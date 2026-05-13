@@ -1,0 +1,473 @@
+:root {
+  color-scheme: light;
+  --ink: #151918;
+  --body: #3f4945;
+  --muted: #68736e;
+  --paper: #f7f4ec;
+  --surface: #fffdf7;
+  --surface-strong: #ffffff;
+  --line: #dad8ce;
+  --field: #ece7dd;
+  --forest: #153f36;
+  --forest-strong: #0c2a24;
+  --mint: #d8eee4;
+  --sage: #729687;
+  --tomato: #b04436;
+  --gold: #d5aa42;
+  --shadow: 0 24px 70px rgba(12, 42, 36, 0.18);
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+  letter-spacing: 0;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 16px;
+  line-height: 1.6;
+}
+
+img {
+  display: block;
+  max-width: 100%;
+}
+
+a {
+  color: inherit;
+}
+
+.site-header {
+  align-items: center;
+  display: flex;
+  gap: 20px;
+  justify-content: space-between;
+  left: 0;
+  padding: 18px 20px;
+  position: absolute;
+  right: 0;
+  top: 0;
+  z-index: 2;
+}
+
+.brand {
+  align-items: center;
+  color: #ffffff;
+  display: inline-flex;
+  font-weight: 800;
+  gap: 10px;
+  text-decoration: none;
+}
+
+.brand img {
+  border-radius: 8px;
+  height: 36px;
+  width: 36px;
+}
+
+.site-nav {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.site-nav a {
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 8px;
+  color: #ffffff;
+  font-size: 0.93rem;
+  font-weight: 700;
+  padding: 8px 12px;
+  text-decoration: none;
+}
+
+.site-nav a:hover,
+.site-nav a:focus-visible {
+  background: rgba(255, 255, 255, 0.13);
+  outline: none;
+}
+
+.hero {
+  background:
+    linear-gradient(
+      90deg,
+      rgba(12, 42, 36, 0.95) 0%,
+      rgba(12, 42, 36, 0.88) 50%,
+      rgba(12, 42, 36, 0.14) 100%
+    ),
+    url("assets/hero-phones.png") right center / auto 100% no-repeat,
+    linear-gradient(90deg, var(--forest-strong) 0%, var(--forest) 58%, #edf2e9 100%);
+  color: #ffffff;
+  min-height: 78svh;
+  padding: 116px 20px 72px;
+  position: relative;
+}
+
+.hero-content {
+  margin: 0 auto;
+  max-width: 1120px;
+  padding-top: 38px;
+}
+
+.eyebrow {
+  color: var(--mint);
+  font-size: 0.92rem;
+  font-weight: 800;
+  margin: 0 0 18px;
+}
+
+.hero h1 {
+  font-size: 3.4rem;
+  line-height: 0.95;
+  margin: 0;
+  max-width: 720px;
+}
+
+.hero-copy {
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 1.2rem;
+  margin: 24px 0 0;
+  max-width: 600px;
+}
+
+.hero-actions,
+.beta-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 30px;
+}
+
+.button {
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  display: inline-flex;
+  font-size: 1rem;
+  font-weight: 800;
+  justify-content: center;
+  min-height: 48px;
+  padding: 11px 16px;
+  text-decoration: none;
+}
+
+.button.primary {
+  background: var(--mint);
+  color: var(--forest-strong);
+}
+
+.button.secondary {
+  border-color: rgba(255, 255, 255, 0.38);
+  color: #ffffff;
+}
+
+.button.dark {
+  background: var(--forest);
+  color: #ffffff;
+}
+
+.button.light {
+  background: var(--surface-strong);
+  border-color: var(--line);
+  color: var(--forest);
+}
+
+.button:hover,
+.button:focus-visible {
+  box-shadow: 0 0 0 4px rgba(216, 238, 228, 0.34);
+  outline: none;
+}
+
+.content-band {
+  padding: 64px 20px;
+}
+
+.content-band.alt {
+  background: var(--surface);
+}
+
+.content-band.deep {
+  background: var(--forest-strong);
+  color: #ffffff;
+}
+
+.section-inner {
+  margin: 0 auto;
+  max-width: 1120px;
+}
+
+.section-kicker {
+  color: var(--tomato);
+  font-size: 0.9rem;
+  font-weight: 800;
+  margin: 0 0 10px;
+}
+
+.deep .section-kicker {
+  color: var(--gold);
+}
+
+.section-heading {
+  font-size: 2rem;
+  line-height: 1.12;
+  margin: 0;
+  max-width: 720px;
+}
+
+.section-copy {
+  color: var(--body);
+  font-size: 1.08rem;
+  margin: 16px 0 0;
+  max-width: 720px;
+}
+
+.deep .section-copy {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.feature-grid,
+.plan-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: 1fr;
+  margin-top: 34px;
+}
+
+.feature-card,
+.plan-card {
+  background: var(--surface-strong);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 22px;
+}
+
+.feature-card h3,
+.plan-card h3 {
+  font-size: 1.1rem;
+  line-height: 1.2;
+  margin: 0 0 10px;
+}
+
+.feature-card p,
+.plan-card p {
+  color: var(--body);
+  margin: 0;
+}
+
+.feature-number {
+  align-items: center;
+  background: var(--field);
+  border-radius: 8px;
+  color: var(--forest);
+  display: inline-flex;
+  font-weight: 900;
+  height: 36px;
+  justify-content: center;
+  margin-bottom: 18px;
+  width: 36px;
+}
+
+.two-column {
+  align-items: center;
+  display: grid;
+  gap: 34px;
+  grid-template-columns: 1fr;
+}
+
+.device-art {
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.check-list {
+  display: grid;
+  gap: 12px;
+  list-style: none;
+  margin: 26px 0 0;
+  padding: 0;
+}
+
+.check-list li {
+  background: rgba(216, 238, 228, 0.12);
+  border: 1px solid rgba(216, 238, 228, 0.2);
+  border-radius: 8px;
+  color: rgba(255, 255, 255, 0.88);
+  padding: 13px 14px;
+}
+
+.info-links {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: 1fr;
+  margin-top: 28px;
+}
+
+.info-link {
+  background: var(--surface-strong);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--forest);
+  font-weight: 800;
+  padding: 16px;
+  text-decoration: none;
+}
+
+.info-link:hover,
+.info-link:focus-visible {
+  border-color: var(--sage);
+  outline: none;
+}
+
+.site-footer {
+  background: #101716;
+  color: rgba(255, 255, 255, 0.78);
+  padding: 28px 20px;
+}
+
+.footer-inner {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: space-between;
+  margin: 0 auto;
+  max-width: 1120px;
+}
+
+.footer-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.footer-links a {
+  color: #ffffff;
+}
+
+.info-page {
+  background: var(--surface);
+}
+
+.info-page .site-header {
+  background: var(--forest-strong);
+  position: static;
+}
+
+.legal {
+  margin: 0 auto;
+  max-width: 820px;
+  padding: 54px 20px 72px;
+}
+
+.legal h1 {
+  font-size: 2.7rem;
+  line-height: 1;
+  margin: 0 0 12px;
+}
+
+.legal h2 {
+  font-size: 1.25rem;
+  line-height: 1.2;
+  margin: 34px 0 10px;
+}
+
+.legal p,
+.legal li {
+  color: var(--body);
+}
+
+.legal .muted {
+  color: var(--muted);
+}
+
+.legal a {
+  color: var(--forest);
+  font-weight: 700;
+}
+
+@media (max-width: 720px) {
+  .site-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .site-nav {
+    justify-content: flex-start;
+  }
+
+  .site-nav a {
+    font-size: 0.88rem;
+    padding: 7px 10px;
+  }
+
+  .hero {
+    background:
+      linear-gradient(
+        180deg,
+        rgba(12, 42, 36, 0.96) 0%,
+        rgba(12, 42, 36, 0.86) 58%,
+        rgba(12, 42, 36, 0.46) 100%
+      ),
+      url("assets/hero-phones.png") center bottom / auto 62% no-repeat,
+      var(--forest-strong);
+    min-height: 84svh;
+    padding-top: 164px;
+  }
+
+  .hero h1 {
+    font-size: 3rem;
+  }
+}
+
+@media (min-width: 760px) {
+  .site-header {
+    padding-left: 32px;
+    padding-right: 32px;
+  }
+
+  .hero {
+    padding-left: 32px;
+    padding-right: 32px;
+  }
+
+  .hero h1 {
+    font-size: 5rem;
+  }
+
+  .section-heading {
+    font-size: 2.7rem;
+  }
+
+  .feature-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .plan-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .two-column {
+    grid-template-columns: 0.92fr 1.08fr;
+  }
+
+  .info-links {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
