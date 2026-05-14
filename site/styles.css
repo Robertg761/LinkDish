@@ -111,7 +111,12 @@ a {
       rgba(12, 42, 36, 0.88) 50%,
       rgba(12, 42, 36, 0.14) 100%
     ),
-    url("assets/hero-phones.png") right center / auto 100% no-repeat,
+    image-set(
+        url("assets/hero-phones.png") 1x,
+        url("assets/hero-phones@2x.png") 2x,
+        url("assets/hero-phones@3x.png") 3x
+      )
+      right center / auto 100% no-repeat,
     linear-gradient(90deg, var(--forest-strong) 0%, var(--forest) 58%, #edf2e9 100%);
   color: #ffffff;
   min-height: 78svh;
@@ -429,7 +434,12 @@ a {
         rgba(12, 42, 36, 0.86) 58%,
         rgba(12, 42, 36, 0.46) 100%
       ),
-      url("assets/hero-phones.png") center bottom / auto 62% no-repeat,
+      image-set(
+          url("assets/hero-phones.png") 1x,
+          url("assets/hero-phones@2x.png") 2x,
+          url("assets/hero-phones@3x.png") 3x
+        )
+        center bottom / auto 62% no-repeat,
       var(--forest-strong);
     min-height: 84svh;
     padding-top: 164px;
