@@ -88,7 +88,8 @@ a {
 }
 
 .site-nav a {
-  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(12, 42, 36, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.28);
   border-radius: 8px;
   color: #ffffff;
   font-size: 0.93rem;
@@ -108,16 +109,18 @@ a {
     linear-gradient(
       90deg,
       rgba(12, 42, 36, 0.95) 0%,
-      rgba(12, 42, 36, 0.88) 50%,
-      rgba(12, 42, 36, 0.14) 100%
+      rgba(12, 42, 36, 0.82) 46%,
+      rgba(12, 42, 36, 0.2) 68%,
+      rgba(12, 42, 36, 0.03) 100%
     ),
     image-set(
         url("assets/hero-phones.png") 1x,
         url("assets/hero-phones@2x.png") 2x,
         url("assets/hero-phones@3x.png") 3x
       )
-      right center / auto 100% no-repeat,
-    linear-gradient(90deg, var(--forest-strong) 0%, var(--forest) 58%, #edf2e9 100%);
+      right 24px center / auto 110% no-repeat,
+    radial-gradient(circle at 84% 50%, rgba(216, 238, 228, 0.28), transparent 34%),
+    linear-gradient(90deg, var(--forest-strong) 0%, var(--forest) 52%, #edf2e9 100%);
   color: #ffffff;
   min-height: 78svh;
   padding: 116px 20px 72px;
@@ -439,9 +442,11 @@ a {
           url("assets/hero-phones@2x.png") 2x,
           url("assets/hero-phones@3x.png") 3x
         )
-        center bottom / auto 62% no-repeat,
+        center bottom -18px / auto 64% no-repeat,
+      radial-gradient(circle at 50% 82%, rgba(216, 238, 228, 0.2), transparent 42%),
       var(--forest-strong);
-    min-height: 84svh;
+    min-height: 88svh;
+    padding-bottom: 236px;
     padding-top: 164px;
   }
 
