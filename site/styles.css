@@ -202,6 +202,11 @@ a {
   outline: none;
 }
 
+.button:disabled {
+  cursor: wait;
+  opacity: 0.68;
+}
+
 .content-band {
   padding: 64px 20px;
 }
@@ -322,6 +327,82 @@ a {
   border-radius: 8px;
   color: rgba(255, 255, 255, 0.88);
   padding: 13px 14px;
+}
+
+.split-panel {
+  align-items: stretch;
+  display: grid;
+  gap: 28px;
+  grid-template-columns: 1fr;
+}
+
+.signup-card {
+  background: var(--surface-strong);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 18px 50px rgba(12, 42, 36, 0.08);
+  padding: 24px;
+}
+
+.signup-heading {
+  font-size: 1.7rem;
+  line-height: 1.12;
+  margin: 0;
+}
+
+.signup-card p:not(.section-kicker):not(.form-status) {
+  color: var(--body);
+  margin: 14px 0 0;
+}
+
+.waitlist-form {
+  margin-top: 22px;
+}
+
+.waitlist-form label {
+  color: var(--forest);
+  display: block;
+  font-size: 0.9rem;
+  font-weight: 800;
+  margin-bottom: 8px;
+}
+
+.waitlist-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.waitlist-row input {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  flex: 1 1 220px;
+  font: inherit;
+  min-height: 48px;
+  padding: 11px 13px;
+}
+
+.waitlist-row input:focus-visible {
+  border-color: var(--sage);
+  box-shadow: 0 0 0 4px rgba(216, 238, 228, 0.6);
+  outline: none;
+}
+
+.form-status {
+  font-size: 0.95rem;
+  font-weight: 700;
+  margin: 12px 0 0;
+  min-height: 1.5em;
+}
+
+.form-status.success {
+  color: var(--forest);
+}
+
+.form-status.error {
+  color: var(--tomato);
 }
 
 .info-links {
@@ -488,6 +569,10 @@ a {
 
   .device-art {
     justify-self: end;
+  }
+
+  .split-panel {
+    grid-template-columns: minmax(0, 1fr) minmax(340px, 0.78fr);
   }
 
   .info-links {

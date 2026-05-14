@@ -157,25 +157,51 @@
       </section>
 
       <section class="content-band alt" id="android-beta" aria-labelledby="beta-heading">
-        <div class="section-inner">
-          <p class="section-kicker">Android closed test</p>
-          <h2 class="section-heading" id="beta-heading">Join the current Android test.</h2>
-          <p class="section-copy">
-            LinkDish is in Google Play closed testing. Join the tester group first, then opt in on
-            Google Play with the same account.
-          </p>
-          <div class="beta-actions">
-            <a class="button dark" href="https://groups.google.com/g/linkdish-android-testers"
-              >Join tester group</a
-            >
-            <a class="button light" href="https://play.google.com/apps/testing/com.linkdish.app"
-              >Open Play opt-in</a
-            >
-            <a
-              class="button light"
-              href="https://play.google.com/store/apps/details?id=com.linkdish.app"
-              >View Play listing</a
-            >
+        <div class="section-inner split-panel">
+          <div>
+            <p class="section-kicker">Android closed test</p>
+            <h2 class="section-heading" id="beta-heading">Join the current Android test.</h2>
+            <p class="section-copy">
+              LinkDish is in Google Play closed testing. Join the tester group first, then opt in on
+              Google Play with the same account.
+            </p>
+            <div class="beta-actions">
+              <a class="button dark" href="https://groups.google.com/g/linkdish-android-testers"
+                >Join tester group</a
+              >
+              <a class="button light" href="https://play.google.com/apps/testing/com.linkdish.app"
+                >Open Play opt-in</a
+              >
+              <a
+                class="button light"
+                href="https://play.google.com/store/apps/details?id=com.linkdish.app"
+                >View Play listing</a
+              >
+            </div>
+          </div>
+          <div class="signup-card" id="ios" aria-labelledby="ios-heading">
+            <p class="section-kicker">Coming soon</p>
+            <h2 class="signup-heading" id="ios-heading">Get notified when LinkDish comes to iOS.</h2>
+            <p>
+              The iPhone version is planned. Leave your email and LinkDish will only use it to send
+              iOS availability updates.
+            </p>
+            <form class="waitlist-form" id="ios-waitlist-form">
+              <label for="ios-waitlist-email">Email address</label>
+              <div class="waitlist-row">
+                <input
+                  id="ios-waitlist-email"
+                  name="email"
+                  type="email"
+                  inputmode="email"
+                  autocomplete="email"
+                  placeholder="you@example.com"
+                  required
+                />
+                <button class="button dark" type="submit">Notify me</button>
+              </div>
+              <p class="form-status" id="ios-waitlist-status" role="status" aria-live="polite"></p>
+            </form>
           </div>
         </div>
       </section>
@@ -203,5 +229,71 @@
         </div>
       </div>
     </footer>
+    <script>
+      (() => {
+        const form = document.querySelector("#ios-waitlist-form");
+        const status = document.querySelector("#ios-waitlist-status");
+        const endpoint = "https://linkdish-api.vercel.app/ios-waitlist";
+
+        if (!(form instanceof HTMLFormElement) || !status) {
+          return;
+        }
+
+        form.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          const email = new FormData(form).get("email");
+          const button = form.querySelector("button[type='submit']");
+
+          if (typeof email !== "string" || !email.trim()) {
+            status.textContent = "Enter an email address first.";
+            status.className = "form-status error";
+            return;
+          }
+
+          if (button instanceof HTMLButtonElement) {
+            button.disabled = true;
+            button.textContent = "Joining…";
+          }
+
+          status.textContent = "";
+          status.className = "form-status";
+
+          try {
+            const response = await fetch(endpoint, {
+              method: "POST",
+              headers: {
+                "content-type": "application/json"
+              },
+              body: JSON.stringify({
+                email,
+                source: "linkdish-site-ios-section"
+              })
+            });
+            const body = await response.json().catch(() => ({}));
+
+            if (!response.ok) {
+              throw new Error(body.message || "Could not join the iOS list right now.");
+            }
+
+            form.reset();
+            status.textContent = body.alreadyJoined
+              ? "You’re already on the iOS list. Thanks!"
+              : "You’re on the iOS list. We’ll let you know when it’s ready.";
+            status.className = "form-status success";
+          } catch (error) {
+            status.textContent =
+              error instanceof Error
+                ? error.message
+                : "Could not join the iOS list right now. Please try again.";
+            status.className = "form-status error";
+          } finally {
+            if (button instanceof HTMLButtonElement) {
+              button.disabled = false;
+              button.textContent = "Notify me";
+            }
+          }
+        });
+      })();
+    </script>
   </body>
 </html>
