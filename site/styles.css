@@ -291,9 +291,13 @@ a {
 }
 
 .device-art {
+  background: #f4f0e8;
   border-radius: 8px;
   box-shadow: var(--shadow);
+  height: auto;
+  justify-self: center;
   overflow: hidden;
+  width: min(100%, 520px);
 }
 
 .check-list {
@@ -465,6 +469,10 @@ a {
 
   .two-column {
     grid-template-columns: 0.92fr 1.08fr;
+  }
+
+  .device-art {
+    justify-self: end;
   }
 
   .info-links {
