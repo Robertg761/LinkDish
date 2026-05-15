@@ -270,13 +270,6 @@ a {
   z-index: 3;
 }
 
-.eyebrow {
-  color: var(--mint);
-  font-size: 0.92rem;
-  font-weight: 800;
-  margin: 0 0 18px;
-}
-
 .hero h1 {
   font-size: 3.4rem;
   line-height: 0.95;
@@ -416,17 +409,6 @@ a {
 .section-inner {
   margin: 0 auto;
   max-width: 1120px;
-}
-
-.section-kicker {
-  color: var(--tomato);
-  font-size: 0.9rem;
-  font-weight: 800;
-  margin: 0 0 10px;
-}
-
-.deep .section-kicker {
-  color: var(--gold);
 }
 
 .section-heading {
@@ -628,7 +610,7 @@ a {
   margin: 0;
 }
 
-.signup-card p:not(.section-kicker):not(.form-status) {
+.signup-card p:not(.form-status) {
   color: var(--body);
   margin: 14px 0 0;
 }
