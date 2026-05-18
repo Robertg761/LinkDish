@@ -286,7 +286,7 @@ a {
 }
 
 .hero-actions,
-.beta-actions {
+.store-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
