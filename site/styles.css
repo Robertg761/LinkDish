@@ -300,6 +300,27 @@ a {
   margin-top: 36px;
 }
 
+.button-group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+}
+
+.button-group .button {
+  width: 100%;
+}
+
+@media (min-width: 480px) {
+  .button-group {
+    flex-direction: row;
+    width: auto;
+  }
+  .button-group .button {
+    width: auto;
+  }
+}
+
 /* Button UI Components */
 .button {
   display: inline-flex;
