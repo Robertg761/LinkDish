@@ -21,18 +21,26 @@
     <title>LinkDish - Recipe links cleaned up on your phone</title>
     <link rel="canonical" href="https://linkdish.xyz/" />
     <link rel="icon" href="assets/linkdish-icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&display=swap" rel="stylesheet">
     <script>
       document.documentElement.classList.add("js");
     </script>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
+    <!-- Background Ornaments -->
+    <div class="blur-blob blob-primary" aria-hidden="true"></div>
+    <div class="blur-blob blob-secondary" aria-hidden="true"></div>
+
     <header class="site-header" aria-label="Primary">
       <a class="brand" href="./" aria-label="LinkDish home">
         <img src="assets/linkdish-icon.png" alt="" width="36" height="36" />
         <span>LinkDish</span>
       </a>
       <nav class="site-nav" aria-label="Site navigation">
+        <a href="#try-it">Try Simulator</a>
         <a href="#how-it-works">How it works</a>
         <a href="#plans">Plans</a>
         <a href="support/">Support</a>
@@ -41,43 +49,122 @@
     </header>
 
     <main>
+      <!-- Hero Section -->
       <section class="hero">
-        <div class="hero-motion" aria-hidden="true">
-          <span class="motion-path path-one"></span>
-          <span class="motion-path path-two"></span>
-          <span class="motion-path path-three"></span>
-        </div>
         <div class="hero-visual" aria-hidden="true">
-          <img
-            src="assets/hero-phones.png"
-            srcset="
-              assets/hero-phones.png    1x,
-              assets/hero-phones@2x.png 2x,
-              assets/hero-phones@3x.png 3x
-            "
-            alt=""
-            width="520"
-            height="500"
-          />
+          <div class="hero-visual-wrapper">
+            <span class="floating-ingredient fi-1">🥛 2 cups Milk</span>
+            <span class="floating-ingredient fi-2">🥚 2 Large Eggs</span>
+            <span class="floating-ingredient fi-3">🍫 1 cup Chocolate Chips</span>
+            <img
+              src="assets/hero-phones.png"
+              srcset="
+                assets/hero-phones.png    1x,
+                assets/hero-phones@2x.png 2x,
+                assets/hero-phones@3x.png 3x
+              "
+              alt=""
+              width="520"
+              height="500"
+            />
+          </div>
         </div>
         <div class="hero-content reveal">
-          <h1>LinkDish</h1>
+          <h1>Recipe links cleaned up on your phone</h1>
           <p class="hero-copy">
-            Turn recipe links into clean ingredients, steps, timing, and saved
-            recipes on your phone. Paste a URL, review the result, and cook
-            without fighting the page around it.
+            Turn messy recipe links into clean ingredients, steps, timing, and saved
+            recipes. Paste a URL, strip the ads, and cook without fighting the page.
           </p>
           <div class="hero-actions">
-            <a
-              class="button primary"
-              href="https://play.google.com/store/apps/details?id=com.linkdish.app"
-              >View on Google Play</a
-            >
-            <a class="button secondary" href="support/">Get support</a>
+            <a class="button primary" href="https://play.google.com/store/apps/details?id=com.linkdish.app">View on Google Play</a>
+            <a class="button secondary" href="#try-it">Try the simulator</a>
           </div>
         </div>
       </section>
 
+      <!-- Interactive Recipe Simulator Section -->
+      <section class="content-band simulator-band" id="try-it">
+        <div class="section-inner">
+          <div class="simulator-intro reveal">
+            <h2 class="section-heading">Experience the clean-up.</h2>
+            <p class="section-copy">
+              Select a test recipe link below to see how LinkDish instantly strips away cookie popups, banner ads, and long backstories, leaving a pristine checklist ready for the kitchen.
+            </p>
+          </div>
+          
+          <div class="simulator-presets reveal">
+            <button class="simulator-preset-btn active" data-recipe="cookies">🍪 Chocolate Chip Cookies</button>
+            <button class="simulator-preset-btn" data-recipe="pasta">🍝 Tomato Basil Pasta</button>
+            <button class="simulator-preset-btn" data-recipe="tacos">🌮 Crispy Fish Tacos</button>
+          </div>
+
+          <div class="simulator-wrapper reveal">
+            <!-- Mock Browser Blog Frame -->
+            <div class="mock-browser" id="blog-preview">
+              <div class="mock-browser-header">
+                <div class="browser-dots">
+                  <span></span><span></span><span></span>
+                </div>
+                <div class="browser-bar" id="browser-url">https://tastyblog.com/grandmas-cookies</div>
+              </div>
+              <div class="mock-browser-body">
+                <div class="mock-browser-ad-top">⚡ SPECIAL COOKING SALE: BUY 1 GET 1 PAN FREE!!! ⚡</div>
+                <h3 class="mock-browser-title" id="browser-title">Grandma's Secret Chocolate Chip Cookies</h3>
+                <div class="mock-browser-meta">
+                  <span class="mock-browser-author">By Sarah Miller</span>
+                  <span>•</span>
+                  <span>Updated May 18, 2026</span>
+                </div>
+                <div class="mock-browser-image" id="browser-img" style="background-image: url('assets/feature-graphic.png')"></div>
+                <div class="mock-browser-backstory" id="browser-story">
+                  <p>Growing up, my grandmother would make these cookies every single Sunday afternoon. The sweet aroma of melting chocolate and caramelized sugar would drift all the way down our street...</p>
+                </div>
+                <div class="mock-browser-ad-inline">
+                  <div class="ad-heading">SPONSORED LINK</div>
+                  <div>Looking for a kitchen upgrade? Try these premium stainless steel mixing bowls (Affiliate Link)</div>
+                </div>
+                
+                <!-- Pop-up Cookie Banner -->
+                <div class="mock-browser-popup" id="cookie-popup">
+                  <p class="popup-text">We and our 548 partners use cookies to track your behavior and show you personalized ads. Allow all?</p>
+                  <button class="popup-btn" onclick="document.getElementById('cookie-popup').style.display='none'">Accept All</button>
+                </div>
+              </div>
+
+              <!-- Scanning Overlay -->
+              <div class="scanning-overlay" id="scanning-overlay">
+                <div class="scanning-line"></div>
+                <div class="scanning-text">
+                  <div class="scanning-spinner"></div>
+                  <span>Cleaning Recipe with LinkDish...</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Mock Phone Frame -->
+            <div class="mock-phone">
+              <div class="mock-phone-bezel"></div>
+              <div class="mock-phone-screen">
+                <div class="mock-phone-header">
+                  <div class="phone-app-brand">
+                    <img src="assets/linkdish-icon.png" alt="" width="18" height="18" />
+                    <span>LinkDish View</span>
+                  </div>
+                  <div class="mock-phone-tabs">
+                    <button class="mock-phone-tab-btn active" id="tab-ingredients" onclick="switchSimulatorTab('ingredients')">Ingredients</button>
+                    <button class="mock-phone-tab-btn" id="tab-steps" onclick="switchSimulatorTab('steps')">Steps</button>
+                  </div>
+                </div>
+                <div class="mock-phone-body" id="phone-content">
+                  <!-- Active recipe details will render here -->
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Content Band 1 -->
       <section class="content-band alt" aria-labelledby="mobile-only-heading">
         <div class="section-inner two-column">
           <div class="reveal">
@@ -107,6 +194,7 @@
         </div>
       </section>
 
+      <!-- How It Works Section -->
       <section
         class="content-band"
         id="how-it-works"
@@ -147,6 +235,7 @@
         </div>
       </section>
 
+      <!-- Privacy Details Section -->
       <section class="content-band deep" aria-labelledby="privacy-heading">
         <div class="section-inner">
           <div class="reveal">
@@ -176,6 +265,7 @@
         </div>
       </section>
 
+      <!-- Plans/Pricing Section -->
       <section class="content-band" id="plans" aria-labelledby="plans-heading">
         <div class="section-inner">
           <div class="reveal">
@@ -186,29 +276,42 @@
           <div class="plan-grid">
             <article class="plan-card reveal">
               <h3>Free</h3>
-              <p>
-                Good for trying LinkDish and saving a small personal recipe list
-                directly on your device.
-              </p>
+              <div class="plan-card-price">$0<span>/forever</span></div>
+              <ul class="plan-card-features">
+                <li>Save up to 15 recipes</li>
+                <li>Import from 100+ sites</li>
+                <li>One-device local storage</li>
+                <li>Clean cooking views</li>
+              </ul>
+              <a class="button secondary" href="https://play.google.com/store/apps/details?id=com.linkdish.app">Get Started</a>
             </article>
-            <article class="plan-card reveal">
+            <article class="plan-card recommended reveal">
               <h3>Plus</h3>
-              <p>
-                Built for heavier recipe importing with unlimited local saved
-                recipes on one device.
-              </p>
+              <div class="plan-card-price">$2.99<span>/mo</span></div>
+              <ul class="plan-card-features">
+                <li>Unlimited recipe imports</li>
+                <li>Unlimited local saves</li>
+                <li>Priority recipe parsing</li>
+                <li>Offline cooking access</li>
+              </ul>
+              <a class="button primary" href="https://play.google.com/store/apps/details?id=com.linkdish.app">Upgrade to Plus</a>
             </article>
             <article class="plan-card reveal">
               <h3>Family</h3>
-              <p>
-                Adds household sharing for families who want one shared LinkDish
-                recipe workflow.
-              </p>
+              <div class="plan-card-price">$4.99<span>/mo</span></div>
+              <ul class="plan-card-features">
+                <li>Everything in Plus</li>
+                <li>Share with up to 5 members</li>
+                <li>Shared family cookbooks</li>
+                <li>Real-time sync across devices</li>
+              </ul>
+              <a class="button secondary" href="https://play.google.com/store/apps/details?id=com.linkdish.app">Upgrade to Family</a>
             </article>
           </div>
         </div>
       </section>
 
+      <!-- Google Play Store / iOS Notify Section -->
       <section
         class="content-band alt"
         id="android"
@@ -220,12 +323,11 @@
               Get LinkDish on Google Play.
             </h2>
             <p class="section-copy">
-              LinkDish is now published on Google Play for Android. iOS is
-              still coming soon.
+              LinkDish is now published on Google Play for Android. iOS is still coming soon.
             </p>
             <div class="store-actions">
               <a
-                class="button dark"
+                class="button primary"
                 href="https://play.google.com/store/apps/details?id=com.linkdish.app"
                 >View on Google Play</a
               >
@@ -255,7 +357,7 @@
                   placeholder="you@example.com"
                   required
                 />
-                <button class="button dark" type="submit">Notify me</button>
+                <button class="button primary" type="submit">Notify me</button>
               </div>
               <p
                 class="form-status"
@@ -268,6 +370,7 @@
         </div>
       </section>
 
+      <!-- Support, Privacy, Contact Links -->
       <section class="content-band" aria-labelledby="information-heading">
         <div class="section-inner">
           <div class="reveal">
@@ -286,6 +389,7 @@
       </section>
     </main>
 
+    <!-- Footer -->
     <footer class="site-footer">
       <div class="footer-inner">
         <span>LinkDish</span>
@@ -296,8 +400,11 @@
         </div>
       </div>
     </footer>
+
+    <!-- Interactive Scripts -->
     <script>
       (() => {
+        // --- 1. Intersection Observer Reveal Animations ---
         const reduceMotion = window.matchMedia(
           "(prefers-reduced-motion: reduce)",
         );
@@ -320,27 +427,27 @@
                 if (!entry.isIntersecting) {
                   return;
                 }
-
                 entry.target.classList.add("is-visible");
                 observer.unobserve(entry.target);
               });
             },
-            { rootMargin: "0px 0px -12% 0px", threshold: 0.16 },
+            { rootMargin: "0px 0px -12% 0px", threshold: 0.12 },
           );
 
           revealItems.forEach((item) => observer.observe(item));
         }
 
+        // --- 2. 3D Tilt Parallax on Hero Section ---
         if (hero && !reduceMotion.matches) {
           hero.addEventListener("pointermove", (event) => {
             const rect = hero.getBoundingClientRect();
             const x = ((event.clientX - rect.left) / rect.width - 0.5) * 2;
             const y = ((event.clientY - rect.top) / rect.height - 0.5) * 2;
 
-            hero.style.setProperty("--hero-shift-x", `${x * 14}px`);
-            hero.style.setProperty("--hero-shift-y", `${y * 10}px`);
-            hero.style.setProperty("--hero-tilt-x", `${y * -2.4}deg`);
-            hero.style.setProperty("--hero-tilt-y", `${x * 3}deg`);
+            hero.style.setProperty("--hero-shift-x", `${x * 12}px`);
+            hero.style.setProperty("--hero-shift-y", `${y * 8}px`);
+            hero.style.setProperty("--hero-tilt-x", `${y * -2.2}deg`);
+            hero.style.setProperty("--hero-tilt-y", `${x * 2.8}deg`);
           });
 
           hero.addEventListener("pointerleave", () => {
@@ -351,70 +458,281 @@
           });
         }
 
+        // --- 3. iOS Waitlist Form Submit ---
         const form = document.querySelector("#ios-waitlist-form");
         const status = document.querySelector("#ios-waitlist-status");
         const endpoint = "https://linkdish-api.vercel.app/ios-waitlist";
 
-        if (!(form instanceof HTMLFormElement) || !status) {
-          return;
+        if (form instanceof HTMLFormElement && status) {
+          form.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            const email = new FormData(form).get("email");
+            const button = form.querySelector("button[type='submit']");
+
+            if (typeof email !== "string" || !email.trim()) {
+              status.textContent = "Enter an email address first.";
+              status.className = "form-status error";
+              return;
+            }
+
+            if (button instanceof HTMLButtonElement) {
+              button.disabled = true;
+              button.textContent = "Joining…";
+            }
+
+            status.textContent = "";
+            status.className = "form-status";
+
+            try {
+              const response = await fetch(endpoint, {
+                method: "POST",
+                headers: {
+                  "content-type": "application/json",
+                },
+                body: JSON.stringify({
+                  email,
+                  source: "linkdish-site-ios-section",
+                }),
+              });
+              const body = await response.json().catch(() => ({}));
+
+              if (!response.ok) {
+                throw new Error(
+                  body.message || "Could not join the iOS list right now.",
+                );
+              }
+
+              form.reset();
+              status.textContent = body.alreadyJoined
+                ? "You’re already on the iOS list. Thanks!"
+                : "You’re on the iOS list. We’ll let you know when it’s ready.";
+              status.className = "form-status success";
+            } catch (error) {
+              status.textContent =
+                error instanceof Error
+                  ? error.message
+                  : "Could not join the iOS list right now. Please try again.";
+              status.className = "form-status error";
+            } finally {
+              if (button instanceof HTMLButtonElement) {
+                button.disabled = false;
+                button.textContent = "Notify me";
+              }
+            }
+          });
         }
 
-        form.addEventListener("submit", async (event) => {
-          event.preventDefault();
-          const email = new FormData(form).get("email");
-          const button = form.querySelector("button[type='submit']");
+        // --- 4. Interactive Recipe Simulator Data & Actions ---
+        const recipesData = {
+          cookies: {
+            url: "https://tastyblog.com/grandmas-cookies",
+            title: "Grandma's Secret Chocolate Chip Cookies",
+            story: "<p>Growing up, my grandmother would make these cookies every single Sunday afternoon. The sweet aroma of melting chocolate and caramelized sugar would drift all the way down our street...</p><p>Before we get to the recipe, let me tell you about the history of flour milling in the late 19th century. In the Midwest, they used stone ground wheat which had a much coarser texture. My grandmother always insisted on sifting it three times. It's a memory I cherish...</p>",
+            img: "assets/feature-graphic.png",
+            meta: [
+              { text: "⏱️ 25 mins", label: "Cook time" },
+              { text: "🍪 24 cookies", label: "Yield" },
+              { text: "🔥 350°F", label: "Oven temp" }
+            ],
+            ingredients: [
+              "2 1/4 cups all-purpose flour",
+              "1 tsp baking soda",
+              "1 tsp salt",
+              "1 cup unsalted butter, softened",
+              "3/4 cup granulated sugar",
+              "3/4 cup packed brown sugar",
+              "1 tsp vanilla extract",
+              "2 large eggs",
+              "2 cups semi-sweet chocolate chips"
+            ],
+            steps: [
+              "Preheat oven to 350°F (175°C) and line a baking sheet with parchment paper.",
+              "In a small bowl, whisk together the flour, baking soda, and salt. Set aside.",
+              "In a large bowl, beat the softened butter, granulated sugar, brown sugar, and vanilla extract until creamy.",
+              "Add eggs one at a time, beating well after each addition.",
+              "Gradually beat in the flour mixture until just combined.",
+              "Stir in the chocolate chips by hand.",
+              "Drop rounded tablespoons of dough onto the prepared baking sheet.",
+              "Bake for 9 to 11 minutes or until golden brown. Let cool on wire racks."
+            ]
+          },
+          pasta: {
+            url: "https://dailychef.net/tomato-basil-pasta",
+            title: "Classic Fresh Tomato & Basil Pasta",
+            story: "<p>Last summer, my partner and I rented a tiny stone cottage in Tuscany. The owner, an elderly gentleman named Giovanni, taught us that the secret to the best pasta is not the complexity, but the quality of the ingredients. We spent hours in his garden picking heirloom tomatoes under the warm Italian sun...</p><p>We would sit on the terrace drinking local wine, listening to the cicadas, and watching the sunset over the olive groves. It was a trip of a lifetime, and every time I make this, I'm transported right back to Giovanni's garden...</p>",
+            img: "assets/hero-phones.png",
+            meta: [
+              { text: "⏱️ 20 mins", label: "Total time" },
+              { text: "🍝 4 servings", label: "Yield" },
+              { text: "🥗 340 kcal", label: "Calories" }
+            ],
+            ingredients: [
+              "12 oz spaghetti or rigatoni",
+              "2 lbs ripe tomatoes, chopped",
+              "4 cloves garlic, thinly sliced",
+              "1/4 cup extra-virgin olive oil",
+              "1 cup fresh basil leaves, torn",
+              "1/2 tsp red pepper flakes",
+              "Salt & freshly ground black pepper",
+              "1/2 cup grated Parmigiano-Reggiano"
+            ],
+            steps: [
+              "Bring a large pot of salted water to a boil. Cook pasta according to package directions until al dente.",
+              "Meanwhile, heat the olive oil in a large skillet over medium heat.",
+              "Sauté sliced garlic and red pepper flakes for about 1 minute until fragrant.",
+              "Add chopped tomatoes, salt, and pepper. Cook for 8-10 minutes, stirring occasionally, until tomatoes break down into sauce.",
+              "Drain pasta, reserving 1/2 cup of pasta water.",
+              "Toss the pasta directly into the skillet with the tomato sauce and torn basil leaves. Add reserved pasta water if needed.",
+              "Cook together for 1 minute, remove from heat, and serve with grated Parmigiano-Reggiano."
+            ]
+          },
+          tacos: {
+            url: "https://mexicocooking.org/crispy-fish-tacos",
+            title: "Crispy Baja Fish Tacos with Crema",
+            story: "<p>Baja California has some of the most vibrant street food culture in the world. I remember walking along the beach in Ensenada, smelling the fresh fish frying in hot lard. The local vendors would pile shredded cabbage and spicy cream sauce onto warm corn tortillas. That experience redefined what a taco could be...</p><p>It's all about the texture contrast: the hot, crispy fish against the cold, crunchy cabbage and the tangy lime juice. Make sure your oil is hot enough, otherwise the batter will absorb too much oil...</p>",
+            img: "assets/feature-graphic.png",
+            meta: [
+              { text: "⏱️ 30 mins", label: "Total time" },
+              { text: "🌮 8 tacos", label: "Yield" },
+              { text: "🌶️ Medium", label: "Spice level" }
+            ],
+            ingredients: [
+              "1 lb firm white fish (cod or halibut), cut into strips",
+              "1 cup all-purpose flour",
+              "1 tsp chili powder & oregano",
+              "1 cup Mexican beer or club soda, cold",
+              "2 cups shredded green cabbage",
+              "1/2 cup Mexican crema or sour cream",
+              "3 tbsp mayonnaise",
+              "Juice of 2 limes",
+              "8 corn tortillas",
+              "Vegetable oil for frying"
+            ],
+            steps: [
+              "In a medium bowl, whisk together flour, chili powder, oregano, and a pinch of salt. Pour in beer and whisk until smooth.",
+              "In a small bowl, mix sour cream, mayonnaise, and half of the lime juice to make the crema sauce. Set aside.",
+              "Heat 1/2 inch of oil in a heavy skillet to 375°F (190°C).",
+              "Pat fish dry. Dip each piece into beer batter, coat thoroughly, and carefully lay into hot oil.",
+              "Fry fish in batches for 2 to 3 minutes per side until golden brown and crispy. Drain on paper towels.",
+              "Warm corn tortillas in a dry skillet, then assemble tacos with crispy fish, cabbage, crema drizzle, and lime juice."
+            ]
+          }
+        };
 
-          if (typeof email !== "string" || !email.trim()) {
-            status.textContent = "Enter an email address first.";
-            status.className = "form-status error";
+        let currentRecipeId = 'cookies';
+        let activeSimulatorTab = 'ingredients';
+
+        window.switchSimulatorTab = (tab) => {
+          activeSimulatorTab = tab;
+          document.getElementById('tab-ingredients').classList.toggle('active', tab === 'ingredients');
+          document.getElementById('tab-steps').classList.toggle('active', tab === 'steps');
+          renderCleanRecipeBody();
+        };
+
+        window.toggleIngredient = (element) => {
+          element.classList.toggle('checked');
+        };
+
+        const renderCleanRecipeBody = () => {
+          const recipe = recipesData[currentRecipeId];
+          const bodyContainer = document.getElementById('phone-content');
+          if (!bodyContainer) return;
+
+          if (activeSimulatorTab === 'ingredients') {
+            bodyContainer.innerHTML = `
+              <div class="clean-recipe-view">
+                <h4 class="clean-recipe-title">${recipe.title}</h4>
+                <div class="clean-recipe-meta">
+                  ${recipe.meta.map(m => `
+                    <span class="clean-meta-badge" title="${m.label}">
+                      <span>${m.text}</span>
+                    </span>
+                  `).join('')}
+                </div>
+                <div class="clean-recipe-content">
+                  <ul class="clean-recipe-items">
+                    ${recipe.ingredients.map(ing => `
+                      <li class="ingredient-item" onclick="toggleIngredient(this)">
+                        <span class="checkbox-custom"></span>
+                        <span class="ingredient-text">${ing}</span>
+                      </li>
+                    `).join('')}
+                  </ul>
+                </div>
+              </div>
+            `;
+          } else {
+            bodyContainer.innerHTML = `
+              <div class="clean-recipe-view">
+                <h4 class="clean-recipe-title">${recipe.title}</h4>
+                <div class="clean-recipe-meta">
+                  ${recipe.meta.map(m => `
+                    <span class="clean-meta-badge" title="${m.label}">
+                      <span>${m.text}</span>
+                    </span>
+                  `).join('')}
+                </div>
+                <div class="clean-recipe-content">
+                  <div class="instruction-steps">
+                    ${recipe.steps.map((step, index) => `
+                      <div class="instruction-step">
+                        <span class="step-num">${index + 1}</span>
+                        <span class="step-text">${step}</span>
+                      </div>
+                    `).join('')}
+                  </div>
+                </div>
+              </div>
+            `;
+          }
+        };
+
+        const loadRecipeInSimulator = (recipeId, silent = false) => {
+          currentRecipeId = recipeId;
+          const recipe = recipesData[recipeId];
+          
+          document.getElementById('browser-url').textContent = recipe.url;
+          document.getElementById('browser-title').textContent = recipe.title;
+          document.getElementById('browser-story').innerHTML = recipe.story;
+          document.getElementById('browser-img').style.backgroundImage = `url('${recipe.img}')`;
+          document.getElementById('cookie-popup').style.display = 'block';
+
+          if (silent) {
+            renderCleanRecipeBody();
             return;
           }
 
-          if (button instanceof HTMLButtonElement) {
-            button.disabled = true;
-            button.textContent = "Joining…";
+          const overlay = document.getElementById('scanning-overlay');
+          if (overlay) {
+            overlay.classList.add('active');
+            setTimeout(() => {
+              overlay.classList.remove('active');
+              renderCleanRecipeBody();
+            }, 1200);
           }
+        };
 
-          status.textContent = "";
-          status.className = "form-status";
-
-          try {
-            const response = await fetch(endpoint, {
-              method: "POST",
-              headers: {
-                "content-type": "application/json",
-              },
-              body: JSON.stringify({
-                email,
-                source: "linkdish-site-ios-section",
-              }),
+        // Initialize Simulator presets listeners
+        const initSimulator = () => {
+          const presetBtns = document.querySelectorAll('.simulator-preset-btn');
+          presetBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+              const recipeId = btn.getAttribute('data-recipe');
+              if (recipeId && recipeId !== currentRecipeId) {
+                presetBtns.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                loadRecipeInSimulator(recipeId);
+              }
             });
-            const body = await response.json().catch(() => ({}));
+          });
+          loadRecipeInSimulator('cookies', true);
+        };
 
-            if (!response.ok) {
-              throw new Error(
-                body.message || "Could not join the iOS list right now.",
-              );
-            }
-
-            form.reset();
-            status.textContent = body.alreadyJoined
-              ? "You’re already on the iOS list. Thanks!"
-              : "You’re on the iOS list. We’ll let you know when it’s ready.";
-            status.className = "form-status success";
-          } catch (error) {
-            status.textContent =
-              error instanceof Error
-                ? error.message
-                : "Could not join the iOS list right now. Please try again.";
-            status.className = "form-status error";
-          } finally {
-            if (button instanceof HTMLButtonElement) {
-              button.disabled = false;
-              button.textContent = "Notify me";
-            }
-          }
-        });
+        document.addEventListener('DOMContentLoaded', initSimulator);
+        // Fallback for static load
+        if (document.readyState === 'interactive' || document.readyState === 'complete') {
+          initSimulator();
+        }
       })();
     </script>
   </body>
