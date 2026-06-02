@@ -279,12 +279,16 @@
             <h2 class="section-heading" id="plans-heading">
               Start simple, upgrade only if you need more.
             </h2>
+            <p class="section-copy">
+              Try 10 recipe imports and 10 saved recipes free. Paid plans are
+              available in the app through Google Play today.
+            </p>
           </div>
           <div class="plan-grid">
             <article class="plan-card reveal">
               <h3>Free</h3>
-              <div class="plan-card-price">$0<span>/forever</span></div>
-              <div style="margin-top: -16px; margin-bottom: 20px; font-size: 0.85rem; color: var(--text-muted); font-weight: 600;">Individual trial use</div>
+              <div class="plan-card-price"><span>USD</span>$0<span>/forever</span></div>
+              <div class="plan-note">Individual trial use</div>
               <ul class="plan-card-features">
                 <li>10 recipe imports/month</li>
                 <li>10 saved recipes limit</li>
@@ -295,25 +299,25 @@
             </article>
             <article class="plan-card recommended reveal">
               <h3>Plus</h3>
-              <div class="plan-card-price">$2.99<span>/mo</span></div>
-              <div style="margin-top: -16px; margin-bottom: 20px; font-size: 0.85rem; color: var(--text-muted); font-weight: 600;">or $19.99/year</div>
+              <div class="plan-card-price"><span>USD</span>$2.99<span>/mo</span></div>
+              <div class="plan-note">or USD $19.99/year</div>
               <ul class="plan-card-features">
                 <li>100 recipe imports/month</li>
                 <li>Unlimited saved recipes</li>
-                <li>Priority recipe parsing</li>
-                <li>Offline cooking access</li>
+                <li>One-device local storage</li>
+                <li>Saved recipes remain readable</li>
               </ul>
               <a class="button primary" href="https://play.google.com/store/apps/details?id=com.linkdish.app">Upgrade to Plus</a>
             </article>
             <article class="plan-card reveal">
               <h3>Family</h3>
-              <div class="plan-card-price">$4.99<span>/mo</span></div>
-              <div style="margin-top: -16px; margin-bottom: 20px; font-size: 0.85rem; color: var(--text-muted); font-weight: 600;">or $39.99/year</div>
+              <div class="plan-card-price"><span>USD</span>$4.99<span>/mo</span></div>
+              <div class="plan-note">or USD $39.99/year</div>
               <ul class="plan-card-features">
                 <li>250 recipe imports/month</li>
                 <li>Unlimited saved recipes</li>
                 <li>Household sharing (up to 6 users)</li>
-                <li>Real-time sync across devices</li>
+                <li>Shared Family recipe book</li>
               </ul>
               <a class="button secondary" href="https://play.google.com/store/apps/details?id=com.linkdish.app">Upgrade to Family</a>
             </article>
@@ -431,6 +435,16 @@
         if (reduceMotion.matches || !("IntersectionObserver" in window)) {
           revealItems.forEach((item) => item.classList.add("is-visible"));
         } else {
+          const revealVisibleItems = () => {
+            const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+            revealItems.forEach((item) => {
+              const rect = item.getBoundingClientRect();
+              if (rect.top < viewportHeight * 0.88 && rect.bottom > 0) {
+                item.classList.add("is-visible");
+              }
+            });
+          };
+
           const observer = new IntersectionObserver(
             (entries) => {
               entries.forEach((entry) => {
@@ -445,6 +459,15 @@
           );
 
           revealItems.forEach((item) => observer.observe(item));
+          requestAnimationFrame(revealVisibleItems);
+          window.addEventListener("load", () => {
+            revealVisibleItems();
+            window.setTimeout(revealVisibleItems, 160);
+          });
+          window.addEventListener("hashchange", () => {
+            requestAnimationFrame(revealVisibleItems);
+            window.setTimeout(revealVisibleItems, 160);
+          });
         }
 
         // --- 2. 3D Tilt Parallax on Hero Section ---

@@ -395,6 +395,7 @@ a {
   padding: 80px 24px;
   position: relative;
   isolation: isolate;
+  scroll-margin-top: 84px;
 }
 
 .content-band.alt {
@@ -1150,6 +1151,14 @@ a {
   color: var(--text-muted);
 }
 
+.plan-note {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin-bottom: 20px;
+  margin-top: -16px;
+}
+
 .plan-card-features {
   list-style: none;
   padding: 0;
@@ -1534,6 +1543,10 @@ a {
     gap: 16px;
     align-items: center;
     padding: 16px;
+  }
+
+  .content-band {
+    scroll-margin-top: 148px;
   }
   
   .site-nav {
