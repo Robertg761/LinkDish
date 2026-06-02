@@ -311,6 +311,14 @@ a {
   width: 100%;
 }
 
+.share-buttons {
+  flex-wrap: wrap;
+}
+
+.share-buttons .button {
+  white-space: nowrap;
+}
+
 @media (min-width: 480px) {
   .button-group {
     flex-direction: row;
