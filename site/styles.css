@@ -313,10 +313,16 @@ a {
 
 .share-buttons {
   flex-wrap: wrap;
+  margin-top: 24px;
 }
 
 .share-buttons .button {
   white-space: nowrap;
+}
+
+.share-status {
+  margin-top: 14px;
+  overflow-wrap: anywhere;
 }
 
 @media (min-width: 480px) {

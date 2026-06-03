@@ -371,7 +371,7 @@
               Send LinkDish to one Android cook who saves recipe links. A useful referral helps
               more than a broad post.
             </p>
-            <div class="button-group share-buttons" style="margin-top: 24px;">
+            <div class="button-group share-buttons">
               <a
                 class="button primary"
                 href="mailto:?subject=Try%20LinkDish%20on%20Android&body=I%20thought%20of%20you%20for%20LinkDish%2C%20an%20Android%20app%20that%20turns%20supported%20recipe%20links%20into%20clean%20ingredients%2C%20steps%2C%20timing%2C%20notes%2C%20and%20saved%20recipes.%0A%0APlay%20Store%3A%20https%3A%2F%2Fplay.google.com%2Fstore%2Fapps%2Fdetails%3Fid%3Dcom.linkdish.app"
@@ -382,7 +382,27 @@
                 href="sms:?&body=Try%20LinkDish%20on%20Android%3A%20it%20turns%20supported%20recipe%20links%20into%20clean%20ingredients%2C%20steps%2C%20timing%2C%20notes%2C%20and%20saved%20recipes.%20https%3A%2F%2Fplay.google.com%2Fstore%2Fapps%2Fdetails%3Fid%3Dcom.linkdish.app"
                 >Text the Play link</a
               >
+              <a
+                class="button secondary"
+                href="https://wa.me/?text=Try%20LinkDish%20on%20Android%3A%20it%20turns%20supported%20recipe%20links%20into%20clean%20ingredients%2C%20steps%2C%20timing%2C%20notes%2C%20and%20saved%20recipes.%20https%3A%2F%2Fplay.google.com%2Fstore%2Fapps%2Fdetails%3Fid%3Dcom.linkdish.app"
+                target="_blank"
+                rel="noopener"
+                >WhatsApp it</a
+              >
+              <button
+                class="button secondary"
+                id="copy-play-link"
+                type="button"
+              >
+                Copy Play link
+              </button>
             </div>
+            <p
+              class="form-status share-status"
+              id="share-status"
+              role="status"
+              aria-live="polite"
+            ></p>
           </div>
         </div>
       </section>
@@ -554,6 +574,43 @@
                 button.disabled = false;
                 button.textContent = "Notify me";
               }
+            }
+          });
+        }
+
+        const playStoreUrl =
+          "https://play.google.com/store/apps/details?id=com.linkdish.app";
+        const copyPlayLinkButton = document.querySelector("#copy-play-link");
+        const shareStatus = document.querySelector("#share-status");
+
+        const copyText = async (text) => {
+          try {
+            await navigator.clipboard.writeText(text);
+            return true;
+          } catch {
+            const scratch = document.createElement("textarea");
+            scratch.value = text;
+            scratch.setAttribute("readonly", "");
+            scratch.style.position = "fixed";
+            scratch.style.left = "-9999px";
+            document.body.appendChild(scratch);
+            scratch.focus();
+            scratch.select();
+            const didCopy = document.execCommand("copy");
+            scratch.remove();
+            return didCopy;
+          }
+        };
+
+        if (copyPlayLinkButton instanceof HTMLButtonElement && shareStatus) {
+          copyPlayLinkButton.addEventListener("click", async () => {
+            if (await copyText(playStoreUrl)) {
+              shareStatus.textContent = "Play link copied.";
+              shareStatus.className = "form-status share-status success";
+            } else {
+              shareStatus.textContent =
+                `Copy did not work here. Play link: ${playStoreUrl}`;
+              shareStatus.className = "form-status share-status error";
             }
           });
         }
