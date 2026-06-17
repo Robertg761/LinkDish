@@ -1625,6 +1625,20 @@ a {
   transform: translateY(-1px);
 }
 
+.support-submit:disabled {
+  cursor: progress;
+  opacity: 0.68;
+  transform: none;
+}
+
+.support-form .form-status {
+  margin: -4px 0 0;
+}
+
+.support-form .support-honeypot {
+  display: none;
+}
+
 .support-side {
   align-self: start;
   padding: clamp(20px, 4vw, 26px);

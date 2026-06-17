@@ -16,7 +16,7 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&amp;family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&amp;display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="../styles.css?v=20260617-form" />
+    <link rel="stylesheet" href="../styles.css?v=20260617-ticket-submit" />
   </head>
   <body class="info-page">
     <header class="site-header" aria-label="Primary">
@@ -43,7 +43,9 @@
         <p>
           Use the form below to report a recipe import problem, account issue,
           web app bug, or privacy request. You can also email
-          <a href="mailto:robertgordon761@gmail.com">robertgordon761@gmail.com</a>
+          <a href="mailto:robertgordon761@gmail.com"
+            >robertgordon761@gmail.com</a
+          >
           directly.
         </p>
       </section>
@@ -52,15 +54,14 @@
         <form
           id="support-form"
           class="support-form"
-          action="mailto:robertgordon761@gmail.com"
+          action="https://linkdish-api.vercel.app/support-ticket"
           method="post"
-          enctype="text/plain"
         >
           <div class="support-form-header">
             <h2>Submit a problem</h2>
             <p>
-              The form opens your email app with these details filled in, so you
-              can review the message before sending it.
+              Send the details here and LinkDish will create a support ticket.
+              You will see a ticket number after the report is received.
             </p>
           </div>
 
@@ -79,10 +80,16 @@
             Problem type
             <select name="problemType" required>
               <option value="">Select one</option>
-              <option value="Recipe import problem">Recipe import problem</option>
-              <option value="Account or household issue">Account or household issue</option>
+              <option value="Recipe import problem">
+                Recipe import problem
+              </option>
+              <option value="Account or household issue">
+                Account or household issue
+              </option>
               <option value="Web app bug">Web app bug</option>
-              <option value="Privacy or data request">Privacy or data request</option>
+              <option value="Privacy or data request">
+                Privacy or data request
+              </option>
               <option value="Other">Other</option>
             </select>
           </label>
@@ -126,7 +133,18 @@
             ></textarea>
           </label>
 
-          <button class="support-submit" type="submit">Open email draft</button>
+          <label class="support-honeypot" aria-hidden="true">
+            Website
+            <input
+              name="website"
+              type="text"
+              tabindex="-1"
+              autocomplete="off"
+            />
+          </label>
+
+          <button class="support-submit" type="submit">Submit ticket</button>
+          <p class="form-status" id="support-form-status" role="status"></p>
         </form>
 
         <aside class="support-side" aria-labelledby="support-side-heading">
@@ -137,7 +155,9 @@
             <li>What you expected and what happened instead.</li>
             <li>Any error message or screenshot if one is available.</li>
           </ul>
-          <a class="button secondary" href="https://app.linkdish.xyz">Open Web App</a>
+          <a class="button secondary" href="https://app.linkdish.xyz"
+            >Open Web App</a
+          >
         </aside>
       </section>
 
@@ -147,9 +167,9 @@
         <details>
           <summary>What recipe links work best?</summary>
           <p>
-            Public recipe pages work best. If a site blocks extraction,
-            requires a login, or is temporarily unreachable, LinkDish may not be
-            able to import it.
+            Public recipe pages work best. If a site blocks extraction, requires
+            a login, or is temporarily unreachable, LinkDish may not be able to
+            import it.
           </p>
         </details>
 
@@ -211,6 +231,16 @@
     </footer>
     <script>
       const supportForm = document.querySelector("#support-form");
+      const supportFormStatus = document.querySelector("#support-form-status");
+
+      const setSupportStatus = (message, type) => {
+        if (!supportFormStatus) {
+          return;
+        }
+
+        supportFormStatus.className = `form-status ${type}`;
+        supportFormStatus.textContent = message;
+      };
 
       supportForm?.addEventListener("submit", (event) => {
         event.preventDefault();
@@ -220,24 +250,45 @@
         }
 
         const formData = new FormData(supportForm);
-        const problemType = formData.get("problemType") || "Support request";
-        const body = [
-          `Email: ${formData.get("email") || ""}`,
-          `Problem type: ${problemType}`,
-          `Recipe or page link: ${formData.get("link") || ""}`,
-          `Device and browser/app: ${formData.get("device") || ""}`,
-          "",
-          "What happened:",
-          formData.get("details") || "",
-          "",
-          "What I expected:",
-          formData.get("expected") || "",
-        ].join("\n");
+        const submitButton = supportForm.querySelector(".support-submit");
+        const payload = Object.fromEntries(formData.entries());
 
-        const subject = `LinkDish support: ${problemType}`;
-        window.location.href = `mailto:robertgordon761@gmail.com?subject=${encodeURIComponent(
-          subject,
-        )}&body=${encodeURIComponent(body)}`;
+        setSupportStatus("Submitting support ticket...", "");
+        submitButton.disabled = true;
+
+        fetch(supportForm.action, {
+          body: JSON.stringify(payload),
+          headers: {
+            "content-type": "application/json",
+          },
+          method: "POST",
+        })
+          .then(async (response) => {
+            const body = await response.json().catch(() => ({}));
+
+            if (!response.ok) {
+              throw new Error(
+                body.message || "Support ticket submission failed.",
+              );
+            }
+
+            supportForm.reset();
+            setSupportStatus(
+              `Thanks, we got it. Ticket ${body.ticketId} was submitted.`,
+              "success",
+            );
+          })
+          .catch((error) => {
+            setSupportStatus(
+              error instanceof Error
+                ? error.message
+                : "Support ticket submission failed.",
+              "error",
+            );
+          })
+          .finally(() => {
+            submitButton.disabled = false;
+          });
       });
     </script>
   </body>
