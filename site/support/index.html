@@ -16,7 +16,7 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&amp;family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&amp;display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="../styles.css?v=20260617-support" />
+    <link rel="stylesheet" href="../styles.css?v=20260617-form" />
   </head>
   <body class="info-page">
     <header class="site-header" aria-label="Primary">
@@ -34,158 +34,169 @@
       </nav>
     </header>
 
-    <main class="legal">
+    <main class="legal support-page">
       <h1>Support</h1>
       <p class="muted">Last updated: June 17, 2026</p>
 
-      <section class="support-hero" aria-labelledby="support-heading">
-        <div>
-          <p class="support-kicker">Help for recipe links, saved recipes, and accounts</p>
-          <h2 id="support-heading">Choose the support path that fits what you need.</h2>
-          <p>
-            LinkDish is designed to keep recipe extraction simple and
-            dependable. The options below help route recipe issues, account
-            questions, privacy requests, and web app problems with the details
-            needed to investigate them.
-          </p>
-        </div>
-        <div class="support-actions button-group" aria-label="Primary support actions">
-          <a
-            class="button primary"
-            href="mailto:robertgordon761@gmail.com?subject=LinkDish%20support%20request&amp;body=What%20happened%3A%0A%0ARecipe%20or%20page%20link%20%28if%20relevant%29%3A%0A%0ADevice%20and%20browser%2Fapp%20version%3A%0A%0ASteps%20you%20tried%3A%0A"
-            >Email Support</a
-          >
+      <section class="support-intro" aria-labelledby="support-heading">
+        <h2 id="support-heading">How can we help?</h2>
+        <p>
+          Use the form below to report a recipe import problem, account issue,
+          web app bug, or privacy request. You can also email
+          <a href="mailto:robertgordon761@gmail.com">robertgordon761@gmail.com</a>
+          directly.
+        </p>
+      </section>
+
+      <section class="support-layout" aria-label="Support request and details">
+        <form
+          id="support-form"
+          class="support-form"
+          action="mailto:robertgordon761@gmail.com"
+          method="post"
+          enctype="text/plain"
+        >
+          <div class="support-form-header">
+            <h2>Submit a problem</h2>
+            <p>
+              The form opens your email app with these details filled in, so you
+              can review the message before sending it.
+            </p>
+          </div>
+
+          <label>
+            Email
+            <input
+              name="email"
+              type="email"
+              autocomplete="email"
+              required
+              placeholder="you@example.com"
+            />
+          </label>
+
+          <label>
+            Problem type
+            <select name="problemType" required>
+              <option value="">Select one</option>
+              <option value="Recipe import problem">Recipe import problem</option>
+              <option value="Account or household issue">Account or household issue</option>
+              <option value="Web app bug">Web app bug</option>
+              <option value="Privacy or data request">Privacy or data request</option>
+              <option value="Other">Other</option>
+            </select>
+          </label>
+
+          <label>
+            Recipe or page link
+            <input
+              name="link"
+              type="url"
+              inputmode="url"
+              placeholder="https://example.com/recipe"
+            />
+          </label>
+
+          <label>
+            Device and browser/app
+            <input
+              name="device"
+              type="text"
+              autocomplete="off"
+              placeholder="iPhone Safari, Android app, Chrome, etc."
+            />
+          </label>
+
+          <label>
+            What happened?
+            <textarea
+              name="details"
+              rows="6"
+              required
+              placeholder="Describe the problem, error message, or incorrect recipe result."
+            ></textarea>
+          </label>
+
+          <label>
+            What did you expect?
+            <textarea
+              name="expected"
+              rows="4"
+              placeholder="Tell us what should have happened instead."
+            ></textarea>
+          </label>
+
+          <button class="support-submit" type="submit">Open email draft</button>
+        </form>
+
+        <aside class="support-side" aria-labelledby="support-side-heading">
+          <h2 id="support-side-heading">What to include</h2>
+          <ul>
+            <li>The recipe URL or LinkDish page where the issue happened.</li>
+            <li>Your device, browser, Android app, or iOS web app details.</li>
+            <li>What you expected and what happened instead.</li>
+            <li>Any error message or screenshot if one is available.</li>
+          </ul>
           <a class="button secondary" href="https://app.linkdish.xyz">Open Web App</a>
-        </div>
+        </aside>
       </section>
 
-      <section class="support-options" aria-label="Support options">
-        <a
-          class="support-card"
-          href="mailto:robertgordon761@gmail.com?subject=LinkDish%20recipe%20import%20help&amp;body=Recipe%20link%3A%0A%0AWhat%20LinkDish%20returned%3A%0A%0AWhat%20you%20expected%3A%0A%0ADevice%20and%20browser%2Fapp%20version%3A%0A"
-        >
-          <span class="support-card-icon" aria-hidden="true">1</span>
-          <span class="support-card-content">
-            <strong>Recipe import help</strong>
-            <span>
-              Send the recipe link, what LinkDish returned, and what looked
-              wrong or incomplete.
-            </span>
-          </span>
-        </a>
-        <a
-          class="support-card"
-          href="mailto:robertgordon761@gmail.com?subject=LinkDish%20account%20or%20household%20help&amp;body=Account%20email%20%28if%20safe%20to%20share%29%3A%0A%0AHousehold%20or%20sharing%20issue%3A%0A%0ADevice%20and%20browser%2Fapp%20version%3A%0A"
-        >
-          <span class="support-card-icon" aria-hidden="true">2</span>
-          <span class="support-card-content">
-            <strong>Account and household help</strong>
-            <span>
-              Get help with sign in, LinkDish Family households, sharing, or
-              account deletion access.
-            </span>
-          </span>
-        </a>
-        <a
-          class="support-card"
-          href="mailto:robertgordon761@gmail.com?subject=LinkDish%20web%20app%20support&amp;body=Browser%20and%20device%3A%0A%0APage%20or%20action%20that%20failed%3A%0A%0AWhat%20you%20saw%3A%0A%0AScreenshot%20available%3F%3A%0A"
-        >
-          <span class="support-card-icon" aria-hidden="true">3</span>
-          <span class="support-card-content">
-            <strong>Web app troubleshooting</strong>
-            <span>
-              Include your browser, device, and the page or action that failed
-              in the web app.
-            </span>
-          </span>
-        </a>
-        <a
-          class="support-card"
-          href="mailto:robertgordon761@gmail.com?subject=LinkDish%20privacy%20or%20data%20request&amp;body=Request%20type%3A%0A%0AAccount%20email%20%28if%20you%20created%20one%29%3A%0A%0ADetails%3A%0A"
-        >
-          <span class="support-card-icon" aria-hidden="true">4</span>
-          <span class="support-card-content">
-            <strong>Privacy and data requests</strong>
-            <span>
-              Ask about privacy, request account deletion help, or report a
-              data concern.
-            </span>
-          </span>
-        </a>
-      </section>
+      <section class="support-faq" aria-labelledby="faq-heading">
+        <h2 id="faq-heading">FAQ</h2>
 
-      <section class="support-detail-panel" aria-labelledby="include-heading">
-        <div>
-          <h2 id="include-heading">What to include</h2>
+        <details>
+          <summary>What recipe links work best?</summary>
           <p>
-            The most useful support emails include the recipe link or account
-            area involved, the device and browser or app version, what you
-            expected, and what happened instead.
+            Public recipe pages work best. If a site blocks extraction,
+            requires a login, or is temporarily unreachable, LinkDish may not be
+            able to import it.
           </p>
-        </div>
-        <ul>
-          <li>Recipe URL or LinkDish page where the problem happened.</li>
-          <li>Device, browser, Android app version, or iOS web app details.</li>
-          <li>Any error message, screenshot, or short screen recording.</li>
-          <li>Whether the issue happens every time or only sometimes.</li>
-        </ul>
+        </details>
+
+        <details>
+          <summary>Why did a recipe import look incomplete?</summary>
+          <p>
+            Some recipe sites publish ingredients, steps, timing, or notes in
+            formats that are hard to read automatically. Send the original link
+            and what looked wrong so the source can be checked.
+          </p>
+        </details>
+
+        <details>
+          <summary>Where are saved recipes stored?</summary>
+          <p>
+            Saved recipes are stored on your device. If a saved recipe looks
+            outdated or malformed after an app update, remove it and extract it
+            again to refresh the content.
+          </p>
+        </details>
+
+        <details>
+          <summary>Do I need an account?</summary>
+          <p>
+            No account is required to import and save recipes on one device.
+            Sign in is required only to create, join, or manage LinkDish Family
+            household sharing.
+          </p>
+        </details>
+
+        <details>
+          <summary>How do I delete my account?</summary>
+          <p>
+            If you created a LinkDish account, you can delete it from Account in
+            the app. If you cannot access the app, submit a privacy or data
+            request with the email address used for the account.
+          </p>
+        </details>
+
+        <details>
+          <summary>Where can I read the privacy policy?</summary>
+          <p>
+            The LinkDish privacy policy is available at
+            <a href="../privacy/">linkdish.xyz/privacy/</a>.
+          </p>
+        </details>
       </section>
-
-      <h2>Fast first checks</h2>
-      <p>
-        If something is not working as expected, these quick checks often solve
-        the issue or make the support request easier to trace:
-      </p>
-
-      <ul>
-        <li>Make sure the recipe link is public and still available.</li>
-        <li>
-          Try pasting the link again if the source was temporarily unreachable.
-        </li>
-        <li>
-          Try a different recipe source if the site blocks extraction or is
-          unsupported.
-        </li>
-      </ul>
-
-      <h2>Saved recipes</h2>
-      <p>
-        Saved recipes are stored on your device. If a saved recipe looks
-        outdated or malformed after an app update, removing it and extracting it
-        again should refresh the content.
-      </p>
-
-      <h2>Accounts and Family households</h2>
-      <p>
-        No account is required to import and save recipes on one device. Sign in
-        is required only to create, join, or manage LinkDish Family household
-        sharing.
-      </p>
-
-      <h2>Privacy</h2>
-      <p>
-        For details about what information the app handles, read the
-        <a href="../privacy/">LinkDish Privacy Policy</a>.
-      </p>
-
-      <h2>Contact</h2>
-      <p>
-        For support, feedback, or privacy questions, email
-        <a href="mailto:robertgordon761@gmail.com">robertgordon761@gmail.com</a
-        >. If you are using the web app, include the browser and device you are
-        using so the issue is easier to trace.
-      </p>
-
-      <h2>Data deletion requests</h2>
-      <p>
-        If you created a LinkDish account, you can delete it from Account in the
-        app. Deleting the account removes server-side account and household
-        records, but paid subscriptions still need to be managed through the
-        checkout or store account used to subscribe. If you cannot access the
-        app, send your request to
-        <a href="mailto:robertgordon761@gmail.com">robertgordon761@gmail.com</a
-        >.
-      </p>
     </main>
 
     <footer class="site-footer">
@@ -198,5 +209,36 @@
         </div>
       </div>
     </footer>
+    <script>
+      const supportForm = document.querySelector("#support-form");
+
+      supportForm?.addEventListener("submit", (event) => {
+        event.preventDefault();
+
+        if (!supportForm.reportValidity()) {
+          return;
+        }
+
+        const formData = new FormData(supportForm);
+        const problemType = formData.get("problemType") || "Support request";
+        const body = [
+          `Email: ${formData.get("email") || ""}`,
+          `Problem type: ${problemType}`,
+          `Recipe or page link: ${formData.get("link") || ""}`,
+          `Device and browser/app: ${formData.get("device") || ""}`,
+          "",
+          "What happened:",
+          formData.get("details") || "",
+          "",
+          "What I expected:",
+          formData.get("expected") || "",
+        ].join("\n");
+
+        const subject = `LinkDish support: ${problemType}`;
+        window.location.href = `mailto:robertgordon761@gmail.com?subject=${encodeURIComponent(
+          subject,
+        )}&body=${encodeURIComponent(body)}`;
+      });
+    </script>
   </body>
 </html>
