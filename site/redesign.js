@@ -125,6 +125,7 @@ let activeRecipeKey = "lemon";
 let activeStepIndex = 0;
 let toastTimer;
 let cleaningTimer;
+let appPromptTimer;
 let lastFocusedElement = null;
 
 const body = document.body;
@@ -145,6 +146,7 @@ const stepList = document.getElementById("step-list");
 const ingredientCount = document.getElementById("ingredient-count");
 const stepCount = document.getElementById("step-count");
 const toast = document.getElementById("toast");
+const appPrompt = document.getElementById("app-prompt");
 const cookModal = document.getElementById("cook-modal");
 const modalTitle = document.getElementById("modal-title");
 const modalStepCopy = document.getElementById("modal-step-copy");
@@ -229,6 +231,7 @@ function showToast(message) {
 
 function cleanRecipe(key) {
   clearTimeout(cleaningTimer);
+  clearTimeout(appPromptTimer);
   formError.textContent = "";
   body.classList.add("is-cleaning");
   heroVisual.classList.remove("is-cleaned");
@@ -241,6 +244,35 @@ function cleanRecipe(key) {
     cleanStatus.textContent = `${recipes[key].title} is cleaned and ready.`;
     showToast(`${recipes[key].title} is ready.`);
   }, 1050);
+}
+
+function openAppPrompt() {
+  appPrompt.hidden = false;
+  body.classList.add("modal-open");
+  document.querySelector(".app-prompt-close").focus();
+}
+
+function closeAppPrompt() {
+  appPrompt.hidden = true;
+  body.classList.remove("modal-open");
+  if (lastFocusedElement) {
+    lastFocusedElement.focus();
+  }
+}
+
+function promptForRealApp() {
+  clearTimeout(appPromptTimer);
+  formError.textContent = "";
+  lastFocusedElement = document.activeElement;
+  body.classList.add("is-cleaning");
+  heroVisual.classList.remove("is-cleaned");
+  cleanStatus.textContent = "Getting LinkDish ready.";
+
+  appPromptTimer = window.setTimeout(() => {
+    body.classList.remove("is-cleaning");
+    cleanStatus.textContent = "Open LinkDish to extract this recipe.";
+    openAppPrompt();
+  }, 900);
 }
 
 cleanerForm.addEventListener("submit", (event) => {
@@ -264,12 +296,16 @@ cleanerForm.addEventListener("submit", (event) => {
       throw new Error("Invalid host");
     }
     recipeUrl.value = normalizedValue;
-    cleanRecipe(chooseRecipeFromUrl(normalizedValue));
+    promptForRealApp();
   } catch {
     formError.textContent = "That does not look like a full recipe URL.";
     recipeUrl.focus();
   }
 });
+
+document
+  .querySelectorAll("[data-close-app-prompt]")
+  .forEach((element) => element.addEventListener("click", closeAppPrompt));
 
 recipeUrl.addEventListener("input", () => {
   formError.textContent = "";
@@ -368,6 +404,9 @@ modalNext.addEventListener("click", () => {
 });
 
 document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !appPrompt.hidden) {
+    closeAppPrompt();
+  }
   if (event.key === "Escape" && !cookModal.hidden) {
     closeCookModal();
   }
