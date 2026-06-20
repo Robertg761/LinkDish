@@ -2874,16 +2874,6 @@ input:focus-visible {
   box-shadow: 0 10px 22px rgba(39, 34, 23, 0.13);
 }
 
-.app-prompt-kicker {
-  position: relative;
-  z-index: 1;
-  margin: 26px 0 12px;
-  color: var(--tomato-dark);
-  font-size: 11px;
-  font-weight: 900;
-  text-transform: uppercase;
-}
-
 .app-prompt-dialog h2 {
   position: relative;
   z-index: 1;
