@@ -1,6 +1,6 @@
 # LinkDish Public Site
 
-This repo is the static public site for `https://linkdish.xyz`. It is separate
+This repo is the static public site for `https://linkdish.ca`. It is separate
 from the LinkDish app/API monorepo.
 
 ## What Lives Here
@@ -9,7 +9,7 @@ from the LinkDish app/API monorepo.
 - `support/index.html`: public support page and support ticket form.
 - `privacy/index.html`: public privacy policy.
 - `styles.css`: shared public-site styling.
-- `CNAME`: GitHub Pages custom domain, currently `linkdish.xyz`.
+- `CNAME`: GitHub Pages custom domain, currently `linkdish.ca`.
 - `assets/`: public images used by the static pages.
 
 There is no build step for this repo. GitHub Pages serves the files from
@@ -20,12 +20,12 @@ There is no build step for this repo. GitHub Pages serves the files from
 The support page has two support paths:
 
 - Inline support form in `support/index.html`.
-- Direct email links to `support@linkdish.xyz`.
+- Direct email links to `support@linkdish.ca`.
 
 The form posts JSON to:
 
 ```text
-https://linkdish-api.vercel.app/support-ticket
+https://api.linkdish.ca/support-ticket
 ```
 
 That endpoint is owned by the LinkDish monorepo, not this static-site repo:
@@ -35,7 +35,7 @@ That endpoint is owned by the LinkDish monorepo, not this static-site repo:
 ```
 
 The backend sends ticket emails through Resend to Proton Mail at
-`support@linkdish.xyz`. The detailed backend/DNS/mailbox runbook is in:
+`support@linkdish.ca`. The detailed backend/DNS/mailbox runbook is in:
 
 ```text
 /Users/robert/Documents/Projects/LinkDish/docs/support-system.md
@@ -81,7 +81,7 @@ The page shows that ticket ID in the form status text.
 
 ## Public Email Links
 
-Use `support@linkdish.xyz` for public support/contact mailto links. Do not
+Use `support@linkdish.ca` for public support/contact mailto links. Do not
 restore the older personal Gmail address on public pages.
 
 Current pages with support/contact email links:
@@ -93,10 +93,10 @@ Current pages with support/contact email links:
 Check with:
 
 ```bash
-rg -n 'mailto:|support@linkdish\\.xyz|robertgordon761@gmail.com' .
+rg -n 'mailto:|support@linkdish\\.ca|robertgordon761@gmail.com' .
 ```
 
-Expected result: public mailto links should use `support@linkdish.xyz`, and
+Expected result: public mailto links should use `support@linkdish.ca`, and
 there should be no `robertgordon761@gmail.com` on the public site.
 
 ## Deploy And Verify
@@ -120,9 +120,9 @@ gh api repos/Robertg761/LinkDish-site/pages --jq '{status:.status,cname:.cname,h
 After Pages reports `built`, verify the live HTML:
 
 ```bash
-for url in https://linkdish.xyz/ https://linkdish.xyz/support/ https://linkdish.xyz/privacy/; do
+for url in https://linkdish.ca/ https://linkdish.ca/support/ https://linkdish.ca/privacy/; do
   echo "--- $url"
-  curl -fsSL "$url?verify=$(date +%s)" | rg -n 'support@linkdish\\.xyz|robertgordon761@gmail.com' || true
+  curl -fsSL "$url?verify=$(date +%s)" | rg -n 'support@linkdish\\.ca|robertgordon761@gmail.com' || true
 done
 ```
 
@@ -141,7 +141,7 @@ DNS and mailbox setup do not live in this repo. Current production ownership:
 - DNS registrar/provider: Porkbun
 - Mailbox provider: Proton Mail custom domain
 - Ticket sender: Resend via `linkdish-api`
-- Ticket recipient: `support@linkdish.xyz`
+- Ticket recipient: `support@linkdish.ca`
 
 Do not change DNS, Vercel env vars, Proton settings, or Resend sender settings
 from assumptions in this repo alone. Use the monorepo support-system runbook.

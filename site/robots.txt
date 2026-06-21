@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://linkdish.xyz/sitemap.xml
+Sitemap: https://linkdish.ca/sitemap.xml
