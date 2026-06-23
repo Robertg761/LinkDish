@@ -203,6 +203,10 @@ button {
   white-space: nowrap;
 }
 
+.mobile-app-dock {
+  display: none;
+}
+
 .menu-toggle {
   display: none;
 }
@@ -3135,6 +3139,10 @@ input:focus-visible {
 }
 
 @media (max-width: 900px) {
+  body {
+    padding-bottom: calc(92px + env(safe-area-inset-bottom));
+  }
+
   .shell {
     width: min(100% - 32px, 720px);
   }
@@ -3236,6 +3244,60 @@ input:focus-visible {
     font-size: 14px;
   }
 
+  .mobile-app-dock {
+    position: fixed;
+    right: 10px;
+    bottom: 10px;
+    bottom: max(10px, env(safe-area-inset-bottom));
+    left: 10px;
+    z-index: 90;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: 12px;
+    width: min(560px, calc(100% - 20px));
+    margin: 0 auto;
+    padding: 10px;
+    color: var(--ink);
+    background: rgba(255, 253, 248, 0.94);
+    border: 1px solid rgba(24, 32, 24, 0.16);
+    border-radius: 24px;
+    box-shadow: 0 18px 44px rgba(39, 34, 23, 0.2);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+  }
+
+  .mobile-app-dock__label {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    font-size: 13px;
+    font-weight: 800;
+    letter-spacing: 0;
+    white-space: nowrap;
+  }
+
+  .mobile-app-dock__label img {
+    width: 30px;
+    height: 30px;
+    border-radius: 9px;
+    box-shadow: 0 7px 16px rgba(39, 34, 23, 0.13);
+  }
+
+  .mobile-app-dock__actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .mobile-app-dock .button {
+    min-height: 44px;
+    padding: 0 10px;
+    font-size: 13px;
+  }
+
   .hero h1 {
     font-size: 4.6rem;
   }
@@ -3314,6 +3376,10 @@ input:focus-visible {
 }
 
 @media (max-width: 620px) {
+  body {
+    padding-bottom: calc(122px + env(safe-area-inset-bottom));
+  }
+
   .js .hero-copy.reveal,
   .js .hero-visual.reveal {
     opacity: 1;
@@ -3327,6 +3393,16 @@ input:focus-visible {
 
   .section {
     padding: 76px 0;
+  }
+
+  .mobile-app-dock {
+    grid-template-columns: 1fr;
+    gap: 8px;
+    border-radius: 21px;
+  }
+
+  .mobile-app-dock__label {
+    justify-content: center;
   }
 
   .hero {
