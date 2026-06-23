@@ -51,7 +51,7 @@
     <script>
       document.documentElement.classList.add("js");
     </script>
-    <link rel="stylesheet" href="redesign.css?v=20260620-app-prompt-clean" />
+    <link rel="stylesheet" href="redesign.css?v=20260623-header-actions" />
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
@@ -86,18 +86,20 @@
           <a href="#questions">FAQ</a>
           <a href="support/">Support</a>
           <a href="privacy/">Privacy</a>
-        </nav>
 
-        <div class="nav-actions">
-          <a
-            class="text-link"
-            href="https://play.google.com/store/apps/details?id=com.linkdish.app"
-            >Android</a
-          >
-          <a class="button button--small button--ink" href="https://app.linkdish.ca"
-            >Open Web App</a
-          >
-        </div>
+          <div class="nav-actions" aria-label="App links">
+            <a
+              class="button button--small button--outline"
+              href="https://play.google.com/store/apps/details?id=com.linkdish.app"
+              >Google Play</a
+            >
+            <a
+              class="button button--small button--ink"
+              href="https://app.linkdish.ca"
+              >Open Web App</a
+            >
+          </div>
+        </nav>
       </div>
     </header>
 

@@ -162,11 +162,13 @@ button {
 
 .main-nav {
   display: flex;
+  flex: 1;
+  align-items: center;
   gap: 24px;
   margin-left: 6px;
 }
 
-.main-nav a,
+.main-nav > a,
 .text-link {
   position: relative;
   color: var(--ink-soft);
@@ -176,7 +178,7 @@ button {
   text-decoration: none;
 }
 
-.main-nav a::after,
+.main-nav > a::after,
 .text-link::after {
   content: "";
   position: absolute;
@@ -188,7 +190,7 @@ button {
   transition: right 0.25s ease;
 }
 
-.main-nav a:hover::after,
+.main-nav > a:hover::after,
 .text-link:hover::after {
   right: 0;
 }
@@ -197,7 +199,8 @@ button {
   margin-left: auto;
   display: flex;
   align-items: center;
-  gap: 24px;
+  gap: 10px;
+  white-space: nowrap;
 }
 
 .menu-toggle {
@@ -3099,6 +3102,10 @@ input:focus-visible {
     margin-left: 0;
   }
 
+  .nav-actions .button {
+    padding-inline: 14px;
+  }
+
   .hero-grid {
     grid-template-columns: 1fr;
     gap: 24px;
@@ -3213,7 +3220,20 @@ input:focus-visible {
   }
 
   .nav-actions {
-    display: none;
+    width: min(100%, 520px);
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin: 12px 0 0;
+    padding-top: 14px;
+    border-top: 1px solid var(--line);
+    white-space: normal;
+  }
+
+  .nav-actions .button {
+    min-height: 48px;
+    padding: 0 14px;
+    font-size: 14px;
   }
 
   .hero h1 {
