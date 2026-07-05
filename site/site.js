@@ -2,6 +2,8 @@
   var reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
   var extractionCopy = document.querySelector("[data-extraction-copy]");
   var assemblyCard = document.querySelector("[data-assembly-card]");
+  var urlText = document.querySelector("[data-url-text]");
+  var timerChip = document.querySelector("[data-timer-chip]");
   var extractionLines = [
     "Warming up the oven…",
     "Skimming off the ads…",
@@ -14,37 +16,150 @@
     document.documentElement.classList.add("motion-ready");
   }
 
-  if (extractionCopy && !reduceMotion.matches) {
-    var extractionIndex = 0;
+  var drawSquiggles = function () {
+    var squiggles = Array.prototype.slice.call(document.querySelectorAll(".squiggle"));
 
-    window.setInterval(function () {
-      extractionCopy.classList.add("is-swapping");
+    squiggles.forEach(function (squiggle) {
+      var path = squiggle.querySelector("path");
 
-      window.setTimeout(function () {
-        extractionIndex = (extractionIndex + 1) % extractionLines.length;
-        extractionCopy.textContent = extractionLines[extractionIndex];
-        extractionCopy.classList.remove("is-swapping");
-      }, 250);
-    }, 1800);
+      if (!path || typeof path.getTotalLength !== "function") {
+        return;
+      }
+
+      squiggle.style.setProperty("--squiggle-length", Math.ceil(path.getTotalLength()));
+    });
+
+    window.setTimeout(function () {
+      Array.prototype.slice
+        .call(document.querySelectorAll(".hero .squiggle"))
+        .forEach(function (squiggle) {
+          squiggle.classList.add("is-drawn");
+        });
+    }, 420);
+  };
+
+  var formatTimer = function (seconds) {
+    var hours = Math.floor(seconds / 3600);
+    var minutes = Math.floor((seconds % 3600) / 60);
+    var secs = seconds % 60;
+
+    return hours + ":" + String(minutes).padStart(2, "0") + ":" + String(secs).padStart(2, "0");
+  };
+
+  if (reduceMotion.matches) {
+    if (urlText) {
+      urlText.textContent = urlText.dataset.fullUrl || urlText.textContent;
+    }
+
+    if (timerChip) {
+      timerChip.textContent = "2:00:00";
+    }
+
+    if (assemblyCard) {
+      assemblyCard.classList.add("is-assembled");
+    }
+  } else {
+    drawSquiggles();
   }
 
-  if (assemblyCard && !reduceMotion.matches) {
-    var assembleCard = function () {
-      assemblyCard.classList.remove("is-clearing");
+  if ((urlText || extractionCopy || assemblyCard || timerChip) && !reduceMotion.matches) {
+    var fullUrl = urlText ? urlText.dataset.fullUrl || urlText.textContent : "";
+    var extractionIndex = 0;
+    var timerInterval = 0;
 
-      window.requestAnimationFrame(function () {
-        assemblyCard.classList.add("is-assembled");
-      });
-
+    var swapExtraction = function (copy, delay) {
       window.setTimeout(function () {
-        assemblyCard.classList.add("is-clearing");
-        assemblyCard.classList.remove("is-assembled");
+        if (!extractionCopy) {
+          return;
+        }
 
-        window.setTimeout(assembleCard, 420);
-      }, 5600);
+        extractionCopy.classList.add("is-swapping");
+
+        window.setTimeout(function () {
+          extractionCopy.textContent = copy;
+          extractionCopy.classList.remove("is-swapping");
+        }, 250);
+      }, delay);
     };
 
-    assembleCard();
+    var startCountdown = function () {
+      if (!timerChip) {
+        return;
+      }
+
+      var remaining = 7200;
+      timerChip.textContent = formatTimer(remaining);
+      window.clearInterval(timerInterval);
+      timerInterval = window.setInterval(function () {
+        remaining -= 1;
+        timerChip.textContent = formatTimer(remaining);
+      }, 1000);
+    };
+
+    var runLoop = function () {
+      if (urlText) {
+        urlText.textContent = "";
+        urlText.classList.add("is-typing");
+      }
+
+      if (assemblyCard) {
+        assemblyCard.classList.add("is-clearing");
+        assemblyCard.classList.remove("is-assembled");
+      }
+
+      if (timerChip) {
+        timerChip.textContent = "2:00:00";
+      }
+
+      if (extractionCopy) {
+        extractionCopy.textContent = extractionLines[0];
+      }
+
+      window.clearInterval(timerInterval);
+
+      var charIndex = 0;
+      var typingInterval = window.setInterval(function () {
+        charIndex += 1;
+
+        if (urlText) {
+          urlText.textContent = fullUrl.slice(0, charIndex);
+        }
+
+        if (charIndex >= fullUrl.length) {
+          window.clearInterval(typingInterval);
+
+          if (urlText) {
+            urlText.classList.remove("is-typing");
+          }
+        }
+      }, 28);
+
+      swapExtraction(extractionLines[(extractionIndex + 1) % extractionLines.length], 3600);
+      swapExtraction(extractionLines[(extractionIndex + 2) % extractionLines.length], 5050);
+      extractionIndex = (extractionIndex + 2) % extractionLines.length;
+
+      window.setTimeout(function () {
+        if (!assemblyCard) {
+          return;
+        }
+
+        assemblyCard.classList.remove("is-clearing");
+        window.requestAnimationFrame(function () {
+          assemblyCard.classList.add("is-assembled");
+          startCountdown();
+        });
+      }, 4600);
+
+      window.setTimeout(function () {
+        if (assemblyCard) {
+          assemblyCard.classList.add("is-clearing");
+          assemblyCard.classList.remove("is-assembled");
+        }
+      }, 10600);
+    };
+
+    runLoop();
+    window.setInterval(runLoop, 11000);
   }
 
   var revealItems = Array.prototype.slice.call(document.querySelectorAll("[data-reveal]"));

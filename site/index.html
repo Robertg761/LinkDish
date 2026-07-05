@@ -41,6 +41,62 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
+    <svg class="svg-defs" aria-hidden="true" focusable="false">
+      <defs>
+        <symbol id="icon-tomato-with-stem" viewBox="0 0 64 64">
+          <circle class="ingredient-blob tomato-blob" cx="34" cy="36" r="22" />
+          <circle class="ingredient-line" cx="31" cy="34" r="20" />
+          <path class="ingredient-line" d="M31 14l-5-7 8 4 7-4-4 8" />
+        </symbol>
+        <symbol id="icon-basil-sprig" viewBox="0 0 64 64">
+          <path class="ingredient-blob basil-blob" d="M23 37c8-10 24-9 29 4-10 8-23 5-29-4z" />
+          <path class="ingredient-line" d="M17 51c11-16 23-25 35-30" />
+          <path class="ingredient-line" d="M26 36c-10-1-16-9-12-18 10 0 17 8 12 18z" />
+          <path class="ingredient-line" d="M36 27c-3-11 3-20 14-21 4 10-3 19-14 21z" />
+          <path class="ingredient-line" d="M29 42c10-9 23-6 27 6-10 7-21 5-27-6z" />
+        </symbol>
+        <symbol id="icon-lemon-wedge" viewBox="0 0 64 64">
+          <path class="ingredient-blob lemon-blob" d="M13 42a24 24 0 0 1 45-20z" />
+          <path class="ingredient-line" d="M10 43a25 25 0 0 1 47-22z" />
+          <path class="ingredient-line" d="M10 43h47" />
+          <path class="ingredient-line" d="M24 41l8-19M37 42l7-14M17 42l11-9M47 43l-1-10" />
+          <circle class="ingredient-dot" cx="28" cy="34" r="1.8" />
+          <circle class="ingredient-dot" cx="38" cy="31" r="1.8" />
+          <circle class="ingredient-dot" cx="48" cy="37" r="1.8" />
+        </symbol>
+        <symbol id="icon-garlic-clove" viewBox="0 0 64 64">
+          <path
+            class="ingredient-blob garlic-blob"
+            d="M23 13c16 7 25 19 24 34-10 8-27 8-34-4 1-12 4-22 10-30z"
+          />
+          <path
+            class="ingredient-line"
+            d="M29 9c15 8 21 20 18 36-8 13-27 12-34-1 0-13 5-25 16-35z"
+          />
+          <path class="ingredient-line" d="M29 9c-1 8 1 14 6 20" />
+          <path class="ingredient-line" d="M26 24c-3 7-3 15 2 25" />
+        </symbol>
+        <symbol id="icon-mushroom" viewBox="0 0 64 64">
+          <path class="ingredient-blob mushroom-blob" d="M15 31c3-14 17-22 32-14 7 4 10 10 9 18z" />
+          <path class="ingredient-line" d="M10 34c3-17 18-26 35-17 8 4 12 11 11 20z" />
+          <path class="ingredient-line" d="M25 35c-2 7-4 14-1 18h16c3-5 0-12-2-18" />
+          <path class="ingredient-line" d="M18 35h35" />
+        </symbol>
+        <symbol id="icon-steam-curl" viewBox="0 0 64 64">
+          <path class="ingredient-line" d="M20 55c10-8-6-13 4-21s-3-12 5-22" />
+          <path class="ingredient-line" d="M34 56c9-9-5-14 4-22s-2-13 6-23" />
+          <path class="ingredient-line" d="M48 55c8-8-4-12 3-20s-1-11 4-19" />
+        </symbol>
+        <symbol id="icon-kitchen-timer" viewBox="0 0 64 64">
+          <circle class="ingredient-blob timer-blob" cx="35" cy="37" r="23" />
+          <circle class="ingredient-line" cx="32" cy="36" r="22" />
+          <path class="ingredient-line" d="M25 9h14M32 14v-5M48 19l5-5" />
+          <path class="ingredient-line" d="M32 36l10-8" />
+          <path class="ingredient-line" d="M22 46h20" />
+        </symbol>
+      </defs>
+    </svg>
+
     <header class="site-header" aria-label="Primary">
       <a class="brand" href="./" aria-label="LinkDish home">
         <img src="assets/linkdish-icon.png" alt="" width="36" height="36" />
@@ -54,12 +110,32 @@
 
     <main>
       <section class="hero" aria-labelledby="hero-heading">
+        <svg class="floating-garnish hero-garnish hero-tomato" aria-hidden="true">
+          <use href="#icon-tomato-with-stem"></use>
+        </svg>
+        <svg class="floating-garnish hero-garnish hero-basil" aria-hidden="true">
+          <use href="#icon-basil-sprig"></use>
+        </svg>
+        <svg class="floating-garnish hero-garnish hero-lemon" aria-hidden="true">
+          <use href="#icon-lemon-wedge"></use>
+        </svg>
+        <svg class="floating-garnish hero-garnish hero-steam" aria-hidden="true">
+          <use href="#icon-steam-curl"></use>
+        </svg>
+        <svg class="floating-garnish hero-garnish hero-garlic" aria-hidden="true">
+          <use href="#icon-garlic-clove"></use>
+        </svg>
         <div class="hero-inner">
           <div class="hero-copy">
             <p class="eyebrow" data-entrance>LINKDISH</p>
             <h1 id="hero-heading" data-entrance>
               <span>Paste a link.</span>
-              <em>Get cooking.</em>
+              <em>
+                Get cooking.
+                <svg class="squiggle squiggle-tomato" aria-hidden="true" viewBox="0 0 260 28">
+                  <path d="M6 18c28-20 56 18 84-2s56 18 84-2 54 15 80-1" />
+                </svg>
+              </em>
             </h1>
             <p class="hero-subline" data-entrance>
               Any recipe link becomes a clean, photographed recipe in your own cookbook.
@@ -68,7 +144,7 @@
               <a
                 class="button button-primary"
                 href="https://play.google.com/store/apps/details?id=com.linkdish.app"
-                >Get it on Google Play</a
+                >Get it on Google Play <span class="button-arrow" aria-hidden="true">→</span></a
               >
               <a class="button button-secondary" href="https://app.linkdish.ca"
                 >Use it on the web</a
@@ -126,13 +202,24 @@
       <section class="section how-section" id="how-it-works" aria-labelledby="how-heading">
         <div class="section-inner">
           <p class="eyebrow" data-reveal>HOW IT WORKS</p>
-          <h2 id="how-heading" data-reveal>From messy link to dinner rhythm.</h2>
+          <h2 id="how-heading" data-reveal>
+            From messy link to
+            <span class="squiggle-wrap">
+              dinner rhythm.
+              <svg class="squiggle squiggle-tomato" aria-hidden="true" viewBox="0 0 260 28">
+                <path d="M6 18c28-20 56 18 84-2s56 18 84-2 54 15 80-1" />
+              </svg>
+            </span>
+          </h2>
 
           <div class="transformation-stage" data-reveal>
             <div class="link-performance">
               <div class="url-chip" aria-label="Example long recipe URL">
                 <span class="lock-dot"></span>
-                <span class="url-text"
+                <span
+                  class="url-text"
+                  data-url-text
+                  data-full-url="tastyplates.example/the-story-of-my-nonnas-summer-in-tuscany-and-also-eventually-a-ragu-recipe?utm_source=…"
                   >tastyplates.example/the-story-of-my-nonnas-summer-in-tuscany-and-also-eventually-a-ragu-recipe?utm_source=…</span
                 >
               </div>
@@ -166,7 +253,7 @@
                   <span>0.5x</span>
                   <span class="active">1x</span>
                   <span>2x</span>
-                  <span class="timer-chip">2:00:00</span>
+                  <span class="timer-chip" data-timer-chip>2:00:00</span>
                 </div>
               </article>
             </div>
@@ -180,7 +267,13 @@
             <div>
               <p class="eyebrow" data-reveal>FEATURES</p>
               <h2 id="features-heading" data-reveal>
-                A cookbook that behaves like a kitchen tool.
+                A cookbook that behaves like a
+                <span class="squiggle-wrap">
+                  kitchen tool.
+                  <svg class="squiggle squiggle-butter" aria-hidden="true" viewBox="0 0 260 28">
+                    <path d="M6 18c28-20 56 18 84-2s56 18 84-2 54 15 80-1" />
+                  </svg>
+                </span>
               </h2>
             </div>
             <p class="section-intro" data-reveal>
@@ -190,7 +283,7 @@
           </div>
 
           <div class="feature-rows">
-            <article class="feature-row" data-reveal>
+            <article class="feature-row feature-cook" data-reveal>
               <div class="feature-media">
                 <figure class="phone-frame product-phone product-phone-left">
                   <img
@@ -202,6 +295,9 @@
                 </figure>
               </div>
               <div class="feature-copy">
+                <svg class="floating-garnish feature-garnish" aria-hidden="true">
+                  <use href="#icon-kitchen-timer"></use>
+                </svg>
                 <p class="feature-label">COOK MODE</p>
                 <h3>Timers where your hands already are.</h3>
                 <p>
@@ -211,8 +307,11 @@
               </div>
             </article>
 
-            <article class="feature-row feature-row-reverse" data-reveal>
+            <article class="feature-row feature-row-reverse feature-scaling" data-reveal>
               <div class="feature-copy">
+                <svg class="floating-garnish feature-garnish" aria-hidden="true">
+                  <use href="#icon-lemon-wedge"></use>
+                </svg>
                 <p class="feature-label">SCALING</p>
                 <h3>Scale any recipe honestly.</h3>
                 <p>
@@ -232,7 +331,7 @@
               </div>
             </article>
 
-            <article class="feature-row" data-reveal>
+            <article class="feature-row feature-household" data-reveal>
               <div class="feature-media">
                 <figure class="phone-frame product-phone product-phone-left">
                   <img
@@ -244,6 +343,9 @@
                 </figure>
               </div>
               <div class="feature-copy">
+                <svg class="floating-garnish feature-garnish" aria-hidden="true">
+                  <use href="#icon-basil-sprig"></use>
+                </svg>
                 <p class="feature-label">HOUSEHOLD</p>
                 <h3>One list. Everyone's dinner.</h3>
                 <p>
@@ -307,6 +409,18 @@
       </section>
 
       <section class="green-finale" id="plans" aria-labelledby="free-heading">
+        <svg class="finale-garnish finale-basil" aria-hidden="true">
+          <use href="#icon-basil-sprig"></use>
+        </svg>
+        <svg class="finale-garnish finale-lemon" aria-hidden="true">
+          <use href="#icon-lemon-wedge"></use>
+        </svg>
+        <svg class="finale-garnish finale-steam" aria-hidden="true">
+          <use href="#icon-steam-curl"></use>
+        </svg>
+        <svg class="finale-garnish finale-tomato" aria-hidden="true">
+          <use href="#icon-tomato-with-stem"></use>
+        </svg>
         <div class="green-garnish" aria-hidden="true">&amp;</div>
         <div class="green-inner" data-reveal>
           <div>
@@ -322,7 +436,7 @@
             <a
               class="button button-light-on-green"
               href="https://play.google.com/store/apps/details?id=com.linkdish.app"
-              >Get it on Google Play</a
+              >Get it on Google Play <span class="button-arrow" aria-hidden="true">→</span></a
             >
             <a class="button button-outline-on-green" href="https://app.linkdish.ca"
               >Use it on the web</a
