@@ -101,38 +101,75 @@
         </div>
       </section>
 
+      <section class="dish-ticker" aria-label="Recipe variety">
+        <p class="sr-only">LinkDish holds every kind of recipe.</p>
+        <div class="dish-track" aria-hidden="true">
+          <span>Ginger-Sesame Chicken Rice Skillet</span>
+          <span>Brown Butter Berry Oat Bars</span>
+          <span>Crisp Cucumber Chickpea Pitas</span>
+          <span>Sunday ragù</span>
+          <span>Miso-butter salmon</span>
+          <span>Sheet-pan gnocchi</span>
+          <span>One-pot coconut dal</span>
+          <span>Saturday-morning pancakes</span>
+          <span>Ginger-Sesame Chicken Rice Skillet</span>
+          <span>Brown Butter Berry Oat Bars</span>
+          <span>Crisp Cucumber Chickpea Pitas</span>
+          <span>Sunday ragù</span>
+          <span>Miso-butter salmon</span>
+          <span>Sheet-pan gnocchi</span>
+          <span>One-pot coconut dal</span>
+          <span>Saturday-morning pancakes</span>
+        </div>
+      </section>
+
       <section class="section how-section" id="how-it-works" aria-labelledby="how-heading">
         <div class="section-inner">
           <p class="eyebrow" data-reveal>HOW IT WORKS</p>
           <h2 id="how-heading" data-reveal>From messy link to dinner rhythm.</h2>
-          <div class="steps" aria-label="How LinkDish works">
-            <article class="step-card" data-reveal>
-              <span class="step-number">1</span>
-              <h3>Share or paste any recipe link</h3>
-              <p>
-                Send the recipe from your browser, a message, a video caption, or wherever it was
-                hiding.
-              </p>
-            </article>
-            <article class="step-card" data-reveal>
-              <span class="step-number">2</span>
-              <h3>We plate it</h3>
-              <p>
-                The ads, pop-ups, and life story fall away. You keep the photo, ingredients, and
-                steps.
-              </p>
+
+          <div class="transformation-stage" data-reveal>
+            <div class="link-performance">
+              <div class="url-chip" aria-label="Example long recipe URL">
+                <span class="lock-dot"></span>
+                <span class="url-text"
+                  >tastyplates.example/the-story-of-my-nonnas-summer-in-tuscany-and-also-eventually-a-ragu-recipe?utm_source=…</span
+                >
+              </div>
+              <ol class="stage-steps">
+                <li><span class="step-number">1</span>Share or paste any recipe link</li>
+                <li><span class="step-number">2</span>We plate it</li>
+                <li><span class="step-number">3</span>Cook, scale, and shop from it.</li>
+              </ol>
               <p class="extraction-line">
                 <span data-extraction-copy>Warming up the oven…</span>
               </p>
-            </article>
-            <article class="step-card" data-reveal>
-              <span class="step-number">3</span>
-              <h3>Cook with timers, scale servings, shop from it</h3>
-              <p>
-                Open cook mode, check off ingredients, scale the batch, and send groceries to the
-                household list.
+            </div>
+
+            <div class="stage-arrow" aria-hidden="true">→</div>
+
+            <div class="assembled-card-shell">
+              <p class="sr-only">
+                LinkDish turns a long recipe link into a clean recipe card with servings, cook time,
+                ingredients, scaling, and a timer.
               </p>
-            </article>
+              <article class="assembled-card" aria-hidden="true" data-assembly-card>
+                <p class="recipe-eyebrow assembly-piece">RECIPE</p>
+                <h3 class="assembly-piece">Sunday Ragù</h3>
+                <p class="recipe-meta assembly-piece">4 servings · Prep 20 min · Cook 2 h</p>
+                <ul class="ingredient-preview assembly-piece">
+                  <li><span></span>San Marzano tomatoes</li>
+                  <li><span></span>Slow-browned beef and pork</li>
+                  <li><span></span>Fresh tagliatelle</li>
+                </ul>
+                <div class="recipe-tools assembly-piece">
+                  <span>0.5x</span>
+                  <span class="active">1x</span>
+                  <span>2x</span>
+                  <span class="timer-chip">2:00:00</span>
+                </div>
+              </article>
+            </div>
           </div>
         </div>
       </section>
@@ -152,75 +189,144 @@
             </p>
           </div>
 
-          <div class="feature-grid">
-            <article class="feature-card" data-reveal>
-              <p class="feature-label">Cookbook</p>
-              <h3>Your cookbook, with photos</h3>
-              <p>
-                Every saved recipe gets a clean card with the dish image, source, notes, and the
-                next thing to cook.
-              </p>
+          <div class="feature-rows">
+            <article class="feature-row" data-reveal>
+              <div class="feature-media">
+                <figure class="phone-frame product-phone product-phone-left">
+                  <img
+                    src="assets/screen-cookmode.png"
+                    alt="LinkDish cook mode with large recipe steps and timers"
+                    width="720"
+                    height="1560"
+                  />
+                </figure>
+              </div>
+              <div class="feature-copy">
+                <p class="feature-label">COOK MODE</p>
+                <h3>Timers where your hands already are.</h3>
+                <p>
+                  Big readable steps keep dinner moving, ingredients check off with a tap, and
+                  parsed timers stay beside the instruction that needs them.
+                </p>
+              </div>
             </article>
-            <article class="feature-card" data-reveal>
-              <p class="feature-label">Cook mode</p>
-              <h3>Timers where your hands already are</h3>
-              <p>
-                Cook from big readable steps, tap to check ingredients, and start parsed timers
-                without losing your place.
-              </p>
+
+            <article class="feature-row feature-row-reverse" data-reveal>
+              <div class="feature-copy">
+                <p class="feature-label">SCALING</p>
+                <h3>Scale any recipe honestly.</h3>
+                <p>
+                  Go from 0.5x to custom servings while original quantities stay visible for the
+                  moments when recipe math gets imperfect.
+                </p>
+              </div>
+              <div class="feature-media">
+                <figure class="phone-frame product-phone product-phone-right">
+                  <img
+                    src="assets/screen-recipe.png"
+                    alt="LinkDish recipe view with serving controls and ingredients"
+                    width="720"
+                    height="1560"
+                  />
+                </figure>
+              </div>
             </article>
-            <article class="feature-card" data-reveal>
-              <p class="feature-label">Scaling</p>
-              <h3>Scale any recipe</h3>
-              <p>
-                Adjust servings with honest scaling that keeps original quantities visible when
-                recipe math gets imperfect.
-              </p>
+
+            <article class="feature-row" data-reveal>
+              <div class="feature-media">
+                <figure class="phone-frame product-phone product-phone-left">
+                  <img
+                    src="assets/screen-shopping.png"
+                    alt="LinkDish household shopping list"
+                    width="720"
+                    height="1560"
+                  />
+                </figure>
+              </div>
+              <div class="feature-copy">
+                <p class="feature-label">HOUSEHOLD</p>
+                <h3>One list. Everyone's dinner.</h3>
+                <p>
+                  Recipe ingredients become groceries, shared household errands stay together, and
+                  the list is ready on web and Android.
+                </p>
+              </div>
             </article>
-            <article class="feature-card" data-reveal>
-              <p class="feature-label">Shopping</p>
-              <h3>Household shopping list</h3>
-              <p>
-                Turn recipe ingredients into groceries and keep shared kitchen errands in one place.
-              </p>
-            </article>
-            <article class="feature-card" data-reveal>
-              <p class="feature-label">Sharing</p>
-              <h3>Share it beautifully</h3>
-              <p>
-                Send branded recipe cards that look like they came from your cookbook, not a
-                cluttered webpage.
-              </p>
-            </article>
-            <article class="feature-card" data-reveal>
-              <p class="feature-label">Everywhere</p>
-              <h3>Android app + web/iPhone</h3>
-              <p>
-                Install on Android from Google Play, or use the web app from Safari and add it to
-                your iPhone Home Screen.
-              </p>
-            </article>
+          </div>
+
+          <div class="detail-macros" aria-label="Product detail closeups">
+            <figure class="macro-card" data-reveal>
+              <div class="macro-window">
+                <img
+                  class="macro-image macro-recipe"
+                  src="assets/screen-recipe.png"
+                  alt=""
+                  width="720"
+                  height="1560"
+                />
+              </div>
+              <figcaption>Half it. Double it. Custom it.</figcaption>
+            </figure>
+            <figure class="macro-card" data-reveal>
+              <div class="macro-window">
+                <img
+                  class="macro-image macro-cookmode"
+                  src="assets/screen-cookmode.png"
+                  alt=""
+                  width="720"
+                  height="1560"
+                />
+              </div>
+              <figcaption>Timers parsed straight from the steps.</figcaption>
+            </figure>
+            <figure class="macro-card" data-reveal>
+              <div class="macro-window">
+                <img
+                  class="macro-image macro-shopping"
+                  src="assets/screen-shopping.png"
+                  alt=""
+                  width="720"
+                  height="1560"
+                />
+              </div>
+              <figcaption>Tap an ingredient, it's on the list.</figcaption>
+            </figure>
+          </div>
+
+          <div class="feature-blurbs">
+            <div data-reveal>
+              <p class="feature-label">SHARING</p>
+              <p>Send branded recipe cards that look like they came from your cookbook.</p>
+            </div>
+            <div data-reveal>
+              <p class="feature-label">EVERYWHERE</p>
+              <p>Install on Android, or use the web app from Safari and add it to Home Screen.</p>
+            </div>
           </div>
         </div>
       </section>
 
-      <section class="free-strip" id="plans" aria-labelledby="free-heading">
-        <div class="free-inner" data-reveal>
+      <section class="green-finale" id="plans" aria-labelledby="free-heading">
+        <div class="green-garnish" aria-hidden="true">&amp;</div>
+        <div class="green-inner" data-reveal>
           <div>
             <p class="eyebrow">FREE TIER</p>
-            <h2 id="free-heading">Start free — save up to 15 recipes and keep them forever.</h2>
+            <h2 id="free-heading">Dinner, <em>without the pop-ups.</em></h2>
             <p>
-              Plus <a href="https://app.linkdish.ca/pricing">$2.99/mo</a> · Family
+              Start free — save up to 15 recipes and keep them forever. Plus
+              <a href="https://app.linkdish.ca/pricing">$2.99/mo</a> · Family
               <a href="https://app.linkdish.ca/pricing">$4.99/mo</a> when your cookbook grows.
             </p>
           </div>
-          <div class="strip-actions">
+          <div class="green-actions">
             <a
-              class="button button-primary"
+              class="button button-light-on-green"
               href="https://play.google.com/store/apps/details?id=com.linkdish.app"
               >Get it on Google Play</a
             >
-            <a class="button button-secondary" href="https://app.linkdish.ca">Use it on the web</a>
+            <a class="button button-outline-on-green" href="https://app.linkdish.ca"
+              >Use it on the web</a
+            >
           </div>
         </div>
       </section>

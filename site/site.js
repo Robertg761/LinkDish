@@ -1,6 +1,7 @@
 (function () {
   var reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
   var extractionCopy = document.querySelector("[data-extraction-copy]");
+  var assemblyCard = document.querySelector("[data-assembly-card]");
   var extractionLines = [
     "Warming up the oven…",
     "Skimming off the ads…",
@@ -25,6 +26,25 @@
         extractionCopy.classList.remove("is-swapping");
       }, 250);
     }, 1800);
+  }
+
+  if (assemblyCard && !reduceMotion.matches) {
+    var assembleCard = function () {
+      assemblyCard.classList.remove("is-clearing");
+
+      window.requestAnimationFrame(function () {
+        assemblyCard.classList.add("is-assembled");
+      });
+
+      window.setTimeout(function () {
+        assemblyCard.classList.add("is-clearing");
+        assemblyCard.classList.remove("is-assembled");
+
+        window.setTimeout(assembleCard, 420);
+      }, 5600);
+    };
+
+    assembleCard();
   }
 
   var revealItems = Array.prototype.slice.call(document.querySelectorAll("[data-reveal]"));
