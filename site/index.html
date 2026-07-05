@@ -127,7 +127,6 @@
         </svg>
         <div class="hero-inner">
           <div class="hero-copy">
-            <p class="eyebrow" data-entrance>LINKDISH</p>
             <h1 id="hero-heading" data-entrance>
               <span>Paste a link.</span>
               <em>
@@ -173,6 +172,13 @@
                 height="949"
               />
             </figure>
+            <div class="hero-marginalia">
+              <p>the timers actually run</p>
+              <svg aria-hidden="true" viewBox="0 0 92 58" focusable="false">
+                <path d="M5 17c20-14 36 1 34 16-2 13 16 15 39-3" />
+                <path d="M66 25l14 4-8 12" />
+              </svg>
+            </div>
           </div>
         </div>
       </section>
@@ -201,7 +207,6 @@
 
       <section class="section how-section" id="how-it-works" aria-labelledby="how-heading">
         <div class="section-inner">
-          <p class="eyebrow" data-reveal>HOW IT WORKS</p>
           <h2 id="how-heading" data-reveal>
             From messy link to
             <span class="squiggle-wrap">
@@ -233,7 +238,12 @@
               </p>
             </div>
 
-            <div class="stage-arrow" aria-hidden="true">→</div>
+            <div class="stage-arrow" aria-hidden="true">
+              <svg class="stage-arrow-svg" viewBox="0 0 96 64" focusable="false">
+                <path class="stage-arrow-line" d="M8 38c18-22 38 16 55-4 11-13 19-13 25-7" />
+                <path class="stage-arrow-head" d="M77 14l13 13-16 7" />
+              </svg>
+            </div>
 
             <div class="assembled-card-shell">
               <p class="sr-only">
@@ -265,7 +275,6 @@
         <div class="section-inner">
           <div class="section-heading-row">
             <div>
-              <p class="eyebrow" data-reveal>FEATURES</p>
               <h2 id="features-heading" data-reveal>
                 A cookbook that behaves like a
                 <span class="squiggle-wrap">
@@ -298,7 +307,6 @@
                 <svg class="floating-garnish feature-garnish" aria-hidden="true">
                   <use href="#icon-kitchen-timer"></use>
                 </svg>
-                <p class="feature-label">COOK MODE</p>
                 <h3>Timers where your hands already are.</h3>
                 <p>
                   Big readable steps keep dinner moving, ingredients check off with a tap, and
@@ -312,7 +320,6 @@
                 <svg class="floating-garnish feature-garnish" aria-hidden="true">
                   <use href="#icon-lemon-wedge"></use>
                 </svg>
-                <p class="feature-label">SCALING</p>
                 <h3>Scale any recipe honestly.</h3>
                 <p>
                   Go from 0.5x to custom servings while original quantities stay visible for the
@@ -346,7 +353,6 @@
                 <svg class="floating-garnish feature-garnish" aria-hidden="true">
                   <use href="#icon-basil-sprig"></use>
                 </svg>
-                <p class="feature-label">HOUSEHOLD</p>
                 <h3>One list. Everyone's dinner.</h3>
                 <p>
                   Recipe ingredients become groceries, shared household errands stay together, and
@@ -397,12 +403,16 @@
 
           <div class="feature-blurbs">
             <div data-reveal>
-              <p class="feature-label">SHARING</p>
-              <p>Send branded recipe cards that look like they came from your cookbook.</p>
+              <p>
+                <strong class="blurb-lead">Share it beautifully.</strong> Send branded recipe cards
+                that look like they came from your cookbook.
+              </p>
             </div>
             <div data-reveal>
-              <p class="feature-label">EVERYWHERE</p>
-              <p>Install on Android, or use the web app from Safari and add it to Home Screen.</p>
+              <p>
+                <strong class="blurb-lead">Works everywhere.</strong> Install on Android, or use the
+                web app from Safari and add it to Home Screen.
+              </p>
             </div>
           </div>
         </div>
@@ -424,7 +434,6 @@
         <div class="green-garnish" aria-hidden="true">&amp;</div>
         <div class="green-inner" data-reveal>
           <div>
-            <p class="eyebrow">FREE TIER</p>
             <h2 id="free-heading">Dinner, <em>without the pop-ups.</em></h2>
             <p>
               Start free — save up to 15 recipes and keep them forever. Plus
@@ -442,6 +451,7 @@
               >Use it on the web</a
             >
           </div>
+          <p class="green-marginalia">free means free — no card, no trial timer</p>
         </div>
       </section>
     </main>
@@ -465,7 +475,7 @@
           <a href="support/">Support</a>
           <a href="https://app.linkdish.ca">Open web app</a>
         </div>
-        <p class="footer-note">Made in Canada. &copy; 2026 LinkDish.</p>
+        <p class="footer-note">Set in Fraunces · Made in Canada · &copy; 2026 LinkDish.</p>
       </div>
     </footer>
     <script src="site.js" defer></script>
