@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex" />
+    <meta
+      name="description"
+      content="Open a LinkDish household invite in the LinkDish mobile app."
+    />
+    <title>Join a LinkDish household</title>
+    <link rel="canonical" href="https://linkdish.ca/invite/" />
+    <link rel="icon" href="../assets/linkdish-icon.png" />
+    <link rel="stylesheet" href="../styles.css" />
+  </head>
+  <body class="info-page invite-page">
+    <header class="site-header" aria-label="Primary">
+      <a class="brand" href="../" aria-label="LinkDish home">
+        <img src="../assets/linkdish-icon.png" alt="" width="36" height="36" />
+        <span>LinkDish</span>
+      </a>
+      <nav class="site-nav" aria-label="Site navigation">
+        <a href="../#how-it-works">How it works</a>
+        <a href="../#plans">Plans</a>
+        <a href="../support/">Support</a>
+        <a href="../privacy/">Privacy</a>
+      </nav>
+    </header>
+
+    <main class="invite-shell">
+      <section class="invite-panel" aria-labelledby="invite-heading">
+        <p class="section-kicker">LinkDish Family</p>
+        <h1 id="invite-heading">Join this household in LinkDish.</h1>
+        <p class="invite-copy">
+          Open the invite on the phone where LinkDish is installed. If the app does not open, copy
+          the code and paste it into Household in the app.
+        </p>
+
+        <div class="invite-code-card" id="invite-code-card" hidden>
+          <span class="invite-label">Invite code</span>
+          <code id="invite-code"></code>
+        </div>
+
+        <p class="invite-copy" id="missing-code-message" hidden>
+          This invite link is missing a code. Ask the household owner to send the invite again.
+        </p>
+
+        <div class="invite-actions" aria-label="Invite actions">
+          <a class="button dark" id="open-app-link" href="linkdish://household">Open LinkDish</a>
+          <button class="button light" id="copy-code-button" type="button" hidden>Copy code</button>
+          <button class="button light" id="share-link-button" type="button" hidden>
+            Share invite link
+          </button>
+        </div>
+
+        <p class="invite-status" id="invite-status" role="status" aria-live="polite"></p>
+
+        <div class="store-actions" aria-label="Install LinkDish">
+          <a
+            class="button light"
+            href="https://play.google.com/store/apps/details?id=com.linkdish.app"
+            >Get Android app</a
+          >
+          <a class="button light" href="../support/">Get help</a>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-inner">
+        <span>LinkDish</span>
+        <div class="footer-links">
+          <a href="../support/">Support</a>
+          <a href="../privacy/">Privacy</a>
+          <a href="mailto:support@linkdish.ca">Contact</a>
+        </div>
+      </div>
+    </footer>
+
+    <script>
+      (function () {
+        var params = new URLSearchParams(window.location.search);
+        var rawCode =
+          params.get("code") ||
+          params.get("invite") ||
+          window.location.hash.replace(/^#\/?/, "") ||
+          "";
+        var inviteCode = rawCode.trim();
+        var deepLink = "linkdish://household";
+        var openLink = document.getElementById("open-app-link");
+        var copyButton = document.getElementById("copy-code-button");
+        var shareButton = document.getElementById("share-link-button");
+        var codeCard = document.getElementById("invite-code-card");
+        var codeValue = document.getElementById("invite-code");
+        var missingMessage = document.getElementById("missing-code-message");
+        var status = document.getElementById("invite-status");
+
+        if (inviteCode) {
+          deepLink += "?invite=" + encodeURIComponent(inviteCode);
+          openLink.href = deepLink;
+          copyButton.hidden = false;
+          codeCard.hidden = false;
+          codeValue.textContent = inviteCode;
+
+          if (navigator.share) {
+            shareButton.hidden = false;
+          }
+
+          if (/Android|iPhone|iPad|iPod/i.test(window.navigator.userAgent)) {
+            window.setTimeout(function () {
+              window.location.href = deepLink;
+            }, 350);
+          }
+        } else {
+          missingMessage.hidden = false;
+        }
+
+        copyButton.addEventListener("click", function () {
+          navigator.clipboard
+            .writeText(inviteCode)
+            .then(function () {
+              status.textContent = "Invite code copied.";
+            })
+            .catch(function () {
+              status.textContent = "Select and copy the invite code above.";
+            });
+        });
+
+        shareButton.addEventListener("click", function () {
+          navigator
+            .share({
+              title: "Join my LinkDish household",
+              text: "Use this invite to join my LinkDish household.",
+              url: window.location.href
+            })
+            .catch(function () {
+              status.textContent = "";
+            });
+        });
+      })();
+    </script>
+    <script src="../analytics.js" defer></script>
+  </body>
+</html>

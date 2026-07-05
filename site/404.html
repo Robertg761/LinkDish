@@ -5,13 +5,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Page not found - LinkDish</title>
     <link rel="icon" href="assets/linkdish-icon.png" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&display=swap"
-      rel="stylesheet"
-    />
-    <link rel="stylesheet" href="styles.css?v=20260617-ticket-submit" />
+    <link rel="stylesheet" href="styles.css" />
+    <script>
+      (function () {
+        var match = window.location.pathname.match(/^\/invite\/([^/?#]+)\/?$/);
+
+        if (match) {
+          window.location.replace("/invite/?code=" + encodeURIComponent(match[1]));
+        }
+      })();
+    </script>
   </head>
   <body class="info-page">
     <header class="site-header" aria-label="Primary">
@@ -20,15 +23,15 @@
         <span>LinkDish</span>
       </a>
       <nav class="site-nav" aria-label="Site navigation">
-        <a href="./#why">Why LinkDish</a>
+        <a href="./#how-it-works">How it works</a>
         <a href="./#plans">Plans</a>
-        <a href="./#questions">FAQ</a>
         <a href="support/">Support</a>
         <a href="privacy/">Privacy</a>
       </nav>
     </header>
 
     <main class="legal">
+      <p class="section-kicker">404</p>
       <h1>Page not found</h1>
       <p>The LinkDish page you were looking for is not available.</p>
       <p><a href="./">Return to the LinkDish home page</a>.</p>

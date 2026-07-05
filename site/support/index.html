@@ -5,434 +5,91 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       name="description"
-      content="Support information for LinkDish, an app and web app for cleaning up recipe links."
+      content="Support information for LinkDish, a mobile app for cleaning up recipe links."
     />
-    <meta name="theme-color" content="#f6f0e5" />
     <title>LinkDish Support</title>
     <link rel="canonical" href="https://linkdish.ca/support/" />
     <link rel="icon" href="../assets/linkdish-icon.png" />
-    <link rel="stylesheet" href="../redesign.css?v=20260620-app-prompt-clean" />
+    <link rel="stylesheet" href="../styles.css" />
   </head>
-  <body class="support-redesign">
-    <a class="skip-link" href="#main">Skip to content</a>
-
-    <header class="site-header" id="top">
-      <div class="shell nav-wrap">
-        <a class="brand" href="../" aria-label="LinkDish home">
-          <img
-            class="brand-mark"
-            src="../assets/linkdish-icon.png"
-            alt=""
-            width="36"
-            height="36"
-          />
-          <span>LinkDish</span>
-        </a>
-
-        <button
-          class="menu-toggle"
-          type="button"
-          aria-expanded="false"
-          aria-controls="main-nav"
-        >
-          <span class="sr-only">Open navigation</span>
-          <span></span>
-          <span></span>
-        </button>
-
-        <nav class="main-nav" id="main-nav" aria-label="Primary navigation">
-          <a href="../#why">Why LinkDish</a>
-          <a href="../#plans">Plans</a>
-          <a href="../#questions">FAQ</a>
-          <a href="../support/">Support</a>
-          <a href="../privacy/">Privacy</a>
-        </nav>
-
-        <div class="nav-actions">
-          <a
-            class="text-link"
-            href="https://play.google.com/store/apps/details?id=com.linkdish.app"
-            >Android</a
-          >
-          <a class="button button--small button--ink" href="https://app.linkdish.ca"
-            >Open Web App</a
-          >
-        </div>
-      </div>
+  <body class="info-page">
+    <header class="site-header" aria-label="Primary">
+      <a class="brand" href="../" aria-label="LinkDish home">
+        <img src="../assets/linkdish-icon.png" alt="" width="36" height="36" />
+        <span>LinkDish</span>
+      </a>
+      <nav class="site-nav" aria-label="Site navigation">
+        <a href="../#how-it-works">How it works</a>
+        <a href="../#plans">Plans</a>
+        <a href="../support/">Support</a>
+        <a href="../privacy/">Privacy</a>
+      </nav>
     </header>
 
-    <main id="main">
-      <section class="support-hero">
-        <div class="hero-noise" aria-hidden="true"></div>
-        <div class="shell support-hero-grid">
-          <div class="support-hero-copy reveal">
-            <h1>Support</h1>
-            <p>
-              Report a recipe import problem, account issue, web app bug, or
-              privacy request. LinkDish will create a support ticket and send
-              you back a ticket number when it is received.
-            </p>
-            <div class="support-hero-actions">
-              <a class="button button--tomato" href="#support-form"
-                >Submit a ticket</a
-              >
-              <a class="button button--outline" href="mailto:support@linkdish.ca"
-                >Email support</a
-              >
-            </div>
-          </div>
+    <main class="legal">
+      <p class="section-kicker">LinkDish</p>
+      <h1>Support</h1>
+      <p class="muted">Last updated: May 11, 2026</p>
 
-          <aside class="support-note reveal reveal--delay" aria-label="Support tips">
-            <img
-              src="../assets/linkdish-icon.png"
-              alt=""
-              width="48"
-              height="48"
-            />
-            <h2>What helps us fix it faster</h2>
-            <ul>
-              <li>The recipe URL or LinkDish page where it happened.</li>
-              <li>Your device, browser, Android app, or iOS web app details.</li>
-              <li>What you expected and what happened instead.</li>
-              <li>Any error message or screenshot if one is available.</li>
-            </ul>
-          </aside>
-        </div>
-      </section>
+      <p>
+        LinkDish is designed to keep recipe extraction simple and dependable. If something is not
+        working as expected, the fastest first checks are:
+      </p>
 
-      <section class="support-band">
-        <div class="shell support-grid">
-          <form
-            id="support-form"
-            class="support-form"
-            action="https://api.linkdish.ca/support-ticket"
-            method="post"
-          >
-            <div class="support-form-header">
-              <span>Support ticket</span>
-              <h2>Tell us what happened.</h2>
-              <p>
-                Include enough detail to reproduce the issue. The form sends
-                directly to LinkDish support.
-              </p>
-            </div>
+      <ul>
+        <li>Make sure the recipe link is public and still available.</li>
+        <li>Try pasting the link again if the source was temporarily unreachable.</li>
+        <li>Try a different recipe source if the site blocks extraction or is unsupported.</li>
+      </ul>
 
-            <label>
-              Email
-              <input
-                name="email"
-                type="email"
-                autocomplete="email"
-                required
-                placeholder="you@example.com"
-              />
-            </label>
+      <h2>Saved recipes</h2>
+      <p>
+        Saving recipes requires LinkDish Plus or Family. Personal saved recipes are stored on your
+        device. If a saved recipe looks outdated or malformed after an app update, removing it and
+        extracting it again should refresh the content.
+      </p>
 
-            <label>
-              Problem type
-              <select name="problemType" required>
-                <option value="">Select one</option>
-                <option value="Recipe import problem">
-                  Recipe import problem
-                </option>
-                <option value="Account or household issue">
-                  Account or household issue
-                </option>
-                <option value="Web app bug">Web app bug</option>
-                <option value="Privacy or data request">
-                  Privacy or data request
-                </option>
-                <option value="Other">Other</option>
-              </select>
-            </label>
+      <h2>Accounts and Family households</h2>
+      <p>
+        No account is required for the first 3 free recipe imports. Sign in is required to buy or
+        restore a paid plan, create, join, or manage LinkDish Family household sharing, or add
+        recipes to a shared Family recipe book.
+      </p>
 
-            <label>
-              Recipe or page link
-              <input
-                name="link"
-                type="url"
-                inputmode="url"
-                placeholder="https://example.com/recipe"
-              />
-            </label>
+      <h2>Privacy</h2>
+      <p>
+        For details about what information the app handles, read the
+        <a href="../privacy/">LinkDish Privacy Policy</a>.
+      </p>
 
-            <label>
-              Device and browser/app
-              <input
-                name="device"
-                type="text"
-                autocomplete="off"
-                placeholder="iPhone Safari, Android app, Chrome, etc."
-              />
-            </label>
+      <h2>Contact</h2>
+      <p>
+        For support or privacy questions, email
+        <a href="mailto:support@linkdish.ca">support@linkdish.ca</a>. If you are testing a
+        pre-release build, you can also use the same channel where you received the build to report
+        issues.
+      </p>
 
-            <label>
-              What happened?
-              <textarea
-                name="details"
-                rows="6"
-                required
-                placeholder="Describe the problem, error message, or incorrect recipe result."
-              ></textarea>
-            </label>
-
-            <label>
-              What did you expect?
-              <textarea
-                name="expected"
-                rows="4"
-                placeholder="Tell us what should have happened instead."
-              ></textarea>
-            </label>
-
-            <label class="support-honeypot" aria-hidden="true">
-              Website
-              <input
-                name="website"
-                type="text"
-                tabindex="-1"
-                autocomplete="off"
-              />
-            </label>
-
-            <button class="button button--tomato support-submit" type="submit">
-              Submit ticket
-            </button>
-            <p class="form-status" id="support-form-status" role="status"></p>
-          </form>
-
-          <aside class="support-side-panel" aria-labelledby="support-side-heading">
-            <h2 id="support-side-heading">Common fixes</h2>
-            <div class="support-fix-list">
-              <article>
-                <span>01</span>
-                <h3>Try the original public page</h3>
-                <p>
-                  Use the recipe's normal public URL, not a saved-reader link,
-                  search result, social redirect, or login-only page.
-                </p>
-              </article>
-              <article>
-                <span>02</span>
-                <h3>Refresh before importing again</h3>
-                <p>
-                  If a result looks stale or partial, reopen LinkDish, paste the
-                  link again, and let the recipe extraction run fresh.
-                </p>
-              </article>
-              <article>
-                <span>03</span>
-                <h3>Check the signed-in account</h3>
-                <p>
-                  For Plus, Family, saved recipes, or household sharing, confirm
-                  you are signed in with the account that bought the plan.
-                </p>
-              </article>
-            </div>
-            <a class="button button--outline" href="https://app.linkdish.ca"
-              >Open Web App</a
-            >
-          </aside>
-        </div>
-      </section>
-
-      <section class="support-faq-section">
-        <div class="shell support-faq-grid">
-          <div class="support-faq-heading">
-            <h2>Good to know.</h2>
-            <p>
-              A few practical answers before you send a ticket.
-            </p>
-          </div>
-
-          <div class="support-details">
-            <details open>
-              <summary>What recipe links work best?</summary>
-              <p>
-                Public recipe pages work best. If a site blocks extraction,
-                requires a login, or is temporarily unreachable, LinkDish may
-                not be able to import it.
-              </p>
-            </details>
-
-            <details>
-              <summary>Why did a recipe import look incomplete?</summary>
-              <p>
-                Some recipe sites publish ingredients, steps, timing, or notes
-                in formats that are hard to read automatically. Send the
-                original link and what looked wrong so the source can be
-                checked.
-              </p>
-            </details>
-
-            <details>
-              <summary>Where are saved recipes stored?</summary>
-              <p>
-                Saving recipes requires LinkDish Plus or Family. Personal saved
-                recipes are stored on your device. If a saved recipe looks
-                outdated or malformed after an app update, remove it and extract
-                it again to refresh the content.
-              </p>
-            </details>
-
-            <details>
-              <summary>Do I need an account?</summary>
-              <p>
-                No account is required for the first 3 free recipe imports. Sign
-                in is required to buy or restore a paid plan, save recipes, or
-                create, join, or manage LinkDish Family household sharing.
-              </p>
-            </details>
-
-            <details>
-              <summary>How do I delete my account?</summary>
-              <p>
-                If you created a LinkDish account, you can delete it from
-                Account in the app. If you cannot access the app, submit a
-                privacy or data request with the email address used for the
-                account.
-              </p>
-            </details>
-
-            <details>
-              <summary>Where can I read the privacy policy?</summary>
-              <p>
-                The LinkDish privacy policy is available at
-                <a href="../privacy/">linkdish.ca/privacy/</a>.
-              </p>
-            </details>
-          </div>
-        </div>
-      </section>
+      <h2>Data deletion requests</h2>
+      <p>
+        If you created a LinkDish account, you can delete it from Account in the app. Deleting the
+        account removes server-side account and household records, but App Store or Google Play
+        subscriptions still need to be managed in the store. If you cannot access the app, send your
+        request to
+        <a href="mailto:support@linkdish.ca">support@linkdish.ca</a>.
+      </p>
     </main>
 
     <footer class="site-footer">
-      <div class="shell footer-grid">
-        <div class="footer-brand">
-          <a class="brand brand--footer" href="../">
-            <img
-              class="brand-mark"
-              src="../assets/linkdish-icon.png"
-              alt=""
-              width="36"
-              height="36"
-            />
-            <span>LinkDish</span>
-          </a>
-          <p>Recipe links cleaned up for real life.</p>
-        </div>
+      <div class="footer-inner">
+        <span>LinkDish</span>
         <div class="footer-links">
-          <div>
-            <h3>Product</h3>
-            <a href="../#why">Why LinkDish</a>
-            <a href="../#plans">Plans</a>
-            <a href="https://app.linkdish.ca">Web app</a>
-          </div>
-          <div>
-            <h3>Help</h3>
-            <a href="../support/">Support</a>
-            <a href="../privacy/">Privacy</a>
-            <a href="mailto:support@linkdish.ca">Contact</a>
-          </div>
+          <a href="../support/">Support</a>
+          <a href="../privacy/">Privacy</a>
+          <a href="mailto:support@linkdish.ca">Contact</a>
         </div>
-      </div>
-      <div class="shell footer-bottom">
-        <span>&copy; <span id="current-year">2026</span> LinkDish</span>
-        <span>Made for calmer cooking</span>
       </div>
     </footer>
-
-    <script>
-      const header = document.querySelector(".site-header");
-      const menuToggle = document.querySelector(".menu-toggle");
-      const mainNav = document.querySelector(".main-nav");
-      const supportForm = document.querySelector("#support-form");
-      const supportFormStatus = document.querySelector("#support-form-status");
-      const year = document.querySelector("#current-year");
-
-      year.textContent = String(new Date().getFullYear());
-
-      menuToggle.addEventListener("click", () => {
-        const isOpen = menuToggle.getAttribute("aria-expanded") === "true";
-        menuToggle.setAttribute("aria-expanded", String(!isOpen));
-        mainNav.classList.toggle("is-open", !isOpen);
-        header.classList.toggle("is-menu-open", !isOpen);
-      });
-
-      mainNav.addEventListener("click", (event) => {
-        if (!event.target.closest("a")) {
-          return;
-        }
-        menuToggle.setAttribute("aria-expanded", "false");
-        mainNav.classList.remove("is-open");
-        header.classList.remove("is-menu-open");
-      });
-
-      window.addEventListener(
-        "scroll",
-        () => {
-          header.classList.toggle("is-scrolled", window.scrollY > 8);
-        },
-        { passive: true },
-      );
-
-      const setSupportStatus = (message, type) => {
-        if (!supportFormStatus) {
-          return;
-        }
-
-        supportFormStatus.className = `form-status ${type}`;
-        supportFormStatus.textContent = message;
-      };
-
-      supportForm?.addEventListener("submit", (event) => {
-        event.preventDefault();
-
-        if (!supportForm.reportValidity()) {
-          return;
-        }
-
-        const formData = new FormData(supportForm);
-        const submitButton = supportForm.querySelector(".support-submit");
-        const payload = Object.fromEntries(formData.entries());
-
-        setSupportStatus("Submitting support ticket...", "");
-        submitButton.disabled = true;
-
-        fetch(supportForm.action, {
-          body: JSON.stringify(payload),
-          headers: {
-            "content-type": "application/json",
-          },
-          method: "POST",
-        })
-          .then(async (response) => {
-            const body = await response.json().catch(() => ({}));
-
-            if (!response.ok) {
-              throw new Error(
-                body.message || "Support ticket submission failed.",
-              );
-            }
-
-            supportForm.reset();
-            setSupportStatus(
-              `Thanks, we got it. Ticket ${body.ticketId} was submitted.`,
-              "success",
-            );
-          })
-          .catch((error) => {
-            setSupportStatus(
-              error instanceof Error
-                ? error.message
-                : "Support ticket submission failed.",
-              "error",
-            );
-          })
-          .finally(() => {
-            submitButton.disabled = false;
-          });
-      });
-    </script>
+    <script src="../analytics.js" defer></script>
   </body>
 </html>
