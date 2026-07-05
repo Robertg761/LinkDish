@@ -5,30 +5,39 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       name="description"
-      content="LinkDish turns recipe links, videos, and photos into a photo-rich cookbook with cook mode, timers, shopping lists, and up to 15 saved recipes free."
+      content="Any recipe link becomes a clean, photographed recipe in your own cookbook."
     />
-    <meta property="og:title" content="LinkDish - Paste a link. Get cooking." />
+    <meta property="og:title" content="LinkDish — Paste a link. Get cooking." />
     <meta
       property="og:description"
-      content="Build your cookbook from links, photos, and share sheets. Cook from clean steps, timers, and a household shopping list."
+      content="Any recipe link becomes a clean, photographed recipe in your own cookbook."
     />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://linkdish.ca/" />
     <meta property="og:image" content="https://linkdish.ca/assets/feature-graphic.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
     <meta
       property="og:image:alt"
-      content="LinkDish app screens showing recipe link import, cleaned recipe details, saved favorites, and cooking guidance."
+      content="LinkDish app screens showing a photographed cookbook and cook mode."
     />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="LinkDish - Paste a link. Get cooking." />
+    <meta name="twitter:title" content="LinkDish — Paste a link. Get cooking." />
     <meta
       name="twitter:description"
-      content="Build your cookbook from links, photos, and share sheets. Cook from clean steps, timers, and a household shopping list."
+      content="Any recipe link becomes a clean, photographed recipe in your own cookbook."
     />
     <meta name="twitter:image" content="https://linkdish.ca/assets/feature-graphic.png" />
-    <title>LinkDish - Paste a link. Get cooking.</title>
+    <title>LinkDish — Paste a link. Get cooking.</title>
     <link rel="canonical" href="https://linkdish.ca/" />
     <link rel="icon" href="assets/linkdish-icon.png" />
+    <link
+      rel="preload"
+      href="assets/fonts/Fraunces-SemiBold.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
@@ -38,215 +47,180 @@
         <span>LinkDish</span>
       </a>
       <nav class="site-nav" aria-label="Site navigation">
-        <a href="#how-it-works">How it works</a>
-        <a href="#plans">Plans</a>
-        <a href="#share">Share</a>
-        <a href="support/">Support</a>
-        <a href="privacy/">Privacy</a>
+        <a class="nav-link" href="support/">Support</a>
+        <a class="nav-button" href="https://app.linkdish.ca">Open the web app</a>
       </nav>
     </header>
 
     <main>
-      <section class="hero">
-        <div class="hero-content">
-          <p class="eyebrow">LINKDISH</p>
-          <h1>
-            <span class="hero-title-roman">Paste a link.</span>
-            <span class="hero-title-accent">Get cooking.</span>
-          </h1>
-          <p class="hero-copy">
-            Turn recipes from links, videos, and photos into a cookbook with images, clean steps,
-            cook mode timers, and a shopping list ready for the household.
-          </p>
-          <div class="hero-actions">
-            <a
-              class="button primary"
-              href="https://play.google.com/store/apps/details?id=com.linkdish.app"
-              >Install on Google Play</a
-            >
-            <a class="button secondary" href="#plans">See plans</a>
-          </div>
-        </div>
-      </section>
-
-      <section class="content-band alt" aria-labelledby="mobile-only-heading">
-        <div class="section-inner two-column">
-          <div>
-            <p class="section-kicker">Your cookbook</p>
-            <h2 class="section-heading" id="mobile-only-heading">
-              Recipes with photos, saved where you will actually use them.
-            </h2>
-            <p class="section-copy">
-              LinkDish keeps useful recipes in one calm place, with images, ingredients, steps,
-              timing, notes, and source context close at hand.
+      <section class="hero" aria-labelledby="hero-heading">
+        <div class="hero-inner">
+          <div class="hero-copy">
+            <p class="eyebrow" data-entrance>LINKDISH</p>
+            <h1 id="hero-heading" data-entrance>
+              <span>Paste a link.</span>
+              <em>Get cooking.</em>
+            </h1>
+            <p class="hero-subline" data-entrance>
+              Any recipe link becomes a clean, photographed recipe in your own cookbook.
+            </p>
+            <div class="hero-actions" data-entrance>
+              <a
+                class="button button-primary"
+                href="https://play.google.com/store/apps/details?id=com.linkdish.app"
+                >Get it on Google Play</a
+              >
+              <a class="button button-secondary" href="https://app.linkdish.ca"
+                >Use it on the web</a
+              >
+            </div>
+            <p class="iphone-note" data-entrance>
+              On iPhone? LinkDish runs beautifully in Safari — open the
+              <a href="https://app.linkdish.ca/install">web app</a> and Add to Home Screen.
             </p>
           </div>
-          <img
-            class="device-art"
-            src="assets/feature-graphic.png"
-            alt="LinkDish app screens showing recipe link import, cleaned recipe details, saved favorites, and cooking guidance."
-            width="1024"
-            height="500"
-            loading="lazy"
-          />
+
+          <div class="phone-stage" aria-label="LinkDish app screenshots" data-entrance>
+            <figure class="phone-frame phone-frame-back">
+              <img
+                src="assets/hero-cookmode.png"
+                alt="Cook mode with a running timer"
+                width="461"
+                height="1000"
+              />
+            </figure>
+            <figure class="phone-frame phone-frame-front">
+              <img
+                src="assets/hero-cookbook.png"
+                alt="Your LinkDish cookbook"
+                width="461"
+                height="1000"
+              />
+            </figure>
+          </div>
         </div>
       </section>
 
-      <section class="content-band" id="how-it-works" aria-labelledby="workflow-heading">
+      <section class="section how-section" id="how-it-works" aria-labelledby="how-heading">
         <div class="section-inner">
-          <p class="section-kicker">Workflow</p>
-          <h2 class="section-heading" id="workflow-heading">From any recipe find to dinner.</h2>
+          <p class="eyebrow" data-reveal>HOW IT WORKS</p>
+          <h2 id="how-heading" data-reveal>From messy link to dinner rhythm.</h2>
+          <div class="steps" aria-label="How LinkDish works">
+            <article class="step-card" data-reveal>
+              <span class="step-number">1</span>
+              <h3>Share or paste any recipe link</h3>
+              <p>
+                Send the recipe from your browser, a message, a video caption, or wherever it was
+                hiding.
+              </p>
+            </article>
+            <article class="step-card" data-reveal>
+              <span class="step-number">2</span>
+              <h3>We plate it</h3>
+              <p>
+                The ads, pop-ups, and life story fall away. You keep the photo, ingredients, and
+                steps.
+              </p>
+              <p class="extraction-line">
+                <span data-extraction-copy>Warming up the oven…</span>
+              </p>
+            </article>
+            <article class="step-card" data-reveal>
+              <span class="step-number">3</span>
+              <h3>Cook with timers, scale servings, shop from it</h3>
+              <p>
+                Open cook mode, check off ingredients, scale the batch, and send groceries to the
+                household list.
+              </p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section feature-section" aria-labelledby="features-heading">
+        <div class="section-inner">
+          <div class="section-heading-row">
+            <div>
+              <p class="eyebrow" data-reveal>FEATURES</p>
+              <h2 id="features-heading" data-reveal>
+                A cookbook that behaves like a kitchen tool.
+              </h2>
+            </div>
+            <p class="section-intro" data-reveal>
+              LinkDish keeps the useful parts close: photos, ingredients, steps, timers, servings,
+              notes, and the original source.
+            </p>
+          </div>
+
           <div class="feature-grid">
-            <article class="feature-card">
-              <span class="feature-number">1</span>
-              <h3>Import from anywhere</h3>
+            <article class="feature-card" data-reveal>
+              <p class="feature-label">Cookbook</p>
+              <h3>Your cookbook, with photos</h3>
               <p>
-                Paste a link, scan a photo, or share from another app when a recipe catches your
-                eye.
+                Every saved recipe gets a clean card with the dish image, source, notes, and the
+                next thing to cook.
               </p>
             </article>
-            <article class="feature-card">
-              <span class="feature-number">2</span>
-              <h3>Review the clean recipe</h3>
+            <article class="feature-card" data-reveal>
+              <p class="feature-label">Cook mode</p>
+              <h3>Timers where your hands already are</h3>
               <p>
-                LinkDish pulls out the title, photo, ingredients, steps, servings, timing, and
-                notes.
+                Cook from big readable steps, tap to check ingredients, and start parsed timers
+                without losing your place.
               </p>
             </article>
-            <article class="feature-card">
-              <span class="feature-number">3</span>
-              <h3>Cook without the clutter</h3>
+            <article class="feature-card" data-reveal>
+              <p class="feature-label">Scaling</p>
+              <h3>Scale any recipe</h3>
               <p>
-                Start cook mode for big step controls, parsed timers, checked ingredients, and a
-                screen that stays awake.
+                Adjust servings with honest scaling that keeps original quantities visible when
+                recipe math gets imperfect.
+              </p>
+            </article>
+            <article class="feature-card" data-reveal>
+              <p class="feature-label">Shopping</p>
+              <h3>Household shopping list</h3>
+              <p>
+                Turn recipe ingredients into groceries and keep shared kitchen errands in one place.
+              </p>
+            </article>
+            <article class="feature-card" data-reveal>
+              <p class="feature-label">Sharing</p>
+              <h3>Share it beautifully</h3>
+              <p>
+                Send branded recipe cards that look like they came from your cookbook, not a
+                cluttered webpage.
+              </p>
+            </article>
+            <article class="feature-card" data-reveal>
+              <p class="feature-label">Everywhere</p>
+              <h3>Android app + web/iPhone</h3>
+              <p>
+                Install on Android from Google Play, or use the web app from Safari and add it to
+                your iPhone Home Screen.
               </p>
             </article>
           </div>
         </div>
       </section>
 
-      <section class="content-band deep" aria-labelledby="privacy-heading">
-        <div class="section-inner">
-          <p class="section-kicker">Straightforward by design</p>
-          <h2 class="section-heading" id="privacy-heading">
-            A real kitchen tool before it asks you to upgrade.
-          </h2>
-          <p class="section-copy">
-            Save a small cookbook for free, then upgrade only when you want more imports, unlimited
-            saves, and household sharing.
-          </p>
-          <ul class="check-list" aria-label="LinkDish feature notes">
-            <li>Your cookbook with recipe photos, notes, and source context.</li>
-            <li>Share-from-any-app importing for links, videos, and recipe images.</li>
-            <li>Cook mode with step controls, keep-awake, ingredient checks, and timers.</li>
-            <li>Household shopping list for recipe ingredients and quick grocery adds.</li>
-            <li>Save up to 15 recipes free.</li>
-          </ul>
-        </div>
-      </section>
-
-      <section class="content-band" id="plans" aria-labelledby="plans-heading">
-        <div class="section-inner">
-          <p class="section-kicker">Access</p>
-          <h2 class="section-heading" id="plans-heading">
-            Start simple, upgrade only if you need more.
-          </h2>
-          <p class="section-copy">
-            Save up to 15 recipes free. Paid plans are available in the app through Google Play
-            today when you need more imports, unlimited saves, or household features.
-          </p>
-          <div class="plan-grid">
-            <article class="plan-card">
-              <h3>Free</h3>
-              <p class="plan-price">USD $0</p>
-              <p>3 recipe imports total and up to 15 saved recipes.</p>
-            </article>
-            <article class="plan-card">
-              <h3>Plus</h3>
-              <p class="plan-price">USD $2.99/month or $24.99/year</p>
-              <p>100 monthly imports and unlimited saved recipes for one cook.</p>
-            </article>
-            <article class="plan-card">
-              <h3>Family</h3>
-              <p class="plan-price">USD $4.99/month or $44.99/year</p>
-              <p>
-                250 monthly imports, unlimited saved recipes, and a shared household recipe book.
-              </p>
-            </article>
-          </div>
-          <div class="plan-actions">
-            <a
-              class="button dark"
-              href="https://play.google.com/store/apps/details?id=com.linkdish.app"
-              >Install on Google Play</a
-            >
-            <a class="button light" href="#share">Send to an Android cook</a>
-          </div>
-        </div>
-      </section>
-
-      <section class="content-band alt" id="android-access" aria-labelledby="access-heading">
-        <div class="section-inner">
-          <p class="section-kicker">Android access</p>
-          <h2 class="section-heading" id="access-heading">Install from Google Play.</h2>
-          <p class="section-copy">
-            LinkDish is available for Android on Google Play. If Play asks for tester access, join
-            the tester group first, then open the Play opt-in link with the same Google account.
-          </p>
-          <div class="beta-actions">
-            <a
-              class="button dark"
-              href="https://play.google.com/store/apps/details?id=com.linkdish.app"
-              >View Play listing</a
-            >
-            <a class="button light" href="https://groups.google.com/g/linkdish-android-testers"
-              >Join tester group</a
-            >
-            <a class="button light" href="https://play.google.com/apps/testing/com.linkdish.app"
-              >Open Play opt-in</a
-            >
-          </div>
-        </div>
-      </section>
-
-      <section class="content-band" id="share" aria-labelledby="share-heading">
-        <div class="section-inner share-panel">
+      <section class="free-strip" id="plans" aria-labelledby="free-heading">
+        <div class="free-inner" data-reveal>
           <div>
-            <p class="section-kicker">Not on Android?</p>
-            <h2 class="section-heading" id="share-heading">Send LinkDish to one Android cook.</h2>
-            <p class="section-copy">
-              A single useful referral helps more than a broad post. Forward the Play link to
-              someone who cooks from recipe links, videos, photos, and shared finds.
+            <p class="eyebrow">FREE TIER</p>
+            <h2 id="free-heading">Start free — save up to 15 recipes and keep them forever.</h2>
+            <p>
+              Plus <a href="https://app.linkdish.ca/pricing">$2.99/mo</a> · Family
+              <a href="https://app.linkdish.ca/pricing">$4.99/mo</a> when your cookbook grows.
             </p>
           </div>
-          <div class="share-actions" aria-label="Share LinkDish">
+          <div class="strip-actions">
             <a
-              class="button dark"
-              href="mailto:?subject=Try%20LinkDish%20on%20Android&body=I%20thought%20of%20you%20for%20LinkDish%2C%20an%20Android%20app%20that%20turns%20supported%20recipe%20links%20into%20clean%20ingredients%2C%20steps%2C%20timing%2C%20notes%2C%20and%20saved%20recipes.%0A%0APlay%20Store%3A%20https%3A%2F%2Fplay.google.com%2Fstore%2Fapps%2Fdetails%3Fid%3Dcom.linkdish.app"
-              >Email the Play link</a
-            >
-            <a
-              class="button light"
-              href="sms:?&body=Try%20LinkDish%20on%20Android%3A%20it%20turns%20supported%20recipe%20links%20into%20clean%20ingredients%2C%20steps%2C%20timing%2C%20notes%2C%20and%20saved%20recipes.%20https%3A%2F%2Fplay.google.com%2Fstore%2Fapps%2Fdetails%3Fid%3Dcom.linkdish.app"
-              >Text the Play link</a
-            >
-            <a
-              class="button light"
+              class="button button-primary"
               href="https://play.google.com/store/apps/details?id=com.linkdish.app"
-              >Open Play listing</a
+              >Get it on Google Play</a
             >
-          </div>
-        </div>
-      </section>
-
-      <section class="content-band" aria-labelledby="information-heading">
-        <div class="section-inner">
-          <p class="section-kicker">Information</p>
-          <h2 class="section-heading" id="information-heading">Support, privacy, and contact.</h2>
-          <div class="info-links">
-            <a class="info-link" href="support/">Support</a>
-            <a class="info-link" href="privacy/">Privacy Policy</a>
-            <a class="info-link" href="mailto:support@linkdish.ca">Email LinkDish</a>
+            <a class="button button-secondary" href="https://app.linkdish.ca">Use it on the web</a>
           </div>
         </div>
       </section>
@@ -254,14 +228,27 @@
 
     <footer class="site-footer">
       <div class="footer-inner">
-        <span>LinkDish</span>
-        <div class="footer-links">
-          <a href="support/">Support</a>
-          <a href="privacy/">Privacy</a>
-          <a href="mailto:support@linkdish.ca">Contact</a>
+        <a class="footer-brand" href="./">LinkDish</a>
+        <div class="footer-share" aria-label="Share LinkDish">
+          <a
+            href="mailto:?subject=Try%20LinkDish&body=I%20thought%20you%27d%20like%20LinkDish.%20It%20turns%20any%20recipe%20link%20into%20a%20clean%20cookbook%20entry%20with%20photos%2C%20cook%20mode%2C%20timers%2C%20and%20shopping%20lists.%20It%20works%20on%20Android%20from%20Google%20Play%20and%20on%20iPhone%20in%20Safari%20as%20a%20web%20app%3A%20https%3A%2F%2Flinkdish.ca%2F"
+            >Email</a
+          >
+          <a
+            href="sms:?&body=Try%20LinkDish%3A%20it%20turns%20any%20recipe%20link%20into%20a%20clean%20cookbook%20entry%20with%20photos.%20Works%20on%20Android%20from%20Google%20Play%20and%20on%20iPhone%20in%20Safari%3A%20https%3A%2F%2Flinkdish.ca%2F"
+            >SMS</a
+          >
+          <a href="https://play.google.com/apps/testing/com.linkdish.app">Testing opt-in</a>
         </div>
+        <div class="footer-links">
+          <a href="privacy/">Privacy</a>
+          <a href="support/">Support</a>
+          <a href="https://app.linkdish.ca">Open web app</a>
+        </div>
+        <p class="footer-note">Made in Canada. &copy; 2026 LinkDish.</p>
       </div>
     </footer>
+    <script src="site.js" defer></script>
     <script src="analytics.js" defer></script>
   </body>
 </html>
