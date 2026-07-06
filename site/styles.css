@@ -550,7 +550,7 @@ p {
   left: 50%;
   position: absolute;
   top: 50%;
-  transform: translate(-50%, -50%) rotate(-1.5deg);
+  transform: translate(-50%, -50%);
   width: 110%;
   z-index: 0;
 }
@@ -567,7 +567,7 @@ p {
   min-width: max-content;
   padding-left: 18px;
   position: relative;
-  transform: rotate(-1.5deg);
+  transform: none;
   z-index: 1;
 }
 
@@ -1564,11 +1564,11 @@ p {
 
   @keyframes dish-marquee {
     from {
-      transform: translateX(0) rotate(-1.5deg);
+      transform: translateX(0);
     }
 
     to {
-      transform: translateX(-50%) rotate(-1.5deg);
+      transform: translateX(-50%);
     }
   }
 
