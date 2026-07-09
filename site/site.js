@@ -4,6 +4,7 @@
   var assemblyCard = document.querySelector("[data-assembly-card]");
   var urlText = document.querySelector("[data-url-text]");
   var timerChip = document.querySelector("[data-timer-chip]");
+  var siteHeader = document.querySelector(".site-header");
   var extractionLines = [
     "Warming up the oven…",
     "Skimming off the ads…",
@@ -14,6 +15,15 @@
 
   if (!reduceMotion.matches) {
     document.documentElement.classList.add("motion-ready");
+  }
+
+  if (siteHeader) {
+    var updateHeader = function () {
+      siteHeader.classList.toggle("is-scrolled", window.scrollY > 8);
+    };
+
+    updateHeader();
+    window.addEventListener("scroll", updateHeader, { passive: true });
   }
 
   var drawSquiggles = function () {

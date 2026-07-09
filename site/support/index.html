@@ -13,47 +13,56 @@
     <link rel="stylesheet" href="../styles.css" />
   </head>
   <body class="info-page">
+    <a class="skip-link" href="#main-content">Skip to content</a>
     <header class="site-header" aria-label="Primary">
       <a class="brand" href="../" aria-label="LinkDish home">
         <img src="../assets/linkdish-icon.png" alt="" width="36" height="36" />
         <span>LinkDish</span>
       </a>
       <nav class="site-nav" aria-label="Site navigation">
-        <a href="../#how-it-works">How it works</a>
-        <a href="../#plans">Plans</a>
-        <a href="../support/">Support</a>
-        <a href="../privacy/">Privacy</a>
+        <a class="nav-link" href="../#how-it-works">How it works</a>
+        <a class="nav-link" href="../#plans">Plans</a>
+        <a class="nav-link" href="../support/" aria-current="page">Support</a>
+        <a class="nav-button" href="https://app.linkdish.ca">Open the web app</a>
       </nav>
     </header>
 
-    <main class="legal">
-      <p class="section-kicker">LinkDish</p>
-      <h1>Support</h1>
-      <p class="muted">Last updated: May 11, 2026</p>
+    <main class="legal" id="main-content">
+      <div class="legal-hero">
+        <p class="section-kicker">LinkDish</p>
+        <h1>Support</h1>
+        <p class="muted">Last updated: May 11, 2026</p>
+      </div>
 
       <p>
-        LinkDish is designed to keep recipe extraction simple and dependable. If something is not
-        working as expected, the fastest first checks are:
+        LinkDish is designed to keep recipe extraction simple and dependable. If
+        something is not working as expected, the fastest first checks are:
       </p>
 
       <ul>
         <li>Make sure the recipe link is public and still available.</li>
-        <li>Try pasting the link again if the source was temporarily unreachable.</li>
-        <li>Try a different recipe source if the site blocks extraction or is unsupported.</li>
+        <li>
+          Try pasting the link again if the source was temporarily unreachable.
+        </li>
+        <li>
+          Try a different recipe source if the site blocks extraction or is
+          unsupported.
+        </li>
       </ul>
 
       <h2>Saved recipes</h2>
       <p>
-        Saving recipes requires LinkDish Plus or Family. Personal saved recipes are stored on your
-        device. If a saved recipe looks outdated or malformed after an app update, removing it and
-        extracting it again should refresh the content.
+        Saving recipes requires LinkDish Plus or Family. Personal saved recipes
+        are stored on your device. If a saved recipe looks outdated or malformed
+        after an app update, removing it and extracting it again should refresh
+        the content.
       </p>
 
       <h2>Accounts and Family households</h2>
       <p>
-        No account is required for the first 3 free recipe imports. Sign in is required to buy or
-        restore a paid plan, create, join, or manage LinkDish Family household sharing, or add
-        recipes to a shared Family recipe book.
+        No account is required for the first 3 free recipe imports. Sign in is
+        required to buy or restore a paid plan, create, join, or manage LinkDish
+        Family household sharing, or add recipes to a shared Family recipe book.
       </p>
 
       <h2>Privacy</h2>
@@ -65,31 +74,35 @@
       <h2>Contact</h2>
       <p>
         For support or privacy questions, email
-        <a href="mailto:support@linkdish.ca">support@linkdish.ca</a>. If you are testing a
-        pre-release build, you can also use the same channel where you received the build to report
-        issues.
+        <a href="mailto:support@linkdish.ca">support@linkdish.ca</a>. If you are
+        testing a pre-release build, you can also use the same channel where you
+        received the build to report issues.
       </p>
 
       <h2>Data deletion requests</h2>
       <p>
-        If you created a LinkDish account, you can delete it from Account in the app. Deleting the
-        account removes server-side account and household records, but App Store or Google Play
-        subscriptions still need to be managed in the store. If you cannot access the app, send your
-        request to
+        If you created a LinkDish account, you can delete it from Account in the
+        app. Deleting the account removes server-side account and household
+        records, but App Store or Google Play subscriptions still need to be
+        managed in the store. If you cannot access the app, send your request to
         <a href="mailto:support@linkdish.ca">support@linkdish.ca</a>.
       </p>
     </main>
 
     <footer class="site-footer">
       <div class="footer-inner">
-        <span>LinkDish</span>
+        <a class="footer-brand" href="../">LinkDish</a>
         <div class="footer-links">
           <a href="../support/">Support</a>
           <a href="../privacy/">Privacy</a>
           <a href="mailto:support@linkdish.ca">Contact</a>
         </div>
+        <p class="footer-note">
+          Set in Fraunces · Made in Canada · &copy; 2026 LinkDish
+        </p>
       </div>
     </footer>
+    <script src="../site.js" defer></script>
     <script src="../analytics.js" defer></script>
   </body>
 </html>

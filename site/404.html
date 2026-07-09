@@ -11,30 +11,55 @@
         var match = window.location.pathname.match(/^\/invite\/([^/?#]+)\/?$/);
 
         if (match) {
-          window.location.replace("/invite/?code=" + encodeURIComponent(match[1]));
+          window.location.replace(
+            "/invite/?code=" + encodeURIComponent(match[1])
+          );
         }
       })();
     </script>
   </head>
   <body class="info-page">
+    <a class="skip-link" href="#main-content">Skip to content</a>
     <header class="site-header" aria-label="Primary">
       <a class="brand" href="./" aria-label="LinkDish home">
         <img src="assets/linkdish-icon.png" alt="" width="36" height="36" />
         <span>LinkDish</span>
       </a>
       <nav class="site-nav" aria-label="Site navigation">
-        <a href="./#how-it-works">How it works</a>
-        <a href="./#plans">Plans</a>
-        <a href="support/">Support</a>
-        <a href="privacy/">Privacy</a>
+        <a class="nav-link" href="./#how-it-works">How it works</a>
+        <a class="nav-link" href="support/">Support</a>
+        <a class="nav-button" href="https://app.linkdish.ca">Open the web app</a>
       </nav>
     </header>
 
-    <main class="legal">
-      <p class="section-kicker">404</p>
-      <h1>Page not found</h1>
-      <p>The LinkDish page you were looking for is not available.</p>
-      <p><a href="./">Return to the LinkDish home page</a>.</p>
+    <main class="legal" id="main-content">
+      <div class="legal-hero">
+        <p class="section-kicker">404</p>
+        <h1>Page not found</h1>
+      </div>
+      <p>
+        The LinkDish page you were looking for is not available. It may have
+        moved, or the link might be a little overdone.
+      </p>
+      <div class="not-found-actions">
+        <a class="button button-primary" href="./">Back to home</a>
+        <a class="button button-secondary" href="support/">Get support</a>
+      </div>
     </main>
+
+    <footer class="site-footer">
+      <div class="footer-inner">
+        <a class="footer-brand" href="./">LinkDish</a>
+        <div class="footer-links">
+          <a href="support/">Support</a>
+          <a href="privacy/">Privacy</a>
+          <a href="mailto:support@linkdish.ca">Contact</a>
+        </div>
+        <p class="footer-note">
+          Set in Fraunces · Made in Canada · &copy; 2026 LinkDish
+        </p>
+      </div>
+    </footer>
+    <script src="site.js" defer></script>
   </body>
 </html>

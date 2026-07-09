@@ -14,26 +14,25 @@
     <link rel="stylesheet" href="../styles.css" />
   </head>
   <body class="info-page invite-page">
+    <a class="skip-link" href="#main-content">Skip to content</a>
     <header class="site-header" aria-label="Primary">
       <a class="brand" href="../" aria-label="LinkDish home">
         <img src="../assets/linkdish-icon.png" alt="" width="36" height="36" />
         <span>LinkDish</span>
       </a>
       <nav class="site-nav" aria-label="Site navigation">
-        <a href="../#how-it-works">How it works</a>
-        <a href="../#plans">Plans</a>
-        <a href="../support/">Support</a>
-        <a href="../privacy/">Privacy</a>
+        <a class="nav-link" href="../support/">Support</a>
+        <a class="nav-button" href="https://app.linkdish.ca">Open the web app</a>
       </nav>
     </header>
 
-    <main class="invite-shell">
+    <main class="invite-shell" id="main-content">
       <section class="invite-panel" aria-labelledby="invite-heading">
         <p class="section-kicker">LinkDish Family</p>
         <h1 id="invite-heading">Join this household in LinkDish.</h1>
         <p class="invite-copy">
-          Open the invite on the phone where LinkDish is installed. If the app does not open, copy
-          the code and paste it into Household in the app.
+          Open the invite on the phone where LinkDish is installed. If the app
+          does not open, copy the code and paste it into Household in the app.
         </p>
 
         <div class="invite-code-card" id="invite-code-card" hidden>
@@ -42,18 +41,33 @@
         </div>
 
         <p class="invite-copy" id="missing-code-message" hidden>
-          This invite link is missing a code. Ask the household owner to send the invite again.
+          This invite link is missing a code. Ask the household owner to send
+          the invite again.
         </p>
 
         <div class="invite-actions" aria-label="Invite actions">
-          <a class="button dark" id="open-app-link" href="linkdish://household">Open LinkDish</a>
-          <button class="button light" id="copy-code-button" type="button" hidden>Copy code</button>
-          <button class="button light" id="share-link-button" type="button" hidden>
+          <a class="button dark" id="open-app-link" href="linkdish://household"
+            >Open LinkDish</a
+          >
+          <button class="button light" id="copy-code-button" type="button" hidden>
+            Copy code
+          </button>
+          <button
+            class="button light"
+            id="share-link-button"
+            type="button"
+            hidden
+          >
             Share invite link
           </button>
         </div>
 
-        <p class="invite-status" id="invite-status" role="status" aria-live="polite"></p>
+        <p
+          class="invite-status"
+          id="invite-status"
+          role="status"
+          aria-live="polite"
+        ></p>
 
         <div class="store-actions" aria-label="Install LinkDish">
           <a
@@ -68,12 +82,15 @@
 
     <footer class="site-footer">
       <div class="footer-inner">
-        <span>LinkDish</span>
+        <a class="footer-brand" href="../">LinkDish</a>
         <div class="footer-links">
           <a href="../support/">Support</a>
           <a href="../privacy/">Privacy</a>
           <a href="mailto:support@linkdish.ca">Contact</a>
         </div>
+        <p class="footer-note">
+          Set in Fraunces · Made in Canada · &copy; 2026 LinkDish
+        </p>
       </div>
     </footer>
 
@@ -139,6 +156,7 @@
         });
       })();
     </script>
+    <script src="../site.js" defer></script>
     <script src="../analytics.js" defer></script>
   </body>
 </html>
