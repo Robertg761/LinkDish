@@ -3,10 +3,11 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#dfff56" />
     <meta name="robots" content="noindex" />
     <meta
       name="description"
-      content="Open a LinkDish household invite in the LinkDish mobile app."
+      content="Open a LinkDish household invite in the LinkDish app."
     />
     <title>Join a LinkDish household</title>
     <link rel="canonical" href="https://linkdish.ca/invite/" />
@@ -15,50 +16,79 @@
   </head>
   <body class="info-page invite-page">
     <a class="skip-link" href="#main-content">Skip to content</a>
-    <header class="site-header" aria-label="Primary">
+
+    <header class="site-header" data-header>
       <a class="brand" href="../" aria-label="LinkDish home">
-        <img src="../assets/linkdish-icon.png" alt="" width="36" height="36" />
-        <span>LinkDish</span>
+        <img src="../assets/linkdish-icon.png" alt="" width="40" height="40" />
+        <span class="brand-word">LinkDish</span>
+        <span class="brand-tag">Recipe saver</span>
       </a>
-      <nav class="site-nav" aria-label="Site navigation">
-        <a class="nav-link" href="../support/">Support</a>
-        <a class="nav-button" href="https://app.linkdish.ca">Open the web app</a>
+
+      <button
+        class="menu-toggle"
+        type="button"
+        aria-expanded="false"
+        aria-controls="site-navigation"
+        data-menu-toggle
+      >
+        <span class="sr-only">Open navigation</span>
+        <span aria-hidden="true"></span>
+        <span aria-hidden="true"></span>
+      </button>
+
+      <nav
+        class="site-nav"
+        id="site-navigation"
+        aria-label="Primary navigation"
+        data-site-nav
+      >
+        <a href="../#how-it-works">How it works</a>
+        <a href="../#plans">Plans</a>
+        <a href="../support/">Support</a>
+        <a class="button button-small button-citrus" href="https://app.linkdish.ca">
+          Open LinkDish <span aria-hidden="true">↗</span>
+        </a>
       </nav>
     </header>
 
     <main class="invite-shell" id="main-content">
       <section class="invite-panel" aria-labelledby="invite-heading">
-        <p class="section-kicker">LinkDish Family</p>
-        <h1 id="invite-heading">Join this household in LinkDish.</h1>
+        <p class="eyebrow eyebrow-dark">LinkDish Family · Household invite</p>
+        <h1 id="invite-heading">Dinner is better shared.</h1>
         <p class="invite-copy">
-          Open the invite on the phone where LinkDish is installed. If the app
+          Open this invite on the phone where LinkDish is installed. If the app
           does not open, copy the code and paste it into Household in the app.
         </p>
 
         <div class="invite-code-card" id="invite-code-card" hidden>
-          <span class="invite-label">Invite code</span>
+          <span class="invite-label">Household invite code</span>
           <code id="invite-code"></code>
         </div>
 
         <p class="invite-copy" id="missing-code-message" hidden>
-          This invite link is missing a code. Ask the household owner to send
-          the invite again.
+          This invite link is missing a code. Ask the household owner to send the
+          invite again.
         </p>
 
         <div class="invite-actions" aria-label="Invite actions">
-          <a class="button dark" id="open-app-link" href="linkdish://household"
-            >Open LinkDish</a
+          <a class="button button-dark" id="open-app-link" href="linkdish://household">
+            Open LinkDish <span aria-hidden="true">↗</span>
+          </a>
+          <button
+            class="button button-outline-dark"
+            id="copy-code-button"
+            type="button"
+            hidden
           >
-          <button class="button light" id="copy-code-button" type="button" hidden>
             Copy code
           </button>
           <button
-            class="button light"
+            class="button button-outline-dark"
             id="share-link-button"
             type="button"
             hidden
           >
-            Share invite link
+            Share invite
           </button>
         </div>
 
@@ -69,28 +99,40 @@
           aria-live="polite"
         ></p>
 
-        <div class="store-actions" aria-label="Install LinkDish">
+        <div class="store-actions" aria-label="Install or get help with LinkDish">
           <a
-            class="button light"
+            class="button button-outline-dark"
             href="https://play.google.com/store/apps/details?id=com.linkdish.app"
-            >Get Android app</a
           >
-          <a class="button light" href="../support/">Get help</a>
+            Get Android app
+          </a>
+          <a class="button button-outline-dark" href="../support/">Get help</a>
         </div>
       </section>
     </main>
 
-    <footer class="site-footer">
-      <div class="footer-inner">
-        <a class="footer-brand" href="../">LinkDish</a>
-        <div class="footer-links">
-          <a href="../support/">Support</a>
-          <a href="../privacy/">Privacy</a>
-          <a href="mailto:support@linkdish.ca">Contact</a>
-        </div>
-        <p class="footer-note">
-          Set in Fraunces · Made in Canada · &copy; 2026 LinkDish
-        </p>
+    <footer class="site-footer inner-footer">
+      <div class="footer-brand-block">
+        <a class="brand brand-footer" href="../">
+          <img src="../assets/linkdish-icon.png" alt="" width="48" height="48" />
+          <span class="brand-word">LinkDish</span>
+        </a>
+        <p>Recipe links cleaned up for real life.</p>
+      </div>
+      <div class="footer-column">
+        <h2>Help</h2>
+        <a href="../support/">Support</a>
+        <a href="../privacy/">Privacy</a>
+        <a href="mailto:support@linkdish.ca">Contact</a>
+      </div>
+      <div class="footer-column">
+        <h2>Product</h2>
+        <a href="https://app.linkdish.ca">Open web app</a>
+        <a href="https://play.google.com/store/apps/details?id=com.linkdish.app">Android</a>
+      </div>
+      <div class="footer-bottom">
+        <span>&copy; <span data-current-year>2026</span> LinkDish</span>
+        <span>Made in Canada · Set in Fraunces</span>
       </div>
     </footer>
 

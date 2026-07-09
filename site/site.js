@@ -1,218 +1,214 @@
 (function () {
+  "use strict";
+
+  var root = document.documentElement;
   var reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
-  var extractionCopy = document.querySelector("[data-extraction-copy]");
-  var assemblyCard = document.querySelector("[data-assembly-card]");
-  var urlText = document.querySelector("[data-url-text]");
-  var timerChip = document.querySelector("[data-timer-chip]");
-  var siteHeader = document.querySelector(".site-header");
-  var extractionLines = [
-    "Warming up the oven…",
-    "Skimming off the ads…",
-    "Chopping it down to the good stuff…",
-    "Tasting for seasoning…",
-    "Plating your recipe…"
-  ];
+  var header = document.querySelector("[data-header]");
+  var menuToggle = document.querySelector("[data-menu-toggle]");
+  var siteNav = document.querySelector("[data-site-nav]");
 
   if (!reduceMotion.matches) {
-    document.documentElement.classList.add("motion-ready");
+    root.classList.add("motion-ready");
   }
 
-  if (siteHeader) {
+  window.requestAnimationFrame(function () {
+    window.requestAnimationFrame(function () {
+      root.classList.add("is-ready");
+    });
+  });
+
+  Array.prototype.slice
+    .call(document.querySelectorAll("[data-current-year]"))
+    .forEach(function (year) {
+      year.textContent = String(new Date().getFullYear());
+    });
+
+  if (header) {
     var updateHeader = function () {
-      siteHeader.classList.toggle("is-scrolled", window.scrollY > 8);
+      header.classList.toggle("is-scrolled", window.scrollY > 8);
     };
 
     updateHeader();
     window.addEventListener("scroll", updateHeader, { passive: true });
   }
 
-  var drawSquiggles = function () {
-    var squiggles = Array.prototype.slice.call(document.querySelectorAll(".squiggle"));
+  if (header && menuToggle && siteNav) {
+    var closeMenu = function () {
+      header.classList.remove("is-menu-open");
+      menuToggle.setAttribute("aria-expanded", "false");
+      menuToggle.querySelector(".sr-only").textContent = "Open navigation";
+    };
 
-    squiggles.forEach(function (squiggle) {
-      var path = squiggle.querySelector("path");
-
-      if (!path || typeof path.getTotalLength !== "function") {
-        return;
-      }
-
-      squiggle.style.setProperty("--squiggle-length", Math.ceil(path.getTotalLength()));
+    menuToggle.addEventListener("click", function () {
+      var willOpen = menuToggle.getAttribute("aria-expanded") !== "true";
+      header.classList.toggle("is-menu-open", willOpen);
+      menuToggle.setAttribute("aria-expanded", String(willOpen));
+      menuToggle.querySelector(".sr-only").textContent = willOpen
+        ? "Close navigation"
+        : "Open navigation";
     });
 
-    window.setTimeout(function () {
-      Array.prototype.slice
-        .call(document.querySelectorAll(".hero .squiggle"))
-        .forEach(function (squiggle) {
-          squiggle.classList.add("is-drawn");
-        });
-    }, 420);
-  };
-
-  var formatTimer = function (seconds) {
-    var hours = Math.floor(seconds / 3600);
-    var minutes = Math.floor((seconds % 3600) / 60);
-    var secs = seconds % 60;
-
-    return hours + ":" + String(minutes).padStart(2, "0") + ":" + String(secs).padStart(2, "0");
-  };
-
-  if (reduceMotion.matches) {
-    if (urlText) {
-      urlText.textContent = urlText.dataset.fullUrl || urlText.textContent;
-    }
-
-    if (timerChip) {
-      timerChip.textContent = "2:00:00";
-    }
-
-    if (assemblyCard) {
-      assemblyCard.classList.add("is-assembled");
-    }
-  } else {
-    drawSquiggles();
-  }
-
-  if ((urlText || extractionCopy || assemblyCard || timerChip) && !reduceMotion.matches) {
-    var fullUrl = urlText ? urlText.dataset.fullUrl || urlText.textContent : "";
-    var extractionIndex = 0;
-    var timerInterval = 0;
-
-    var swapExtraction = function (copy, delay) {
-      window.setTimeout(function () {
-        if (!extractionCopy) {
-          return;
-        }
-
-        extractionCopy.classList.add("is-swapping");
-
-        window.setTimeout(function () {
-          extractionCopy.textContent = copy;
-          extractionCopy.classList.remove("is-swapping");
-        }, 250);
-      }, delay);
-    };
-
-    var startCountdown = function () {
-      if (!timerChip) {
-        return;
+    siteNav.addEventListener("click", function (event) {
+      if (event.target.closest("a")) {
+        closeMenu();
       }
-
-      var remaining = 7200;
-      timerChip.textContent = formatTimer(remaining);
-      window.clearInterval(timerInterval);
-      timerInterval = window.setInterval(function () {
-        remaining -= 1;
-        timerChip.textContent = formatTimer(remaining);
-      }, 1000);
-    };
-
-    var runLoop = function () {
-      if (urlText) {
-        urlText.textContent = "";
-        urlText.classList.add("is-typing");
-      }
-
-      if (assemblyCard) {
-        assemblyCard.classList.add("is-clearing");
-        assemblyCard.classList.remove("is-assembled");
-      }
-
-      if (timerChip) {
-        timerChip.textContent = "2:00:00";
-      }
-
-      if (extractionCopy) {
-        extractionCopy.textContent = extractionLines[0];
-      }
-
-      window.clearInterval(timerInterval);
-
-      var charIndex = 0;
-      var typingInterval = window.setInterval(function () {
-        charIndex += 1;
-
-        if (urlText) {
-          urlText.textContent = fullUrl.slice(0, charIndex);
-        }
-
-        if (charIndex >= fullUrl.length) {
-          window.clearInterval(typingInterval);
-
-          if (urlText) {
-            urlText.classList.remove("is-typing");
-          }
-        }
-      }, 28);
-
-      swapExtraction(extractionLines[(extractionIndex + 1) % extractionLines.length], 3600);
-      swapExtraction(extractionLines[(extractionIndex + 2) % extractionLines.length], 5050);
-      extractionIndex = (extractionIndex + 2) % extractionLines.length;
-
-      window.setTimeout(function () {
-        if (!assemblyCard) {
-          return;
-        }
-
-        assemblyCard.classList.remove("is-clearing");
-        window.requestAnimationFrame(function () {
-          assemblyCard.classList.add("is-assembled");
-          startCountdown();
-        });
-      }, 4600);
-
-      window.setTimeout(function () {
-        if (assemblyCard) {
-          assemblyCard.classList.add("is-clearing");
-          assemblyCard.classList.remove("is-assembled");
-        }
-      }, 10600);
-    };
-
-    runLoop();
-    window.setInterval(runLoop, 11000);
-  }
-
-  var revealItems = Array.prototype.slice.call(document.querySelectorAll("[data-reveal]"));
-
-  if (!revealItems.length) {
-    return;
-  }
-
-  if (reduceMotion.matches || !("IntersectionObserver" in window)) {
-    revealItems.forEach(function (item) {
-      item.classList.add("is-visible");
     });
-    return;
+
+    document.addEventListener("keydown", function (event) {
+      if (event.key === "Escape") {
+        closeMenu();
+        menuToggle.focus();
+      }
+    });
+
+    window.addEventListener("resize", function () {
+      if (window.innerWidth > 760) {
+        closeMenu();
+      }
+    });
   }
 
-  var observer = new IntersectionObserver(
-    function (entries) {
-      entries.forEach(function (entry) {
-        if (!entry.isIntersecting) {
-          return;
-        }
-
-        var item = entry.target;
-        item.style.setProperty(
-          "--reveal-delay",
-          Math.min(Number(item.dataset.revealIndex) * 60, 360) + "ms"
-        );
-        item.classList.add("is-visible");
-        observer.unobserve(item);
-      });
-    },
-    { rootMargin: "0px 0px -8% 0px", threshold: 0.16 }
+  var revealItems = Array.prototype.slice.call(
+    document.querySelectorAll("[data-reveal]")
   );
 
-  revealItems.forEach(function (item, index) {
-    item.dataset.revealIndex = String(index);
-    observer.observe(item);
-  });
+  if (revealItems.length) {
+    if (reduceMotion.matches || !("IntersectionObserver" in window)) {
+      revealItems.forEach(function (item) {
+        item.classList.add("is-visible");
+      });
+    } else {
+      var observer = new IntersectionObserver(
+        function (entries) {
+          entries.forEach(function (entry) {
+            if (!entry.isIntersecting) {
+              return;
+            }
 
-  // Safety net: content must never stay hidden if the observer misfires.
-  window.setTimeout(function () {
-    revealItems.forEach(function (item) {
-      item.classList.add("is-visible");
+            entry.target.classList.add("is-visible");
+            observer.unobserve(entry.target);
+          });
+        },
+        { rootMargin: "0px 0px -8% 0px", threshold: 0.12 }
+      );
+
+      revealItems.forEach(function (item, index) {
+        item.style.setProperty("--reveal-delay", Math.min(index % 3, 2) * 70 + "ms");
+        observer.observe(item);
+      });
+
+      window.setTimeout(function () {
+        revealItems.forEach(function (item) {
+          item.classList.add("is-visible");
+        });
+      }, 1600);
+    }
+  }
+
+  var stationTabs = Array.prototype.slice.call(
+    document.querySelectorAll("[data-station-target]")
+  );
+  var stationPanels = Array.prototype.slice.call(
+    document.querySelectorAll("[data-station-panel]")
+  );
+
+  if (stationTabs.length && stationPanels.length) {
+    var activateStation = function (name, moveFocus) {
+      stationTabs.forEach(function (tab) {
+        var active = tab.dataset.stationTarget === name;
+        tab.classList.toggle("is-active", active);
+        tab.setAttribute("aria-selected", String(active));
+        tab.tabIndex = active ? 0 : -1;
+
+        if (active && moveFocus) {
+          tab.focus();
+        }
+      });
+
+      stationPanels.forEach(function (panel) {
+        var active = panel.dataset.stationPanel === name;
+        panel.hidden = !active;
+        panel.classList.toggle("is-active", active);
+      });
+    };
+
+    stationTabs.forEach(function (tab, index) {
+      tab.addEventListener("click", function () {
+        activateStation(tab.dataset.stationTarget, false);
+      });
+
+      tab.addEventListener("keydown", function (event) {
+        if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
+          return;
+        }
+
+        event.preventDefault();
+        var offset = event.key === "ArrowRight" ? 1 : -1;
+        var nextIndex = (index + offset + stationTabs.length) % stationTabs.length;
+        activateStation(stationTabs[nextIndex].dataset.stationTarget, true);
+      });
     });
-  }, 1400);
+  }
+
+  var supportForm = document.querySelector("[data-support-form]");
+  var supportStatus = document.querySelector("[data-support-status]");
+
+  if (supportForm && supportStatus) {
+    var setSupportStatus = function (message, type) {
+      supportStatus.className = "form-status" + (type ? " " + type : "");
+      supportStatus.textContent = message;
+    };
+
+    supportForm.addEventListener("submit", function (event) {
+      event.preventDefault();
+
+      if (!supportForm.reportValidity()) {
+        return;
+      }
+
+      var submitButton = supportForm.querySelector("button[type='submit']");
+      var payload = Object.fromEntries(new FormData(supportForm).entries());
+
+      submitButton.disabled = true;
+      setSupportStatus("Submitting your support ticket…", "");
+
+      fetch(supportForm.action, {
+        body: JSON.stringify(payload),
+        headers: { "content-type": "application/json" },
+        method: "POST"
+      })
+        .then(function (response) {
+          return response
+            .json()
+            .catch(function () {
+              return {};
+            })
+            .then(function (body) {
+              if (!response.ok) {
+                throw new Error(body.message || "Support ticket submission failed.");
+              }
+
+              return body;
+            });
+        })
+        .then(function (body) {
+          supportForm.reset();
+          setSupportStatus(
+            "Thanks — ticket " + (body.ticketId || "received") + " was submitted.",
+            "success"
+          );
+        })
+        .catch(function (error) {
+          setSupportStatus(
+            error instanceof Error
+              ? error.message
+              : "Support ticket submission failed. Please email support@linkdish.ca.",
+            "error"
+          );
+        })
+        .finally(function () {
+          submitButton.disabled = false;
+        });
+    });
+  }
 })();

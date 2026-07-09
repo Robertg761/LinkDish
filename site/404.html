@@ -3,9 +3,11 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Page not found - LinkDish</title>
-    <link rel="icon" href="assets/linkdish-icon.png" />
-    <link rel="stylesheet" href="styles.css" />
+    <meta name="theme-color" content="#ee5535" />
+    <meta name="robots" content="noindex" />
+    <title>Page not found — LinkDish</title>
+    <link rel="icon" href="/assets/linkdish-icon.png" />
+    <link rel="stylesheet" href="/styles.css" />
     <script>
       (function () {
         var match = window.location.pathname.match(/^\/invite\/([^/?#]+)\/?$/);
@@ -20,46 +22,87 @@
   </head>
   <body class="info-page">
     <a class="skip-link" href="#main-content">Skip to content</a>
-    <header class="site-header" aria-label="Primary">
-      <a class="brand" href="./" aria-label="LinkDish home">
-        <img src="assets/linkdish-icon.png" alt="" width="36" height="36" />
-        <span>LinkDish</span>
+
+    <header class="site-header" data-header>
+      <a class="brand" href="/" aria-label="LinkDish home">
+        <img src="/assets/linkdish-icon.png" alt="" width="40" height="40" />
+        <span class="brand-word">LinkDish</span>
+        <span class="brand-tag">Recipe saver</span>
       </a>
-      <nav class="site-nav" aria-label="Site navigation">
-        <a class="nav-link" href="./#how-it-works">How it works</a>
-        <a class="nav-link" href="support/">Support</a>
-        <a class="nav-button" href="https://app.linkdish.ca">Open the web app</a>
+
+      <button
+        class="menu-toggle"
+        type="button"
+        aria-expanded="false"
+        aria-controls="site-navigation"
+        data-menu-toggle
+      >
+        <span class="sr-only">Open navigation</span>
+        <span aria-hidden="true"></span>
+        <span aria-hidden="true"></span>
+      </button>
+
+      <nav
+        class="site-nav"
+        id="site-navigation"
+        aria-label="Primary navigation"
+        data-site-nav
+      >
+        <a href="/#how-it-works">How it works</a>
+        <a href="/#plans">Plans</a>
+        <a href="/support/">Support</a>
+        <a class="button button-small button-citrus" href="https://app.linkdish.ca">
+          Open LinkDish <span aria-hidden="true">↗</span>
+        </a>
       </nav>
     </header>
 
-    <main class="legal" id="main-content">
-      <div class="legal-hero">
-        <p class="section-kicker">404</p>
-        <h1>Page not found</h1>
-      </div>
-      <p>
-        The LinkDish page you were looking for is not available. It may have
-        moved, or the link might be a little overdone.
-      </p>
-      <div class="not-found-actions">
-        <a class="button button-primary" href="./">Back to home</a>
-        <a class="button button-secondary" href="support/">Get support</a>
-      </div>
+    <main class="not-found-shell" id="main-content">
+      <section class="not-found" aria-labelledby="not-found-title">
+        <p class="eyebrow eyebrow-dark">Page not found</p>
+        <h1 id="not-found-title">This one fell behind the fridge.</h1>
+        <p>
+          The page may have moved, or the link might be a little overdone. Head
+          back to the kitchen pass or ask for help.
+        </p>
+        <div class="not-found-actions">
+          <a class="button button-dark" href="/">Back to LinkDish</a>
+          <a class="button button-outline-dark" href="/support/">Get support</a>
+        </div>
+      </section>
     </main>
 
-    <footer class="site-footer">
-      <div class="footer-inner">
-        <a class="footer-brand" href="./">LinkDish</a>
-        <div class="footer-links">
-          <a href="support/">Support</a>
-          <a href="privacy/">Privacy</a>
-          <a href="mailto:support@linkdish.ca">Contact</a>
-        </div>
-        <p class="footer-note">
-          Set in Fraunces · Made in Canada · &copy; 2026 LinkDish
-        </p>
+    <footer class="site-footer inner-footer">
+      <div class="footer-brand-block">
+        <a class="brand brand-footer" href="/">
+          <img src="/assets/linkdish-icon.png" alt="" width="48" height="48" />
+          <span class="brand-word">LinkDish</span>
+        </a>
+        <p>Recipe links cleaned up for real life.</p>
+      </div>
+      <div class="footer-column">
+        <h2>Help</h2>
+        <a href="/support/">Support</a>
+        <a href="/privacy/">Privacy</a>
+        <a href="mailto:support@linkdish.ca">Contact</a>
+      </div>
+      <div class="footer-column">
+        <h2>Product</h2>
+        <a href="https://app.linkdish.ca">Open web app</a>
+        <a href="https://play.google.com/store/apps/details?id=com.linkdish.app">Android</a>
+      </div>
+      <div class="footer-bottom">
+        <span>&copy; <span data-current-year>2026</span> LinkDish</span>
+        <span>Made in Canada · Set in Fraunces</span>
       </div>
     </footer>
-    <script src="site.js" defer></script>
+
+    <aside class="mobile-cta-dock" aria-label="Get LinkDish">
+      <a href="https://app.linkdish.ca">Open web app</a>
+      <a href="https://play.google.com/store/apps/details?id=com.linkdish.app">Android</a>
+    </aside>
+
+    <script src="/site.js" defer></script>
+    <script src="/analytics.js" defer></script>
   </body>
 </html>
