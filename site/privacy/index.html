@@ -59,7 +59,7 @@
           What LinkDish handles, why it is needed, where it goes, and the choices
           you have.
         </p>
-        <p class="page-meta">Last updated · June 17, 2026</p>
+        <p class="page-meta">Last updated · July 10, 2026</p>
       </section>
 
       <div class="legal-layout">
@@ -91,18 +91,29 @@
               Recipe content returned from the extraction service, such as titles,
               ingredients, steps, and timing.
             </li>
-            <li>Recipes you choose to save after upgrading to a paid plan.</li>
+            <li>
+              Recipe photos or camera captures you choose to submit for image-based
+              recipe scanning.
+            </li>
+            <li>
+              Recipes, edits, and personal notes you choose to save. Free includes
+              up to 15 personal saved recipes; paid plans include unlimited saves.
+            </li>
+            <li>
+              Recipes, edits, and notes you add to a shared Family recipe book,
+              including the account shown as the recipe owner.
+            </li>
             <li>
               An app-generated RevenueCat app user ID used to load purchase options,
               restore purchases, and verify LinkDish paid plan entitlement status.
             </li>
             <li>
-              Purchase and subscription status returned by RevenueCat, Apple App
-              Store, or Google Play, such as whether a LinkDish Plus or Family
-              entitlement is active.
+              Purchase, subscription, and lifetime-access status returned by
+              RevenueCat, Apple App Store, Google Play, or RevenueCat Web Billing,
+              such as whether a Plus, Family, or Founding entitlement is active.
             </li>
             <li>
-              If you sign in for paid plan access or Family household sharing, your
+              If you sign in for plan access or Family household sharing, your
               account email, login code/session records, household membership, and
               household invite records.
             </li>
@@ -120,8 +131,13 @@
               extract recipe details.
             </li>
             <li>
-              Personal saved recipes require LinkDish Plus or Family and are stored
-              on your device so you can reopen them later inside the app.
+              Personal saved recipes are stored on your device so you can reopen
+              them later inside the app. Free includes up to 15 personal saves;
+              paid plans remove that save limit.
+            </li>
+            <li>
+              Shared Family recipes are stored by LinkDish so active household
+              members can view them and see who added them.
             </li>
             <li>
               The app-generated purchase ID is sent to RevenueCat and to LinkDish's
@@ -146,17 +162,20 @@
 
           <h2 id="purchases">Purchases</h2>
           <p>
-            LinkDish uses RevenueCat to manage in-app purchase offerings, purchases,
-            restores, and entitlement checks. Purchases are processed by Apple App
-            Store or Google Play through RevenueCat. LinkDish does not receive your
-            full payment card number or payment account credentials.
+            LinkDish uses RevenueCat to manage purchase offerings, purchases,
+            restores, customer-portal access, and entitlement checks. Mobile
+            purchases are processed by Apple App Store or Google Play through
+            RevenueCat. Web subscriptions and the one-time Founding offer are
+            processed through RevenueCat Web Billing and its payment processor.
+            LinkDish does not receive your full payment card number or payment
+            account credentials.
           </p>
 
           <h2 id="does-not">What LinkDish does not do</h2>
           <ul>
             <li>No account is required for the first 3 free recipe imports.</li>
             <li>
-              Sign in is required to buy or restore a paid plan and for Family
+              Sign in is required to buy or restore a plan and for Family
               household sharing.
             </li>
             <li>LinkDish does not sell your personal information.</li>
@@ -172,13 +191,15 @@
 
           <h2 id="storage">Data storage</h2>
           <p>
-            Personal recipes you save after upgrading are stored locally on your
-            device. Extracted recipe data may also pass through LinkDish's backend
+            Personal recipes you save are stored locally on your device. Shared
+            Family recipes are stored by LinkDish for household access. Extracted
+            recipe data may also pass through LinkDish's backend
             service in order to produce results and keep the service running
             reliably. The RevenueCat app user ID is stored on your device and may be
             stored by LinkDish's backend for quota checks and by RevenueCat for
-            purchase and entitlement management. Account sessions are stored on your
-            device in secure storage. Server-side account, session, invite, and
+            purchase and entitlement management. Mobile session tokens use
+            operating-system-backed secure storage; the web app uses browser storage
+            needed to keep you signed in. Server-side account, session, invite, and
             household records are stored by LinkDish's backend. First-party analytics
             records are stored by LinkDish's backend using anonymous or hashed
             identifiers.
@@ -187,20 +208,21 @@
           <h2 id="choices">Your choices</h2>
           <p>
             You can stop using the extraction service at any time by not submitting
-            links, and paid users can remove saved recipes from inside the app
-            whenever they want.
+            links or images, and you can remove personal saved recipes from inside
+            the app whenever you want.
           </p>
           <p>
-            You can manage, cancel, or restore subscriptions through the App Store or
-            Google Play account used to make the purchase. Restoring purchases asks
-            RevenueCat to check that store account for active LinkDish paid plan
-            access.
+            You can manage or restore access from LinkDish's Plans screen. Store
+            subscriptions are managed through the App Store or Google Play account
+            used to make the purchase; web subscriptions are managed through the
+            RevenueCat customer portal opened from LinkDish. Founding access is a
+            one-time purchase and does not renew.
           </p>
           <p>
             If you create a LinkDish account, you can delete it from Account in the
             app. Account deletion removes server-side account and household records,
-            but it does not cancel App Store or Google Play subscriptions. Local
-            saved recipes remain on your device.
+            but it does not cancel App Store, Google Play, or web subscriptions.
+            Local saved recipes remain on your device.
           </p>
           <p>
             If you cannot access the app and need help with deletion of data retained
