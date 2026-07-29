@@ -3,18 +3,19 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#ee5535" />
+    <meta name="theme-color" content="#f4efe7" />
     <meta name="robots" content="noindex" />
     <title>Page not found — LinkDish</title>
     <link rel="icon" href="/assets/linkdish-icon.png" />
-    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/home.css" />
+    <link rel="stylesheet" href="/info.css" />
     <script>
       (function () {
         var match = window.location.pathname.match(/^\/invite\/([^/?#]+)\/?$/);
 
         if (match) {
           window.location.replace(
-            "/invite/?code=" + encodeURIComponent(match[1])
+            "/invite/?code=" + encodeURIComponent(match[1]),
           );
         }
       })();
@@ -27,7 +28,6 @@
       <a class="brand" href="/" aria-label="LinkDish home">
         <img src="/assets/linkdish-icon.png" alt="" width="40" height="40" />
         <span class="brand-word">LinkDish</span>
-        <span class="brand-tag">Recipe saver</span>
       </a>
 
       <button
@@ -51,7 +51,10 @@
         <a href="/#how-it-works">How it works</a>
         <a href="/#plans">Plans</a>
         <a href="/support/">Support</a>
-        <a class="button button-small button-citrus" href="https://app.linkdish.ca">
+        <a
+          class="button button-small button-primary"
+          href="https://app.linkdish.ca"
+        >
           Open LinkDish <span aria-hidden="true">↗</span>
         </a>
       </nav>
@@ -59,15 +62,14 @@
 
     <main class="not-found-shell" id="main-content">
       <section class="not-found" aria-labelledby="not-found-title">
-        <p class="eyebrow eyebrow-dark">Page not found</p>
         <h1 id="not-found-title">This one fell behind the fridge.</h1>
         <p>
           The page may have moved, or the link might be a little overdone. Head
           back to the kitchen pass or ask for help.
         </p>
         <div class="not-found-actions">
-          <a class="button button-dark" href="/">Back to LinkDish</a>
-          <a class="button button-outline-dark" href="/support/">Get support</a>
+          <a class="button button-primary" href="/">Back to LinkDish</a>
+          <a class="button button-secondary" href="/support/">Get support</a>
         </div>
       </section>
     </main>
@@ -78,7 +80,7 @@
           <img src="/assets/linkdish-icon.png" alt="" width="48" height="48" />
           <span class="brand-word">LinkDish</span>
         </a>
-        <p>Recipe links cleaned up for real life.</p>
+        <p>Keep the recipe. Lose the clutter.</p>
       </div>
       <div class="footer-column">
         <h2>Help</h2>
@@ -89,7 +91,9 @@
       <div class="footer-column">
         <h2>Product</h2>
         <a href="https://app.linkdish.ca">Open web app</a>
-        <a href="https://play.google.com/store/apps/details?id=com.linkdish.app">Android</a>
+        <a href="https://play.google.com/store/apps/details?id=com.linkdish.app"
+          >Android</a
+        >
       </div>
       <div class="footer-bottom">
         <span>&copy; <span data-current-year>2026</span> LinkDish</span>
@@ -99,7 +103,9 @@
 
     <aside class="mobile-cta-dock" aria-label="Get LinkDish">
       <a href="https://app.linkdish.ca">Open web app</a>
-      <a href="https://play.google.com/store/apps/details?id=com.linkdish.app">Android</a>
+      <a href="https://play.google.com/store/apps/details?id=com.linkdish.app"
+        >Android</a
+      >
     </aside>
 
     <script src="/site.js" defer></script>
