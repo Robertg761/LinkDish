@@ -2,14 +2,26 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
     <loc>https://linkdish.ca/</loc>
-    <lastmod>2026-05-13</lastmod>
+    <lastmod>2026-07-29</lastmod>
   </url>
   <url>
     <loc>https://linkdish.ca/support/</loc>
-    <lastmod>2026-05-13</lastmod>
+    <lastmod>2026-07-29</lastmod>
   </url>
   <url>
     <loc>https://linkdish.ca/privacy/</loc>
-    <lastmod>2026-05-13</lastmod>
+    <lastmod>2026-07-29</lastmod>
+  </url>
+  <url>
+    <loc>https://linkdish.ca/recipe-saver-app/</loc>
+    <lastmod>2026-07-29</lastmod>
+  </url>
+  <url>
+    <loc>https://linkdish.ca/save-recipes-from-websites/</loc>
+    <lastmod>2026-07-29</lastmod>
+  </url>
+  <url>
+    <loc>https://linkdish.ca/paprika-alternative/</loc>
+    <lastmod>2026-07-29</lastmod>
   </url>
 </urlset>

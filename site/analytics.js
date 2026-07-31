@@ -1,4 +1,12 @@
 (function () {
+  if (
+    window.location.hostname === "localhost" ||
+    window.location.hostname === "127.0.0.1" ||
+    window.location.hostname === "::1"
+  ) {
+    return;
+  }
+
   var apiBaseUrl = "https://api.linkdish.ca";
   var clientKey = "linkdish:marketing:analytics-client-id:v1";
   var sessionKey = "linkdish:marketing:analytics-session-id:v1";

@@ -42,10 +42,16 @@ Copy the relevant example environment file before running an application:
 Start a development target:
 
 ```bash
+pnpm dev:site
 pnpm dev:web
 pnpm dev:mobile
 pnpm dev:api
 ```
+
+The static product site is served at `http://localhost:4173`; its analytics are
+disabled on localhost. `pnpm validate` also checks its internal links, metadata,
+sitemap, support form contract, and social-preview image. See
+[site/README.md](site/README.md) for website development and deployment details.
 
 Do not commit credentials, production data, or private environment files.
 

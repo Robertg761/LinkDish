@@ -1,5 +1,16 @@
 # Architecture Notes
 
+## Public Site
+
+- `site/` contains the static marketing, support, privacy, invite, and search
+  landing pages for `linkdish.ca`.
+- The site has no build step. GitHub Pages publishes only `site/` through the
+  dedicated deployment workflow.
+- The support form and first-party analytics call the API in this repository,
+  so their browser payloads and backend contracts must change together.
+- `pnpm check:site` validates local references, metadata, sitemap coverage,
+  social artwork, and the support form contract.
+
 ## Mobile
 
 - Expo Router drives navigation between the intake screen and a result preview screen.

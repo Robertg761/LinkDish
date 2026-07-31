@@ -15,6 +15,7 @@ export default tseslint.config(
       "apps/mobile/babel.config.js",
       "apps/mobile/metro.config.js",
       "apps/mobile/scripts/*.mjs",
+      "scripts/*.mjs",
       "services/extractor-api/scripts/*.mjs",
       "site/analytics.js",
       "site/site.js",

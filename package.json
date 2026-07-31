@@ -3,6 +3,8 @@
   "private": true,
   "packageManager": "pnpm@10.8.0",
   "scripts": {
+    "dev:site": "node scripts/serve-site.mjs",
+    "check:site": "node scripts/check-site.mjs",
     "dev:web": "pnpm --filter @linkdish/web dev",
     "build:web": "pnpm --filter @linkdish/web build",
     "preview:web": "pnpm --filter @linkdish/web preview",
@@ -15,7 +17,7 @@
     "test": "pnpm -r --if-present test",
     "test:mobile": "pnpm --filter @linkdish/mobile test",
     "test:api": "pnpm --filter @linkdish/extractor-api test",
-    "validate": "pnpm lint && pnpm typecheck && pnpm test",
+    "validate": "pnpm lint && pnpm typecheck && pnpm test && pnpm check:site",
     "release:mobile": "pnpm --filter @linkdish/mobile run prebuild:release && pnpm --filter @linkdish/mobile run export:release && pnpm --filter @linkdish/mobile run assert:production-clean",
     "release:api": "pnpm --filter @linkdish/extractor-api run test",
     "release:api:production": "pnpm --filter @linkdish/extractor-api run check:production",

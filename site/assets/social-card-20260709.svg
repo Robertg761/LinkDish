@@ -1,0 +1,100 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <defs>
+    <pattern id="grid" width="42" height="42" patternUnits="userSpaceOnUse">
+      <path d="M42 0H0V42" fill="none" stroke="#dfff56" stroke-opacity="0.07" />
+    </pattern>
+    <filter id="shadow" x="-30%" y="-30%" width="180%" height="180%">
+      <feDropShadow dx="12" dy="12" stdDeviation="0" flood-color="#ee5535" />
+    </filter>
+  </defs>
+
+  <rect width="1200" height="630" fill="#10231c" />
+  <rect width="1200" height="630" fill="url(#grid)" />
+
+  <g transform="translate(58 52)">
+    <rect width="54" height="54" rx="14" fill="#f4f0e5" />
+    <path
+      d="M14 30c0-8 6-14 14-14h5c6 0 10 5 10 10s-4 10-10 10h-8"
+      fill="none"
+      stroke="#10231c"
+      stroke-width="5"
+      stroke-linecap="round"
+    />
+    <path
+      d="M40 25c0 8-6 14-14 14h-5c-6 0-10-5-10-10s4-10 10-10h8"
+      fill="none"
+      stroke="#10231c"
+      stroke-width="5"
+      stroke-linecap="round"
+    />
+    <text
+      x="72"
+      y="24"
+      fill="#f4f0e5"
+      font-family="Avenir Next, Helvetica, sans-serif"
+      font-size="22"
+      font-weight="800"
+      letter-spacing="4"
+    >LINKDISH</text>
+    <text
+      x="72"
+      y="48"
+      fill="#dfff56"
+      font-family="Avenir Next, Helvetica, sans-serif"
+      font-size="11"
+      font-weight="800"
+      letter-spacing="3"
+    >RECIPE SAVER</text>
+  </g>
+
+  <g transform="translate(58 172)">
+    <text
+      fill="#f4f0e5"
+      font-family="Georgia, serif"
+      font-size="88"
+      font-weight="700"
+      letter-spacing="-5"
+    >
+      <tspan x="0" y="0">Keep the recipe.</tspan>
+      <tspan x="0" y="91" fill="#dfff56" font-style="italic">Lose the rest.</tspan>
+    </text>
+    <text
+      x="4"
+      y="224"
+      fill="#f4f0e5"
+      fill-opacity="0.78"
+      font-family="Avenir Next, Helvetica, sans-serif"
+      font-size="24"
+    >
+      <tspan x="4" dy="0">Any recipe link becomes a clean cookbook entry —</tspan>
+      <tspan x="4" dy="35">ready to save, cook, scale, and shop.</tspan>
+    </text>
+  </g>
+
+  <g transform="translate(812 90) rotate(3)" filter="url(#shadow)">
+    <rect width="318" height="452" fill="#fffdf7" />
+    <path d="M0 452l12-10 12 10 12-10 12 10 12-10 12 10 12-10 12 10 12-10 12 10 12-10 12 10 12-10 12 10 12-10 12 10 12-10 12 10 12-10 12 10 12-10 12 10 12-10 12 10 12-10 12 10 12-10 12 10" fill="#fffdf7" />
+    <text x="28" y="38" fill="#10231c" font-family="Avenir Next, Helvetica, sans-serif" font-size="10" font-weight="800" letter-spacing="2">LINKDISH · SAVED</text>
+    <text x="214" y="38" fill="#10231c" font-family="Avenir Next, Helvetica, sans-serif" font-size="10" font-weight="800" letter-spacing="1">ORDER 042</text>
+    <path d="M28 56h262" stroke="#10231c" stroke-dasharray="5 4" />
+    <text x="28" y="91" fill="#ee5535" font-family="Avenir Next, Helvetica, sans-serif" font-size="11" font-weight="800" letter-spacing="3">RECIPE</text>
+    <text x="28" y="139" fill="#10231c" font-family="Georgia, serif" font-size="37" font-weight="700" letter-spacing="-2">Brown Butter</text>
+    <text x="28" y="178" fill="#10231c" font-family="Georgia, serif" font-size="37" font-weight="700" letter-spacing="-2">Berry Oat Bars</text>
+    <text x="28" y="210" fill="#10231c" fill-opacity="0.68" font-family="Avenir Next, Helvetica, sans-serif" font-size="13" font-weight="700">9 bars · Prep 15 min · Cook 38 min</text>
+    <path d="M28 234h262" stroke="#10231c" stroke-dasharray="5 4" />
+    <circle cx="35" cy="270" r="5" fill="none" stroke="#10231c" />
+    <circle cx="35" cy="306" r="5" fill="none" stroke="#10231c" />
+    <circle cx="35" cy="342" r="5" fill="none" stroke="#10231c" />
+    <text x="54" y="275" fill="#10231c" font-family="Avenir Next, Helvetica, sans-serif" font-size="16" font-weight="700">Brown butter</text>
+    <text x="54" y="311" fill="#10231c" font-family="Avenir Next, Helvetica, sans-serif" font-size="16" font-weight="700">Rolled oats</text>
+    <text x="54" y="347" fill="#10231c" font-family="Avenir Next, Helvetica, sans-serif" font-size="16" font-weight="700">Mixed berries</text>
+    <rect x="28" y="379" width="262" height="45" fill="#10231c" />
+    <text x="56" y="407" fill="#f4f0e5" font-family="Avenir Next, Helvetica, sans-serif" font-size="12" font-weight="800" letter-spacing="2">READY FOR THE KITCHEN</text>
+  </g>
+
+  <g transform="translate(58 552)">
+    <rect width="170" height="35" fill="#dfff56" />
+    <text x="85" y="23" text-anchor="middle" fill="#10231c" font-family="Avenir Next, Helvetica, sans-serif" font-size="11" font-weight="900" letter-spacing="2">ANDROID + WEB</text>
+    <text x="192" y="23" fill="#f4f0e5" fill-opacity="0.65" font-family="Avenir Next, Helvetica, sans-serif" font-size="12" font-weight="700">LINKDISH.CA</text>
+  </g>
+</svg>
