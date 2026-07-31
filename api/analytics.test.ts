@@ -72,9 +72,26 @@ describe("Vercel analytics adapter", () => {
     const response = await analyticsApi.POST(request());
 
     expect(response.status).toBe(200);
+    expect(response.headers.get("access-control-allow-credentials")).toBe("true");
     await expect(response.json()).resolves.toEqual({ accepted: 1 });
     expect(mocks.checkPublicEndpointRateLimit).toHaveBeenCalledOnce();
     expect(mocks.writeAnalyticsEvents).toHaveBeenCalledOnce();
+  });
+
+  it("allows credentialed web analytics preflights", async () => {
+    const analyticsApi = await import("./analytics.js");
+    const response = analyticsApi.OPTIONS(
+      new Request("https://api.linkdish.ca/analytics/events", {
+        headers: {
+          origin: "https://linkdish.ca"
+        },
+        method: "OPTIONS"
+      })
+    );
+
+    expect(response.status).toBe(204);
+    expect(response.headers.get("access-control-allow-origin")).toBe("https://linkdish.ca");
+    expect(response.headers.get("access-control-allow-credentials")).toBe("true");
   });
 
   it("rejects events over the network limit", async () => {

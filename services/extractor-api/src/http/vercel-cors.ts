@@ -15,6 +15,7 @@ const getAllowedOrigin = (request: Request): string => {
 };
 
 export const getCorsHeaders = (request: Request): Record<string, string> => ({
+  "access-control-allow-credentials": "true",
   "access-control-allow-headers":
     "authorization, content-type, x-linkdish-client-id, x-linkdish-platform, x-linkdish-session-id",
   "access-control-allow-methods": "DELETE, GET, OPTIONS, PATCH, POST",
