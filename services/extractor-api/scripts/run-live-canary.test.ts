@@ -62,10 +62,28 @@ type RunLiveCanary = (input: {
   };
 }>;
 
+type ResolveCanaryTimeoutMs = (rawTimeoutMs?: string) => number;
+
 const validateManifestEntry = (canaryModule as { validateManifestEntry: ValidateManifestEntry })
   .validateManifestEntry;
 const preflightEntry = (canaryModule as { preflightEntry: PreflightEntry }).preflightEntry;
 const runLiveCanary = (canaryModule as { runLiveCanary: RunLiveCanary }).runLiveCanary;
+const resolveCanaryTimeoutMs = (
+  canaryModule as { resolveCanaryTimeoutMs: ResolveCanaryTimeoutMs }
+).resolveCanaryTimeoutMs;
+
+describe("resolveCanaryTimeoutMs", () => {
+  it("accepts a positive integer override", () => {
+    expect(resolveCanaryTimeoutMs("45000")).toBe(45_000);
+  });
+
+  it.each(["", "0", "-1", "1.5", "not-a-number"])(
+    "falls back to the default for %j",
+    (value) => {
+      expect(resolveCanaryTimeoutMs(value)).toBe(20_000);
+    }
+  );
+});
 
 describe("validateManifestEntry", () => {
   it("marks final URL drift distinctly", () => {

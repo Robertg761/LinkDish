@@ -60,6 +60,8 @@ declare module "./run-live-canary.mjs" {
     fetchImplementation?: typeof fetch;
   }): Promise<LiveCanaryPreflightResult>;
 
+  export function resolveCanaryTimeoutMs(rawTimeoutMs?: string): number;
+
   export function runLiveCanary(input: {
     manifestPath: string;
     baseUrl?: string;

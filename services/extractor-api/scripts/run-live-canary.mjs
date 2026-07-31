@@ -43,6 +43,18 @@ const toTimedOutFailure = (userMessage) => ({
 const buildRegex = (pattern) => (pattern ? new RegExp(pattern, "i") : null);
 const blockedStatusCodes = new Set([401, 402, 403, 429, 451]);
 
+export const resolveCanaryTimeoutMs = (
+  rawTimeoutMs = process.env.LINKDISH_CANARY_TIMEOUT_MS
+) => {
+  if (rawTimeoutMs == null || rawTimeoutMs.trim() === "") {
+    return defaultTimeoutMs;
+  }
+
+  const timeoutMs = Number(rawTimeoutMs);
+
+  return Number.isSafeInteger(timeoutMs) && timeoutMs > 0 ? timeoutMs : defaultTimeoutMs;
+};
+
 const resolveCanaryBaseUrl = () =>
   process.env.LINKDISH_CANARY_BASE_URL ??
   process.env.LINKDISH_PRODUCTION_API_BASE_URL ??
@@ -254,7 +266,7 @@ export const runLiveCanary = async ({
   billingClientId = process.env.LINKDISH_CANARY_CLIENT_ID,
   billingProvider = process.env.LINKDISH_CANARY_BILLING_PROVIDER ?? "revenuecat",
   headers = {},
-  timeoutMs = defaultTimeoutMs,
+  timeoutMs = resolveCanaryTimeoutMs(),
   fetchImplementation = fetch
 }) => {
   const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
