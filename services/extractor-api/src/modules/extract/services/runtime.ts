@@ -8,6 +8,7 @@ import {
   fetchYouTubeDocument
 } from "../fetchers/index.js";
 import { looksLikeShellHtml, looksLikeThinHtml } from "../fetchers/shared.js";
+import { hasUsableRecipeStructuredData } from "../source-detection/detect-source-type.js";
 import { parseYouTubeVideoId } from "../source-detection/parse-youtube-video-id.js";
 import { validatePublicSourceUrl } from "../source-url-safety.js";
 import {
@@ -19,6 +20,22 @@ import type { ExtractorRuntime, FetchResult, YouTubeSourceDocument } from "../ty
 
 const fetchImplementation = fetch;
 let sharedRuntime: ExtractorRuntime | null = null;
+
+export const shouldUseBrowserFallback = ({
+  available,
+  blockedSignals,
+  html
+}: {
+  available: boolean;
+  blockedSignals: string[];
+  html: string;
+}): boolean => {
+  if (!available || hasUsableRecipeStructuredData(html)) {
+    return false;
+  }
+
+  return blockedSignals.length > 0 || looksLikeShellHtml(html) || looksLikeThinHtml(html);
+};
 
 export const createDefaultExtractorRuntime = (): ExtractorRuntime => {
   const browserFetcher = createBrowserFetcher({
@@ -37,10 +54,11 @@ export const createDefaultExtractorRuntime = (): ExtractorRuntime => {
         });
 
         if (
-          browserFetcher.available &&
-          (httpResult.blockedSignals.length > 0 ||
-            looksLikeShellHtml(httpResult.document.html) ||
-            looksLikeThinHtml(httpResult.document.html))
+          shouldUseBrowserFallback({
+            available: browserFetcher.available,
+            blockedSignals: httpResult.blockedSignals,
+            html: httpResult.document.html
+          })
         ) {
           return browserFetcher.fetch(url);
         }

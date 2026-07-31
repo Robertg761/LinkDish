@@ -8,8 +8,17 @@ import type { DetectionResult, HtmlSourceDocument } from "../types.js";
 const socialHosts = ["instagram.com", "tiktok.com", "facebook.com"];
 const videoHosts = ["vimeo.com", "dailymotion.com", "twitch.tv"];
 
-const hasRecipeJsonLd = (html: string): boolean => /"@type"\s*:\s*"Recipe"/i.test(html);
+const hasRecipeJsonLd = (html: string): boolean =>
+  /"@type"\s*:\s*(?:"Recipe"|\[[^\]]*"Recipe")/i.test(html);
 const hasRecipeMicrodata = (html: string): boolean => /itemtype\s*=\s*["'][^"']*Recipe/i.test(html);
+
+export const hasUsableRecipeStructuredData = (html: string): boolean =>
+  (hasRecipeJsonLd(html) &&
+    /"recipeIngredient"\s*:\s*\[\s*(?:"|\{)/i.test(html) &&
+    /"recipeInstructions"\s*:\s*(?:\[\s*(?:"|\{)|"(?:[^"\\]|\\.)+")/i.test(html)) ||
+  (hasRecipeMicrodata(html) &&
+    /itemprop\s*=\s*["'][^"']*recipeIngredient/i.test(html) &&
+    /itemprop\s*=\s*["'][^"']*recipeInstructions/i.test(html));
 
 const hasStrongRecipeDomSignals = (document: HtmlSourceDocument): boolean => {
   const $ = load(document.html);
