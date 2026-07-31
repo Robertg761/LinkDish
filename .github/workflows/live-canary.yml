@@ -1,0 +1,152 @@
+name: Live Canary
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "Override the production API base URL for this canary run."
+        required: false
+        default: ""
+  schedule:
+    - cron: "0 14 * * 1"
+
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          version: 10.8.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run live canary
+        id: canary
+        env:
+          LINKDISH_CANARY_BASE_URL: ${{ inputs.base_url || 'https://api.linkdish.ca' }}
+          LINKDISH_CANARY_AUTH_TOKEN: ${{ secrets.LINKDISH_CANARY_AUTH_TOKEN }}
+        run: pnpm canary:live
+
+      - name: Upload canary artifacts
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: live-canary-results
+          path: services/extractor-api/.artifacts/live-canary/*.json
+          retention-days: 7
+
+      - name: Report live canary failure
+        if: failure() && steps.canary.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            const fs = require("node:fs");
+            const path = require("node:path");
+
+            const { owner, repo } = context.repo;
+            const title = "Live canary failing";
+            const label = "live-canary";
+            const runUrl = `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`;
+
+            const readSummary = () => {
+              const artifactsDir = path.join(
+                process.env.GITHUB_WORKSPACE,
+                "services/extractor-api/.artifacts/live-canary"
+              );
+
+              try {
+                const files = fs
+                  .readdirSync(artifactsDir)
+                  .filter((file) => file.endsWith(".json"))
+                  .map((file) => {
+                    const filePath = path.join(artifactsDir, file);
+                    return { file, filePath, mtimeMs: fs.statSync(filePath).mtimeMs };
+                  })
+                  .sort((left, right) => right.mtimeMs - left.mtimeMs);
+
+                if (files.length === 0) {
+                  return "No live canary results JSON was found.";
+                }
+
+                const payload = JSON.parse(fs.readFileSync(files[0].filePath, "utf8"));
+                const summary = payload.summary;
+
+                if (!summary) {
+                  return `Results file: ${files[0].file}. Summary counts were not present.`;
+                }
+
+                return [
+                  `Results file: ${files[0].file}`,
+                  [
+                    `total=${summary.total ?? "n/a"}`,
+                    `passed=${summary.passed ?? "n/a"}`,
+                    `failed=${summary.failed ?? "n/a"}`,
+                    `manifestDrift=${summary.manifestDrift ?? "n/a"}`,
+                    `outcomeFailures=${summary.outcomeFailures ?? "n/a"}`
+                  ].join(", ")
+                ].join("\n");
+              } catch (error) {
+                return `Could not read live canary results JSON: ${error.message}`;
+              }
+            };
+
+            try {
+              try {
+                await github.rest.issues.getLabel({ owner, repo, name: label });
+              } catch (error) {
+                if (error.status !== 404) {
+                  throw error;
+                }
+
+                await github.rest.issues.createLabel({
+                  owner,
+                  repo,
+                  name: label,
+                  color: "d73a4a",
+                  description: "Live canary workflow failures"
+                });
+              }
+
+              const { data: issues } = await github.rest.issues.listForRepo({
+                owner,
+                repo,
+                state: "open",
+                labels: label,
+                per_page: 100
+              });
+              let issue = issues.find((candidate) => candidate.title === title);
+
+              if (!issue) {
+                const created = await github.rest.issues.create({
+                  owner,
+                  repo,
+                  title,
+                  labels: [label],
+                  body: "Automated tracking issue for weekly Live Canary failures."
+                });
+                issue = created.data;
+              }
+
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: issue.number,
+                body: [`Live Canary failed: ${runUrl}`, "", readSummary()].join("\n")
+              });
+            } catch (error) {
+              core.warning(`Could not report Live Canary failure: ${error.message}`);
+            }

@@ -1,0 +1,63 @@
+{
+  "cli": {
+    "version": ">= 16.16.0",
+    "appVersionSource": "local"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "environment": "development",
+      "env": {
+        "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_test_a25vd24tc2hhZC0zNi5jbGVyay5hY2NvdW50cy5kZXYk",
+        "EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY": "goog_sCjpBFqrTYRrYYXTVluyJCTzGlQ",
+        "EXPO_PUBLIC_REVENUECAT_ENTITLEMENT_ID": "Plus",
+        "EXPO_PUBLIC_REVENUECAT_PLUS_ENTITLEMENT_ID": "Plus",
+        "EXPO_PUBLIC_REVENUECAT_FAMILY_ENTITLEMENT_ID": "Family",
+        "EXPO_PUBLIC_REVENUECAT_PLUS_PRODUCT_IDS": "linkdish_plus",
+        "EXPO_PUBLIC_REVENUECAT_FAMILY_PRODUCT_IDS": "linkdish_family"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "environment": "preview",
+      "env": {
+        "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_test_a25vd24tc2hhZC0zNi5jbGVyay5hY2NvdW50cy5kZXYk",
+        "EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY": "goog_sCjpBFqrTYRrYYXTVluyJCTzGlQ",
+        "EXPO_PUBLIC_REVENUECAT_ENTITLEMENT_ID": "Plus",
+        "EXPO_PUBLIC_REVENUECAT_PLUS_ENTITLEMENT_ID": "Plus",
+        "EXPO_PUBLIC_REVENUECAT_FAMILY_ENTITLEMENT_ID": "Family",
+        "EXPO_PUBLIC_REVENUECAT_PLUS_PRODUCT_IDS": "linkdish_plus",
+        "EXPO_PUBLIC_REVENUECAT_FAMILY_PRODUCT_IDS": "linkdish_family"
+      }
+    },
+    "production": {
+      "environment": "production",
+      "env": {
+        "EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY": "goog_sCjpBFqrTYRrYYXTVluyJCTzGlQ",
+        "EXPO_PUBLIC_REVENUECAT_ENTITLEMENT_ID": "Plus",
+        "EXPO_PUBLIC_REVENUECAT_PLUS_ENTITLEMENT_ID": "Plus",
+        "EXPO_PUBLIC_REVENUECAT_FAMILY_ENTITLEMENT_ID": "Family",
+        "EXPO_PUBLIC_REVENUECAT_PLUS_PRODUCT_IDS": "linkdish_plus",
+        "EXPO_PUBLIC_REVENUECAT_FAMILY_PRODUCT_IDS": "linkdish_family"
+      }
+    }
+  },
+  "submit": {
+    "internal": {
+      "android": {
+        "track": "internal"
+      }
+    },
+    "closed": {
+      "android": {
+        "track": "alpha"
+      }
+    },
+    "production": {
+      "android": {
+        "track": "production"
+      }
+    }
+  }
+}

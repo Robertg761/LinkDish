@@ -1,0 +1,178 @@
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  min-height: 100dvh;
+  background: transparent;
+  position: relative;
+}
+
+.app-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 90;
+  display: grid;
+  grid-template-columns: 40px minmax(110px, auto) minmax(0, 1fr) auto auto auto;
+  align-items: center;
+  gap: 6px;
+  min-height: calc(58px + env(safe-area-inset-top));
+  padding: calc(8px + env(safe-area-inset-top)) 12px 8px;
+  background: rgba(251, 247, 240, 0.88);
+  border-bottom: 1px solid var(--color-topbar-border);
+  box-shadow: var(--shadow-topbar);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.app-topbar-destination {
+  grid-template-columns: minmax(110px, auto) minmax(0, 1fr) auto auto auto;
+}
+
+.app-nav-btn {
+  min-width: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-muted);
+  font: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast),
+    opacity var(--transition-fast),
+    transform var(--transition-fast);
+}
+
+.app-wordmark-btn {
+  min-width: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-muted);
+  font-family: var(--font-family-serif);
+  font-size: 18px;
+  font-weight: 600;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast),
+    opacity var(--transition-fast),
+    transform var(--transition-fast);
+}
+
+.app-nav-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 40px;
+  min-width: 40px;
+  padding: 0 10px;
+}
+
+.app-wordmark-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  height: 40px;
+  padding: 0 6px;
+}
+
+.app-nav-btn:disabled {
+  color: var(--color-muted);
+  cursor: default;
+  opacity: 0.42;
+}
+
+.app-nav-btn:not(:disabled):active {
+  transform: scale(0.94);
+}
+
+.app-nav-btn:not(:disabled):hover,
+.app-wordmark-btn:hover {
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+}
+
+.app-wordmark-btn:active {
+  transform: scale(0.97);
+}
+
+.app-nav-btn-active {
+  color: var(--color-accent);
+}
+
+.app-nav-btn-save-bounce {
+  animation: app-nav-save-bounce 240ms ease-out both;
+  color: var(--color-accent);
+}
+
+.app-topbar-spacer {
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.app-shell-content {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+@media (max-width: 360px) {
+  .app-topbar {
+    grid-template-columns: 38px minmax(96px, auto) minmax(0, 1fr) 38px 38px 38px;
+    gap: 4px;
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+
+  .app-topbar-destination {
+    grid-template-columns: minmax(96px, auto) minmax(0, 1fr) 38px 38px 38px;
+  }
+
+  .app-nav-btn {
+    width: 38px;
+    height: 38px;
+  }
+
+  .app-wordmark-btn {
+    height: 38px;
+    padding: 0 4px;
+    font-size: 17px;
+  }
+}
+
+@keyframes app-nav-save-bounce {
+  0% {
+    transform: scale(1);
+  }
+
+  38% {
+    transform: scale(1.05);
+  }
+
+  100% {
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-nav-btn-save-bounce {
+    animation: none;
+    transform: none;
+  }
+}
+
+.app-nav-btn-label {
+  font-size: 0.88rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+@media (max-width: 560px) {
+  .app-nav-btn-label {
+    display: none;
+  }
+}

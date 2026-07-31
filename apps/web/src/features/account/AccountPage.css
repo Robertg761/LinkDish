@@ -1,0 +1,411 @@
+.account-page {
+  padding: 20px 20px 80px 20px;
+  max-width: var(--max-width-content);
+  margin: 0 auto;
+}
+
+.account-loading {
+  font-family: var(--font-family-sans);
+  color: var(--color-muted);
+  text-align: center;
+  padding: 60px 0;
+  font-size: 16px;
+}
+
+.account-profile-container,
+.account-login-container {
+  max-width: 480px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+}
+
+.profile-card,
+.login-card {
+  padding: 20px;
+  gap: 16px;
+  border-radius: var(--radius-card);
+}
+
+.profile-card {
+  align-items: center;
+  text-align: center;
+}
+
+.profile-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  border-bottom: none;
+  padding-bottom: 0;
+  width: 100%;
+}
+
+.profile-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  font-weight: 700;
+  background-color: var(--color-accent-soft);
+  color: var(--color-accent);
+  width: 58px;
+  height: 58px;
+  border-radius: 18px;
+  border: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.profile-details {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  width: 100%;
+}
+
+.profile-name {
+  font-family: var(--font-family-serif);
+  font-size: 22px;
+  font-weight: normal;
+  line-height: 28px;
+  margin: 0;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.profile-email {
+  font-family: var(--font-family-sans);
+  color: var(--color-muted);
+  font-size: 14px;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.profile-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+  margin-top: 14px;
+}
+
+.emoji-picker-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  align-items: center;
+}
+
+.emoji-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  width: 100%;
+}
+
+.emoji-option {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1;
+  background-color: var(--color-canvas);
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  width: 44px;
+  height: 44px;
+  font-size: 24px;
+  cursor: pointer;
+  transition:
+    transform 100ms ease,
+    background-color 150ms ease,
+    border-color 150ms ease;
+  -webkit-tap-highlight-color: transparent;
+  padding: 0;
+}
+
+.emoji-option:active:not(:disabled) {
+  transform: scale(0.97);
+  opacity: 0.72;
+}
+
+.emoji-option.selected {
+  background-color: var(--color-accent-soft);
+  border-color: var(--color-accent);
+}
+
+.emoji-option:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.custom-emoji-input-wrapper {
+  margin-top: 10px;
+  width: 100%;
+}
+
+.profile-save-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin-top: 8px;
+}
+
+.profile-saved-message {
+  font-family: var(--font-family-sans);
+  font-size: 14px;
+  color: var(--color-muted);
+  margin: 0;
+}
+
+.profile-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.section-label {
+  font-family: var(--font-family-sans);
+  color: var(--color-accent);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+  margin: 0;
+}
+
+.plan-badge-container {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background-color: var(--color-surface-subtle);
+  padding: 16px;
+  border: none;
+  border-radius: var(--radius-card);
+  text-align: left;
+}
+
+.plan-chip {
+  align-self: flex-start;
+}
+
+.plan-description {
+  font-family: var(--font-family-sans);
+  font-size: 14px;
+  color: var(--color-text);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.account-links-card {
+  align-items: stretch;
+  text-align: left;
+}
+
+.account-utility-links {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+
+.account-utility-link {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) 20px;
+  align-items: center;
+  gap: 10px;
+  min-height: 56px;
+  padding: 10px 8px;
+  border-radius: var(--radius-sm);
+  color: var(--color-muted);
+  text-decoration: none;
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.account-utility-link:hover {
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+  text-decoration: none;
+}
+
+.account-utility-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-subtle);
+  color: var(--color-accent);
+}
+
+.account-utility-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.account-utility-label {
+  color: var(--color-text);
+  font-family: var(--font-family-sans);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.account-utility-description {
+  overflow: hidden;
+  color: var(--color-muted);
+  font-family: var(--font-family-sans);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-signout-action {
+  width: 100%;
+  margin-top: 8px;
+}
+
+.danger-zone-trigger {
+  display: flex;
+  justify-content: center;
+  margin-top: 8px;
+}
+
+.text-danger-btn {
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-xs);
+  font-family: var(--font-family-sans);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-danger);
+  cursor: pointer;
+  padding: 8px;
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.text-danger-btn:hover {
+  background-color: var(--color-danger-bg-hover);
+  color: var(--color-danger-hover);
+}
+
+.delete-confirm-card {
+  border: 1px solid var(--color-danger-border);
+  gap: 16px;
+}
+
+.delete-title {
+  color: var(--color-danger);
+  font-size: 18px;
+  font-family: var(--font-family-serif);
+  margin: 0;
+}
+
+.delete-warning {
+  font-family: var(--font-family-sans);
+  font-size: 14px;
+  color: var(--color-muted);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.delete-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.delete-actions {
+  display: flex;
+  gap: 12px;
+}
+
+.login-title {
+  font-family: var(--font-family-serif);
+  font-size: 31px;
+  font-weight: normal;
+  text-align: center;
+  color: var(--color-text);
+  margin: 0;
+}
+
+.login-subtitle {
+  font-family: var(--font-family-sans);
+  color: var(--color-muted);
+  font-size: 15px;
+  text-align: center;
+  margin: -6px 0 6px 0;
+  line-height: 1.5;
+}
+
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.login-code-sent-msg {
+  font-family: var(--font-family-sans);
+  font-size: 14px;
+  color: var(--color-text);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.login-actions-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sso-divider-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  width: 100%;
+  margin: 8px 0;
+}
+
+.sso-divider-line {
+  flex: 1;
+  height: 1px;
+  background-color: var(--color-border);
+}
+
+.sso-divider-text {
+  font-family: var(--font-family-sans);
+  font-size: 13px;
+  color: var(--color-muted);
+  font-weight: 600;
+}
+
+.sso-config-message {
+  font-family: var(--font-family-sans);
+  font-size: 13px;
+  color: var(--color-muted);
+  line-height: 1.45;
+  margin: -4px 0 0;
+  text-align: center;
+}

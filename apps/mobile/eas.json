@@ -1,0 +1,73 @@
+{
+  "cli": {
+    "version": ">= 16.16.0",
+    "appVersionSource": "local"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "environment": "development",
+      "env": {
+        "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_test_a25vd24tc2hhZC0zNi5jbGVyay5hY2NvdW50cy5kZXYk",
+        "EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY": "goog_sCjpBFqrTYRrYYXTVluyJCTzGlQ",
+        "EXPO_PUBLIC_REVENUECAT_ENTITLEMENT_ID": "Plus",
+        "EXPO_PUBLIC_ENABLE_LOCAL_PLAN_PREVIEW": "true",
+        "EXPO_PUBLIC_REVENUECAT_PLUS_ENTITLEMENT_ID": "Plus",
+        "EXPO_PUBLIC_REVENUECAT_FAMILY_ENTITLEMENT_ID": "Family",
+        "EXPO_PUBLIC_REVENUECAT_PLUS_PRODUCT_IDS": "linkdish_plus",
+        "EXPO_PUBLIC_REVENUECAT_FAMILY_PRODUCT_IDS": "linkdish_family",
+        "ORG_GRADLE_PROJECT_reactNativeArchitectures": "armeabi-v7a,arm64-v8a,x86,x86_64"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "environment": "preview",
+      "env": {
+        "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_test_a25vd24tc2hhZC0zNi5jbGVyay5hY2NvdW50cy5kZXYk",
+        "EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY": "goog_sCjpBFqrTYRrYYXTVluyJCTzGlQ",
+        "EXPO_PUBLIC_REVENUECAT_ENTITLEMENT_ID": "Plus",
+        "EXPO_PUBLIC_ENABLE_LOCAL_PLAN_PREVIEW": "false",
+        "EXPO_PUBLIC_REVENUECAT_PLUS_ENTITLEMENT_ID": "Plus",
+        "EXPO_PUBLIC_REVENUECAT_FAMILY_ENTITLEMENT_ID": "Family",
+        "EXPO_PUBLIC_REVENUECAT_PLUS_PRODUCT_IDS": "linkdish_plus",
+        "EXPO_PUBLIC_REVENUECAT_FAMILY_PRODUCT_IDS": "linkdish_family",
+        "ORG_GRADLE_PROJECT_reactNativeArchitectures": "armeabi-v7a,arm64-v8a,x86,x86_64"
+      }
+    },
+    "production": {
+      "environment": "production",
+      "env": {
+        "EXPO_PUBLIC_ENABLE_DEBUG_HOUSEHOLD_SIMULATOR": "false",
+        "EXPO_PUBLIC_ENABLE_LOCAL_PLAN_PREVIEW": "false",
+        "EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY": "goog_sCjpBFqrTYRrYYXTVluyJCTzGlQ",
+        "EXPO_PUBLIC_REVENUECAT_ENTITLEMENT_ID": "Plus",
+        "EXPO_PUBLIC_REVENUECAT_PLUS_ENTITLEMENT_ID": "Plus",
+        "EXPO_PUBLIC_REVENUECAT_FAMILY_ENTITLEMENT_ID": "Family",
+        "EXPO_PUBLIC_REVENUECAT_PLUS_PRODUCT_IDS": "linkdish_plus",
+        "EXPO_PUBLIC_REVENUECAT_FAMILY_PRODUCT_IDS": "linkdish_family",
+        "ORG_GRADLE_PROJECT_reactNativeArchitectures": "armeabi-v7a,arm64-v8a,x86,x86_64"
+      }
+    }
+  },
+  "submit": {
+    "internal": {
+      "android": {
+        "applicationId": "com.linkdish.app",
+        "track": "internal"
+      }
+    },
+    "closed": {
+      "android": {
+        "applicationId": "com.linkdish.app",
+        "track": "alpha"
+      }
+    },
+    "production": {
+      "android": {
+        "applicationId": "com.linkdish.app",
+        "track": "production"
+      }
+    }
+  }
+}

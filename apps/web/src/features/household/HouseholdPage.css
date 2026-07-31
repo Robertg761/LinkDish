@@ -1,0 +1,158 @@
+.household-page {
+  margin: 32px auto;
+}
+
+.household-header {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.household-header h1,
+.household-empty-card h1 {
+  font-family: var(--font-family-serif);
+  font-size: 34px;
+  font-weight: 500;
+  line-height: 40px;
+  margin: 0;
+}
+
+.household-header p,
+.household-empty-card p,
+.household-card p {
+  color: var(--color-muted);
+  font-family: var(--font-family-sans);
+  line-height: 22px;
+  margin: 0;
+}
+
+.household-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.household-card,
+.household-empty-card {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.household-card h2,
+.household-card h3 {
+  font-family: var(--font-family-serif);
+  font-weight: 500;
+  margin: 0;
+}
+
+.household-card-header {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.household-member-list,
+.household-pending-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.household-member-row,
+.household-pending-row,
+.household-invite-share {
+  align-items: center;
+  background: var(--color-surface-subtle);
+  border-radius: var(--radius-card);
+  display: flex;
+  gap: 12px;
+  padding: 12px;
+}
+
+.household-avatar {
+  align-items: center;
+  background: var(--color-accent-soft);
+  border-radius: 999px;
+  color: var(--color-accent);
+  display: flex;
+  flex: 0 0 auto;
+  font-weight: 800;
+  height: 44px;
+  justify-content: center;
+  width: 44px;
+}
+
+.household-member-copy {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.household-member-copy strong,
+.household-pending-row span:first-child,
+.household-invite-share strong {
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.household-member-copy span,
+.household-pending-row span,
+.household-invite-share span {
+  color: var(--color-muted);
+  font-size: 13px;
+}
+
+.household-form {
+  align-items: flex-start;
+  display: flex;
+  gap: 10px;
+}
+
+.household-form .field-container {
+  flex: 1;
+}
+
+.household-invite-share {
+  justify-content: space-between;
+}
+
+.household-invite-share div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.household-invite-share code {
+  color: var(--color-accent);
+  font-family: var(--font-family-mono, monospace);
+  font-size: 14px;
+  word-break: break-all;
+}
+
+.household-loading {
+  color: var(--color-muted);
+  font-family: var(--font-family-sans);
+}
+
+.household-footer-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
+@media (max-width: 720px) {
+  .household-form,
+  .household-member-row,
+  .household-pending-row,
+  .household-invite-share {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}

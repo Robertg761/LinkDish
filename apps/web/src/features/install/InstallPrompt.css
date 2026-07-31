@@ -1,0 +1,82 @@
+.install-prompt-card {
+  padding: 16px;
+  max-width: 480px;
+  margin: 16px auto;
+  gap: 12px;
+  position: relative;
+  width: 100%;
+}
+
+.install-prompt-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.install-prompt-icon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+}
+
+.install-prompt-text-container {
+  flex: 1;
+  min-width: 0;
+}
+
+.install-prompt-title {
+  font-family: var(--font-family-serif);
+  font-size: 16px;
+  font-weight: normal;
+  margin: 0 0 2px 0;
+  color: var(--color-text);
+}
+
+.install-prompt-desc {
+  font-family: var(--font-family-sans);
+  font-size: 13px;
+  color: var(--color-muted);
+  margin: 0;
+  line-height: 1.4;
+}
+
+.install-prompt-close {
+  background: transparent;
+  border: none;
+  color: var(--color-muted);
+  cursor: pointer;
+  padding: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  transition: background-color 100ms ease;
+}
+
+.install-prompt-close:hover {
+  background-color: var(--color-surface-muted);
+}
+
+.install-prompt-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.install-ios-instructions {
+  font-family: var(--font-family-sans);
+  font-size: 14px;
+  color: var(--color-text);
+  background: var(--color-background);
+  padding: 10px 14px;
+  border-radius: 12px;
+  width: 100%;
+  margin: 0;
+  line-height: 1.4;
+}
+
+.share-icon {
+  font-weight: bold;
+  font-size: 16px;
+}

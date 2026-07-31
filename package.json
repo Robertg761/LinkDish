@@ -1,0 +1,82 @@
+{
+  "name": "linkdish",
+  "private": true,
+  "packageManager": "pnpm@10.8.0",
+  "scripts": {
+    "dev:web": "pnpm --filter @linkdish/web dev",
+    "build:web": "pnpm --filter @linkdish/web build",
+    "preview:web": "pnpm --filter @linkdish/web preview",
+    "test:web": "pnpm --filter @linkdish/web test",
+    "typecheck:web": "pnpm --filter @linkdish/web typecheck",
+    "dev:mobile": "pnpm --filter @linkdish/mobile dev",
+    "dev:api": "pnpm --filter @linkdish/extractor-api dev",
+    "lint": "eslint .",
+    "typecheck": "pnpm -r --if-present typecheck && tsc -p tsconfig.json --noEmit",
+    "test": "pnpm -r --if-present test",
+    "test:mobile": "pnpm --filter @linkdish/mobile test",
+    "test:api": "pnpm --filter @linkdish/extractor-api test",
+    "validate": "pnpm lint && pnpm typecheck && pnpm test",
+    "release:mobile": "pnpm --filter @linkdish/mobile run prebuild:release && pnpm --filter @linkdish/mobile run export:release && pnpm --filter @linkdish/mobile run assert:production-clean",
+    "release:api": "pnpm --filter @linkdish/extractor-api run test",
+    "release:api:production": "pnpm --filter @linkdish/extractor-api run check:production",
+    "release:check": "pnpm validate && pnpm release:mobile && pnpm release:api && pnpm release:api:production",
+    "play:android:build": "pnpm --filter @linkdish/mobile run build:android:playstore",
+    "play:android:submit:closed": "pnpm --filter @linkdish/mobile run submit:android:closed",
+    "play:android:submit:internal": "pnpm --filter @linkdish/mobile run submit:android:internal",
+    "play:android:submit:production": "pnpm --filter @linkdish/mobile run submit:android:production",
+    "format": "prettier . --write",
+    "canary:live": "pnpm --filter @linkdish/extractor-api canary:live"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.25.1",
+    "@testing-library/jest-dom": "^6.6.3",
+    "@types/node": "^22.14.1",
+    "@typescript-eslint/eslint-plugin": "^8.30.1",
+    "@typescript-eslint/parser": "^8.30.1",
+    "eslint": "^9.25.1",
+    "eslint-config-prettier": "^10.1.2",
+    "eslint-plugin-import": "^2.31.0",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "eslint-plugin-react-native": "^5.0.0",
+    "globals": "^16.0.0",
+    "prettier": "^3.5.3",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "react-test-renderer": "19.2.3",
+    "typescript": "^5.8.3",
+    "typescript-eslint": "^8.30.1",
+    "vitest": "^3.1.2"
+  },
+  "dependencies": {
+    "@vercel/functions": "^3.6.0"
+  },
+  "pnpm": {
+    "auditConfig": {
+      "ignoreGhsas": [
+        "GHSA-qwww-vcr4-c8h2"
+      ]
+    },
+    "overrides": {
+      "@babel/core@<=7.29.0": "7.29.6",
+      "@xmldom/xmldom@<0.8.13": "0.8.13",
+      "brace-expansion@>=5.0.0 <5.0.8": "5.0.9",
+      "fast-uri@>=3.0.0 <3.1.4": "3.1.4",
+      "fast-uri@>=4.0.0 <4.1.1": "4.1.1",
+      "find-my-way@<=9.6.0": "9.7.0",
+      "form-data@>=4.0.0 <4.0.6": "4.0.6",
+      "js-yaml@<3.15.0": "3.15.0",
+      "js-yaml@>=4.0.0 <4.3.0": "4.3.0",
+      "jayson>uuid": "11.1.1",
+      "postcss@<8.5.18": "8.5.25",
+      "shell-quote@>=1.1.0 <1.9.0": "1.10.0",
+      "tar@<=7.5.15": "7.5.19",
+      "undici@<6.27.0": "6.27.0",
+      "undici@>=7.0.0 <7.28.0": "7.28.0",
+      "xcode>uuid": "11.1.1",
+      "ws@>=6.0.0 <6.2.4": "6.2.4",
+      "ws@>=7.0.0 <7.5.11": "7.5.11",
+      "ws@>=8.0.0 <8.21.0": "8.21.0"
+    }
+  }
+}

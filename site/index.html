@@ -1,0 +1,484 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Any recipe link becomes a clean, photographed recipe in your own cookbook."
+    />
+    <meta property="og:title" content="LinkDish — Paste a link. Get cooking." />
+    <meta
+      property="og:description"
+      content="Any recipe link becomes a clean, photographed recipe in your own cookbook."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://linkdish.ca/" />
+    <meta property="og:image" content="https://linkdish.ca/assets/feature-graphic.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="LinkDish app screens showing a photographed cookbook and cook mode."
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="LinkDish — Paste a link. Get cooking." />
+    <meta
+      name="twitter:description"
+      content="Any recipe link becomes a clean, photographed recipe in your own cookbook."
+    />
+    <meta name="twitter:image" content="https://linkdish.ca/assets/feature-graphic.png" />
+    <title>LinkDish — Paste a link. Get cooking.</title>
+    <link rel="canonical" href="https://linkdish.ca/" />
+    <link rel="icon" href="assets/linkdish-icon.png" />
+    <link
+      rel="preload"
+      href="assets/fonts/Fraunces-SemiBold.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <svg class="svg-defs" aria-hidden="true" focusable="false">
+      <defs>
+        <symbol id="icon-tomato-with-stem" viewBox="0 0 64 64">
+          <circle class="ingredient-blob tomato-blob" cx="34" cy="36" r="22" />
+          <circle class="ingredient-line" cx="31" cy="34" r="20" />
+          <path class="ingredient-line" d="M31 14l-5-7 8 4 7-4-4 8" />
+        </symbol>
+        <symbol id="icon-basil-sprig" viewBox="0 0 64 64">
+          <path class="ingredient-blob basil-blob" d="M23 37c8-10 24-9 29 4-10 8-23 5-29-4z" />
+          <path class="ingredient-line" d="M17 51c11-16 23-25 35-30" />
+          <path class="ingredient-line" d="M26 36c-10-1-16-9-12-18 10 0 17 8 12 18z" />
+          <path class="ingredient-line" d="M36 27c-3-11 3-20 14-21 4 10-3 19-14 21z" />
+          <path class="ingredient-line" d="M29 42c10-9 23-6 27 6-10 7-21 5-27-6z" />
+        </symbol>
+        <symbol id="icon-lemon-wedge" viewBox="0 0 64 64">
+          <path class="ingredient-blob lemon-blob" d="M13 42a24 24 0 0 1 45-20z" />
+          <path class="ingredient-line" d="M10 43a25 25 0 0 1 47-22z" />
+          <path class="ingredient-line" d="M10 43h47" />
+          <path class="ingredient-line" d="M24 41l8-19M37 42l7-14M17 42l11-9M47 43l-1-10" />
+          <circle class="ingredient-dot" cx="28" cy="34" r="1.8" />
+          <circle class="ingredient-dot" cx="38" cy="31" r="1.8" />
+          <circle class="ingredient-dot" cx="48" cy="37" r="1.8" />
+        </symbol>
+        <symbol id="icon-garlic-clove" viewBox="0 0 64 64">
+          <path
+            class="ingredient-blob garlic-blob"
+            d="M23 13c16 7 25 19 24 34-10 8-27 8-34-4 1-12 4-22 10-30z"
+          />
+          <path
+            class="ingredient-line"
+            d="M29 9c15 8 21 20 18 36-8 13-27 12-34-1 0-13 5-25 16-35z"
+          />
+          <path class="ingredient-line" d="M29 9c-1 8 1 14 6 20" />
+          <path class="ingredient-line" d="M26 24c-3 7-3 15 2 25" />
+        </symbol>
+        <symbol id="icon-mushroom" viewBox="0 0 64 64">
+          <path class="ingredient-blob mushroom-blob" d="M15 31c3-14 17-22 32-14 7 4 10 10 9 18z" />
+          <path class="ingredient-line" d="M10 34c3-17 18-26 35-17 8 4 12 11 11 20z" />
+          <path class="ingredient-line" d="M25 35c-2 7-4 14-1 18h16c3-5 0-12-2-18" />
+          <path class="ingredient-line" d="M18 35h35" />
+        </symbol>
+        <symbol id="icon-steam-curl" viewBox="0 0 64 64">
+          <path class="ingredient-line" d="M20 55c10-8-6-13 4-21s-3-12 5-22" />
+          <path class="ingredient-line" d="M34 56c9-9-5-14 4-22s-2-13 6-23" />
+          <path class="ingredient-line" d="M48 55c8-8-4-12 3-20s-1-11 4-19" />
+        </symbol>
+        <symbol id="icon-kitchen-timer" viewBox="0 0 64 64">
+          <circle class="ingredient-blob timer-blob" cx="35" cy="37" r="23" />
+          <circle class="ingredient-line" cx="32" cy="36" r="22" />
+          <path class="ingredient-line" d="M25 9h14M32 14v-5M48 19l5-5" />
+          <path class="ingredient-line" d="M32 36l10-8" />
+          <path class="ingredient-line" d="M22 46h20" />
+        </symbol>
+      </defs>
+    </svg>
+
+    <header class="site-header" aria-label="Primary">
+      <a class="brand" href="./" aria-label="LinkDish home">
+        <img src="assets/linkdish-icon.png" alt="" width="36" height="36" />
+        <span>LinkDish</span>
+      </a>
+      <nav class="site-nav" aria-label="Site navigation">
+        <a class="nav-link" href="support/">Support</a>
+        <a class="nav-button" href="https://app.linkdish.ca">Open the web app</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero" aria-labelledby="hero-heading">
+        <svg class="floating-garnish hero-garnish hero-tomato" aria-hidden="true">
+          <use href="#icon-tomato-with-stem"></use>
+        </svg>
+        <svg class="floating-garnish hero-garnish hero-basil" aria-hidden="true">
+          <use href="#icon-basil-sprig"></use>
+        </svg>
+        <svg class="floating-garnish hero-garnish hero-lemon" aria-hidden="true">
+          <use href="#icon-lemon-wedge"></use>
+        </svg>
+        <svg class="floating-garnish hero-garnish hero-steam" aria-hidden="true">
+          <use href="#icon-steam-curl"></use>
+        </svg>
+        <svg class="floating-garnish hero-garnish hero-garlic" aria-hidden="true">
+          <use href="#icon-garlic-clove"></use>
+        </svg>
+        <div class="hero-inner">
+          <div class="hero-copy">
+            <h1 id="hero-heading" data-entrance>
+              <span>Paste a link.</span>
+              <em>
+                Get cooking.
+                <svg class="squiggle squiggle-tomato" aria-hidden="true" viewBox="0 0 260 28">
+                  <path d="M6 18c28-20 56 18 84-2s56 18 84-2 54 15 80-1" />
+                </svg>
+              </em>
+            </h1>
+            <p class="hero-subline" data-entrance>
+              Any recipe link becomes a clean, photographed recipe in your own cookbook.
+            </p>
+            <div class="hero-actions" data-entrance>
+              <a
+                class="button button-primary"
+                href="https://play.google.com/store/apps/details?id=com.linkdish.app"
+                >Get it on Google Play <span class="button-arrow" aria-hidden="true">→</span></a
+              >
+              <a class="button button-secondary" href="https://app.linkdish.ca"
+                >Use it on the web</a
+              >
+            </div>
+            <p class="iphone-note" data-entrance>
+              On iPhone? LinkDish runs beautifully in Safari — open the
+              <a href="https://app.linkdish.ca/install">web app</a> and Add to Home Screen.
+            </p>
+          </div>
+
+          <div class="phone-stage" aria-label="LinkDish app screenshots" data-entrance>
+            <figure class="phone-frame phone-frame-back">
+              <img
+                src="assets/hero-cookmode.png"
+                alt="Cook mode with a running timer"
+                width="461"
+                height="949"
+              />
+            </figure>
+            <figure class="phone-frame phone-frame-front">
+              <img
+                src="assets/hero-cookbook.png"
+                alt="Your LinkDish cookbook"
+                width="461"
+                height="949"
+              />
+            </figure>
+            <div class="hero-marginalia">
+              <p>the timers actually run</p>
+              <svg aria-hidden="true" viewBox="0 0 92 58" focusable="false">
+                <path d="M5 17c20-14 36 1 34 16-2 13 16 15 39-3" />
+                <path d="M66 25l14 4-8 12" />
+              </svg>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="dish-ticker" aria-label="Recipe variety">
+        <p class="sr-only">LinkDish holds every kind of recipe.</p>
+        <div class="dish-track" aria-hidden="true">
+          <span>Ginger-Sesame Chicken Rice Skillet</span>
+          <span>Brown Butter Berry Oat Bars</span>
+          <span>Crisp Cucumber Chickpea Pitas</span>
+          <span>Sunday ragù</span>
+          <span>Miso-butter salmon</span>
+          <span>Sheet-pan gnocchi</span>
+          <span>One-pot coconut dal</span>
+          <span>Saturday-morning pancakes</span>
+          <span>Ginger-Sesame Chicken Rice Skillet</span>
+          <span>Brown Butter Berry Oat Bars</span>
+          <span>Crisp Cucumber Chickpea Pitas</span>
+          <span>Sunday ragù</span>
+          <span>Miso-butter salmon</span>
+          <span>Sheet-pan gnocchi</span>
+          <span>One-pot coconut dal</span>
+          <span>Saturday-morning pancakes</span>
+        </div>
+      </section>
+
+      <section class="section how-section" id="how-it-works" aria-labelledby="how-heading">
+        <div class="section-inner">
+          <h2 id="how-heading" data-reveal>
+            From messy link to
+            <span class="squiggle-wrap">
+              dinner rhythm.
+              <svg class="squiggle squiggle-tomato" aria-hidden="true" viewBox="0 0 260 28">
+                <path d="M6 18c28-20 56 18 84-2s56 18 84-2 54 15 80-1" />
+              </svg>
+            </span>
+          </h2>
+
+          <div class="transformation-stage" data-reveal>
+            <div class="link-performance">
+              <div class="url-chip" aria-label="Example long recipe URL">
+                <span class="lock-dot"></span>
+                <span
+                  class="url-text"
+                  data-url-text
+                  data-full-url="tastyplates.example/the-story-of-my-nonnas-summer-in-tuscany-and-also-eventually-a-ragu-recipe?utm_source=…"
+                  >tastyplates.example/the-story-of-my-nonnas-summer-in-tuscany-and-also-eventually-a-ragu-recipe?utm_source=…</span
+                >
+              </div>
+              <ol class="stage-steps">
+                <li><span class="step-number">1</span>Share or paste any recipe link</li>
+                <li><span class="step-number">2</span>We plate it</li>
+                <li><span class="step-number">3</span>Cook, scale, and shop from it.</li>
+              </ol>
+              <p class="extraction-line">
+                <span data-extraction-copy>Warming up the oven…</span>
+              </p>
+            </div>
+
+            <div class="stage-arrow" aria-hidden="true">
+              <svg class="stage-arrow-svg" viewBox="0 0 96 64" focusable="false">
+                <path class="stage-arrow-line" d="M8 38c18-22 38 16 55-4 11-13 19-13 25-7" />
+                <path class="stage-arrow-head" d="M77 14l13 13-16 7" />
+              </svg>
+            </div>
+
+            <div class="assembled-card-shell">
+              <p class="sr-only">
+                LinkDish turns a long recipe link into a clean recipe card with servings, cook time,
+                ingredients, scaling, and a timer.
+              </p>
+              <article class="assembled-card" aria-hidden="true" data-assembly-card>
+                <p class="recipe-eyebrow assembly-piece">RECIPE</p>
+                <h3 class="assembly-piece">Sunday Ragù</h3>
+                <p class="recipe-meta assembly-piece">4 servings · Prep 20 min · Cook 2 h</p>
+                <ul class="ingredient-preview assembly-piece">
+                  <li><span></span>San Marzano tomatoes</li>
+                  <li><span></span>Slow-browned beef and pork</li>
+                  <li><span></span>Fresh tagliatelle</li>
+                </ul>
+                <div class="recipe-tools assembly-piece">
+                  <span>0.5x</span>
+                  <span class="active">1x</span>
+                  <span>2x</span>
+                  <span class="timer-chip" data-timer-chip>2:00:00</span>
+                </div>
+              </article>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section feature-section" aria-labelledby="features-heading">
+        <div class="section-inner">
+          <div class="section-heading-row">
+            <div>
+              <h2 id="features-heading" data-reveal>
+                A cookbook that behaves like a
+                <span class="squiggle-wrap">
+                  kitchen tool.
+                  <svg class="squiggle squiggle-butter" aria-hidden="true" viewBox="0 0 260 28">
+                    <path d="M6 18c28-20 56 18 84-2s56 18 84-2 54 15 80-1" />
+                  </svg>
+                </span>
+              </h2>
+            </div>
+            <p class="section-intro" data-reveal>
+              LinkDish keeps the useful parts close: photos, ingredients, steps, timers, servings,
+              notes, and the original source.
+            </p>
+          </div>
+
+          <div class="feature-rows">
+            <article class="feature-row feature-cook" data-reveal>
+              <div class="feature-media">
+                <figure class="phone-frame product-phone product-phone-left">
+                  <img
+                    src="assets/screen-cookmode.png"
+                    alt="LinkDish cook mode with large recipe steps and timers"
+                    width="720"
+                    height="1482"
+                  />
+                </figure>
+              </div>
+              <div class="feature-copy">
+                <svg class="floating-garnish feature-garnish" aria-hidden="true">
+                  <use href="#icon-kitchen-timer"></use>
+                </svg>
+                <h3>Timers where your hands already are.</h3>
+                <p>
+                  Big readable steps keep dinner moving, ingredients check off with a tap, and
+                  parsed timers stay beside the instruction that needs them.
+                </p>
+              </div>
+            </article>
+
+            <article class="feature-row feature-row-reverse feature-scaling" data-reveal>
+              <div class="feature-copy">
+                <svg class="floating-garnish feature-garnish" aria-hidden="true">
+                  <use href="#icon-lemon-wedge"></use>
+                </svg>
+                <h3>Scale any recipe honestly.</h3>
+                <p>
+                  Go from 0.5x to custom servings while original quantities stay visible for the
+                  moments when recipe math gets imperfect.
+                </p>
+              </div>
+              <div class="feature-media">
+                <figure class="phone-frame product-phone product-phone-right">
+                  <img
+                    src="assets/screen-recipe.png"
+                    alt="LinkDish recipe view with serving controls and ingredients"
+                    width="720"
+                    height="1482"
+                  />
+                </figure>
+              </div>
+            </article>
+
+            <article class="feature-row feature-household" data-reveal>
+              <div class="feature-media">
+                <figure class="phone-frame product-phone product-phone-left">
+                  <img
+                    src="assets/screen-shopping.png"
+                    alt="LinkDish household shopping list"
+                    width="720"
+                    height="1482"
+                  />
+                </figure>
+              </div>
+              <div class="feature-copy">
+                <svg class="floating-garnish feature-garnish" aria-hidden="true">
+                  <use href="#icon-basil-sprig"></use>
+                </svg>
+                <h3>One list. Everyone's dinner.</h3>
+                <p>
+                  Recipe ingredients become groceries, shared household errands stay together, and
+                  the list is ready on web and Android.
+                </p>
+              </div>
+            </article>
+          </div>
+
+          <div class="detail-macros" aria-label="Product detail closeups">
+            <figure class="macro-card" data-reveal>
+              <div class="macro-window">
+                <img
+                  class="macro-image macro-recipe"
+                  src="assets/screen-recipe.png"
+                  alt=""
+                  width="720"
+                  height="1482"
+                />
+              </div>
+              <figcaption>Half it. Double it. Custom it.</figcaption>
+            </figure>
+            <figure class="macro-card" data-reveal>
+              <div class="macro-window">
+                <img
+                  class="macro-image macro-cookmode"
+                  src="assets/screen-cookmode.png"
+                  alt=""
+                  width="720"
+                  height="1482"
+                />
+              </div>
+              <figcaption>Timers parsed straight from the steps.</figcaption>
+            </figure>
+            <figure class="macro-card" data-reveal>
+              <div class="macro-window">
+                <img
+                  class="macro-image macro-shopping"
+                  src="assets/screen-shopping.png"
+                  alt=""
+                  width="720"
+                  height="1482"
+                />
+              </div>
+              <figcaption>Tap an ingredient, it's on the list.</figcaption>
+            </figure>
+          </div>
+
+          <div class="feature-blurbs">
+            <div data-reveal>
+              <p>
+                <strong class="blurb-lead">Share it beautifully.</strong> Send branded recipe cards
+                that look like they came from your cookbook.
+              </p>
+            </div>
+            <div data-reveal>
+              <p>
+                <strong class="blurb-lead">Works everywhere.</strong> Install on Android, or use the
+                web app from Safari and add it to Home Screen.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="green-finale" id="plans" aria-labelledby="free-heading">
+        <svg class="finale-garnish finale-basil" aria-hidden="true">
+          <use href="#icon-basil-sprig"></use>
+        </svg>
+        <svg class="finale-garnish finale-lemon" aria-hidden="true">
+          <use href="#icon-lemon-wedge"></use>
+        </svg>
+        <svg class="finale-garnish finale-steam" aria-hidden="true">
+          <use href="#icon-steam-curl"></use>
+        </svg>
+        <svg class="finale-garnish finale-tomato" aria-hidden="true">
+          <use href="#icon-tomato-with-stem"></use>
+        </svg>
+        <div class="green-garnish" aria-hidden="true">&amp;</div>
+        <div class="green-inner" data-reveal>
+          <div>
+            <h2 id="free-heading">Dinner, <em>without the pop-ups.</em></h2>
+            <p>
+              Start free — save up to 15 recipes and keep them forever. Plus
+              <a href="https://app.linkdish.ca/pricing">$2.99/mo</a> · Family
+              <a href="https://app.linkdish.ca/pricing">$4.99/mo</a> when your cookbook grows.
+            </p>
+          </div>
+          <div class="green-actions">
+            <a
+              class="button button-light-on-green"
+              href="https://play.google.com/store/apps/details?id=com.linkdish.app"
+              >Get it on Google Play <span class="button-arrow" aria-hidden="true">→</span></a
+            >
+            <a class="button button-outline-on-green" href="https://app.linkdish.ca"
+              >Use it on the web</a
+            >
+          </div>
+          <p class="green-marginalia">free means free — no card, no trial timer</p>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-inner">
+        <a class="footer-brand" href="./">LinkDish</a>
+        <div class="footer-share" aria-label="Share LinkDish">
+          <a
+            href="mailto:?subject=Try%20LinkDish&body=I%20thought%20you%27d%20like%20LinkDish.%20It%20turns%20any%20recipe%20link%20into%20a%20clean%20cookbook%20entry%20with%20photos%2C%20cook%20mode%2C%20timers%2C%20and%20shopping%20lists.%20It%20works%20on%20Android%20from%20Google%20Play%20and%20on%20iPhone%20in%20Safari%20as%20a%20web%20app%3A%20https%3A%2F%2Flinkdish.ca%2F"
+            >Email</a
+          >
+          <a
+            href="sms:?&body=Try%20LinkDish%3A%20it%20turns%20any%20recipe%20link%20into%20a%20clean%20cookbook%20entry%20with%20photos.%20Works%20on%20Android%20from%20Google%20Play%20and%20on%20iPhone%20in%20Safari%3A%20https%3A%2F%2Flinkdish.ca%2F"
+            >SMS</a
+          >
+          <a href="https://play.google.com/apps/testing/com.linkdish.app">Testing opt-in</a>
+        </div>
+        <div class="footer-links">
+          <a href="privacy/">Privacy</a>
+          <a href="support/">Support</a>
+          <a href="https://app.linkdish.ca">Open web app</a>
+        </div>
+        <p class="footer-note">Set in Fraunces · Made in Canada · &copy; 2026 LinkDish.</p>
+      </div>
+    </footer>
+    <script src="site.js" defer></script>
+    <script src="analytics.js" defer></script>
+  </body>
+</html>

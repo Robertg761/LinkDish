@@ -1,0 +1,224 @@
+.offline-banner {
+  width: 100%;
+  max-width: var(--max-width-content);
+  background-color: var(--color-surface-muted);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  font-size: 14px;
+  color: var(--color-text);
+  text-align: center;
+}
+
+.offline-banner a {
+  color: var(--color-accent);
+  text-decoration: underline;
+}
+
+.extract-page {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: calc(100vh - 58px - env(safe-area-inset-top));
+  min-height: calc(100dvh - 58px - env(safe-area-inset-top));
+  padding: 24px 24px calc(24px + 12vh);
+}
+
+.hero-section {
+  text-align: center;
+  margin-bottom: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.page-enter .hero-eyebrow,
+.page-enter .hero-title-line,
+.page-enter .extract-form {
+  animation: hero-lockup-enter 340ms ease-out both;
+}
+
+.page-enter .hero-eyebrow {
+  animation-delay: 0ms;
+}
+
+.page-enter .hero-title-line:first-child {
+  animation-delay: 70ms;
+}
+
+.page-enter .hero-title-line-accent {
+  animation-delay: 140ms;
+}
+
+.page-enter .extract-form {
+  animation-delay: 240ms;
+}
+
+.hero-eyebrow {
+  color: var(--color-accent);
+  font-family: var(--font-family-sans);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  line-height: 16px;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.hero-title {
+  font-family: var(--font-family-serif);
+  font-size: 40px;
+  font-weight: normal;
+  line-height: 1.08;
+  letter-spacing: -1px;
+  color: var(--color-text);
+  max-width: 480px;
+  margin: 0 auto;
+}
+
+.hero-title-line {
+  display: block;
+}
+
+.hero-title-line-accent {
+  color: var(--color-accent);
+  font-style: italic;
+}
+
+.extraction-loading-copy {
+  display: inline-grid;
+  min-height: var(--text-small-line-height);
+  place-items: center;
+  position: relative;
+  width: min(calc(100vw - 48px), 34ch);
+}
+
+.extraction-loading-copy-line {
+  grid-area: 1 / 1;
+}
+
+.extraction-loading-copy-line.is-entering {
+  animation: extraction-copy-enter 250ms ease-out both;
+}
+
+.extraction-loading-copy-line.is-exiting {
+  animation: extraction-copy-exit 250ms ease-out both;
+}
+
+.needs-retry-card {
+  max-width: 480px;
+  width: 100%;
+  text-align: center;
+  gap: 20px;
+}
+
+.retry-title {
+  font-family: var(--font-family-serif);
+  font-size: 22px;
+  font-weight: normal;
+  letter-spacing: -0.4px;
+}
+
+.retry-message {
+  font-size: 15px;
+  color: var(--color-muted);
+  line-height: 22px;
+}
+
+.retry-diagnostics {
+  background-color: var(--color-canvas);
+  padding: 16px;
+  border-radius: var(--radius-card);
+  border: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.diagnostic-text {
+  font-size: 14px;
+  color: var(--color-text);
+}
+
+.retry-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.failure-container {
+  max-width: 480px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.quota-upgrade-card {
+  text-align: center;
+  gap: 16px;
+}
+
+.quota-upgrade-card h3 {
+  font-family: var(--font-family-serif);
+  font-size: 20px;
+  font-weight: normal;
+}
+
+.quota-upgrade-card p {
+  font-size: 14px;
+  color: var(--color-muted);
+}
+
+.upgrade-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+@media (max-width: 480px) {
+  .hero-title {
+    font-size: 32px;
+    line-height: 1.08;
+  }
+}
+
+@keyframes hero-lockup-enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes extraction-copy-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes extraction-copy-exit {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  to {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+}

@@ -1,0 +1,73 @@
+.field-container {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+
+.field-label {
+  font-size: var(--text-label);
+  font-weight: 600;
+  letter-spacing: var(--text-label-letter-spacing);
+  line-height: var(--text-label-line-height);
+  text-transform: uppercase;
+  color: var(--color-accent);
+}
+
+.field-input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.field-input {
+  width: 100%;
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-input, 12px);
+  min-height: 54px;
+  padding: 0 16px;
+  font-size: var(--text-body);
+  line-height: var(--text-body-line-height);
+  font-family: var(--font-family-sans);
+  color: var(--color-text);
+  transition:
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
+  box-sizing: border-box;
+}
+
+.field-input-with-right {
+  padding-right: 48px;
+}
+
+.field-input::placeholder {
+  color: var(--color-placeholder);
+}
+
+.field-input:focus {
+  border-color: var(--color-accent);
+  border-width: 1.5px;
+  box-shadow: 0 0 0 3px var(--color-focus-ring-strong);
+}
+
+.field-input-error {
+  border-color: var(--color-danger);
+}
+
+.field-right-element {
+  position: absolute;
+  right: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.field-error-message {
+  font-size: var(--text-small);
+  line-height: var(--text-small-line-height);
+  color: var(--color-danger);
+  margin-top: 4px;
+  display: block;
+}

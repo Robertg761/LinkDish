@@ -1,0 +1,10 @@
+# These exact findings are publishable client identifiers or inert test fixtures.
+# New findings, including new values in the same files, remain reportable.
+apps/mobile/config/production-public-env.json:generic-api-key:2
+apps/mobile/eas.json:generic-api-key:12
+apps/mobile/eas.json:generic-api-key:27
+apps/web/.env.example:generic-api-key:5
+eas.json:generic-api-key:12
+eas.json:generic-api-key:25
+apps/web/src/auth/auth-storage.test.ts:generic-api-key:20
+apps/web/src/auth/auth-storage.test.ts:generic-api-key:28

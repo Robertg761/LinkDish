@@ -1,0 +1,118 @@
+@font-face {
+  font-display: swap;
+  font-family: "Fraunces";
+  font-style: normal;
+  font-weight: 600;
+  src: url("/fonts/Fraunces-SemiBold.woff2") format("woff2");
+}
+
+@font-face {
+  font-display: swap;
+  font-family: "Fraunces";
+  font-style: normal;
+  font-weight: 700;
+  src: url("/fonts/Fraunces-Bold.woff2") format("woff2");
+}
+
+@font-face {
+  font-display: swap;
+  font-family: "Fraunces";
+  font-style: italic;
+  font-weight: 600;
+  src: url("/fonts/Fraunces-SemiBoldItalic.woff2") format("woff2");
+}
+
+:root {
+  /* Colors – core palette */
+  --color-accent: #29443b;
+  --color-accent-rgb: 41, 68, 59;
+  --color-accent-hover: #1e322b;
+  --color-accent-soft: #dde7df;
+  --color-accent-soft-hover: #cbd9ce;
+  --color-background: #f4efe7;
+  --color-border: #ddd2c3;
+  --color-border-rgb: 221, 210, 195;
+  --color-canvas: #fbf7f0;
+  --color-surface: #fffdf8;
+  --color-surface-muted: #efe7da;
+  --color-surface-subtle: #f1eadf;
+  --color-muted: #6e685f;
+  --color-muted-rgb: 110, 104, 95;
+  --color-text: #1f211d;
+  --color-text-rgb: 31, 33, 29;
+
+  --color-danger: #9a523f;
+  --color-danger-bg: #f2d8d2;
+  --color-danger-bg-hover: #e8c4bc;
+  --color-danger-text: #8b2e23;
+  --color-danger-text-rgb: 139, 46, 35;
+  --color-danger-hover: #72241b;
+
+  --color-white: #ffffff;
+
+  --color-placeholder: rgba(var(--color-muted-rgb), 0.6);
+  --color-focus-ring: rgba(var(--color-accent-rgb), 0.08);
+  --color-focus-ring-strong: rgba(41, 68, 59, 0.12);
+  --color-accent-border-tint: rgba(var(--color-accent-rgb), 0.18);
+  --color-danger-border-subtle: rgba(var(--color-danger-text-rgb), 0.1);
+  --color-danger-border: rgba(var(--color-danger-text-rgb), 0.15);
+  --color-topbar-border: rgba(var(--color-border-rgb), 0.78);
+  --color-scan-backdrop: rgba(31, 28, 24, 0.28);
+  --color-editor-backdrop: rgba(35, 31, 27, 0.42);
+
+  /* Typography */
+  --font-family-serif: "Fraunces", Georgia, Cambria, "Times New Roman", Times, serif;
+  --font-family-sans:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif,
+    "Apple Color Emoji", "Segoe UI Emoji";
+  --text-display: 40px;
+  --text-display-line-height: 1.1;
+  --text-display-letter-spacing: -1px;
+  --text-headline: 31px;
+  --text-headline-line-height: 1.16;
+  --text-headline-letter-spacing: -0.5px;
+  --text-title: 22px;
+  --text-title-line-height: 1.27;
+  --text-title-letter-spacing: -0.2px;
+  --text-body: 16px;
+  --text-body-line-height: 1.5;
+  --text-small: 14px;
+  --text-small-line-height: 1.43;
+  --text-label: 12px;
+  --text-label-line-height: 1.33;
+  --text-label-letter-spacing: 1.2px;
+
+  /* Spacing scale */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 12px;
+  --space-lg: 16px;
+  --space-xl: 20px;
+  --space-xxl: 24px;
+  --space-xxxl: 32px;
+
+  /* Layout */
+  --max-width-content: 720px;
+  --max-width-grid: 1100px;
+
+  /* Border radii */
+  --radius-xs: 8px;
+  --radius-sm: 12px;
+  --radius-md: 16px;
+  --radius-lg: 24px;
+  --radius-card: var(--radius-md);
+  --radius-button: var(--radius-sm);
+  --radius-input: var(--radius-sm);
+  --radius-pill: 9999px;
+
+  /* Shadows */
+  --color-shadow-rgb: 93, 86, 75;
+  --shadow-soft: 0 1px 2px rgba(93, 86, 75, 0.06), 0 4px 12px rgba(93, 86, 75, 0.07);
+  --shadow-premium: 0 2px 4px rgba(93, 86, 75, 0.05), 0 12px 28px rgba(93, 86, 75, 0.1);
+  --shadow-button: 0 1px 2px rgba(41, 68, 59, 0.1), 0 4px 10px rgba(41, 68, 59, 0.16);
+  --shadow-topbar: 0 4px 16px rgba(var(--color-shadow-rgb), 0.05);
+
+  /* Transitions */
+  --transition-fast: 0.15s ease;
+  --transition-normal: 0.25s ease;
+}

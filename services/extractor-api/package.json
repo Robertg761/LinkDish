@@ -1,0 +1,42 @@
+{
+  "name": "@linkdish/extractor-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "check:production": "node scripts/check-production-api.mjs",
+    "canary:live": "node scripts/run-live-canary.mjs ../../docs/live-canary-manifest.json",
+    "grant:plan": "tsx scripts/grant-plan-by-email.ts"
+  },
+  "dependencies": {
+    "@clerk/backend": "^3.4.13",
+    "@fastify/cors": "^11.1.0",
+    "@fastify/rate-limit": "^10.3.0",
+    "@linkdish/api-contracts": "workspace:*",
+    "@linkdish/config": "workspace:*",
+    "@linkdish/recipe-domain": "workspace:*",
+    "@linkdish/utils": "workspace:*",
+    "@mozilla/readability": "^0.6.0",
+    "@sparticuz/chromium": "^148.0.0",
+    "cheerio": "^1.1.2",
+    "dotenv": "^17.4.2",
+    "fastify": "^5.10.0",
+    "jsdom": "^26.1.0",
+    "openai": "^4.104.0",
+    "pg": "^8.21.0",
+    "playwright": "^1.59.1",
+    "playwright-core": "^1.59.1",
+    "sharp": "^0.35.3",
+    "youtube-transcript": "^1.2.1",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/jsdom": "^21.1.7",
+    "tsx": "^4.19.3"
+  }
+}

@@ -1,0 +1,395 @@
+[
+  {
+    "id": "recipe-king-arthur-classic-sandwich-bread",
+    "kind": "recipe-webpage",
+    "expectedMinimumOutcome": "success",
+    "url": "https://www.kingarthurbaking.com/recipes/classic-sandwich-bread-recipe",
+    "expectedFinalUrlPattern": "kingarthurbaking\\.com/recipes/classic-sandwich-bread-recipe",
+    "expectedTitlePattern": "Classic Sandwich Bread"
+  },
+  {
+    "id": "recipe-rock-recipes-partridgeberry-apple-jam",
+    "kind": "recipe-webpage",
+    "expectedMinimumOutcome": "success",
+    "url": "https://www.rockrecipes.com/partridgeberry-apple-jam/",
+    "expectedFinalUrlPattern": "rockrecipes\\.com/partridgeberry-apple-jam-cranberry-apple-jam",
+    "expectedTitlePattern": "Partridgeberry Apple Jam|Cranberry Apple Jam"
+  },
+  {
+    "id": "recipe-sallys-homemade-bagels",
+    "kind": "recipe-webpage",
+    "expectedMinimumOutcome": "needs_retry",
+    "url": "https://sallysbakingaddiction.com/homemade-bagels/",
+    "expectedFinalUrlPattern": "sallysbakingaddiction\\.com/homemade-bagels",
+    "expectedTitlePattern": "Homemade Bagels"
+  },
+  {
+    "id": "recipe-minimalist-baker-red-lentil-chili",
+    "kind": "recipe-webpage",
+    "expectedMinimumOutcome": "needs_retry",
+    "url": "https://minimalistbaker.com/1-pot-red-lentil-chili/",
+    "expectedFinalUrlPattern": "minimalistbaker\\.com/1-pot-red-lentil-chili",
+    "expectedTitlePattern": "Red Lentil Chili|1-Pot Red Lentil Chili"
+  },
+  {
+    "id": "recipe-budget-bytes-chicken-stew",
+    "kind": "recipe-webpage",
+    "expectedMinimumOutcome": "success",
+    "url": "https://www.budgetbytes.com/spicy-noodles/",
+    "expectedFinalUrlPattern": "budgetbytes\\.com/spicy-noodles",
+    "expectedTitlePattern": "Spicy Sriracha Noodles|Spicy Noodles"
+  },
+  {
+    "id": "recipe-allrecipes-worlds-best-lasagna",
+    "kind": "recipe-webpage",
+    "expectedMinimumOutcome": "success",
+    "url": "https://www.recipetineats.com/lasagna/",
+    "expectedFinalUrlPattern": "recipetineats\\.com/lasagna",
+    "expectedTitlePattern": "Lasagna"
+  },
+  {
+    "id": "recipe-simply-recipes-irish-soda-bread",
+    "kind": "recipe-webpage",
+    "expectedMinimumOutcome": "success",
+    "url": "https://www.kingarthurbaking.com/recipes/irish-soda-bread-recipe",
+    "expectedFinalUrlPattern": "kingarthurbaking\\.com/recipes/irish-soda-bread-recipe",
+    "expectedTitlePattern": "Irish Soda Bread"
+  },
+  {
+    "id": "recipe-food-network-the-chewy",
+    "kind": "recipe-webpage",
+    "expectedMinimumOutcome": "needs_retry",
+    "url": "https://www.foodnetwork.com/recipes/alton-brown/the-chewy-recipe-1909046",
+    "expectedFinalUrlPattern": "foodnetwork\\.com/recipes/.*/the-chewy-recipe-1909046",
+    "expectedTitlePattern": "The Chewy"
+  },
+  {
+    "id": "recipe-serious-eats-pork-shoulder",
+    "kind": "recipe-webpage",
+    "expectedMinimumOutcome": "success",
+    "url": "https://www.recipetineats.com/pulled-pork-with-bbq-sauce/",
+    "expectedFinalUrlPattern": "recipetineats\\.com/pulled-pork-with-bbq-sauce",
+    "expectedTitlePattern": "Pulled Pork|BBQ Pulled Pork"
+  },
+  {
+    "id": "recipe-love-and-lemons-baked-oatmeal",
+    "kind": "recipe-webpage",
+    "expectedMinimumOutcome": "needs_retry",
+    "url": "https://www.loveandlemons.com/baked-oatmeal/",
+    "expectedFinalUrlPattern": "loveandlemons\\.com/baked-oatmeal",
+    "expectedTitlePattern": "Baked Oatmeal"
+  },
+  {
+    "id": "recipe-ambitious-kitchen-banana-bread",
+    "kind": "recipe-webpage",
+    "expectedMinimumOutcome": "success",
+    "url": "https://cookieandkate.com/healthy-banana-bread-recipe/",
+    "expectedFinalUrlPattern": "cookieandkate\\.com/healthy-banana-bread-recipe",
+    "expectedTitlePattern": "Healthy Banana Bread|Banana Bread"
+  },
+  {
+    "id": "recipe-onceuponachef-waffles",
+    "kind": "recipe-webpage",
+    "expectedMinimumOutcome": "success",
+    "url": "https://www.onceuponachef.com/recipes/waffle-recipe.html",
+    "expectedFinalUrlPattern": "onceuponachef\\.com/recipes/waffle-recipe\\.html",
+    "expectedTitlePattern": "Waffle Recipe|Homemade Waffle"
+  },
+  {
+    "id": "recipe-pinch-of-yum-red-curry-lentils",
+    "kind": "recipe-webpage",
+    "expectedMinimumOutcome": "needs_retry",
+    "url": "https://pinchofyum.com/red-curry-lentils",
+    "expectedFinalUrlPattern": "pinchofyum\\.com/red-curry-lentils",
+    "expectedTitlePattern": "Red Curry Lentils"
+  },
+  {
+    "id": "recipe-a-couple-cooks-lentil-soup",
+    "kind": "recipe-webpage",
+    "expectedMinimumOutcome": "success",
+    "url": "https://www.acouplecooks.com/lentil-soup/",
+    "expectedFinalUrlPattern": "acouplecooks\\.com/lentil-soup",
+    "expectedTitlePattern": "Lentil Soup"
+  },
+  {
+    "id": "recipe-cookie-and-kate-healthy-granola",
+    "kind": "recipe-webpage",
+    "expectedMinimumOutcome": "success",
+    "url": "https://cookieandkate.com/healthy-granola-recipe/",
+    "expectedFinalUrlPattern": "cookieandkate\\.com/healthy-granola-recipe",
+    "expectedTitlePattern": "Granola"
+  },
+  {
+    "id": "recipe-recipetin-eats-butter-chicken",
+    "kind": "recipe-webpage",
+    "expectedMinimumOutcome": "success",
+    "url": "https://www.recipetineats.com/butter-chicken/",
+    "expectedFinalUrlPattern": "recipetineats\\.com/butter-chicken",
+    "expectedTitlePattern": "Butter Chicken"
+  },
+  {
+    "id": "recipe-spend-with-pennies-classic-meatloaf",
+    "kind": "recipe-webpage",
+    "expectedMinimumOutcome": "success",
+    "url": "https://www.recipetineats.com/meatloaf-recipe/",
+    "expectedFinalUrlPattern": "recipetineats\\.com/meatloaf-recipe",
+    "expectedTitlePattern": "Meatloaf"
+  },
+  {
+    "id": "recipe-tastes-better-from-scratch-french-bread",
+    "kind": "recipe-webpage",
+    "expectedMinimumOutcome": "success",
+    "url": "https://tastesbetterfromscratch.com/baguettes/",
+    "expectedFinalUrlPattern": "tastesbetterfromscratch\\.com/baguettes",
+    "expectedTitlePattern": "Baguette|Baguettes"
+  },
+  {
+    "id": "recipe-eatingwell-one-pot-shrimp-broccoli",
+    "kind": "recipe-webpage",
+    "expectedMinimumOutcome": "success",
+    "url": "https://www.onceuponachef.com/recipes/easy-garlic-butter-shrimp.html",
+    "expectedFinalUrlPattern": "onceuponachef\\.com/recipes/easy-garlic-butter-shrimp\\.html",
+    "expectedTitlePattern": "Garlic Butter Shrimp|Shrimp"
+  },
+  {
+    "id": "recipe-delish-best-lasagna",
+    "kind": "recipe-webpage",
+    "expectedMinimumOutcome": "success",
+    "url": "https://www.delish.com/cooking/recipe-ideas/a51337/classic-lasagna-recipe/",
+    "expectedFinalUrlPattern": "delish\\.com/cooking/recipe-ideas/.*/classic-lasagna-recipe",
+    "expectedTitlePattern": "Lasagna"
+  },
+  {
+    "id": "recipe-mediterranean-dish-falafel",
+    "kind": "recipe-webpage",
+    "expectedMinimumOutcome": "success",
+    "url": "https://www.themediterraneandish.com/baked-falafel/",
+    "expectedFinalUrlPattern": "themediterraneandish\\.com/baked-falafel",
+    "expectedTitlePattern": "Falafel"
+  },
+  {
+    "id": "article-bonappetit-overnight-oats",
+    "kind": "recipe-webpage",
+    "expectedMinimumOutcome": "success",
+    "url": "https://www.bonappetit.com/recipe/overnight-oats",
+    "expectedFinalUrlPattern": "bonappetit\\.com/recipe/overnight-oats",
+    "expectedTitlePattern": "Overnight Oats"
+  },
+  {
+    "id": "article-king-arthur-no-knead-bread",
+    "kind": "article-blog",
+    "expectedMinimumOutcome": "needs_retry",
+    "url": "https://www.kingarthurbaking.com/blog/2022/05/25/how-to-make-a-bread-recipe-no-knead",
+    "expectedFinalUrlPattern": "kingarthurbaking\\.com/blog/2022/05/25/how-to-make-a-bread-recipe-no-knead",
+    "expectedTitlePattern": "No-Knead|Bread Recipe"
+  },
+  {
+    "id": "article-serious-eats-boil-eggs",
+    "kind": "recipe-webpage",
+    "expectedMinimumOutcome": "success",
+    "url": "https://www.budgetbytes.com/how-to-make-hard-boiled-eggs/",
+    "expectedFinalUrlPattern": "budgetbytes\\.com/how-to-make-hard-boiled-eggs",
+    "expectedTitlePattern": "Hard Boiled Eggs"
+  },
+  {
+    "id": "article-food-and-wine-risotto",
+    "kind": "recipe-webpage",
+    "expectedMinimumOutcome": "success",
+    "url": "https://www.loveandlemons.com/mushroom-risotto/",
+    "expectedFinalUrlPattern": "loveandlemons\\.com/mushroom-risotto",
+    "expectedTitlePattern": "Mushroom Risotto|Risotto"
+  },
+  {
+    "id": "article-simply-recipes-cold-brew",
+    "kind": "recipe-webpage",
+    "expectedMinimumOutcome": "success",
+    "url": "https://www.kingarthurbaking.com/blog/2016/01/01/no-knead-crusty-white-bread",
+    "expectedFinalUrlPattern": "kingarthurbaking\\.com/blog/2016/01/01/no-knead-crusty-white-bread",
+    "expectedTitlePattern": "No-Knead Crusty White Bread"
+  },
+  {
+    "id": "article-love-and-lemons-quinoa",
+    "kind": "recipe-webpage",
+    "expectedMinimumOutcome": "success",
+    "url": "https://www.loveandlemons.com/quinoa/",
+    "expectedFinalUrlPattern": "loveandlemons\\.com/quinoa",
+    "expectedTitlePattern": "Cook Quinoa|Quinoa"
+  },
+  {
+    "id": "article-budget-bytes-cook-rice",
+    "kind": "article-blog",
+    "expectedMinimumOutcome": "success",
+    "url": "https://www.budgetbytes.com/how-to-cook-rice/",
+    "expectedFinalUrlPattern": "budgetbytes\\.com/how-to-cook-rice",
+    "expectedTitlePattern": "Cook Rice"
+  },
+  {
+    "id": "article-a-couple-cooks-lentils",
+    "kind": "article-blog",
+    "expectedMinimumOutcome": "success",
+    "url": "https://www.acouplecooks.com/how-to-cook-lentils/",
+    "expectedFinalUrlPattern": "acouplecooks\\.com/how-to-cook-lentils",
+    "expectedTitlePattern": "Cook Lentils"
+  },
+  {
+    "id": "article-pinch-of-yum-farro",
+    "kind": "recipe-webpage",
+    "expectedMinimumOutcome": "success",
+    "url": "https://pinchofyum.com/one-pan-farro-with-tomatoes-and-kale",
+    "expectedFinalUrlPattern": "pinchofyum\\.com/one-pan-farro-with-tomatoes-and-kale",
+    "expectedTitlePattern": "Farro"
+  },
+  {
+    "id": "article-budget-bytes-pulled-pork",
+    "kind": "recipe-webpage",
+    "expectedMinimumOutcome": "success",
+    "url": "https://www.budgetbytes.com/slow-cooker-pulled-pork/",
+    "expectedFinalUrlPattern": "budgetbytes\\.com/slow-cooker-pulled-pork",
+    "expectedTitlePattern": "Pulled Pork"
+  },
+  {
+    "id": "article-king-arthur-no-knead-bread-archive",
+    "kind": "article-blog",
+    "expectedMinimumOutcome": "needs_retry",
+    "url": "https://www.kingarthurbaking.com/blog/2020/04/27/how-to-make-no-knead-sourdough-bread",
+    "expectedFinalUrlPattern": "kingarthurbaking\\.com/blog/2020/04/27/how-to-make-no-knead-sourdough-bread",
+    "expectedTitlePattern": "No-Knead|Sourdough Bread"
+  },
+  {
+    "id": "article-mediterranean-dish-lentils",
+    "kind": "article-blog",
+    "expectedMinimumOutcome": "success",
+    "url": "https://www.themediterraneandish.com/how-to-cook-lentils/",
+    "expectedFinalUrlPattern": "themediterraneandish\\.com/how-to-cook-lentils",
+    "expectedTitlePattern": "Cook Lentils"
+  },
+  {
+    "id": "article-serious-eats-pan-fry-fish",
+    "kind": "article-blog",
+    "expectedMinimumOutcome": "needs_retry",
+    "url": "https://www.recipetineats.com/crispy-pan-fried-fish/",
+    "expectedFinalUrlPattern": "recipetineats\\.com/crispy-pan-fried-fish",
+    "expectedTitlePattern": "Crispy Pan Fried Fish|Pan Fried Fish"
+  },
+  {
+    "id": "article-allrecipes-oatmeal",
+    "kind": "recipe-webpage",
+    "expectedMinimumOutcome": "success",
+    "url": "https://www.budgetbytes.com/roasted-butternut-squash/",
+    "expectedFinalUrlPattern": "budgetbytes\\.com/roasted-butternut-squash",
+    "expectedTitlePattern": "Roasted Butternut Squash"
+  },
+  {
+    "id": "article-eatingwell-overnight-oats",
+    "kind": "recipe-webpage",
+    "expectedMinimumOutcome": "success",
+    "url": "https://www.acouplecooks.com/how-to-blanch-asparagus/",
+    "expectedFinalUrlPattern": "acouplecooks\\.com/how-to-blanch-asparagus",
+    "expectedTitlePattern": "Blanch Asparagus"
+  },
+  {
+    "id": "youtube-hyh-iv41sgy",
+    "kind": "youtube",
+    "expectedMinimumOutcome": "failure",
+    "url": "https://www.youtube.com/watch?v=HyH_Iv41sGY",
+    "expectedFinalUrlPattern": "youtube\\.com/watch\\?v=HyH_Iv41sGY"
+  },
+  {
+    "id": "youtube-l7up5v1f0o",
+    "kind": "youtube",
+    "expectedMinimumOutcome": "failure",
+    "url": "https://www.youtube.com/watch?v=l7Up5V1F_0o",
+    "expectedFinalUrlPattern": "youtube\\.com/watch\\?v=l7Up5V1F_0o"
+  },
+  {
+    "id": "youtube-iistq4i5pse",
+    "kind": "youtube",
+    "expectedMinimumOutcome": "failure",
+    "url": "https://www.youtube.com/watch?v=IiStQ4i5psE",
+    "expectedFinalUrlPattern": "youtube\\.com/watch\\?v=IiStQ4i5psE"
+  },
+  {
+    "id": "youtube-khgtdnn5ohi",
+    "kind": "youtube",
+    "expectedMinimumOutcome": "failure",
+    "url": "https://www.youtube.com/watch?v=kHgTDnn5oHI",
+    "expectedFinalUrlPattern": "youtube\\.com/watch\\?v=kHgTDnn5oHI"
+  },
+  {
+    "id": "youtube-xxmxvdbojfg",
+    "kind": "youtube",
+    "expectedMinimumOutcome": "failure",
+    "url": "https://www.youtube.com/watch?v=xXmXvdbOjfg",
+    "expectedFinalUrlPattern": "youtube\\.com/watch\\?v=xXmXvdbOjfg"
+  },
+  {
+    "id": "youtube-rymubv0o4sm",
+    "kind": "youtube",
+    "expectedMinimumOutcome": "failure",
+    "url": "https://www.youtube.com/watch?v=RymUBv0o4SM",
+    "expectedFinalUrlPattern": "youtube\\.com/watch\\?v=RymUBv0o4SM"
+  },
+  {
+    "id": "youtube-kodtjxd1xjg",
+    "kind": "youtube",
+    "expectedMinimumOutcome": "failure",
+    "url": "https://www.youtube.com/watch?v=KODtjxD1XJg",
+    "expectedFinalUrlPattern": "youtube\\.com/watch\\?v=KODtjxD1XJg"
+  },
+  {
+    "id": "youtube-sdip0u7iiw",
+    "kind": "youtube",
+    "expectedMinimumOutcome": "failure",
+    "url": "https://www.youtube.com/watch?v=SDip0U7__iw",
+    "expectedFinalUrlPattern": "youtube\\.com/watch\\?v=SDip0U7__iw"
+  },
+  {
+    "id": "youtube-yvifxmxqcpy",
+    "kind": "youtube",
+    "expectedMinimumOutcome": "failure",
+    "url": "https://www.youtube.com/watch?v=yvifxMxQcmY",
+    "expectedFinalUrlPattern": "youtube\\.com/watch\\?v=yvifxMxQcmY"
+  },
+  {
+    "id": "youtube-8mdytxwaoay",
+    "kind": "youtube",
+    "expectedMinimumOutcome": "failure",
+    "url": "https://www.youtube.com/watch?v=8MDYTXwAOaY",
+    "expectedFinalUrlPattern": "youtube\\.com/watch\\?v=8MDYTXwAOaY"
+  },
+  {
+    "id": "youtube-xgkzbx8gjzk",
+    "kind": "youtube",
+    "expectedMinimumOutcome": "failure",
+    "url": "https://www.youtube.com/watch?v=XgKzBX8gjZk",
+    "expectedFinalUrlPattern": "youtube\\.com/watch\\?v=XgKzBX8gjZk"
+  },
+  {
+    "id": "youtube-mth1s1tdle",
+    "kind": "youtube",
+    "expectedMinimumOutcome": "failure",
+    "url": "https://www.youtube.com/watch?v=Mth1s-1tdlE",
+    "expectedFinalUrlPattern": "youtube\\.com/watch\\?v=Mth1s-1tdlE"
+  },
+  {
+    "id": "youtube-fqpxa9o3gve",
+    "kind": "youtube",
+    "expectedMinimumOutcome": "failure",
+    "url": "https://www.youtube.com/watch?v=fqPXa9o3GvE",
+    "expectedFinalUrlPattern": "youtube\\.com/watch\\?v=fqPXa9o3GvE"
+  },
+  {
+    "id": "youtube-eemaeuflide",
+    "kind": "youtube",
+    "expectedMinimumOutcome": "failure",
+    "url": "https://www.youtube.com/watch?v=EEMAEuFLiD8",
+    "expectedFinalUrlPattern": "youtube\\.com/watch\\?v=EEMAEuFLiD8"
+  },
+  {
+    "id": "youtube-qbyuk9dqiai",
+    "kind": "youtube",
+    "expectedMinimumOutcome": "failure",
+    "url": "https://www.youtube.com/watch?v=QbyUK9DqIaI",
+    "expectedFinalUrlPattern": "youtube\\.com/watch\\?v=QbyUK9DqIaI"
+  }
+]

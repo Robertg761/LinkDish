@@ -1,0 +1,92 @@
+.install-page {
+  padding: 20px 20px 80px 20px;
+  max-width: var(--max-width-content);
+  margin: 0 auto;
+}
+
+.install-header {
+  text-align: center;
+  margin-bottom: 32px;
+}
+
+.install-eyebrow {
+  color: var(--color-accent);
+  font-family: var(--font-family-sans);
+  font-size: var(--text-label);
+  font-weight: 600;
+  letter-spacing: var(--text-label-letter-spacing);
+  line-height: var(--text-label-line-height);
+  margin: 0 0 8px;
+  text-transform: uppercase;
+}
+
+.install-title {
+  font-family: var(--font-family-serif);
+  font-size: var(--text-headline);
+  font-weight: normal;
+  line-height: var(--text-headline-line-height);
+  letter-spacing: var(--text-headline-letter-spacing);
+  color: var(--color-text);
+  margin: 0 0 8px 0;
+}
+
+.install-subtitle {
+  font-family: var(--font-family-sans);
+  color: var(--color-muted);
+  font-size: var(--text-small);
+  line-height: var(--text-small-line-height);
+  margin: 0;
+}
+
+.install-steps-container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.install-step-card {
+  padding: 20px;
+  gap: 14px;
+}
+
+.step-card-title {
+  font-family: var(--font-family-serif);
+  font-size: 20px;
+  font-weight: normal;
+  color: var(--color-text);
+  margin: 0 0 4px 0;
+}
+
+.step-list-ordered {
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+}
+
+.step-list-ordered li {
+  font-family: var(--font-family-sans);
+  font-size: 15px;
+  color: var(--color-text);
+  line-height: 1.5;
+}
+
+.share-icon-large {
+  font-weight: bold;
+  background-color: var(--color-surface-subtle);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm, 12px);
+  font-size: 14px;
+}
+
+.step-card-footer-note {
+  font-family: var(--font-family-sans);
+  font-size: 12px;
+  color: var(--color-muted);
+  line-height: 1.5;
+  background-color: var(--color-surface-subtle);
+  padding: 12px;
+  border-radius: 12px;
+  margin: 0;
+}

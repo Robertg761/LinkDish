@@ -1,0 +1,123 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "installCommand": "PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 pnpm install",
+  "headers": [
+    {
+      "source": "/(.*)",
+      "has": [
+        {
+          "type": "host",
+          "value": "(?:app\\.linkdish\\.ca|app\\.linkdish\\.xyz|linkdish-web\\.vercel\\.app)"
+        }
+      ],
+      "headers": [
+        {
+          "key": "Content-Security-Policy",
+          "value": "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; script-src 'self' https://cdn.jsdelivr.net https://clerk.linkdish.ca https://*.clerk.com https://*.clerk.dev https://*.clerk.accounts.dev; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' data: https://cdn.jsdelivr.net; img-src 'self' data: blob: https:; connect-src 'self' https://api.linkdish.ca https://linkdish-api.vercel.app https://clerk.linkdish.ca https://*.clerk.com https://*.clerk.dev https://*.clerk.accounts.dev https://*.revenuecat.com https://*.stripe.com wss://*.clerk.com; frame-src https://accounts.linkdish.ca https://clerk.linkdish.ca https://*.clerk.com https://*.clerk.dev https://*.clerk.accounts.dev https://*.revenuecat.com https://*.stripe.com; worker-src 'self' blob:; manifest-src 'self'; form-action 'self' https://accounts.linkdish.ca https://clerk.linkdish.ca https://*.clerk.com; upgrade-insecure-requests"
+        },
+        {
+          "key": "Cross-Origin-Opener-Policy",
+          "value": "same-origin-allow-popups"
+        },
+        {
+          "key": "Permissions-Policy",
+          "value": "camera=(self), microphone=(), geolocation=(), payment=()"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "strict-origin-when-cross-origin"
+        },
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "X-Frame-Options",
+          "value": "DENY"
+        }
+      ]
+    }
+  ],
+  "rewrites": [
+    {
+      "source": "/privacy",
+      "destination": "/privacy.html"
+    },
+    {
+      "source": "/support",
+      "destination": "/support.html"
+    },
+    {
+      "source": "/admin",
+      "destination": "/api/admin"
+    },
+    {
+      "source": "/admin/:path*",
+      "destination": "/api/admin?path=:path*"
+    },
+    {
+      "source": "/auth/:path*",
+      "destination": "/api/auth?path=:path*"
+    },
+    {
+      "source": "/webhooks/clerk",
+      "destination": "/api/clerk-webhook"
+    },
+    {
+      "source": "/webhooks/revenuecat",
+      "destination": "/api/billing?path=revenuecat-webhook"
+    },
+    {
+      "source": "/account",
+      "destination": "/api/account"
+    },
+    {
+      "source": "/account/:path*",
+      "destination": "/api/account?path=:path*"
+    },
+    {
+      "source": "/household",
+      "destination": "/api/household"
+    },
+    {
+      "source": "/household/:path*",
+      "destination": "/api/household?path=:path*"
+    },
+    {
+      "source": "/billing",
+      "destination": "/api/billing"
+    },
+    {
+      "source": "/billing/:path*",
+      "destination": "/api/billing?path=:path*"
+    },
+    {
+      "source": "/health",
+      "destination": "/api/health"
+    },
+    {
+      "source": "/ios-waitlist",
+      "destination": "/api/ios-waitlist"
+    },
+    {
+      "source": "/support-ticket",
+      "destination": "/api/support-ticket"
+    },
+    {
+      "source": "/image",
+      "destination": "/api/image"
+    },
+    {
+      "source": "/extract",
+      "destination": "/api/extract"
+    },
+    {
+      "source": "/analytics/events",
+      "destination": "/api/analytics"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}

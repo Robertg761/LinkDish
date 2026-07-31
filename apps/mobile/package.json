@@ -1,0 +1,81 @@
+{
+  "name": "@linkdish/mobile",
+  "version": "0.1.0",
+  "private": true,
+  "main": "expo-router/entry",
+  "expo": {
+    "doctor": {
+      "appConfigFieldsNotSyncedCheck": {
+        "enabled": false
+      }
+    }
+  },
+  "scripts": {
+    "dev": "expo start --clear",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "doctor": "npx expo-doctor",
+    "export": "expo export --platform android --platform ios",
+    "export:release": "node scripts/with-production-public-env.mjs expo export --platform android --platform ios",
+    "assert:production-clean": "node scripts/assert-production-clean.mjs",
+    "assert:production-env": "node scripts/assert-production-clean.mjs --env-only",
+    "prebuild": "expo prebuild --clean --no-install",
+    "prebuild:release": "node scripts/with-production-public-env.mjs expo prebuild --clean --no-install",
+    "build:android:release": "node -e \"console.error('Local Gradle Android release builds are intentionally disabled.\\n\\nUse the EAS Play Store build path instead:\\n  pnpm play:android:build\\n\\nThe checked-in Android Gradle project still uses the debug keystore for its release build type. Until local upload-keystore signing is wired and verified, this command fails closed so a debug-signed AAB cannot be mistaken for a Play-ready artifact.'); process.exit(1)\"",
+    "build:android:playstore": "pnpm run assert:production-env && node scripts/with-production-public-env.mjs npx eas-cli build --platform android --profile production",
+    "build:ios:simulator": "node scripts/with-production-public-env.mjs xcodebuild -workspace ios/LinkDish.xcworkspace -scheme LinkDish -configuration Release -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' build",
+    "submit:android:closed": "npx eas-cli submit --platform android --profile closed",
+    "submit:android:internal": "npx eas-cli submit --platform android --profile internal",
+    "submit:android:production": "npx eas-cli submit --platform android --profile production",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@clerk/expo": "^3.7.4",
+    "@expo/dom-webview": "~56.0.6",
+    "@expo/vector-icons": "^15.0.2",
+    "@linkdish/api-client": "workspace:*",
+    "@linkdish/api-contracts": "workspace:*",
+    "@linkdish/config": "workspace:*",
+    "@linkdish/recipe-domain": "workspace:*",
+    "@linkdish/ui": "workspace:*",
+    "@linkdish/utils": "workspace:*",
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "expo": "~56.0.15",
+    "expo-apple-authentication": "~56.0.4",
+    "expo-auth-session": "~56.0.15",
+    "expo-blur": "~56.0.3",
+    "expo-constants": "~56.0.20",
+    "expo-crypto": "~56.0.4",
+    "expo-file-system": "~56.0.8",
+    "expo-haptics": "~56.0.3",
+    "expo-image-manipulator": "~56.0.21",
+    "expo-image-picker": "^56.0.20",
+    "expo-keep-awake": "~56.0.3",
+    "expo-linking": "~56.0.15",
+    "expo-router": "~56.2.14",
+    "expo-secure-store": "~56.0.4",
+    "expo-sharing": "~56.0.21",
+    "expo-splash-screen": "~56.0.12",
+    "expo-status-bar": "~56.0.4",
+    "expo-store-review": "~56.0.3",
+    "expo-system-ui": "^56.0.5",
+    "expo-web-browser": "~56.0.5",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "react-native": "0.85.3",
+    "react-native-purchases": "^10.4.2",
+    "react-native-reanimated": "~4.3.1",
+    "react-native-safe-area-context": "~5.7.0",
+    "react-native-screens": "~4.25.2",
+    "react-native-view-shot": "5.1.0",
+    "react-native-web": "^0.21.0"
+  },
+  "devDependencies": {
+    "@expo/ngrok": "^4.1.0",
+    "@types/react": "~19.2.17",
+    "@types/react-test-renderer": "^19.1.0",
+    "react-test-renderer": "19.2.3",
+    "typescript": "~6.0.3"
+  }
+}

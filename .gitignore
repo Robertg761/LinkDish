@@ -1,0 +1,34 @@
+.DS_Store
+node_modules
+.pnpm-store
+.env
+.env.local
+.env.*.local
+coverage
+dist
+.turbo
+*.tsbuildinfo
+
+# Expo / React Native
+.expo
+.expo-shared
+apps/mobile/.expo
+
+# Build artifacts
+*.log
+*.apk
+*.aab
+.artifacts
+.vercel
+.env*.local
+
+# Private and generated working material
+.tmp_*
+home_screen*.png
+store-shots/
+apps/mobile/store-assets/
+docs/marketing/
+opencode.json
+
+# Claude Code session-local files
+.claude/

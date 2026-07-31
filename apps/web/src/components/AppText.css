@@ -1,0 +1,52 @@
+.app-text {
+  margin: 0;
+}
+
+.app-text-display {
+  font-family: var(--font-family-serif);
+  font-size: var(--text-display);
+  font-weight: normal;
+  line-height: var(--text-display-line-height);
+  letter-spacing: var(--text-display-letter-spacing);
+  color: var(--color-text);
+}
+
+.app-text-headline {
+  font-family: var(--font-family-serif);
+  font-size: var(--text-headline);
+  font-weight: normal;
+  line-height: var(--text-headline-line-height);
+  letter-spacing: var(--text-headline-letter-spacing);
+  color: var(--color-text);
+}
+
+.app-text-title {
+  font-family: var(--font-family-sans);
+  font-size: var(--text-title);
+  font-weight: 700;
+  line-height: var(--text-title-line-height);
+  letter-spacing: var(--text-title-letter-spacing);
+  color: var(--color-text);
+}
+
+.app-text-body {
+  font-family: var(--font-family-sans);
+  font-size: var(--text-body);
+  font-weight: normal;
+  line-height: var(--text-body-line-height);
+  color: var(--color-text);
+}
+
+.app-text-label {
+  font-family: var(--font-family-sans);
+  font-size: var(--text-label);
+  font-weight: 600;
+  line-height: var(--text-label-line-height);
+  letter-spacing: var(--text-label-letter-spacing);
+  text-transform: uppercase;
+  color: var(--color-muted);
+}
+
+.app-text-muted {
+  color: var(--color-muted);
+}

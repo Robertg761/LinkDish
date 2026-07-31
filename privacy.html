@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LinkDish Privacy Policy</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #fff9f1;
+        --surface: rgba(255, 255, 255, 0.9);
+        --text: #201d18;
+        --muted: #5d584f;
+        --border: #e8dcc7;
+        --accent: #335c56;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background:
+          radial-gradient(circle at top, rgba(51, 92, 86, 0.08), transparent 32%),
+          linear-gradient(180deg, #fffaf4 0%, var(--bg) 100%);
+        color: var(--text);
+        font-family: Georgia, "Times New Roman", serif;
+        line-height: 1.6;
+      }
+
+      main {
+        width: min(760px, calc(100% - 32px));
+        margin: 48px auto;
+        padding: 32px;
+        border: 1px solid var(--border);
+        border-radius: 28px;
+        background: var(--surface);
+        box-shadow: 0 18px 60px rgba(32, 29, 24, 0.08);
+      }
+
+      h1,
+      h2 {
+        line-height: 1.15;
+        margin: 0 0 16px;
+      }
+
+      h1 {
+        font-size: clamp(2rem, 5vw, 3.2rem);
+      }
+
+      h2 {
+        margin-top: 28px;
+        font-size: 1.3rem;
+      }
+
+      p,
+      li {
+        font-size: 1rem;
+      }
+
+      .eyebrow {
+        color: var(--accent);
+        font-family: "Helvetica Neue", Arial, sans-serif;
+        font-size: 0.82rem;
+        font-weight: 700;
+        letter-spacing: 0.14em;
+        margin-bottom: 12px;
+        text-transform: uppercase;
+      }
+
+      .muted {
+        color: var(--muted);
+      }
+
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="eyebrow">LinkDish</div>
+      <h1>Privacy Policy</h1>
+      <p class="muted">Last updated: July 10, 2026</p>
+
+      <p>
+        LinkDish helps you turn recipe links into a clean, readable recipe format. This page
+        explains what information the app handles and how it is used.
+      </p>
+
+      <h2>Information LinkDish handles</h2>
+      <ul>
+        <li>
+          Recipe links that you paste into the app so the service can extract recipe information.
+        </li>
+        <li>
+          Recipe photos or camera captures you choose to submit for image-based recipe scanning.
+        </li>
+        <li>
+          Recipe content returned from the extraction service, such as titles, ingredients, steps,
+          and timing.
+        </li>
+        <li>
+          Recipes, edits, and personal notes you choose to save. Free includes up to 15 personal
+          saved recipes; paid plans include unlimited personal saves.
+        </li>
+        <li>
+          Recipes, edits, and personal notes you choose to add to a shared Family recipe book,
+          including the account email shown as the recipe owner.
+        </li>
+        <li>
+          Source page text, metadata, and video transcript details needed to extract recipe
+          information, including when LinkDish uses configured fallback processing for difficult
+          links.
+        </li>
+        <li>
+          An app-generated RevenueCat app user ID used to load purchase options, restore purchases,
+          and verify LinkDish paid plan entitlement status.
+        </li>
+        <li>
+          Purchase, subscription, and lifetime-access status returned by RevenueCat, Apple App
+          Store, Google Play, or RevenueCat Web Billing, such as whether a LinkDish Plus, Family,
+          or Founding entitlement is active.
+        </li>
+        <li>
+          If you sign in for plan access or Family household sharing, your account email, login
+          code/session records or social sign-in identity details, household membership, and
+          household invite records.
+        </li>
+        <li>
+          If you join the iOS notification list, the email address you submit and basic request
+          details needed to prevent abuse.
+        </li>
+        <li>
+          First-party analytics events such as page or screen views, app opens, feature actions,
+          extraction outcomes, source hostnames, app version, session identifiers, and sanitized
+          error summaries.
+        </li>
+      </ul>
+
+      <h2>How the information is used</h2>
+      <ul>
+        <li>
+          Submitted links are sent to LinkDish's backend service to fetch and extract recipe
+          details.
+        </li>
+        <li>
+          Difficult links may be processed by LinkDish's configured extraction providers to recover
+          missing recipe details. This is used only to provide recipe extraction, not for
+          advertising.
+        </li>
+        <li>
+          Submitted recipe images may be processed by LinkDish's backend and configured extraction
+          providers to turn paper recipes, recipe cards, or cookbook pages into structured recipe
+          details.
+        </li>
+        <li>
+          Personal saved recipes are stored on your device so you can reopen them later inside the
+          app. Free accounts can keep up to 15 personal recipes; paid plans remove that save limit.
+        </li>
+        <li>
+          Shared Family recipes are stored by LinkDish's backend so active household members can
+          view them, duplicate them, and see who added them.
+        </li>
+        <li>
+          The app-generated purchase ID is sent to RevenueCat and to LinkDish's backend service so
+          LinkDish can check entitlement status and apply the correct import and extraction limits.
+        </li>
+        <li>
+          Basic server-side operational logs may be used to monitor reliability, prevent abuse, and
+          debug failures.
+        </li>
+        <li>
+          Analytics are used to understand whether LinkDish is working across the website, web app,
+          Android app, and backend, including extraction success rates, source hostnames,
+          performance problems, and errors.
+        </li>
+        <li>
+          Account and household records are used only to sign you in, manage Family household
+          membership, send login or invite emails through LinkDish's email provider, verify
+          Google/Apple sign-in through LinkDish's configured authentication provider, and apply the
+          shared Family quota.
+        </li>
+        <li>
+          iOS notification list emails are used only to send LinkDish iOS availability updates and
+          maintain the list.
+        </li>
+      </ul>
+
+      <h2>Purchases</h2>
+      <p>
+        LinkDish uses RevenueCat to manage purchase offerings, purchases, restores, customer-portal
+        access, and entitlement checks. Mobile purchases are processed by Apple App Store or Google
+        Play through RevenueCat. Web subscriptions and the one-time Founding offer are processed
+        through RevenueCat Web Billing and its payment processor. LinkDish does not receive your
+        full payment card number or payment account credentials.
+      </p>
+
+      <h2>Authentication providers</h2>
+      <p>
+        LinkDish may use Clerk to support Google and Apple sign-in. When that sign-in option is
+        enabled, Clerk handles the authentication flow and provides LinkDish with a verified account
+        identifier and email address so LinkDish can connect the sign-in to a LinkDish account.
+        LinkDish keeps its own account ID for saved recipes, Family households, quotas, and account
+        deletion.
+      </p>
+
+      <h2>What LinkDish does not do</h2>
+      <ul>
+        <li>No account is required for the first 3 free recipe imports.</li>
+        <li>Sign in is required to buy or restore a plan and for Family household sharing.</li>
+        <li>LinkDish does not sell your personal information.</li>
+        <li>LinkDish does not include third-party advertising in the current app.</li>
+        <li>
+          LinkDish analytics do not store full recipe URLs, recipe titles, ingredients,
+          instructions, uploaded recipe images, raw page text, or LLM prompts.
+        </li>
+      </ul>
+
+      <h2>Data storage</h2>
+      <p>
+        Personal recipes you save are stored locally on your device. Shared Family
+        recipes and their notes are stored by LinkDish's backend for household access. Extracted
+        recipe data may also pass through LinkDish's backend service in order to produce results and
+        keep the service running reliably. The RevenueCat app user ID is stored on your device and
+        may be stored by LinkDish's backend for quota checks and by RevenueCat for purchase and
+        entitlement management. Mobile session tokens use operating-system-backed secure storage;
+        the web app uses browser storage needed to keep you signed in. Server-side account,
+        session, external sign-in identity, invite, household, and shared
+        recipe records are stored by LinkDish's backend. iOS notification list records are stored by
+        LinkDish's backend. First-party analytics records are stored by LinkDish's backend using
+        anonymous or hashed identifiers.
+      </p>
+
+      <h2>Your choices</h2>
+      <p>
+        You can stop using the extraction service at any time by not submitting links or recipe
+        images, and you can remove personal saved recipes from inside the app whenever you want. You
+        can unshare recipes you added to a Family recipe book from the shared recipe
+        controls.
+      </p>
+      <p>
+        You can manage or restore access from LinkDish's Plans screen. Store subscriptions are
+        managed through the App Store or Google Play account used to make the purchase; web
+        subscriptions are managed through the RevenueCat customer portal opened from LinkDish.
+        Founding access is a one-time purchase and does not renew.
+      </p>
+      <p>
+        If you create a LinkDish account, you can delete it from Account in the app. Account
+        deletion removes server-side account, household, and shared Family recipe records that
+        belong to the account, but it does not cancel App Store, Google Play, or web subscriptions.
+        Local saved recipes remain on your device.
+      </p>
+      <p>
+        If you joined the iOS notification list and want to be removed, or if you cannot access the
+        app and need help with deletion of data retained by LinkDish, email
+        <a href="mailto:support@linkdish.ca">support@linkdish.ca</a>.
+      </p>
+
+      <h2>Questions</h2>
+      <p>
+        If you have questions about privacy or support, use the support contact listed on the app's
+        store listing or visit the <a href="/support">LinkDish support page</a>.
+      </p>
+    </main>
+  </body>
+</html>
