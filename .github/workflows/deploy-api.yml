@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - api/**
+      - public/**
       - services/extractor-api/**
       - packages/**
       - package.json

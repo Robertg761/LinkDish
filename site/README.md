@@ -76,25 +76,29 @@ When artwork changes, add a new 1200 x 630 PNG with a dated filename such as
 putting pricing or quota promises into the image unless production plan
 configuration was verified in the same change.
 
-## Deployment And Cutover
+## Deployment And Ownership
 
 Changes under `site/` deploy from the public `Robertg761/LinkDish` repository
 after they reach `main`. The workflow uploads only this directory; app and API
 files are not part of the Pages artifact.
 
-The former `Robertg761/LinkDish-site` repository served `linkdish.ca` before the
-monorepo migration. For the one-time hosting cutover:
+The custom domain, Pages configuration, deployment workflow, and complete site
+history are owned by this monorepo. The former `Robertg761/LinkDish-site`
+repository is archived, has Pages disabled, and is not required for development
+or deployment.
 
-1. Push the merged monorepo and enable GitHub Actions as the Pages source for
-   `Robertg761/LinkDish`.
-2. Confirm the new workflow successfully publishes its temporary GitHub Pages
-   URL.
-3. Remove the `linkdish.ca` custom domain from the old repository, configure it
-   on `Robertg761/LinkDish`, and enforce HTTPS.
-4. Rerun the site workflow and verify the homepage, support form, privacy page,
-   SEO pages, sitemap, social image, and household invite redirect.
-5. Archive the old site repository only after the custom domain is healthy on
-   the monorepo.
+For every site change:
+
+1. Run `pnpm check:site` from the repository root.
+2. Merge or push the change to `main` and confirm the `Deploy Site` workflow
+   succeeds.
+3. Verify the affected routes on `https://linkdish.ca`, including the support
+   form or invite handoff when those contracts changed.
+
+If the custom domain or Pages settings ever need repair, configure GitHub Pages
+on `Robertg761/LinkDish` with GitHub Actions as the source, `linkdish.ca` as the
+custom domain, and HTTPS enforcement enabled. Do not restore Pages on the
+archived repository.
 
 Do not change DNS, Vercel environment variables, Proton Mail, or Resend settings
 as part of routine site deployment.

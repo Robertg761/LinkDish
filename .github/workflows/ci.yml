@@ -9,16 +9,16 @@ on:
       - "store-shots/**"
       - "**.md"
       - "*.png"
-      - privacy.html
-      - support.html
+      - public/privacy.html
+      - public/support.html
   pull_request:
     paths-ignore:
       - "docs/**"
       - "store-shots/**"
       - "**.md"
       - "*.png"
-      - privacy.html
-      - support.html
+      - public/privacy.html
+      - public/support.html
 
 concurrency:
   group: ci-${{ github.ref }}
