@@ -23,4 +23,4 @@ report does not create a promise of payment or a response deadline.
 Components APIs. LinkDish uses React Router's browser-only declarative mode and
 does not import or enable those APIs. The pnpm production audit ignores that
 specific advisory while the project remains on the React Router 7 application
-baseline; no other production advisory is ignored.
+baseline; no other advisory is ignored.

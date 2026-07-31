@@ -1,9 +1,6 @@
 import js from "@eslint/js";
 import globals from "globals";
-import importPlugin from "eslint-plugin-import";
-import reactPlugin from "eslint-plugin-react";
-import reactHooksPlugin from "eslint-plugin-react-hooks";
-import reactNativePlugin from "eslint-plugin-react-native";
+import importPlugin from "eslint-plugin-import-x";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
@@ -39,15 +36,7 @@ export default tseslint.config(
       }
     },
     plugins: {
-      import: importPlugin,
-      react: reactPlugin,
-      "react-hooks": reactHooksPlugin,
-      "react-native": reactNativePlugin
-    },
-    settings: {
-      react: {
-        version: "detect"
-      }
+      import: importPlugin
     },
     rules: {
       "@typescript-eslint/consistent-type-imports": [
@@ -83,9 +72,7 @@ export default tseslint.config(
             "type"
           ]
         }
-      ],
-      "react/react-in-jsx-scope": "off",
-      "react-native/no-inline-styles": "off"
+      ]
     }
   }
 );
