@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { randomUUID } from "expo-crypto";
 import { Platform } from "react-native";
 
 import { mobileEnv } from "../../config/env";
@@ -29,8 +30,7 @@ const loadPurchasesModule = async () => {
   return purchasesModulePromise;
 };
 
-const createLocalAppUserId = (): string =>
-  `linkdish_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+const createLocalAppUserId = (): string => `linkdish_${randomUUID()}`;
 
 export const getRevenueCatApiKey = (): string | null => {
   if (Platform.OS === "ios") {

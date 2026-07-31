@@ -72,6 +72,20 @@ const buildSuccessResponse = (
   }
 });
 
+const isVideoUrl = (value: string): boolean => {
+  try {
+    const hostname = new URL(value).hostname.toLowerCase();
+    return (
+      hostname === "youtube.com" ||
+      hostname.endsWith(".youtube.com") ||
+      hostname === "youtu.be" ||
+      hostname.endsWith(".youtu.be")
+    );
+  } catch {
+    return false;
+  }
+};
+
 export const buildMockExtractionResponse = (
   request: ExtractRecipeRequest
 ): ExtractRecipeResponse => {
@@ -81,7 +95,7 @@ export const buildMockExtractionResponse = (
 
   const { attempt, url } = request;
 
-  if (url.includes("unsupported") || url.includes("youtube.com") || url.includes("youtu.be")) {
+  if (url.includes("unsupported") || isVideoUrl(url)) {
     return {
       status: "failure",
       reason: "unsupported_source",

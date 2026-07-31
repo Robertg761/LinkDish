@@ -17,29 +17,14 @@ describe("matchStepIngredients", () => {
     const recipe = recipeById("starter-ginger-sesame-chicken-rice-skillet");
     const matches = recipe.steps.map((step) => matchStepIngredients(step.text, recipe.ingredients));
 
-    expect(matches).toEqual([
-      [0, 1, 2, 3, 4],
-      [5, 6],
-      [5],
-      [7, 8],
-      [],
-      [9, 10, 11]
-    ]);
+    expect(matches).toEqual([[0, 1, 2, 3, 4], [5, 6], [5], [7, 8], [], [9, 10, 11]]);
   });
 
   it("matches the oat bar sample without treating prepared mixtures as single ingredients", () => {
     const recipe = recipeById("starter-brown-butter-berry-oat-bars");
     const matches = recipe.steps.map((step) => matchStepIngredients(step.text, recipe.ingredients));
 
-    expect(matches).toEqual([
-      [],
-      [0],
-      [0, 1, 2, 3, 4, 5],
-      [],
-      [6, 7, 8, 9],
-      [10],
-      []
-    ]);
+    expect(matches).toEqual([[], [0], [0, 1, 2, 3, 4, 5], [], [6, 7, 8, 9], [10], []]);
   });
 
   it("matches the cucumber pita sample", () => {
@@ -62,11 +47,26 @@ describe("matchStepIngredients", () => {
       ])
     ).toEqual([]);
 
-    expect(matchStepIngredients("Pour in the sauce and simmer.", ["3 tablespoons low-sodium soy sauce"])).toEqual(
-      []
-    );
-    expect(matchStepIngredients("Sprinkle with sesame oil.", ["1 teaspoon toasted sesame seeds"])).toEqual([]);
-    expect(matchStepIngredients("Add sugar if needed.", ["2 tablespoons granulated sugar", "1 tablespoon coarse sugar"]))
-      .toEqual([]);
+    expect(
+      matchStepIngredients("Pour in the sauce and simmer.", ["3 tablespoons low-sodium soy sauce"])
+    ).toEqual([]);
+    expect(
+      matchStepIngredients("Sprinkle with sesame oil.", ["1 teaspoon toasted sesame seeds"])
+    ).toEqual([]);
+    expect(
+      matchStepIngredients("Add sugar if needed.", [
+        "2 tablespoons granulated sugar",
+        "1 tablespoon coarse sugar"
+      ])
+    ).toEqual([]);
+  });
+
+  it("ignores bracketed and parenthesized preparation notes", () => {
+    expect(
+      matchStepIngredients("Add the tomatoes and simmer.", [
+        "1 can tomatoes [drained chicken]",
+        "1 cup stock (with spinach)"
+      ])
+    ).toEqual([0]);
   });
 });

@@ -10,11 +10,25 @@
       return window.crypto.randomUUID();
     }
 
-    return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function (character) {
-      var random = Math.floor(Math.random() * 16);
-      var value = character === "x" ? random : (random & 0x3) | 0x8;
-      return value.toString(16);
-    });
+    if (!window.crypto || !window.crypto.getRandomValues) {
+      return "";
+    }
+
+    var bytes = new Uint8Array(16);
+    window.crypto.getRandomValues(bytes);
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    var hex = Array.from(bytes, function (value) {
+      return value.toString(16).padStart(2, "0");
+    }).join("");
+
+    return [
+      hex.slice(0, 8),
+      hex.slice(8, 12),
+      hex.slice(12, 16),
+      hex.slice(16, 20),
+      hex.slice(20)
+    ].join("-");
   }
 
   function getStoredId(key) {
@@ -25,6 +39,11 @@
     }
 
     var next = uuid();
+
+    if (!next) {
+      return "";
+    }
+
     window.localStorage.setItem(key, next);
     return next;
   }
@@ -36,10 +55,16 @@
 
     if (!sessionId || !Number.isFinite(lastSeen) || now - lastSeen > sessionTimeoutMs) {
       sessionId = uuid();
-      window.localStorage.setItem(sessionKey, sessionId);
+
+      if (sessionId) {
+        window.localStorage.setItem(sessionKey, sessionId);
+      }
     }
 
-    window.localStorage.setItem(sessionLastSeenKey, String(now));
+    if (sessionId) {
+      window.localStorage.setItem(sessionLastSeenKey, String(now));
+    }
+
     return sessionId;
   }
 
@@ -60,12 +85,19 @@
   }
 
   function send(eventName, properties) {
+    var anonymousId = getStoredId(clientKey);
+    var sessionId = getSessionId();
+
+    if (!anonymousId || !sessionId) {
+      return;
+    }
+
     var event = {
       eventName: eventName,
       occurredAt: new Date().toISOString(),
       platform: "marketing_site",
-      anonymousId: getStoredId(clientKey),
-      sessionId: getSessionId(),
+      anonymousId: anonymousId,
+      sessionId: sessionId,
       routeOrScreen: window.location.pathname,
       referrerHostname: referrerHostname(),
       utmSource: utm("utm_source"),
@@ -122,13 +154,26 @@
 
     var href = link.getAttribute("href") || "";
     var label = (link.textContent || "").trim().slice(0, 80);
+    var targetUrl;
 
-    if (href.indexOf("play.google.com") >= 0) {
+    try {
+      targetUrl = new URL(href, window.location.href);
+    } catch (_error) {
+      targetUrl = null;
+    }
+
+    if (
+      targetUrl &&
+      (targetUrl.hostname === "play.google.com" || targetUrl.hostname.endsWith(".play.google.com"))
+    ) {
       send("marketing_play_store_clicked", { cta: label });
       return;
     }
 
-    if (href.indexOf("app.linkdish.ca") >= 0) {
+    if (
+      targetUrl &&
+      (targetUrl.hostname === "app.linkdish.ca" || targetUrl.hostname.endsWith(".app.linkdish.ca"))
+    ) {
       send("marketing_web_app_clicked", { cta: label });
       return;
     }

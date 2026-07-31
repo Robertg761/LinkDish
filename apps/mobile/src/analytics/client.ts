@@ -1,6 +1,7 @@
 import { createExtractorApiClient } from "@linkdish/api-client";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Constants from "expo-constants";
+import { randomUUID } from "expo-crypto";
 import { Platform } from "react-native";
 
 import { mobileEnv } from "../config/env";
@@ -27,12 +28,7 @@ const apiClient = createExtractorApiClient({
   baseUrl: mobileEnv.apiBaseUrl
 });
 
-export const createMobileAnalyticsId = (): string =>
-  "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/gu, (character) => {
-    const random = Math.floor(Math.random() * 16);
-    const value = character === "x" ? random : (random & 0x3) | 0x8;
-    return value.toString(16);
-  });
+export const createMobileAnalyticsId = (): string => randomUUID();
 
 const getStoredOrCreate = async (key: string): Promise<string> => {
   const existing = await AsyncStorage.getItem(key);

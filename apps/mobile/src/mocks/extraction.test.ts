@@ -32,4 +32,13 @@ describe("buildMockExtractionResponse", () => {
     expect(response.status).toBe("success");
     expect(response.status === "success" ? response.recipe.sourceType : null).toBe("image");
   });
+
+  it("does not treat lookalike YouTube hostnames as video sources", () => {
+    expect(
+      buildMockExtractionResponse({
+        url: "https://youtube.com.example.test/recipe",
+        attempt: "primary"
+      }).status
+    ).toBe("success");
+  });
 });

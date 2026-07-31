@@ -132,7 +132,12 @@ export const createExtractorApiClient = ({
   fetchImplementation = fetch,
   getHeaders
 }: CreateExtractorApiClientOptions): ExtractorApiClient => {
-  const normalizedBaseUrl = baseUrl.replace(/\/+$/, "");
+  let normalizedBaseUrl = baseUrl;
+
+  while (normalizedBaseUrl.endsWith("/")) {
+    normalizedBaseUrl = normalizedBaseUrl.slice(0, -1);
+  }
+
   const requestJson = async <Response>(
     path: string,
     options: {

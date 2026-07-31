@@ -41,6 +41,14 @@ vi.mock("expo-constants", () => ({
   }
 }));
 
+vi.mock("expo-crypto", () => ({
+  randomUUID: vi
+    .fn()
+    .mockReturnValueOnce("00000000-0000-4000-8000-000000000001")
+    .mockReturnValueOnce("00000000-0000-4000-8000-000000000002")
+    .mockReturnValue("00000000-0000-4000-8000-000000000003")
+}));
+
 vi.mock("react-native", () => ({
   Platform: {
     OS: "android"

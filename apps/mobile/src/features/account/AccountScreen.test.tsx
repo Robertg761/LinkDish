@@ -72,7 +72,9 @@ vi.mock("@clerk/expo/google", () => ({
   })
 }));
 
-vi.mock("expo-crypto", () => ({}));
+vi.mock("expo-crypto", () => ({
+  randomUUID: vi.fn(() => "00000000-0000-4000-8000-000000000001")
+}));
 
 vi.mock("@linkdish/api-client", () => ({
   ExtractorApiError: class ExtractorApiError extends Error {

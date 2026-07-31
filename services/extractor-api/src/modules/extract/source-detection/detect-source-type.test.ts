@@ -20,6 +20,16 @@ describe("detectSourceType", () => {
     expect(detectSourceType("https://vimeo.com/123456").sourceType).toBe("video");
   });
 
+  it("does not classify lookalike hostnames as supported services", () => {
+    expect(detectSourceType("https://youtube.com.example.test/watch?v=abc123").sourceType).toBe(
+      "article"
+    );
+    expect(detectSourceType("https://vimeo.com.example.test/123456").sourceType).toBe("article");
+    expect(detectSourceType("https://instagram.com.example.test/reel/abc123").sourceType).toBe(
+      "article"
+    );
+  });
+
   it("marks unsupported social URLs as social", () => {
     expect(detectSourceType("https://www.instagram.com/reel/abc123").sourceType).toBe("social");
   });

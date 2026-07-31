@@ -11,6 +11,10 @@ vi.mock("react-native", () => ({
   Text: ({ children }: { children: React.ReactNode }) => React.createElement("text", null, children)
 }));
 
+vi.mock("expo-crypto", () => ({
+  randomUUID: vi.fn(() => "00000000-0000-4000-8000-000000000001")
+}));
+
 vi.mock("../../../services/extractor-api", () => ({
   extractRecipe: vi.fn()
 }));

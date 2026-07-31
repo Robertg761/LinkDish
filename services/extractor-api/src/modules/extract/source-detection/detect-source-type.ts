@@ -7,6 +7,8 @@ import type { DetectionResult, HtmlSourceDocument } from "../types.js";
 
 const socialHosts = ["instagram.com", "tiktok.com", "facebook.com"];
 const videoHosts = ["vimeo.com", "dailymotion.com", "twitch.tv"];
+const matchesHostname = (hostname: string, expected: string): boolean =>
+  hostname === expected || hostname.endsWith(`.${expected}`);
 
 const hasRecipeJsonLd = (html: string): boolean =>
   /"@type"\s*:\s*(?:"Recipe"|\[[^\]]*"Recipe")/i.test(html);
@@ -52,7 +54,7 @@ export const detectSourceType = (url: string, document?: HtmlSourceDocument): De
   const pathname = parsedUrl.pathname.toLowerCase();
   const adapter = getDomainAdapter(hostname);
 
-  if (hostname.includes("youtube.com") || hostname.includes("youtu.be")) {
+  if (matchesHostname(hostname, "youtube.com") || matchesHostname(hostname, "youtu.be")) {
     if (pathname.startsWith("/shorts/")) {
       return {
         sourceType: "video",
@@ -79,7 +81,7 @@ export const detectSourceType = (url: string, document?: HtmlSourceDocument): De
     };
   }
 
-  if (videoHosts.some((candidate) => hostname.includes(candidate))) {
+  if (videoHosts.some((candidate) => matchesHostname(hostname, candidate))) {
     return {
       sourceType: "video",
       confidence: "high",
@@ -88,7 +90,7 @@ export const detectSourceType = (url: string, document?: HtmlSourceDocument): De
     };
   }
 
-  if (socialHosts.some((candidate) => hostname.includes(candidate))) {
+  if (socialHosts.some((candidate) => matchesHostname(hostname, candidate))) {
     return {
       sourceType: "social",
       confidence: "high",

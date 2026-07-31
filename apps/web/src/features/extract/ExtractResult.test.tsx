@@ -106,6 +106,25 @@ describe("ExtractResult", () => {
     expect(screen.queryByText("4 servings servings")).not.toBeInTheDocument();
   });
 
+  it("does not render unsafe source URLs as links", () => {
+    render(
+      <ExtractResult
+        recipe={recipe}
+        sourceUrl="javascript:alert(1)"
+        extraction={{
+          fetchMode: "http",
+          provenance: ["jsonld"],
+          strategy: "recipe-schema",
+          warnings: []
+        }}
+        onReset={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("From Unknown source")).not.toHaveAttribute("href");
+    expect(screen.queryByRole("link", { name: "Unknown source" })).not.toBeInTheDocument();
+  });
+
   it("opens the save-limit upgrade sheet when the free cookbook is full", async () => {
     authMocks.user = {
       billingPlan: "free",

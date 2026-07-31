@@ -36,6 +36,15 @@ interface ExtractResultProps {
 
 const prefersReducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
+const parseSafeSourceUrl = (value: string): URL | null => {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed : null;
+  } catch {
+    return null;
+  }
+};
+
 export const ExtractResult: React.FC<ExtractResultProps> = ({
   recipe,
   sourceUrl,
@@ -54,7 +63,8 @@ export const ExtractResult: React.FC<ExtractResultProps> = ({
   const [nutritionExpanded, setNutritionExpanded] = useState(true);
 
   const isPremium = user?.billingPlan === "plus" || user?.billingPlan === "family";
-  const sourceHost = new URL(sourceUrl).hostname.replace(/^www\./i, "");
+  const safeSourceUrl = parseSafeSourceUrl(sourceUrl);
+  const sourceHost = safeSourceUrl?.hostname.replace(/^www\./i, "") || "Unknown source";
   const previewImageUrl = buildRecipeImageUrl(getRecipeImageOrNull(recipe.image), 1200);
   const hasNutrition =
     recipe.nutrition && Object.values(recipe.nutrition).some((v) => v != null && v !== "");
@@ -228,9 +238,18 @@ export const ExtractResult: React.FC<ExtractResultProps> = ({
           <p className="recipe-metadata">{buildRecipeMetaLine(recipe)}</p>
           <p className="recipe-source-line">
             From{" "}
-            <a href={sourceUrl} target="_blank" rel="noreferrer" className="recipe-source-link">
-              {sourceHost}
-            </a>
+            {safeSourceUrl ? (
+              <a
+                href={safeSourceUrl.href}
+                target="_blank"
+                rel="noreferrer"
+                className="recipe-source-link"
+              >
+                {sourceHost}
+              </a>
+            ) : (
+              sourceHost
+            )}
           </p>
           <div className="result-actions-top">
             <Button variant="ghost" onClick={onReset}>

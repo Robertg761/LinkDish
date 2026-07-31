@@ -105,11 +105,32 @@ const singularize = (token: string): string => {
   return token;
 };
 
+const stripDelimitedSegments = (text: string, opening: string, closing: string): string => {
+  let cursor = 0;
+  let result = "";
+
+  while (cursor < text.length) {
+    const openingIndex = text.indexOf(opening, cursor);
+
+    if (openingIndex < 0) {
+      return result + text.slice(cursor);
+    }
+
+    const closingIndex = text.indexOf(closing, openingIndex + opening.length);
+
+    if (closingIndex < 0) {
+      return result + text.slice(cursor);
+    }
+
+    result += `${text.slice(cursor, openingIndex)} `;
+    cursor = closingIndex + closing.length;
+  }
+
+  return result;
+};
+
 const normalizeTokens = (text: string): string[] =>
-  text
-    .toLowerCase()
-    .replace(/\[[^\]]+\]/g, " ")
-    .replace(/\([^)]*\)/g, " ")
+  stripDelimitedSegments(stripDelimitedSegments(text.toLowerCase(), "[", "]"), "(", ")")
     .replace(/['’]/g, "")
     .replace(/[^a-z0-9]+/g, " ")
     .trim()
@@ -192,7 +213,10 @@ const buildCandidate = (ingredient: IngredientInput, index: number): IngredientC
  * and intentionally avoids generic one-word matches when they could point at
  * the wrong ingredient.
  */
-export const matchStepIngredients = (stepText: string, ingredients: readonly IngredientInput[]): number[] => {
+export const matchStepIngredients = (
+  stepText: string,
+  ingredients: readonly IngredientInput[]
+): number[] => {
   const stepTokens = normalizeTokens(stepText);
   const stepTokenSet = new Set(stepTokens);
   const normalizedStep = ` ${stepTokens.join(" ")} `;
@@ -209,12 +233,17 @@ export const matchStepIngredients = (stepText: string, ingredients: readonly Ing
 
   const matches: number[] = [];
   const hasSingleAlias = (alias: string): boolean =>
-    stepTokens.some((token, index) => token === alias && !preparedContextWords.has(stepTokens[index + 1] ?? ""));
+    stepTokens.some(
+      (token, index) => token === alias && !preparedContextWords.has(stepTokens[index + 1] ?? "")
+    );
 
   for (const candidate of candidates) {
-    const phraseMatched = candidate.phrases.some((phrase) => normalizedStep.includes(` ${phrase} `));
+    const phraseMatched = candidate.phrases.some((phrase) =>
+      normalizedStep.includes(` ${phrase} `)
+    );
     const singleMatched = candidate.singleAliases.some(
-      (alias) => (aliasCounts.get(alias) ?? 0) === 1 && stepTokenSet.has(alias) && hasSingleAlias(alias)
+      (alias) =>
+        (aliasCounts.get(alias) ?? 0) === 1 && stepTokenSet.has(alias) && hasSingleAlias(alias)
     );
 
     if (phraseMatched || singleMatched) {
