@@ -46,12 +46,18 @@
 
 html {
   background: var(--background);
+  /* Decorative shapes (e.g. .hero::before) bleed past the page edge and made
+     the page pannable sideways on phones. Clip on both html and body — a lone
+     body value propagates to the viewport and stops clipping the body box —
+     and use clip, not hidden, so sticky positioning keeps working. */
+  overflow-x: clip;
   scroll-behavior: smooth;
 }
 
 body {
   min-width: 320px;
   margin: 0;
+  overflow-x: clip;
   background:
     radial-gradient(
       circle at 50% -10%,

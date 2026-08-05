@@ -38,12 +38,14 @@
 
 html {
   background: var(--background);
+  overflow-x: clip;
   scroll-behavior: smooth;
 }
 
 body {
   min-width: 320px;
   margin: 0;
+  overflow-x: clip;
   background:
     radial-gradient(circle at 85% 2%, #f7e9c8 0, transparent 30rem),
     var(--background);
