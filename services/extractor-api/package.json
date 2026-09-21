@@ -15,7 +15,7 @@
   },
   "dependencies": {
     "@clerk/backend": "^3.4.13",
-    "@fastify/cors": "^11.1.0",
+    "@fastify/cors": "^11.3.0",
     "@fastify/rate-limit": "^10.3.0",
     "@linkdish/api-contracts": "workspace:*",
     "@linkdish/config": "workspace:*",
