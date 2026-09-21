@@ -19,6 +19,8 @@ import {
 } from "../services/extractor-api/src/modules/auth/login-code-rate-limit.js";
 import { getEffectiveAccountBillingPlanId } from "../services/extractor-api/src/modules/billing/account-billing-plan.js";
 
+import { getVercelRequestIdentity } from "./_lib/vercel-request-identity.js";
+
 import type { AccountUser } from "../packages/api-contracts/src/index.js";
 
 export const config = {
@@ -60,19 +62,35 @@ const readJsonBody = async (request: Request): Promise<unknown> => {
   }
 };
 
-const errorResponse = (request: Request, error: unknown): Response =>
-  jsonError(
-    request,
-    error instanceof Error ? error.message : "Unexpected auth error.",
-    error instanceof ZodError
-      ? 400
-      : typeof error === "object" &&
-          error !== null &&
-          "statusCode" in error &&
-          typeof (error as { statusCode?: unknown }).statusCode === "number"
-        ? (error as { statusCode: number }).statusCode
-        : 500
-  );
+const genericErrorMessage = "Something went wrong on our side. Please try again in a moment.";
+
+/* null means the error carried no status of its own, i.e. it is unclassified. */
+const getClassifiedErrorStatus = (error: unknown): number | null =>
+  error instanceof ZodError
+    ? 400
+    : typeof error === "object" &&
+        error !== null &&
+        "statusCode" in error &&
+        typeof (error as { statusCode?: unknown }).statusCode === "number"
+      ? (error as { statusCode: number }).statusCode
+      : null;
+
+/*
+ * Unclassified failures carry provider internals (Upstash/Postgres hostnames,
+ * connection strings), so the client only learns that the request failed and
+ * the detail is logged server-side.
+ */
+const errorResponse = (request: Request, error: unknown): Response => {
+  const status = getClassifiedErrorStatus(error);
+
+  if (status === null) {
+    console.error("Unhandled auth error.", error);
+
+    return jsonError(request, genericErrorMessage, 500);
+  }
+
+  return jsonError(request, error instanceof Error ? error.message : genericErrorMessage, status);
+};
 
 const disabledResponse = (request: Request): Response =>
   jsonError(request, "LinkDish households are not enabled.", 404);
@@ -143,7 +161,10 @@ export async function POST(request: Request) {
 
   try {
     if (path === "login-code") {
-      const rateLimit = await checkLoginCodeRateLimit(request.headers);
+      const rateLimit = await checkLoginCodeRateLimit(
+        request.headers,
+        getVercelRequestIdentity(request)
+      );
 
       if (!rateLimit.allowed) {
         console.warn(

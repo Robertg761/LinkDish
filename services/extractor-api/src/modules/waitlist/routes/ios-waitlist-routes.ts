@@ -26,7 +26,9 @@ const sendError = (
 export const registerIosWaitlistRoutes = (app: FastifyInstance) => {
   app.post("/ios-waitlist", async (request, reply) => {
     try {
-      return reply.status(200).send(await joinIosWaitlist(request.body, request.headers));
+      return reply
+        .status(200)
+        .send(await joinIosWaitlist(request.body, request.headers, { remoteAddress: request.ip }));
     } catch (error) {
       return sendError(reply, error);
     }

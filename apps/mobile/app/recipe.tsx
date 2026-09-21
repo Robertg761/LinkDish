@@ -38,6 +38,14 @@ import {
   RecipeResultCard,
   type RecipeShoppingActionContext
 } from "../src/features/recipe-results/components/RecipeResultCard";
+import {
+  appendDraftStep,
+  createDraftSteps,
+  getDraftStepTexts,
+  removeDraftStep as removeDraftStepById,
+  updateDraftStep as updateDraftStepById,
+  type DraftStep
+} from "../src/features/recipe-results/draftSteps";
 import { useRecipeExtraction } from "../src/features/recipe-results/hooks/useRecipeExtraction";
 import { useSavedRecipes } from "../src/features/saved-recipes/SavedRecipesContext";
 import {
@@ -193,7 +201,7 @@ export default function RecipeScreen() {
   const [draftTitle, setDraftTitle] = useState("");
   const [draftServings, setDraftServings] = useState("");
   const [draftIngredients, setDraftIngredients] = useState("");
-  const [draftSteps, setDraftSteps] = useState<string[]>([]);
+  const [draftSteps, setDraftSteps] = useState<DraftStep[]>([]);
   const [draftNotes, setDraftNotes] = useState("");
   const shareCardRef = useRef<View>(null);
   const extractionErrorTitle = useMemo(() => selectFlavorCopyLine(EXTRACTION_ERROR_LINES), []);
@@ -411,7 +419,9 @@ export default function RecipeScreen() {
     setDraftTitle(recipe.title);
     setDraftServings(recipe.servings ?? "");
     setDraftIngredients(formatEditableIngredients(recipe.ingredients));
-    setDraftSteps(recipe.steps.length > 0 ? recipe.steps.map((step) => step.text) : [""]);
+    setDraftSteps(
+      createDraftSteps(recipe.steps.length > 0 ? recipe.steps.map((step) => step.text) : [""])
+    );
     setDraftNotes(editableRecipe.notes ?? "");
     setEditorError(null);
     setIsEditorVisible(true);
@@ -433,7 +443,7 @@ export default function RecipeScreen() {
 
     const title = draftTitle.trim();
     const ingredients = splitEditableIngredients(draftIngredients);
-    const steps = draftSteps.map((step) => step.trim()).filter(Boolean);
+    const steps = getDraftStepTexts(draftSteps);
 
     if (!title || ingredients.length === 0 || steps.length === 0) {
       setEditorError("Title, ingredients, and method all need at least one entry.");
@@ -481,18 +491,15 @@ export default function RecipeScreen() {
   };
 
   const addDraftStep = () => {
-    setDraftSteps((current) => [...current, ""]);
+    setDraftSteps((current) => appendDraftStep(current));
   };
 
-  const removeDraftStep = (stepIndex: number) => {
-    setDraftSteps((current) => {
-      const nextSteps = current.filter((_, index) => index !== stepIndex);
-      return nextSteps.length > 0 ? nextSteps : [""];
-    });
+  const removeDraftStep = (stepId: string) => {
+    setDraftSteps((current) => removeDraftStepById(current, stepId));
   };
 
-  const updateDraftStep = (stepIndex: number, value: string) => {
-    setDraftSteps((current) => current.map((step, index) => (index === stepIndex ? value : step)));
+  const updateDraftStep = (stepId: string, value: string) => {
+    setDraftSteps((current) => updateDraftStepById(current, stepId, value));
   };
 
   const handleSaveRecipe = async (target: "personal" | "family" | "both" = "personal") => {
@@ -666,7 +673,7 @@ export default function RecipeScreen() {
     }
 
     if (!result.saved || !result.recipeId) {
-      if (!result.allowed && result.message?.startsWith("Your free Cookbook holds")) {
+      if (!result.allowed && result.reason === "save_limit_reached") {
         showUpgradeMoment("save_limit");
         return;
       }
@@ -1410,15 +1417,15 @@ const RecipeEditorModal = ({
   draftIngredients: string;
   draftNotes: string;
   draftServings: string;
-  draftSteps: string[];
+  draftSteps: DraftStep[];
   draftTitle: string;
   error: string | null;
   isSaving: boolean;
   onAddStep: () => void;
   onApply: () => void;
-  onChangeStep: (stepIndex: number, value: string) => void;
+  onChangeStep: (stepId: string, value: string) => void;
   onClose: () => void;
-  onRemoveStep: (stepIndex: number) => void;
+  onRemoveStep: (stepId: string) => void;
   setDraftIngredients: (value: string) => void;
   setDraftNotes: (value: string) => void;
   setDraftServings: (value: string) => void;
@@ -1604,49 +1611,68 @@ const MethodStepsEditor = ({
   steps
 }: {
   onAddStep: () => void;
-  onChangeStep: (stepIndex: number, value: string) => void;
-  onRemoveStep: (stepIndex: number) => void;
+  onChangeStep: (stepId: string, value: string) => void;
+  onRemoveStep: (stepId: string) => void;
   onStepFocus: (offsetY: number, rowHeight: number) => void;
-  steps: string[];
+  steps: DraftStep[];
 }) => {
   const methodOffsetYRef = useRef(0);
   const stepListOffsetYRef = useRef(0);
-  const pendingFocusStepIndexRef = useRef<number | null>(null);
-  const stepLayoutsRef = useRef<Array<{ height: number; offsetY: number } | null>>([]);
-  const stepInputRefs = useRef<Array<TextInput | null>>([]);
+  const pendingFocusStepCountRef = useRef<number | null>(null);
+  const pendingFocusStepIdRef = useRef<string | null>(null);
+  const stepLayoutsRef = useRef<Record<string, { height: number; offsetY: number }>>({});
+  const stepInputRefs = useRef<Record<string, TextInput | null>>({});
 
+  // Rows are keyed by id, so drop the measurements and refs of rows that are gone
+  // instead of shifting every entry after a removal.
   useEffect(() => {
-    stepLayoutsRef.current = stepLayoutsRef.current.slice(0, steps.length);
-    stepInputRefs.current = stepInputRefs.current.slice(0, steps.length);
-  }, [steps.length]);
+    const stepIds = new Set(steps.map((step) => step.id));
+
+    for (const stepId of Object.keys(stepLayoutsRef.current)) {
+      if (!stepIds.has(stepId)) {
+        delete stepLayoutsRef.current[stepId];
+      }
+    }
+
+    for (const stepId of Object.keys(stepInputRefs.current)) {
+      if (!stepIds.has(stepId)) {
+        delete stepInputRefs.current[stepId];
+      }
+    }
+
+    if (pendingFocusStepCountRef.current != null && steps.length > pendingFocusStepCountRef.current) {
+      pendingFocusStepIdRef.current = steps[steps.length - 1]?.id ?? null;
+      pendingFocusStepCountRef.current = null;
+    }
+  }, [steps]);
 
   const handleAddStep = () => {
-    pendingFocusStepIndexRef.current = steps.length;
+    pendingFocusStepCountRef.current = steps.length;
     onAddStep();
   };
 
-  const handleStepLayout = (stepIndex: number, rowOffsetY: number, rowHeight: number) => {
+  const handleStepLayout = (stepId: string, rowOffsetY: number, rowHeight: number) => {
     const contentOffsetY = methodOffsetYRef.current + stepListOffsetYRef.current + rowOffsetY;
 
-    stepLayoutsRef.current[stepIndex] = {
+    stepLayoutsRef.current[stepId] = {
       height: rowHeight,
       offsetY: contentOffsetY
     };
 
-    if (pendingFocusStepIndexRef.current !== stepIndex) {
+    if (pendingFocusStepIdRef.current !== stepId) {
       return;
     }
 
-    pendingFocusStepIndexRef.current = null;
+    pendingFocusStepIdRef.current = null;
 
     requestAnimationFrame(() => {
-      stepInputRefs.current[stepIndex]?.focus();
+      stepInputRefs.current[stepId]?.focus();
       onStepFocus(contentOffsetY, rowHeight);
     });
   };
 
-  const handleStepFocus = (stepIndex: number) => {
-    const layout = stepLayoutsRef.current[stepIndex];
+  const handleStepFocus = (stepId: string) => {
+    const layout = stepLayoutsRef.current[stepId];
 
     if (!layout) {
       return;
@@ -1685,9 +1711,9 @@ const MethodStepsEditor = ({
       >
         {steps.map((step, index) => (
           <View
-            key={index}
+            key={step.id}
             onLayout={(event) =>
-              handleStepLayout(index, event.nativeEvent.layout.y, event.nativeEvent.layout.height)
+              handleStepLayout(step.id, event.nativeEvent.layout.y, event.nativeEvent.layout.height)
             }
             style={styles.stepEditorRow}
           >
@@ -1696,22 +1722,22 @@ const MethodStepsEditor = ({
             </View>
             <TextInput
               multiline
-              onChangeText={(value) => onChangeStep(index, value)}
-              onFocus={() => handleStepFocus(index)}
+              onChangeText={(value) => onChangeStep(step.id, value)}
+              onFocus={() => handleStepFocus(step.id)}
               placeholder={`Step ${index + 1}`}
               placeholderTextColor={appColors.muted}
               ref={(element) => {
-                stepInputRefs.current[index] = element;
+                stepInputRefs.current[step.id] = element;
               }}
               style={[styles.editorInput, styles.stepEditorInput]}
               textAlignVertical="top"
-              value={step}
+              value={step.text}
             />
             <Pressable
               accessibilityLabel={`Remove step ${index + 1}`}
               accessibilityRole="button"
               hitSlop={10}
-              onPress={() => onRemoveStep(index)}
+              onPress={() => onRemoveStep(step.id)}
               style={({ pressed }) => [styles.removeStepButton, pressed && styles.pressed]}
             >
               <MaterialCommunityIcons color={appColors.muted} name="trash-can-outline" size={20} />

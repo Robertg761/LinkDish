@@ -395,7 +395,10 @@ const incrementUsage = async (
   if (plan.id === "free" && extractorApiEnv.LINKDISH_MONTHLY_METERING) {
     await Promise.all([
       incrementUsageKey(getLifetimeUsageKey(quotaIdentityKey, quotaKind)),
-      incrementUsageKey(getMonthlyUsageKey(quotaIdentityKey, quotaKind), getSecondsUntilNextPeriod())
+      incrementUsageKey(
+        getMonthlyUsageKey(quotaIdentityKey, quotaKind),
+        getSecondsUntilNextPeriod()
+      )
     ]);
     return readUsage(plan, quotaIdentityKey, quotaKind);
   }

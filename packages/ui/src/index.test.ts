@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("react-native", () => ({
   Platform: { OS: "android", select: (specifics: Record<string, unknown>) => specifics.android },
   Pressable: () => null,
-  StyleSheet: { create: <T,>(styles: T): T => styles, flatten: (style: unknown) => style },
+  StyleSheet: { create: <T>(styles: T): T => styles, flatten: (style: unknown) => style },
   Text: () => null,
   TextInput: () => null,
   View: () => null

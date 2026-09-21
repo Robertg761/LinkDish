@@ -9,6 +9,7 @@ import {
 import type { SuccessfulExtractionState } from "./types";
 
 const DRAFT_EXTRACTIONS_STORAGE_KEY = "linkdish.draftRecipeExtractions";
+const DRAFT_EXTRACTIONS_CORRUPT_BACKUP_STORAGE_KEY = "linkdish.draftRecipeExtractions.corrupt.v1";
 const MAX_DRAFT_EXTRACTIONS = 20;
 
 interface DraftRecipeExtractionRecord {
@@ -54,29 +55,49 @@ const normalizeDraftRecipeExtractionRecord = (
 
 const parseDraftRecipeExtractions = (
   serializedDrafts: string | null
-): DraftRecipeExtractionRecord[] => {
+): { drafts: DraftRecipeExtractionRecord[]; isCorrupt: boolean } => {
   if (!serializedDrafts) {
-    return [];
+    return { drafts: [], isCorrupt: false };
   }
 
   try {
     const parsed = JSON.parse(serializedDrafts) as unknown;
 
     if (!Array.isArray(parsed)) {
-      return [];
+      return { drafts: [], isCorrupt: true };
     }
 
-    return parsed
-      .map(normalizeDraftRecipeExtractionRecord)
-      .filter((entry): entry is DraftRecipeExtractionRecord => entry !== null);
+    return {
+      drafts: parsed
+        .map(normalizeDraftRecipeExtractionRecord)
+        .filter((entry): entry is DraftRecipeExtractionRecord => entry !== null),
+      isCorrupt: false
+    };
   } catch {
-    return [];
+    return { drafts: [], isCorrupt: true };
   }
 };
 
 const readDraftRecipeExtractions = async (): Promise<DraftRecipeExtractionRecord[]> => {
   const serializedDrafts = await AsyncStorage.getItem(DRAFT_EXTRACTIONS_STORAGE_KEY);
-  return parseDraftRecipeExtractions(serializedDrafts);
+  const { drafts, isCorrupt } = parseDraftRecipeExtractions(serializedDrafts);
+
+  if (isCorrupt) {
+    // The next save replaces this blob, so keep a copy of what could not be read
+    // instead of discarding it outright.
+    console.warn("Draft recipe extractions could not be read. Keeping a backup copy.");
+
+    try {
+      await AsyncStorage.setItem(
+        DRAFT_EXTRACTIONS_CORRUPT_BACKUP_STORAGE_KEY,
+        serializedDrafts ?? ""
+      );
+    } catch (error) {
+      console.warn("Failed to back up the unreadable draft recipe extractions.", error);
+    }
+  }
+
+  return drafts;
 };
 
 export const getDraftRecipeExtraction = async (
