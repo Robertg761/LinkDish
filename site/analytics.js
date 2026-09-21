@@ -39,8 +39,36 @@
     ].join("-");
   }
 
+  // Storage is unavailable in private/blocked-cookie modes and every call can
+  // throw, so reads and writes fall back to a per-page-load memory store.
+  var memoryStore = {};
+
+  function readStored(key) {
+    try {
+      var stored = window.localStorage.getItem(key);
+
+      if (stored) {
+        return stored;
+      }
+    } catch (_error) {
+      // Fall through to the in-memory copy.
+    }
+
+    return memoryStore[key] || null;
+  }
+
+  function writeStored(key, value) {
+    memoryStore[key] = value;
+
+    try {
+      window.localStorage.setItem(key, value);
+    } catch (_error) {
+      // Best effort only; the in-memory copy keeps ids stable for this page.
+    }
+  }
+
   function getStoredId(key) {
-    var existing = window.localStorage.getItem(key);
+    var existing = readStored(key);
 
     if (existing) {
       return existing;
@@ -52,25 +80,25 @@
       return "";
     }
 
-    window.localStorage.setItem(key, next);
+    writeStored(key, next);
     return next;
   }
 
   function getSessionId() {
     var now = Date.now();
-    var lastSeen = Number(window.localStorage.getItem(sessionLastSeenKey) || 0);
-    var sessionId = window.localStorage.getItem(sessionKey);
+    var lastSeen = Number(readStored(sessionLastSeenKey) || 0);
+    var sessionId = readStored(sessionKey);
 
     if (!sessionId || !Number.isFinite(lastSeen) || now - lastSeen > sessionTimeoutMs) {
       sessionId = uuid();
 
       if (sessionId) {
-        window.localStorage.setItem(sessionKey, sessionId);
+        writeStored(sessionKey, sessionId);
       }
     }
 
     if (sessionId) {
-      window.localStorage.setItem(sessionLastSeenKey, String(now));
+      writeStored(sessionLastSeenKey, String(now));
     }
 
     return sessionId;
