@@ -1,4 +1,15 @@
+import { safeGetItem, safeSetItem } from "./safe-storage";
+
 const CLIENT_ID_KEY = "linkdish:web:client-id:v1";
+
+const CLIENT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Fallback used when storage is unavailable or refuses writes (Safari Private
+ * Browsing, "block all cookies", Firefox strict mode). It keeps the id stable
+ * for the lifetime of the page instead of minting a new one per request.
+ */
+let inMemoryClientId: string | null = null;
 
 function generateUUID(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -37,15 +48,32 @@ function generateUUID(): string {
 }
 
 export function getStableClientId(): string {
-  if (typeof window === "undefined" || typeof localStorage === "undefined") {
+  if (typeof window === "undefined") {
     return "";
   }
-  
-  let clientId = localStorage.getItem(CLIENT_ID_KEY);
-  if (!clientId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(clientId)) {
-    clientId = generateUUID();
-    localStorage.setItem(CLIENT_ID_KEY, clientId);
+
+  const storedClientId = safeGetItem(CLIENT_ID_KEY);
+
+  if (storedClientId && CLIENT_ID_PATTERN.test(storedClientId)) {
+    return storedClientId;
   }
-  
+
+  if (inMemoryClientId) {
+    return inMemoryClientId;
+  }
+
+  const clientId = generateUUID();
+
+  // Never let a blocked/full storage area break the caller: the id lives in
+  // memory for this session when it cannot be persisted.
+  if (!safeSetItem(CLIENT_ID_KEY, clientId)) {
+    inMemoryClientId = clientId;
+  }
+
   return clientId;
+}
+
+/** Test seam: drops the in-memory fallback id. */
+export function resetInMemoryClientIdForTests(): void {
+  inMemoryClientId = null;
 }
