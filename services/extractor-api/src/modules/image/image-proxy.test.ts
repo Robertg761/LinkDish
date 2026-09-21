@@ -46,7 +46,7 @@ describe("parseImageProxyQuery", () => {
     ).toThrowError(
       expect.objectContaining({
         reason: "invalid_width"
-      })
+      }) as unknown as Error
     );
   });
 

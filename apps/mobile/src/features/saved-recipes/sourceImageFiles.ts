@@ -59,10 +59,10 @@ const writeScanFile = (
  * A scan that cannot be written is dropped rather than inlined: losing one photo
  * is far better than losing the recipe (and every other recipe in the blob).
  */
-export const persistRecipeSourceImages = async (
+export const persistRecipeSourceImages = (
   recordId: string,
   images: RecipeSourceImage[] | undefined
-): Promise<RecipeSourceImage[] | undefined> => {
+): RecipeSourceImage[] | undefined => {
   if (!images || images.length === 0) {
     return undefined;
   }

@@ -42,6 +42,15 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
+
+const firstWrittenEvent = (): Record<string, unknown> | undefined => {
+  const [firstCall] = mocks.writeAnalyticsEvents.mock.calls as Array<
+    [Array<Record<string, unknown>>]
+  >;
+
+  return firstCall?.[0]?.[0];
+};
+
 describe("normalizeAnalyticsClientId", () => {
   it("accepts a canonical uuid and lowercases it", () => {
     expect(normalizeAnalyticsClientId("5D9A4B20-7E1F-4D5F-8FA2-838071CA35CB")).toBe(
@@ -79,7 +88,7 @@ describe("POST /analytics/events client identity", () => {
 
     expect(response.statusCode).toBe(200);
     expect(mocks.writeAnalyticsEvents).toHaveBeenCalledOnce();
-    expect(mocks.writeAnalyticsEvents.mock.calls[0]?.[0]?.[0]).not.toHaveProperty("anonymousId");
+    expect(firstWrittenEvent()).not.toHaveProperty("anonymousId");
     await app.close();
   });
 
@@ -95,7 +104,7 @@ describe("POST /analytics/events client identity", () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(mocks.writeAnalyticsEvents.mock.calls[0]?.[0]?.[0]).toMatchObject({
+    expect(firstWrittenEvent()).toMatchObject({
       anonymousId: "5d9a4b20-7e1f-4d5f-8fa2-838071ca35cb"
     });
     await app.close();
