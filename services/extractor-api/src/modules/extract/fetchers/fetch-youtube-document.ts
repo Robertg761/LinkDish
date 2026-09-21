@@ -185,10 +185,7 @@ export const fetchYouTubeDocument = async (
   }
 
   if (!isHtmlLikeContentType(watchResponse.headers.get("content-type"))) {
-    throw new YouTubeFetchError(
-      "Refused non-HTML YouTube watch page content type.",
-      "unreachable"
-    );
+    throw new YouTubeFetchError("Refused non-HTML YouTube watch page content type.", "unreachable");
   }
 
   const pageHtml = await readLimitedYouTubeText(watchResponse, maxBytes);

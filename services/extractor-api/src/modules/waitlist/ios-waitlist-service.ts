@@ -4,7 +4,12 @@ import { z } from "zod";
 
 import { extractorApiEnv } from "../../config/env.js";
 import { hashEmail, normalizeEmail } from "../auth/auth-service.js";
-import { getHeader, getRequestAddress, hashServerSideIdentity } from "../request-identity.js";
+import {
+  getHeader,
+  getRequestAddress,
+  hashServerSideIdentity,
+  type RequestIdentity
+} from "../request-identity.js";
 import {
   addStoreSortedSetMember,
   checkStoreSlidingWindowRateLimit,
@@ -76,8 +81,11 @@ export const iosWaitlistKeys = {
     `linkdish:ios-waitlist-rate-limit:${waitlistVersion}:${identityHash}`
 };
 
-const checkWaitlistRateLimit = async (headers: RequestHeaders): Promise<void> => {
-  const identityHash = hashServerSideIdentity("ios-waitlist", getRequestAddress(headers));
+const checkWaitlistRateLimit = async (
+  headers: RequestHeaders,
+  identity?: RequestIdentity
+): Promise<void> => {
+  const identityHash = hashServerSideIdentity("ios-waitlist", getRequestAddress(headers, identity));
   const key = iosWaitlistKeys.rateLimit(identityHash);
   const now = Date.now();
   const usage = await checkStoreSlidingWindowRateLimit({
@@ -189,10 +197,11 @@ export const getIosWaitlistSnapshot = async (limit = 100): Promise<IosWaitlistSn
 
 export const joinIosWaitlist = async (
   payload: unknown,
-  headers: RequestHeaders
+  headers: RequestHeaders,
+  identity?: RequestIdentity
 ): Promise<{ alreadyJoined: boolean; email: string; status: "joined" }> => {
   const parsed = signupSchema.parse(payload);
-  await checkWaitlistRateLimit(headers);
+  await checkWaitlistRateLimit(headers, identity);
 
   const email = normalizeEmail(parsed.email);
   const emailHash = hashEmail(email);

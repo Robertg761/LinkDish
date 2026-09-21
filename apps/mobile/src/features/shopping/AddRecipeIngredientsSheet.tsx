@@ -1,6 +1,6 @@
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { AppButton, AppSurface, AppText } from "@linkdish/ui";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Modal, Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -41,8 +41,16 @@ export const AddRecipeIngredientsSheet = ({
   );
   const selectedCount = selectedIndexes.size;
 
+  const wasVisibleRef = useRef(visible);
+
+  // Only reset the selection when the sheet opens. `inputs` is recomputed
+  // whenever the scale or unit mode changes, and resetting on that would wipe
+  // the rows the cook deliberately unticked while the sheet was open.
   useEffect(() => {
-    if (visible) {
+    const wasVisible = wasVisibleRef.current;
+    wasVisibleRef.current = visible;
+
+    if (visible && !wasVisible) {
       setSelectedIndexes(new Set(inputs.map((_, index) => index)));
     }
   }, [inputs, visible]);

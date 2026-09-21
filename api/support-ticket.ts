@@ -9,6 +9,8 @@ import {
   RateLimitUnavailableError
 } from "../services/extractor-api/src/modules/rate-limit/enforce-rate-limit.js";
 
+import { getVercelRequestIdentity } from "./_lib/vercel-request-identity.js";
+
 export const config = {
   maxDuration: 30
 };
@@ -178,7 +180,8 @@ export async function POST(request: Request) {
   try {
     const rateLimit = await checkPublicEndpointRateLimit(
       request.headers,
-      supportTicketRateLimitPolicy
+      supportTicketRateLimitPolicy,
+      getVercelRequestIdentity(request)
     );
 
     if (!rateLimit.allowed) {

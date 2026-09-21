@@ -2,6 +2,7 @@ import { analyticsEventBatchRequestSchema } from "../packages/api-contracts/src/
 import { corsJson, corsPreflight } from "../services/extractor-api/src/http/vercel-cors.js";
 import {
   hashAnalyticsUserId,
+  normalizeAnalyticsClientId,
   sanitizeAnalyticsProperties
 } from "../services/extractor-api/src/modules/analytics/analytics-privacy.js";
 import { writeAnalyticsEvents } from "../services/extractor-api/src/modules/analytics/analytics-store.js";
@@ -11,6 +12,8 @@ import {
   RateLimitUnavailableError
 } from "../services/extractor-api/src/modules/rate-limit/enforce-rate-limit.js";
 import { getHeader } from "../services/extractor-api/src/modules/request-identity.js";
+
+import { getVercelRequestIdentity } from "./_lib/vercel-request-identity.js";
 
 export const config = {
   maxDuration: 10
@@ -30,7 +33,11 @@ export async function POST(request: Request) {
   let rateLimit;
 
   try {
-    rateLimit = await checkPublicEndpointRateLimit(request.headers, analyticsRateLimitPolicy);
+    rateLimit = await checkPublicEndpointRateLimit(
+      request.headers,
+      analyticsRateLimitPolicy,
+      getVercelRequestIdentity(request)
+    );
   } catch (error) {
     if (error instanceof RateLimitUnavailableError) {
       return corsJson(
@@ -77,7 +84,7 @@ export async function POST(request: Request) {
 
   const session = await getAuthenticatedUser(request.headers).catch(() => null);
   const accountUserHash = session ? hashAnalyticsUserId(session.user.id) : undefined;
-  const clientId = getHeader(request.headers, "x-linkdish-client-id") ?? undefined;
+  const clientId = normalizeAnalyticsClientId(getHeader(request.headers, "x-linkdish-client-id"));
 
   const events = parsed.data.events.map((event) => ({
     ...event,
@@ -86,7 +93,13 @@ export async function POST(request: Request) {
     properties: sanitizeAnalyticsProperties(event.properties)
   }));
 
+  /* A storage failure must not lose (or 500) the whole batch. */
+  const accepted = await writeAnalyticsEvents(events).catch((error: unknown) => {
+    console.warn("Failed to write analytics events.", error);
+    return 0;
+  });
+
   return corsJson(request, {
-    accepted: await writeAnalyticsEvents(events)
+    accepted
   });
 }

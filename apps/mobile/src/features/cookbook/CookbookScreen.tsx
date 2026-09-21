@@ -151,6 +151,7 @@ const RecipeBookThumbnail = ({ recipe }: { recipe: Pick<Recipe, "image" | "title
       {imageUrl ? (
         <Image
           accessibilityIgnoresInvertColors
+          accessible={false}
           resizeMode="cover"
           source={{ uri: imageUrl }}
           style={styles.recipeThumbnailImage}
@@ -397,7 +398,7 @@ export const CookbookScreen = () => {
     const result = cloneRecipe(id);
 
     if (!result.saved || !result.recipeId) {
-      if (!result.allowed && result.message?.startsWith("Your free Cookbook holds")) {
+      if (!result.allowed && result.reason === "save_limit_reached") {
         showUpgradeMoment("save_limit");
       }
 
@@ -417,7 +418,7 @@ export const CookbookScreen = () => {
     const result = cloneSharedRecipe(id);
 
     if (!result.saved || !result.recipeId) {
-      if (!result.allowed && result.message?.startsWith("Your free Cookbook holds")) {
+      if (!result.allowed && result.reason === "save_limit_reached") {
         showUpgradeMoment("save_limit");
       }
 

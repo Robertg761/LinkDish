@@ -22,6 +22,13 @@ export const getHeader = (headers: RequestHeaders, name: string): string | null 
   return normalizeHeaderValue(headers[name] ?? headers[name.toLowerCase()]);
 };
 
+/*
+ * Forwarded headers are client-controlled unless a trusted proxy overwrites
+ * them, and the Fastify server sets no trustProxy. Every caller therefore
+ * passes a trusted `identity` (Vercel's ipAddress() helper for the serverless
+ * handlers, request.ip for Fastify); this chain is only a last-resort fallback
+ * for local tooling and must not be relied on for abuse controls.
+ */
 const getForwardedAddress = (headers: RequestHeaders): string | null => {
   const forwardedValue =
     getHeader(headers, "x-vercel-forwarded-for") ??

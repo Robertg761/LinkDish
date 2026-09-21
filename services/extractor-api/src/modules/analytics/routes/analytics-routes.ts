@@ -23,9 +23,7 @@ export const registerAnalyticsRoutes = (app: FastifyInstance) => {
 
     const session = await getAuthenticatedUser(request.headers).catch(() => null);
     const accountUserHash = session ? hashAnalyticsUserId(session.user.id) : undefined;
-    const clientId = normalizeAnalyticsClientId(
-      getHeader(request.headers, "x-linkdish-client-id")
-    );
+    const clientId = normalizeAnalyticsClientId(getHeader(request.headers, "x-linkdish-client-id"));
 
     const events = parsed.data.events.map((event) => ({
       ...event,

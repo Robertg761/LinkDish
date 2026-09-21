@@ -4,15 +4,22 @@ on:
   workflow_dispatch:
     inputs:
       base_url:
-        description: "Override the production API base URL for this canary run."
+        description: "API base URL for this canary run."
         required: false
-        default: ""
+        type: choice
+        default: "https://api.linkdish.ca"
+        # Free text here would let anyone with dispatch access point the canary — and the
+        # LINKDISH_CANARY_AUTH_TOKEN it sends — at a host they control.
+        options:
+          - "https://api.linkdish.ca"
+          - "https://linkdish-api.vercel.app"
   schedule:
     - cron: "0 14 * * 1"
 
 jobs:
   canary:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       issues: write
@@ -26,7 +33,7 @@ jobs:
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
 
       - name: Install dependencies

@@ -533,8 +533,7 @@ const getMemoryFailureDrilldown = (): AnalyticsFailureDrilldown => {
     byPlatform: countBy(failures, (event) => event.platform),
     byBuild: countBy(
       failures,
-      (event) =>
-        [event.appVersion, event.buildNumber].filter(Boolean).join(" / ") || "unknown"
+      (event) => [event.appVersion, event.buildNumber].filter(Boolean).join(" / ") || "unknown"
     ),
     byVisitor: countBy(visitorAliases, (alias) => alias),
     bySession: countBy(sessionAliases, (alias) => alias),

@@ -80,8 +80,7 @@ export const hashAnalyticsUserId = (userId: string): string =>
     .update(userId)
     .digest("hex");
 
-const uuidPattern =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 
 /*
  * The x-linkdish-client-id header is unvalidated client input that ends up in a

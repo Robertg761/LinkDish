@@ -38,7 +38,11 @@ const parsedExtractorApiEnv = readEnv(
     RATE_LIMIT_MAX: z.coerce.number().int().positive().default(60),
     FETCH_HTTP_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
     FETCH_HTTP_RETRIES: z.coerce.number().int().min(0).default(2),
-    FETCH_MAX_RESPONSE_BYTES: z.coerce.number().int().positive().default(5 * 1024 * 1024),
+    FETCH_MAX_RESPONSE_BYTES: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(5 * 1024 * 1024),
     BROWSER_FETCH_ENABLED: z
       .union([trimmedBooleanString, z.boolean()])
       .default("true")

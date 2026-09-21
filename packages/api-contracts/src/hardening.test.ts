@@ -137,9 +137,7 @@ describe("image extraction payload bounds", () => {
   it("caps a single image data url", () => {
     expect(
       extractRecipeRequestSchema.safeParse({
-        images: [
-          { dataUrl: buildDataUrl(MAX_IMAGE_DATA_URL_CHARS + 1), mimeType: "image/jpeg" }
-        ],
+        images: [{ dataUrl: buildDataUrl(MAX_IMAGE_DATA_URL_CHARS + 1), mimeType: "image/jpeg" }],
         sourceUrl: "https://linkdish.ca/image-imports/test"
       }).success
     ).toBe(false);

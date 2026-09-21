@@ -96,6 +96,22 @@ describe("createBrowserFetcher", () => {
     );
   });
 
+  it("refuses a rendered document that exceeds the byte cap", async () => {
+    pageMock.content.mockResolvedValue(`<html><body>${"a".repeat(200_000)}</body></html>`);
+    const fetcher = createBrowserFetcher({
+      enabled: true,
+      timeoutMs: 2_000,
+      concurrency: 1,
+      maxBytes: 1_024,
+      validateUrl: validateUrlMock
+    });
+
+    await expect(fetcher.fetch("https://example.com/huge")).rejects.toMatchObject({
+      blockedSignals: ["response_too_large"],
+      reason: "too_large"
+    });
+  });
+
   it("routes asset requests away during browser fetch", async () => {
     const fetcher = createEnabledFetcher();
 

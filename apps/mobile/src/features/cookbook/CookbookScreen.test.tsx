@@ -16,6 +16,10 @@ const hapticMocks = vi.hoisted(() => ({
   warn: vi.fn()
 }));
 
+const recipeImageMocks = vi.hoisted(() => ({
+  buildProxiedRecipeImageUrl: vi.fn<() => string | null>(() => null)
+}));
+
 const asyncStorageMocks = vi.hoisted(() => ({
   getItem: vi.fn(),
   setItem: vi.fn()
@@ -150,7 +154,7 @@ vi.mock("../saved-recipes/SavedRecipesContext", () => ({
 }));
 
 vi.mock("../../lib/recipeImage", () => ({
-  buildProxiedRecipeImageUrl: () => null,
+  buildProxiedRecipeImageUrl: recipeImageMocks.buildProxiedRecipeImageUrl,
   getRecipeMonogram: () => "T"
 }));
 
@@ -194,6 +198,8 @@ describe("CookbookScreen navigation and sharing", () => {
     asyncStorageMocks.setItem.mockReset();
     asyncStorageMocks.setItem.mockResolvedValue(undefined);
     upgradeMomentMocks.showUpgradeMoment.mockReset();
+    recipeImageMocks.buildProxiedRecipeImageUrl.mockReset();
+    recipeImageMocks.buildProxiedRecipeImageUrl.mockReturnValue(null);
     savedRecipesState.canUseSharedRecipeBook = false;
     savedRecipesState.cloneRecipe.mockReset();
     savedRecipesState.cloneSharedRecipe.mockReset();
@@ -546,6 +552,7 @@ describe("CookbookScreen navigation and sharing", () => {
     savedRecipesState.cloneRecipe.mockReturnValue({
       allowed: false,
       message: "Your free Cookbook holds up to 15 personal recipes. Upgrade for unlimited saves.",
+      reason: "save_limit_reached",
       saved: false
     });
 
@@ -565,5 +572,73 @@ describe("CookbookScreen navigation and sharing", () => {
 
     expect(upgradeMomentMocks.showUpgradeMoment).toHaveBeenCalledWith("save_limit");
     expect(routerMocks.push).not.toHaveBeenCalled();
+  });
+
+  it("opens the upgrade moment from the typed save-limit reason, not the copy", () => {
+    savedRecipesState.savedRecipes = [savedRecipe];
+    savedRecipesState.cloneRecipe.mockReturnValue({
+      allowed: false,
+      message: "Reworded upgrade copy that no longer starts with the old prefix.",
+      reason: "save_limit_reached",
+      saved: false
+    });
+
+    let renderer: ReturnType<typeof create>;
+
+    act(() => {
+      renderer = create(<CookbookScreen />);
+    });
+
+    const duplicateButton = renderer!.root.findByProps({
+      accessibilityLabel: "Duplicate recipe"
+    });
+
+    act(() => {
+      (duplicateButton.props as { onPress: () => void }).onPress();
+    });
+
+    expect(savedRecipesState.cloneRecipe).toHaveBeenCalledWith("saved_1");
+    expect(upgradeMomentMocks.showUpgradeMoment).toHaveBeenCalledWith("save_limit");
+    expect(routerMocks.push).not.toHaveBeenCalled();
+  });
+
+  it("does not show the upgrade moment for unrelated duplicate failures", () => {
+    savedRecipesState.savedRecipes = [savedRecipe];
+    savedRecipesState.cloneRecipe.mockReturnValue({
+      allowed: false,
+      message: "This saved recipe is no longer available.",
+      saved: false
+    });
+
+    let renderer: ReturnType<typeof create>;
+
+    act(() => {
+      renderer = create(<CookbookScreen />);
+    });
+
+    act(() => {
+      (
+        renderer!.root.findByProps({ accessibilityLabel: "Duplicate recipe" }).props as {
+          onPress: () => void;
+        }
+      ).onPress();
+    });
+
+    expect(upgradeMomentMocks.showUpgradeMoment).not.toHaveBeenCalled();
+  });
+
+  it("hides decorative recipe thumbnails from screen readers", () => {
+    recipeImageMocks.buildProxiedRecipeImageUrl.mockReturnValue("https://example.com/thumb.jpg");
+    savedRecipesState.savedRecipes = [savedRecipe];
+
+    let renderer: ReturnType<typeof create>;
+
+    act(() => {
+      renderer = create(<CookbookScreen />);
+    });
+
+    const thumbnail = renderer!.root.findByType("Image" as never);
+
+    expect((thumbnail.props as { accessible?: boolean }).accessible).toBe(false);
   });
 });

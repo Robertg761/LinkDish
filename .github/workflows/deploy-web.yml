@@ -24,6 +24,7 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     env:
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_WEB_PROJECT_ID }}
@@ -39,6 +40,14 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+
+      # This workflow triggers on packages/**, so shared-code changes must be validated here
+      # before they ship to production web. Mirrors deploy-api.yml.
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate repository
+        run: pnpm validate
 
       - name: Install Vercel CLI
         run: npm install --global vercel@58.4.4

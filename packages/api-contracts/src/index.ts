@@ -370,10 +370,7 @@ export const createWebBillingCheckoutRequestSchema = z.union([
 export const webBillingRedirectResponseSchema = z.object({
   // The web app assigns this straight to `window.location`, so it is pinned to LinkDish and the
   // billing providers rather than being any URL the API happens to return.
-  url: buildPinnedHttpUrlSchema(
-    BILLING_REDIRECT_HOSTS,
-    "Billing redirect URL host is not allowed."
-  )
+  url: buildPinnedHttpUrlSchema(BILLING_REDIRECT_HOSTS, "Billing redirect URL host is not allowed.")
 });
 
 export const logoutResponseSchema = z.object({

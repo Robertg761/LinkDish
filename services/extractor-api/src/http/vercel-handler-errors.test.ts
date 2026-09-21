@@ -90,17 +90,13 @@ describe("serverless handlers hide internal failures", () => {
   it("/api/household returns a generic 500", async () => {
     const householdApi = await import("../../../../api/household.js");
 
-    await expectNoLeak(
-      await householdApi.GET(new Request("https://api.linkdish.ca/household?path=overview"))
-    );
+    await expectNoLeak(await householdApi.GET(new Request("https://api.linkdish.ca/household")));
   });
 
   it("/api/auth returns a generic 500", async () => {
     const authApi = await import("../../../../api/auth.js");
 
-    await expectNoLeak(
-      await authApi.GET(new Request("https://api.linkdish.ca/auth?path=session"))
-    );
+    await expectNoLeak(await authApi.GET(new Request("https://api.linkdish.ca/auth?path=session")));
   });
 
   it("/api/ios-waitlist returns a generic 500", async () => {
@@ -115,6 +111,26 @@ describe("serverless handlers hide internal failures", () => {
         })
       )
     );
+  });
+
+  it("keeps the message of a classified upstream failure", async () => {
+    mocks.handleRevenueCatWebhook.mockRejectedValue(
+      Object.assign(new Error("RevenueCat billing portal request failed (503): unavailable"), {
+        statusCode: 502
+      })
+    );
+    const billingApi = await import("../../../../api/billing.js");
+    const response = await billingApi.POST(
+      new Request("https://api.linkdish.ca/billing?path=revenuecat-webhook", {
+        method: "POST",
+        body: "{}"
+      })
+    );
+
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toEqual({
+      message: "RevenueCat billing portal request failed (503): unavailable"
+    });
   });
 
   it("still reports classified errors with their own message", async () => {
