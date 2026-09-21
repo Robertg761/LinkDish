@@ -53,25 +53,29 @@
   "pnpm": {
     "auditConfig": {
       "ignoreGhsas": [
-        "GHSA-qwww-vcr4-c8h2"
+        "GHSA-5p2g-fcmc-qvqq",
+        "GHSA-qwww-vcr4-c8h2",
+        "GHSA-w3rx-r6r6-pgpr"
       ]
     },
     "overrides": {
       "@babel/core@<=7.29.0": "7.29.6",
       "@expo/ngrok>uuid": "11.1.1",
-      "@xmldom/xmldom@<0.8.13": "0.8.13",
+      "@xmldom/xmldom@<0.8.15": "0.8.15",
       "brace-expansion@<1.1.16": "1.1.16",
       "brace-expansion@>=2.0.0 <2.1.2": "2.1.2",
       "brace-expansion@>=5.0.0 <5.0.8": "5.0.9",
+      "browserslist@<4.28.9": "4.28.9",
       "ejs>jake": "12.10.1",
-      "fast-uri@>=3.0.0 <3.1.4": "3.1.4",
-      "fast-uri@>=4.0.0 <4.1.1": "4.1.1",
+      "fast-uri@>=3.0.0 <3.1.8": "3.1.8",
+      "fast-uri@>=4.0.0 <4.2.1": "4.2.1",
       "fastify@<5.12.1": "5.12.1",
       "find-my-way@<=9.6.0": "9.7.0",
       "form-data@>=4.0.0 <4.0.6": "4.0.6",
       "jayson>uuid": "11.1.1",
       "js-yaml@<3.15.0": "3.15.0",
-      "js-yaml@>=4.0.0 <4.3.0": "4.3.0",
+      "js-yaml@>=4.0.0 <4.3.2": "4.3.2",
+      "nanoid@>=3.0.0 <3.3.19": "3.3.19",
       "postcss@<8.5.18": "8.5.25",
       "sharp@<0.35.4": "0.35.4",
       "shell-quote@>=1.1.0 <1.9.0": "1.10.0",

@@ -162,12 +162,10 @@ export const fetchHtmlDocument = async (
               statusCode: response.status
             }
       );
-      const failureKind = statusFailureKind;
-
-      if (!response.ok && failureKind) {
+      if (!response.ok && statusFailureKind) {
         throw new HtmlFetchError(
           `Failed to fetch HTML document: ${response.status}`,
-          failureKind,
+          statusFailureKind,
           blockedSignals,
           response.status,
           response.url || requestUrl
