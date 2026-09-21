@@ -121,17 +121,69 @@ export interface ExtractorApiClient {
   verifyLoginCode(input: VerifyLoginCodeRequest): Promise<VerifyLoginCodeResponse>;
 }
 
+/** A stalled mobile connection would otherwise hang forever, so every request is bounded. */
+export const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+
+/** Extraction can legitimately take a while (browser fallback, LLM passes), so it gets longer. */
+export const DEFAULT_EXTRACT_TIMEOUT_MS = 120_000;
+
 export interface CreateExtractorApiClientOptions {
   baseUrl: string;
   fetchImplementation?: FetchLike;
   getHeaders?: () => Promise<Record<string, string>> | Record<string, string>;
+  /** Per-request timeout in milliseconds. Pass 0 (or a negative value) to disable. */
+  timeoutMs?: number;
+  /** Timeout for `extractRecipe` specifically. Defaults to {@link DEFAULT_EXTRACT_TIMEOUT_MS}. */
+  extractTimeoutMs?: number;
 }
 
-export const createExtractorApiClient = ({
-  baseUrl,
-  fetchImplementation = fetch,
-  getHeaders
-}: CreateExtractorApiClientOptions): ExtractorApiClient => {
+interface RequestTimeout {
+  signal: AbortSignal | undefined;
+  dispose: () => void;
+}
+
+const noTimeout: RequestTimeout = { signal: undefined, dispose: () => undefined };
+
+const createRequestTimeout = (timeoutMs: number): RequestTimeout => {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    return noTimeout;
+  }
+
+  if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") {
+    return { signal: AbortSignal.timeout(timeoutMs), dispose: () => undefined };
+  }
+
+  // React Native and older runtimes may ship AbortController without AbortSignal.timeout.
+  if (typeof AbortController === "undefined") {
+    return noTimeout;
+  }
+
+  const controller = new AbortController();
+  const timer: unknown = setTimeout(() => {
+    controller.abort(new Error("Extractor API request timed out."));
+  }, timeoutMs);
+
+  if (timer && typeof (timer as { unref?: () => void }).unref === "function") {
+    (timer as { unref: () => void }).unref();
+  }
+
+  return {
+    signal: controller.signal,
+    dispose: () => {
+      clearTimeout(timer as ReturnType<typeof setTimeout>);
+    }
+  };
+};
+
+export const createExtractorApiClient = (
+  options: CreateExtractorApiClientOptions
+): ExtractorApiClient => {
+  const { baseUrl, fetchImplementation = fetch, getHeaders } = options;
+  const timeoutMs = options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+  // An explicit `timeoutMs` also bounds extraction unless a dedicated value is supplied.
+  const extractTimeoutMs =
+    options.extractTimeoutMs ?? options.timeoutMs ?? DEFAULT_EXTRACT_TIMEOUT_MS;
+
   let normalizedBaseUrl = baseUrl;
 
   while (normalizedBaseUrl.endsWith("/")) {
@@ -144,18 +196,30 @@ export const createExtractorApiClient = ({
       body?: unknown;
       method?: "DELETE" | "GET" | "PATCH" | "POST" | "PUT";
       responseSchema: ZodType<Response, ZodTypeDef, unknown>;
+      timeoutMs?: number;
     }
   ): Promise<Response> => {
-    const response = await fetchImplementation(`${normalizedBaseUrl}${path}`, {
-      method: options.method ?? "GET",
-      headers: {
-        ...(options.body === undefined ? {} : { "content-type": "application/json" }),
-        ...(getHeaders ? await getHeaders() : {})
-      },
-      ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) })
-    });
+    const timeout = createRequestTimeout(options.timeoutMs ?? timeoutMs);
 
-    const rawBody = await response.text();
+    let response: Awaited<ReturnType<FetchLike>>;
+    let rawBody: string;
+
+    try {
+      response = await fetchImplementation(`${normalizedBaseUrl}${path}`, {
+        method: options.method ?? "GET",
+        headers: {
+          ...(options.body === undefined ? {} : { "content-type": "application/json" }),
+          ...(getHeaders ? await getHeaders() : {})
+        },
+        ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
+        ...(timeout.signal === undefined ? {} : { signal: timeout.signal })
+      });
+
+      rawBody = await response.text();
+    } finally {
+      timeout.dispose();
+    }
+
     let body: unknown;
 
     try {
@@ -164,14 +228,15 @@ export const createExtractorApiClient = ({
       body = rawBody;
     }
 
+    // An error response is an error even when its body happens to satisfy the success contract.
+    if (!response.ok) {
+      throw new ExtractorApiError("Extractor API request failed.", response.status, body);
+    }
+
     const parsedBody = options.responseSchema.safeParse(body);
 
     if (parsedBody.success) {
       return parsedBody.data;
-    }
-
-    if (!response.ok) {
-      throw new ExtractorApiError("Extractor API request failed.", response.status, body);
     }
 
     throw new ExtractorApiError(
@@ -250,41 +315,13 @@ export const createExtractorApiClient = ({
         responseSchema: deleteSharedRecipeResponseSchema
       });
     },
-    async extractRecipe(input) {
-      const request = extractRecipeRequestSchema.parse(input);
-      const response = await fetchImplementation(`${normalizedBaseUrl}/extract`, {
+    extractRecipe(input) {
+      return requestJson("/extract", {
+        body: extractRecipeRequestSchema.parse(input),
         method: "POST",
-        headers: {
-          "content-type": "application/json",
-          ...(getHeaders ? await getHeaders() : {})
-        },
-        body: JSON.stringify(request)
+        responseSchema: extractRecipeResponseSchema,
+        timeoutMs: extractTimeoutMs
       });
-
-      const rawBody = await response.text();
-      let body: unknown;
-
-      try {
-        body = JSON.parse(rawBody) as unknown;
-      } catch {
-        body = rawBody;
-      }
-
-      const parsedBody = extractRecipeResponseSchema.safeParse(body);
-
-      if (parsedBody.success) {
-        return parsedBody.data;
-      }
-
-      if (!response.ok) {
-        throw new ExtractorApiError("Extractor API request failed.", response.status, body);
-      }
-
-      throw new ExtractorApiError(
-        "Extractor API response did not match the contract.",
-        response.status,
-        body
-      );
     },
     getAuthConfig() {
       return requestJson("/auth/config", {

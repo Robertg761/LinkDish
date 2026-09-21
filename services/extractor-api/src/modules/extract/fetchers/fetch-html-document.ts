@@ -1,11 +1,16 @@
 import { isSourceUrlRejection, validatePublicSourceUrl } from "../source-url-safety.js";
 
+import { extractorApiEnv } from "../../../config/env.js";
+
 import {
   browserLikeHeaders,
   buildHtmlSourceDocument,
   classifyFetchStatusCode,
   createTimeoutSignal,
   detectBlockedSignals,
+  isHtmlLikeContentType,
+  readLimitedResponseText,
+  ResponseBodyTooLargeError,
   sleep
 } from "./shared.js";
 
@@ -29,6 +34,7 @@ export interface FetchHtmlDocumentOptions {
   timeoutMs: number;
   retries: number;
   blockSignalPatterns?: RegExp[];
+  maxBytes?: number;
   maxRedirects?: number;
   validateUrl?: ValidateSourceUrl;
 }
@@ -48,6 +54,7 @@ export const fetchHtmlDocument = async (
 ): Promise<FetchResult> => {
   const validateUrl = options.validateUrl ?? validatePublicSourceUrl;
   const maxRedirects = options.maxRedirects ?? 5;
+  const maxBytes = options.maxBytes ?? extractorApiEnv.FETCH_MAX_RESPONSE_BYTES;
 
   for (let attempt = 0; attempt <= options.retries; attempt += 1) {
     const timeout = createTimeoutSignal(options.timeoutMs);
@@ -112,7 +119,37 @@ export const fetchHtmlDocument = async (
         throw new HtmlFetchError("HTML request failed.", "unreachable");
       }
 
-      const html = await response.text();
+      const contentType = response.headers.get("content-type");
+      const statusFailureKind = classifyFetchStatusCode(response.status);
+
+      if (!isHtmlLikeContentType(contentType)) {
+        /* Refuse before buffering: a PDF/zip/video body is never a recipe page. */
+        throw new HtmlFetchError(
+          `Refused non-HTML response content type: ${contentType ?? "unknown"}`,
+          statusFailureKind ?? "unsupported_content_type",
+          statusFailureKind ? [] : ["unsupported_content_type"],
+          response.status,
+          response.url || requestUrl
+        );
+      }
+
+      const html = await (async () => {
+        try {
+          return await readLimitedResponseText(response, maxBytes);
+        } catch (error) {
+          if (error instanceof ResponseBodyTooLargeError) {
+            throw new HtmlFetchError(
+              `Failed to fetch HTML document: ${error.message}`,
+              "too_large",
+              ["response_too_large"],
+              response.status,
+              response.url || requestUrl
+            );
+          }
+
+          throw error;
+        }
+      })();
       const blockedSignals = detectBlockedSignals(
         options.blockSignalPatterns
           ? {
@@ -125,7 +162,7 @@ export const fetchHtmlDocument = async (
               statusCode: response.status
             }
       );
-      const failureKind = classifyFetchStatusCode(response.status);
+      const failureKind = statusFailureKind;
 
       if (!response.ok && failureKind) {
         throw new HtmlFetchError(
@@ -152,7 +189,7 @@ export const fetchHtmlDocument = async (
           url,
           finalUrl: response.url || requestUrl,
           html,
-          contentType: response.headers.get("content-type"),
+          contentType,
           blockedSignals,
           statusCode: response.status
         }),

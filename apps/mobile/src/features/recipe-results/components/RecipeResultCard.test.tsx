@@ -1579,6 +1579,133 @@ describe("RecipeResultCard", () => {
     expect(output).toContain("Some ingredients can't be scaled automatically");
   });
 
+  it("stops the cook mode tick once every timer has finished", async () => {
+    vi.useFakeTimers();
+    let renderer: ReturnType<typeof create>;
+
+    act(() => {
+      renderer = create(
+        <RecipeResultCard
+          recipe={{
+            title: "Roast",
+            sourceUrl: "https://example.com/roast",
+            sourceType: "article",
+            ingredients: [{ text: "2 potatoes" }],
+            steps: [{ index: 1, text: "Roast for 10 minutes at 400\u00b0F." }],
+            servings: null,
+            prepTimeMinutes: null,
+            cookTimeMinutes: null,
+            nutrition: null,
+            confidence: {
+              score: 0.8,
+              summary: "Confident extraction.",
+              missingFields: [],
+              notes: [],
+              fieldProvenance: {
+                title: "visible-text",
+                ingredients: "visible-text",
+                steps: "visible-text",
+                servings: null,
+                prepTimeMinutes: null,
+                cookTimeMinutes: null,
+                nutrition: null
+              }
+            }
+          }}
+        />
+      );
+    });
+
+    act(() => {
+      getProps<PressableProps>(
+        renderer!.root.findByProps({ accessibilityLabel: "Open step-by-step cooking mode" })
+      ).onPress?.();
+    });
+
+    act(() => {
+      getProps<PressableProps>(
+        renderer!.root.findAllByProps({ accessibilityLabel: "Start 10 minutes timer" })[0]!
+      ).onPress?.();
+    });
+
+    expect(vi.getTimerCount()).toBeGreaterThan(0);
+
+    await act(async () => {
+      vi.advanceTimersByTime(10 * 60 * 1000 + 1_000);
+      await flushAsyncWork();
+    });
+
+    expect(JSON.stringify(renderer!.toJSON())).toContain("Done");
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("keeps cook mode controls accessible at large font scales", () => {
+    let renderer: ReturnType<typeof create>;
+
+    act(() => {
+      renderer = create(
+        <RecipeResultCard
+          recipe={{
+            title: "Roast",
+            sourceUrl: "https://example.com/roast",
+            sourceType: "article",
+            image: {
+              url: "https://example.com/roast.jpg",
+              width: 1200,
+              height: 800,
+              source: "og"
+            },
+            ingredients: [{ text: "2 potatoes" }],
+            steps: [{ index: 1, text: "Roast the potatoes." }],
+            servings: null,
+            prepTimeMinutes: null,
+            cookTimeMinutes: null,
+            nutrition: null,
+            confidence: {
+              score: 0.8,
+              summary: "Confident extraction.",
+              missingFields: [],
+              notes: [],
+              fieldProvenance: {
+                title: "visible-text",
+                ingredients: "visible-text",
+                steps: "visible-text",
+                servings: null,
+                prepTimeMinutes: null,
+                cookTimeMinutes: null,
+                nutrition: null
+              }
+            }
+          }}
+        />
+      );
+    });
+
+    const heroImage = renderer!.root.findAllByType("image" as React.ElementType)[0];
+    expect(heroImage).toBeDefined();
+    expect(getProps<{ accessible?: boolean }>(heroImage!).accessible).toBe(false);
+
+    act(() => {
+      getProps<PressableProps>(
+        renderer!.root.findByProps({ accessibilityLabel: "Open step-by-step cooking mode" })
+      ).onPress?.();
+    });
+
+    const keepAwakeSwitch = renderer!.root.findByType("switch" as React.ElementType);
+    expect(getProps<{ accessibilityLabel?: string }>(keepAwakeSwitch).accessibilityLabel).toBe(
+      "Keep screen awake"
+    );
+
+    const finishLabel = renderer!.root
+      .findAllByType("text" as React.ElementType)
+      .find((node) => getPrimitiveText(node) === "Finish");
+    expect(finishLabel).toBeDefined();
+
+    const finishLabelProps = getProps<{ maxFontSizeMultiplier?: number }>(finishLabel!);
+    expect(finishLabelProps.maxFontSizeMultiplier).toBeGreaterThan(1);
+    expect(finishLabelProps.maxFontSizeMultiplier).toBeLessThanOrEqual(1.5);
+  });
+
   it("computes timer remaining time from the Date deadline", () => {
     const dateNow = vi.spyOn(Date, "now");
     dateNow.mockReturnValue(1_000);

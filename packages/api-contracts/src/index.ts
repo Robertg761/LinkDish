@@ -1,17 +1,42 @@
 import { z } from "zod";
 
 import {
+  buildPinnedHttpUrlSchema,
+  httpUrlSchema,
   missingRecipeFieldSchema,
   recipeSchema,
   shoppingItemSchema,
   sourceTypeSchema
 } from "../../recipe-domain/src/index.js";
 
+/** Hosts LinkDish itself serves. Used to pin URLs the clients follow automatically. */
+export const LINKDISH_HOSTS = [
+  "linkdish.ca",
+  "linkdish.xyz",
+  "linkdish.app",
+  "linkdish-web.vercel.app",
+  "linkdish-api.vercel.app",
+  "localhost",
+  "127.0.0.1"
+] as const;
+
+/** Billing providers the checkout/portal redirects are allowed to point at. */
+export const BILLING_REDIRECT_HOSTS = [
+  ...LINKDISH_HOSTS,
+  "revenuecat.com",
+  "rev.cat",
+  "stripe.com"
+] as const;
+
+export const MAX_IMAGE_DATA_URL_CHARS = 4_500_000;
+export const MAX_IMAGE_EXTRACT_PAYLOAD_CHARS = 8_000_000;
+export const MAX_IMAGE_EXTRACT_COUNT = 4;
+
 const imageMimeTypeSchema = z.enum(["image/jpeg", "image/png", "image/webp"]);
 const imageDataUrlSchema = z
   .string()
   .min(1)
-  .max(4_500_000)
+  .max(MAX_IMAGE_DATA_URL_CHARS)
   .regex(/^data:image\/(?:jpeg|jpg|png|webp);base64,[a-z0-9+/=\s]+$/iu);
 const extractionCorrelationIdSchema = z.string().uuid();
 
@@ -20,29 +45,63 @@ export const extractRecipeImageSchema = z.object({
   mimeType: imageMimeTypeSchema
 });
 
-const addImageExtractPayloadLimitIssue = (payload: unknown, context: z.RefinementCtx): void => {
-  if (JSON.stringify(payload).length > 8_000_000) {
-    context.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: "Image extraction payload is too large."
-    });
+/**
+ * Measures an image extraction payload without serializing it. `JSON.stringify` on an 18 MB
+ * payload just to learn that it is too big is exactly what this guard exists to avoid.
+ */
+const measureImageExtractPayloadChars = (payload: unknown): number => {
+  if (!payload || typeof payload !== "object") {
+    return 0;
   }
+
+  const { images } = payload as { images?: unknown };
+
+  if (!Array.isArray(images)) {
+    return 0;
+  }
+
+  let total = 0;
+
+  for (const image of images) {
+    if (image && typeof image === "object") {
+      const { dataUrl } = image as { dataUrl?: unknown };
+
+      if (typeof dataUrl === "string") {
+        total += dataUrl.length;
+      }
+    }
+  }
+
+  return total;
 };
 
 const extractRecipeUrlRequestSchema = z.object({
-  url: z.string().url(),
+  url: httpUrlSchema,
   attempt: z.enum(["primary", "fallback"]).default("primary"),
   correlationId: extractionCorrelationIdSchema.optional()
 });
 
+const extractRecipeImageRequestObjectSchema = z.object({
+  images: z.array(extractRecipeImageSchema).min(1).max(MAX_IMAGE_EXTRACT_COUNT),
+  sourceUrl: httpUrlSchema,
+  attempt: z.literal("fallback").default("fallback"),
+  correlationId: extractionCorrelationIdSchema.optional()
+});
+
+// The size guard runs *before* the object (and therefore before the per-image base64 regex), so an
+// oversized payload is rejected without megabytes of regex scanning or re-serialization.
 const extractRecipeImageRequestSchema = z
-  .object({
-    images: z.array(extractRecipeImageSchema).min(1).max(4),
-    sourceUrl: z.string().url(),
-    attempt: z.literal("fallback").default("fallback"),
-    correlationId: extractionCorrelationIdSchema.optional()
+  .unknown()
+  .superRefine((payload, context) => {
+    if (measureImageExtractPayloadChars(payload) > MAX_IMAGE_EXTRACT_PAYLOAD_CHARS) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        fatal: true,
+        message: "Image extraction payload is too large."
+      });
+    }
   })
-  .superRefine(addImageExtractPayloadLimitIssue);
+  .pipe(extractRecipeImageRequestObjectSchema);
 
 export const extractRecipeRequestSchema = z.union([
   extractRecipeImageRequestSchema,
@@ -309,7 +368,12 @@ export const createWebBillingCheckoutRequestSchema = z.union([
 ]);
 
 export const webBillingRedirectResponseSchema = z.object({
-  url: z.string().url()
+  // The web app assigns this straight to `window.location`, so it is pinned to LinkDish and the
+  // billing providers rather than being any URL the API happens to return.
+  url: buildPinnedHttpUrlSchema(
+    BILLING_REDIRECT_HOSTS,
+    "Billing redirect URL host is not allowed."
+  )
 });
 
 export const logoutResponseSchema = z.object({
@@ -343,7 +407,7 @@ export const householdInviteCodeSchema = z.string().trim().min(8).max(120);
 
 export const householdInviteShareSchema = householdInviteSummarySchema.extend({
   inviteCode: householdInviteCodeSchema,
-  inviteUrl: z.string().url()
+  inviteUrl: buildPinnedHttpUrlSchema(LINKDISH_HOSTS, "Invite URL host is not allowed.")
 });
 
 export const householdDetailsSchema = z.object({
@@ -605,10 +669,56 @@ const analyticsPropertyValueSchema = z.union([
   z.null()
 ]);
 
-export const analyticsEventPropertiesSchema = z.record(
+export const MAX_ANALYTICS_EVENT_PROPERTY_COUNT = 40;
+export const MAX_ANALYTICS_EVENT_PROPERTIES_CHARS = 4_000;
+
+const analyticsEventPropertiesRecordSchema = z.record(
   z.string().trim().min(1).max(80),
   analyticsPropertyValueSchema
 );
+
+const NON_STRING_ANALYTICS_VALUE_CHARS = 8;
+
+const measureAnalyticsPropertiesChars = (properties: Record<string, unknown>): number => {
+  let total = 0;
+
+  for (const [key, value] of Object.entries(properties)) {
+    total += key.length;
+    total += typeof value === "string" ? value.length : NON_STRING_ANALYTICS_VALUE_CHARS;
+  }
+
+  return total;
+};
+
+export const analyticsEventPropertiesSchema = z
+  .unknown()
+  .superRefine((properties, context) => {
+    if (!properties || typeof properties !== "object" || Array.isArray(properties)) {
+      return;
+    }
+
+    const record = properties as Record<string, unknown>;
+    const keyCount = Object.keys(record).length;
+
+    if (keyCount > MAX_ANALYTICS_EVENT_PROPERTY_COUNT) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        fatal: true,
+        message: `Analytics events accept at most ${MAX_ANALYTICS_EVENT_PROPERTY_COUNT} properties.`
+      });
+
+      return;
+    }
+
+    if (measureAnalyticsPropertiesChars(record) > MAX_ANALYTICS_EVENT_PROPERTIES_CHARS) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        fatal: true,
+        message: "Analytics event properties are too large."
+      });
+    }
+  })
+  .pipe(analyticsEventPropertiesRecordSchema);
 
 export const analyticsEventInputSchema = z.object({
   eventName: analyticsEventNameSchema,

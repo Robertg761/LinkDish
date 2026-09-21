@@ -1,4 +1,4 @@
-import type { SuccessfulExtractionState } from "../recipe-results/types";
+import type { RecipeSourceImage, SuccessfulExtractionState } from "../recipe-results/types";
 import type {
   ExtractRecipeImage,
   SharedRecipe,
@@ -19,7 +19,7 @@ export interface SavedRecipeRecord {
   savedAt: string;
   sharedAt?: string | undefined;
   sharedRecipeId?: string | undefined;
-  sourceImages?: ExtractRecipeImage[] | undefined;
+  sourceImages?: RecipeSourceImage[] | undefined;
   strategy: SuccessfulExtractionState["strategy"];
   timesCooked?: number | undefined;
   updatedAt?: string | undefined;
@@ -165,31 +165,55 @@ const normalizeRecipeImage = (value: unknown): RecipeImage | null => {
   };
 };
 
-const normalizeSourceImages = (value: unknown): ExtractRecipeImage[] | undefined => {
+export const isDataUrlSourceImage = (image: RecipeSourceImage): boolean =>
+  image.uri.startsWith("data:");
+
+const isSupportedSourceImageMimeType = (
+  value: unknown
+): value is ExtractRecipeImage["mimeType"] =>
+  value === "image/jpeg" || value === "image/png" || value === "image/webp";
+
+/**
+ * Reads a persisted scan photo entry.
+ *
+ * Accepts both the current `{ uri }` shape and the legacy `{ dataUrl }` shape so
+ * cookbooks written by older builds keep their scans until they are migrated to
+ * the filesystem.
+ */
+const normalizeSourceImages = (value: unknown): RecipeSourceImage[] | undefined => {
   if (!Array.isArray(value)) {
     return undefined;
   }
 
   const images = value
-    .filter((image): image is { dataUrl: string; mimeType: ExtractRecipeImage["mimeType"] } => {
+    .map((image): RecipeSourceImage | null => {
       if (!image || typeof image !== "object") {
-        return false;
+        return null;
       }
 
-      const candidate = image as { dataUrl?: unknown; mimeType?: unknown };
+      const candidate = image as { dataUrl?: unknown; mimeType?: unknown; uri?: unknown };
 
-      return (
-        typeof candidate.dataUrl === "string" &&
-        candidate.dataUrl.startsWith("data:image/") &&
-        (candidate.mimeType === "image/jpeg" ||
-          candidate.mimeType === "image/png" ||
-          candidate.mimeType === "image/webp")
-      );
+      if (!isSupportedSourceImageMimeType(candidate.mimeType)) {
+        return null;
+      }
+
+      if (typeof candidate.uri === "string" && candidate.uri.trim().length > 0) {
+        return {
+          mimeType: candidate.mimeType,
+          uri: candidate.uri
+        };
+      }
+
+      if (typeof candidate.dataUrl === "string" && candidate.dataUrl.startsWith("data:image/")) {
+        return {
+          mimeType: candidate.mimeType,
+          uri: candidate.dataUrl
+        };
+      }
+
+      return null;
     })
-    .map((image) => ({
-      dataUrl: image.dataUrl,
-      mimeType: image.mimeType
-    }));
+    .filter((image): image is RecipeSourceImage => image !== null);
 
   return images.length > 0 ? images : undefined;
 };
@@ -543,27 +567,69 @@ export const searchSharedRecipeRecords = (
     .filter((recipe): recipe is SharedRecipe => recipe != null);
 };
 
-export const parseSavedRecipeRecords = (
+export type SavedRecipeReadStatus = "corrupt" | "empty" | "ok";
+
+export interface SavedRecipeReadResult {
+  records: SavedRecipeRecord[];
+  status: SavedRecipeReadStatus;
+}
+
+/**
+ * Reads the persisted cookbook and reports whether the blob itself was readable.
+ *
+ * A `corrupt` status means the whole blob could not be understood, which is very
+ * different from an empty cookbook: callers must not persist over a corrupt blob
+ * (that turns a recoverable read failure into permanent data loss).
+ */
+export const readSavedRecipeRecords = (
   serializedSavedRecipes: string | null
-): SavedRecipeRecord[] => {
+): SavedRecipeReadResult => {
   if (!serializedSavedRecipes) {
-    return [];
+    return { records: [], status: "empty" };
   }
 
   try {
     const parsed = JSON.parse(serializedSavedRecipes) as unknown;
 
     if (!Array.isArray(parsed)) {
-      return [];
+      return { records: [], status: "corrupt" };
     }
 
-    return parsed
-      .map(normalizeSavedRecipeRecord)
-      .filter((entry): entry is SavedRecipeRecord => entry !== null);
+    return {
+      records: parsed
+        .map(normalizeSavedRecipeRecord)
+        .filter((entry): entry is SavedRecipeRecord => entry !== null),
+      status: "ok"
+    };
   } catch {
-    return [];
+    return { records: [], status: "corrupt" };
   }
 };
 
+export const parseSavedRecipeRecords = (
+  serializedSavedRecipes: string | null
+): SavedRecipeRecord[] => readSavedRecipeRecords(serializedSavedRecipes).records;
+
+/**
+ * Drops scan photos that are still `data:` URLs.
+ *
+ * Base64 scans are megabytes each and a single oversized AsyncStorage write
+ * fails on Android, which used to silently drop the whole cookbook. Scans are
+ * written to the filesystem before a save; anything still inlined here could not
+ * be written to disk and is not worth losing the cookbook over.
+ */
+const stripUnpersistableSourceImages = (record: SavedRecipeRecord): SavedRecipeRecord => {
+  if (!record.sourceImages?.some(isDataUrlSourceImage)) {
+    return record;
+  }
+
+  const persistableImages = record.sourceImages.filter((image) => !isDataUrlSourceImage(image));
+
+  return {
+    ...record,
+    sourceImages: persistableImages.length > 0 ? persistableImages : undefined
+  };
+};
+
 export const serializeSavedRecipeRecords = (savedRecipes: SavedRecipeRecord[]): string =>
-  JSON.stringify(savedRecipes);
+  JSON.stringify(savedRecipes.map(stripUnpersistableSourceImages));

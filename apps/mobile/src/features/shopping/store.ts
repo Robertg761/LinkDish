@@ -343,19 +343,32 @@ export const applyRemoteShoppingItems = (
 export const sortShoppingItems = (items: MobileShoppingItem[]): MobileShoppingItem[] =>
   [...items].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
 
-export const parseShoppingItems = (serializedItems: string | null): MobileShoppingItem[] => {
+export type ShoppingItemsReadStatus = "corrupt" | "empty" | "ok";
+
+export interface ShoppingItemsReadResult {
+  items: MobileShoppingItem[];
+  status: ShoppingItemsReadStatus;
+}
+
+/**
+ * Reads the stored shopping list and reports whether the blob itself was readable.
+ *
+ * A `corrupt` status must not be treated as an empty list: persisting over it
+ * would turn a recoverable read failure into permanent data loss.
+ */
+export const readShoppingItems = (serializedItems: string | null): ShoppingItemsReadResult => {
   if (!serializedItems) {
-    return [];
+    return { items: [], status: "empty" };
   }
 
   try {
     const parsed = JSON.parse(serializedItems) as unknown;
 
     if (!Array.isArray(parsed)) {
-      return [];
+      return { items: [], status: "corrupt" };
     }
 
-    return parsed
+    const items = parsed
       .filter((item): item is MobileShoppingItem => {
         if (typeof item !== "object" || item === null) {
           return false;
@@ -387,10 +400,15 @@ export const parseShoppingItems = (serializedItems: string | null): MobileShoppi
               : "local_only"
         }
       }));
+
+    return { items, status: "ok" };
   } catch {
-    return [];
+    return { items: [], status: "corrupt" };
   }
 };
+
+export const parseShoppingItems = (serializedItems: string | null): MobileShoppingItem[] =>
+  readShoppingItems(serializedItems).items;
 
 export const serializeShoppingItems = (items: MobileShoppingItem[]): string =>
   JSON.stringify(items);

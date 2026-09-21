@@ -18,6 +18,7 @@ import { useBilling } from "../billing/BillingContext";
 import { billingPlans } from "../billing/plans";
 import { canSaveAnotherRecipe } from "../billing/store";
 
+import { persistRecipeSourceImages } from "./sourceImageFiles";
 import {
   cloneSavedRecipeRecord,
   createSavedRecipeRecord,
@@ -25,9 +26,10 @@ import {
   getSavedRecipeRecordById,
   getSavedRecipeRecordBySourceUrl,
   incrementSavedRecipeTimesCooked,
+  isDataUrlSourceImage,
   markSavedRecipeShared,
   markSavedRecipeUnshared,
-  parseSavedRecipeRecords,
+  readSavedRecipeRecords,
   removeSavedRecipeRecord,
   serializeSavedRecipeRecords,
   savedRecipeRecordToSharedRecipeRequest,
@@ -79,6 +81,7 @@ interface SavedRecipesContextValue {
 
 const SavedRecipesContext = createContext<SavedRecipesContextValue | null>(null);
 const SAVED_RECIPES_STORAGE_KEY = "linkdish.savedRecipes";
+const SAVED_RECIPES_CORRUPT_BACKUP_STORAGE_KEY = "linkdish.savedRecipes.corrupt.v1";
 const STARTER_RECIPES_SEEDED_STORAGE_KEY = "linkdish.starterRecipesSeeded.v1";
 const RECIPE_BOOK_SHARE_MODE_STORAGE_KEY_PREFIX = "linkdish.recipeBookShareMode";
 
@@ -95,14 +98,46 @@ const buildPartialShareMessage = (message?: string): string =>
     ? `Saved to your personal book, but Family sharing failed: ${message}`
     : "Saved to your personal book, but Family sharing failed.";
 
+export type SaveRecipeFailureReason = "persist_failed" | "save_limit_reached";
+
 export interface SaveLimitStatus {
   allowed: boolean;
   message?: string;
+  reason?: SaveRecipeFailureReason;
 }
 
 export interface SaveRecipeResult extends SaveLimitStatus {
   saved: boolean;
 }
+
+/**
+ * Rewrites any scan photo that is still inlined as base64 onto the filesystem.
+ *
+ * Cookbooks written by older builds stored the full `data:` URL in the record,
+ * which is what used to make the cookbook too large for AsyncStorage to persist.
+ */
+const migrateLegacySourceImages = async (
+  records: SavedRecipeRecord[]
+): Promise<{ didMigrate: boolean; records: SavedRecipeRecord[] }> => {
+  if (!records.some((record) => record.sourceImages?.some(isDataUrlSourceImage))) {
+    return { didMigrate: false, records };
+  }
+
+  const migratedRecords = await Promise.all(
+    records.map(async (record) => {
+      if (!record.sourceImages?.some(isDataUrlSourceImage)) {
+        return record;
+      }
+
+      return {
+        ...record,
+        sourceImages: await persistRecipeSourceImages(record.id, record.sourceImages)
+      };
+    })
+  );
+
+  return { didMigrate: true, records: migratedRecords };
+};
 
 const getSharedRecipeErrorMessage = (error: unknown): string => {
   if (error instanceof ExtractorApiError && typeof error.details === "object" && error.details) {
@@ -122,6 +157,7 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
   const [hasLoadedSavedRecipes, setHasLoadedSavedRecipes] = useState(false);
   const [hasLoadedSharedRecipes, setHasLoadedSharedRecipes] = useState(false);
   const [savedRecipes, setSavedRecipes] = useState<SavedRecipeRecord[]>([]);
+  const [hasUnreadableStoredRecipes, setHasUnreadableStoredRecipes] = useState(false);
   const [sharedRecipes, setSharedRecipes] = useState<SharedRecipe[]>([]);
   const [sharedRecipeError, setSharedRecipeError] = useState<string | null>(null);
   const [shareMode, setShareModeState] = useState<RecipeBookShareMode>("none");
@@ -166,7 +202,8 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
 
     return {
       allowed: false,
-      message: `Your free Cookbook holds up to ${billingPlans.free.limits.savedRecipes} personal recipes. Upgrade for unlimited saves.`
+      message: `Your free Cookbook holds up to ${billingPlans.free.limits.savedRecipes} personal recipes. Upgrade for unlimited saves.`,
+      reason: "save_limit_reached"
     };
   };
 
@@ -221,14 +258,37 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
           return;
         }
 
-        const loadedRecipes = parseSavedRecipeRecords(storedRecipes);
-        const shouldSeedStarterRecipes = loadedRecipes.length === 0 && storedSeeded !== "true";
+        const { records: loadedRecipes, status } = readSavedRecipeRecords(storedRecipes);
+
+        if (status === "corrupt") {
+          console.warn("Saved recipes could not be read. Keeping the stored copy for recovery.");
+          setHasUnreadableStoredRecipes(true);
+
+          try {
+            await AsyncStorage.setItem(
+              SAVED_RECIPES_CORRUPT_BACKUP_STORAGE_KEY,
+              storedRecipes ?? ""
+            );
+          } catch (error) {
+            console.warn("Failed to back up the unreadable saved recipes.", error);
+          }
+        }
+
+        const { records: migratedRecipes } = await migrateLegacySourceImages(loadedRecipes);
+        const shouldSeedStarterRecipes =
+          status !== "corrupt" && migratedRecipes.length === 0 && storedSeeded !== "true";
         const hydratedRecipes = shouldSeedStarterRecipes
           ? createStarterRecipeSeedRecords().map(starterRecipeSeedRecordToSavedRecipeRecord)
-          : loadedRecipes;
-        if (storedSeeded !== "true") {
+          : migratedRecipes;
+
+        if (status !== "corrupt" && storedSeeded !== "true") {
           await AsyncStorage.setItem(STARTER_RECIPES_SEEDED_STORAGE_KEY, "true");
         }
+
+        if (!isMounted) {
+          return;
+        }
+
         setSavedRecipes((current) =>
           current.reduce(
             (accumulator, entry) => upsertSavedRecipeRecord(accumulator, entry),
@@ -298,6 +358,13 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
       return;
     }
 
+    // The stored cookbook could not be parsed. Writing an empty list over it now
+    // would turn a recoverable read failure into permanent data loss, so wait
+    // until there is something real to store.
+    if (hasUnreadableStoredRecipes && savedRecipes.length === 0) {
+      return;
+    }
+
     const persistSavedRecipes = async () => {
       try {
         await AsyncStorage.setItem(
@@ -310,7 +377,7 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
     };
 
     void persistSavedRecipes();
-  }, [hasLoadedSavedRecipes, savedRecipes]);
+  }, [hasLoadedSavedRecipes, hasUnreadableStoredRecipes, savedRecipes]);
 
   useEffect(() => {
     if (!shareModeStorageKey || !hasLoadedShareMode) {
@@ -422,9 +489,9 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
     }
   };
 
-  const savePersonalRecipe = (
+  const savePersonalRecipe = async (
     state: SuccessfulExtractionState
-  ): SaveRecipeResult & { recipe?: SavedRecipeRecord; recipeId?: string } => {
+  ): Promise<SaveRecipeResult & { recipe?: SavedRecipeRecord; recipeId?: string }> => {
     const existingRecord = getSavedRecipeRecordBySourceUrl(savedRecipes, state.recipe.sourceUrl);
     const saveGate = getSaveLimitStatus({ isExistingRecord: existingRecord != null });
 
@@ -436,14 +503,35 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
     }
 
     const createdRecord = createSavedRecipeRecord(state);
-    const nextRecord = {
+    const recordId = existingRecord?.id ?? createdRecord.id;
+    const nextRecord: SavedRecipeRecord = {
       ...createdRecord,
-      id: existingRecord?.id ?? createdRecord.id,
+      id: recordId,
       sharedAt: existingRecord?.sharedAt,
       sharedRecipeId: existingRecord?.sharedRecipeId,
+      sourceImages: await persistRecipeSourceImages(recordId, createdRecord.sourceImages),
       timesCooked: existingRecord?.timesCooked ?? createdRecord.timesCooked
     };
 
+    // Persist before reporting success: a swallowed write failure used to leave
+    // the recipe looking saved until the next launch, when it was simply gone.
+    try {
+      await AsyncStorage.setItem(
+        SAVED_RECIPES_STORAGE_KEY,
+        serializeSavedRecipeRecords(upsertSavedRecipeRecord(savedRecipes, nextRecord))
+      );
+    } catch (error) {
+      console.warn("Failed to persist saved recipes.", error);
+
+      return {
+        allowed: true,
+        message: "This recipe could not be saved to your Cookbook. Please try again.",
+        reason: "persist_failed",
+        saved: false
+      };
+    }
+
+    setHasUnreadableStoredRecipes(false);
     setSavedRecipes((current) => upsertSavedRecipeRecord(current, nextRecord));
 
     trackMobileEvent({
@@ -651,7 +739,7 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
           setSavedRecipes((current) => removeSavedRecipeRecord(current, id));
         },
         saveRecipe: async (state) => {
-          const result = savePersonalRecipe(state);
+          const result = await savePersonalRecipe(state);
 
           if (result.saved && result.recipe && shareMode === "all") {
             const sharedResult = await shareRecipeRecord(result.recipe);
@@ -669,6 +757,7 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
           return {
             allowed: result.allowed,
             ...(result.message ? { message: result.message } : {}),
+            ...(result.reason ? { reason: result.reason } : {}),
             ...(result.recipeId ? { recipeId: result.recipeId } : {}),
             saved: result.saved
           };
@@ -708,12 +797,13 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
             }
           }
 
-          const personalResult = savePersonalRecipe(state);
+          const personalResult = await savePersonalRecipe(state);
 
           if (!personalResult.saved || !personalResult.recipe) {
             return {
               allowed: personalResult.allowed,
               ...(personalResult.message ? { message: personalResult.message } : {}),
+              ...(personalResult.reason ? { reason: personalResult.reason } : {}),
               ...(personalResult.recipeId ? { recipeId: personalResult.recipeId } : {}),
               saved: false
             };

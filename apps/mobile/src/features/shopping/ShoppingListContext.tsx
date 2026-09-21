@@ -21,7 +21,7 @@ import {
   applyRemoteShoppingItems,
   deleteShoppingItemInList,
   markShoppingItemsSyncFailed,
-  parseShoppingItems,
+  readShoppingItems,
   serializeShoppingItems,
   setShoppingItemCheckedInList,
   sortShoppingItems,
@@ -31,6 +31,7 @@ import {
 } from "./store";
 
 const SHOPPING_ITEMS_STORAGE_KEY = "linkdish.shoppingItems.v1";
+const SHOPPING_ITEMS_CORRUPT_BACKUP_STORAGE_KEY = "linkdish.shoppingItems.corrupt.v1";
 
 interface ShoppingListContextValue {
   addItems: (inputs: AddShoppingItemInput[]) => void;
@@ -72,6 +73,7 @@ export const ShoppingListProvider = ({ children }: PropsWithChildren) => {
   const [isRefreshingShoppingList, setIsRefreshingShoppingList] = useState(false);
   const [shoppingError, setShoppingError] = useState<string | null>(null);
   const [shoppingItems, setShoppingItems] = useState<MobileShoppingItem[]>([]);
+  const [hasUnreadableStoredItems, setHasUnreadableStoredItems] = useState(false);
   const isRefreshingRef = useRef(false);
   const shoppingItemsRef = useRef<MobileShoppingItem[]>([]);
   const client = useMemo(
@@ -94,12 +96,27 @@ export const ShoppingListProvider = ({ children }: PropsWithChildren) => {
     const hydrateShoppingItems = async () => {
       try {
         const storedItems = await AsyncStorage.getItem(SHOPPING_ITEMS_STORAGE_KEY);
+        const { items, status } = readShoppingItems(storedItems);
+
+        if (status === "corrupt") {
+          console.warn("Shopping list could not be read. Keeping the stored copy for recovery.");
+          setHasUnreadableStoredItems(true);
+
+          try {
+            await AsyncStorage.setItem(
+              SHOPPING_ITEMS_CORRUPT_BACKUP_STORAGE_KEY,
+              storedItems ?? ""
+            );
+          } catch (error) {
+            console.warn("Failed to back up the unreadable shopping list.", error);
+          }
+        }
 
         if (!isMounted) {
           return;
         }
 
-        setShoppingItems(sortShoppingItems(parseShoppingItems(storedItems)));
+        setShoppingItems(sortShoppingItems(items));
       } catch (error) {
         console.warn("Failed to load shopping list.", error);
       } finally {
@@ -121,6 +138,12 @@ export const ShoppingListProvider = ({ children }: PropsWithChildren) => {
       return;
     }
 
+    // The stored list could not be parsed. Writing an empty list over it now
+    // would make a recoverable read failure permanent, so wait for real content.
+    if (hasUnreadableStoredItems && shoppingItems.length === 0) {
+      return;
+    }
+
     const persistShoppingItems = async () => {
       try {
         await AsyncStorage.setItem(SHOPPING_ITEMS_STORAGE_KEY, serializeShoppingItems(shoppingItems));
@@ -130,7 +153,7 @@ export const ShoppingListProvider = ({ children }: PropsWithChildren) => {
     };
 
     void persistShoppingItems();
-  }, [hasLoadedShoppingItems, shoppingItems]);
+  }, [hasLoadedShoppingItems, hasUnreadableStoredItems, shoppingItems]);
 
   const refreshShoppingList = useCallback(async () => {
     if (!hasLoadedShoppingItems || isRefreshingRef.current) {

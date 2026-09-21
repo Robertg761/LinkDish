@@ -40,6 +40,108 @@ const redirectHintPatterns = [
   /\bnot found\b/i
 ] as const;
 
+/*
+ * The extract path fetches attacker-supplied URLs, so response bodies are
+ * streamed with a hard byte cap (mirroring the image proxy's readImageBody)
+ * instead of being buffered with response.text(). Without this a URL that
+ * streams hundreds of megabytes inside the fetch timeout window is buffered in
+ * full and then re-parsed several times downstream, which OOMs a
+ * memory-bounded serverless function.
+ */
+export class ResponseBodyTooLargeError extends Error {
+  public constructor(public readonly maxBytes: number) {
+    super(`Response body exceeded the ${maxBytes} byte limit.`);
+    this.name = "ResponseBodyTooLargeError";
+  }
+}
+
+const htmlLikeContentTypes = new Set([
+  "application/xhtml+xml",
+  "application/xml",
+  "text/html",
+  "text/plain",
+  "text/xml"
+]);
+
+export const getContentTypeEssence = (value: string | null | undefined): string =>
+  (value ?? "").split(";")[0]?.trim().toLowerCase() ?? "";
+
+export const isHtmlLikeContentType = (value: string | null | undefined): boolean => {
+  const essence = getContentTypeEssence(value);
+
+  /* Servers that omit content-type are common enough that we keep reading them. */
+  return essence === "" || htmlLikeContentTypes.has(essence);
+};
+
+const getDeclaredContentLength = (response: Response): number | null => {
+  const rawValue = response.headers?.get?.("content-length");
+
+  if (!rawValue) {
+    return null;
+  }
+
+  const parsedValue = Number.parseInt(rawValue, 10);
+
+  return Number.isFinite(parsedValue) && parsedValue >= 0 ? parsedValue : null;
+};
+
+export const readLimitedResponseText = async (
+  response: Response,
+  maxBytes: number
+): Promise<string> => {
+  const declaredContentLength = getDeclaredContentLength(response);
+
+  if (declaredContentLength !== null && declaredContentLength > maxBytes) {
+    throw new ResponseBodyTooLargeError(maxBytes);
+  }
+
+  const body = response.body as ReadableStream<Uint8Array> | null | undefined;
+
+  if (!body || typeof body.getReader !== "function") {
+    /* Mocked or already-buffered responses still get the same cap. */
+    const text = await response.text();
+
+    if (Buffer.byteLength(text, "utf8") > maxBytes) {
+      throw new ResponseBodyTooLargeError(maxBytes);
+    }
+
+    return text;
+  }
+
+  const reader = body.getReader();
+  /* Matches Response.text(), which always decodes as UTF-8. */
+  const decoder = new TextDecoder("utf-8");
+  let text = "";
+  let totalBytes = 0;
+
+  try {
+    for (;;) {
+      const result = await reader.read();
+
+      if (result.done) {
+        break;
+      }
+
+      if (!result.value) {
+        continue;
+      }
+
+      totalBytes += result.value.byteLength;
+
+      if (totalBytes > maxBytes) {
+        throw new ResponseBodyTooLargeError(maxBytes);
+      }
+
+      text += decoder.decode(result.value, { stream: true });
+    }
+  } catch (error) {
+    await reader.cancel().catch(() => undefined);
+    throw error;
+  }
+
+  return text + decoder.decode();
+};
+
 export const sleep = async (durationMs: number) =>
   new Promise((resolve) => {
     setTimeout(resolve, durationMs);

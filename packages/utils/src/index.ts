@@ -18,6 +18,26 @@ const namedHtmlEntityMap: Record<string, string> = {
   quot: '"'
 };
 
+const FIRST_SURROGATE_CODE_POINT = 0xd800;
+const LAST_SURROGATE_CODE_POINT = 0xdfff;
+const MAX_UNICODE_CODE_POINT = 0x10ffff;
+
+// Tab, line feed and carriage return are the only control characters that carry meaning in
+// recipe text. Everything else in the C0/C1 ranges (plus DEL) is dropped so attacker-controlled
+// page content cannot smuggle raw control bytes into stored recipes.
+const allowedControlCodePoints = new Set([0x09, 0x0a, 0x0d]);
+
+const isSurrogateCodePoint = (codePoint: number): boolean =>
+  codePoint >= FIRST_SURROGATE_CODE_POINT && codePoint <= LAST_SURROGATE_CODE_POINT;
+
+const isDisallowedControlCodePoint = (codePoint: number): boolean => {
+  if (allowedControlCodePoints.has(codePoint)) {
+    return false;
+  }
+
+  return codePoint <= 0x1f || (codePoint >= 0x7f && codePoint <= 0x9f);
+};
+
 export const decodeHtmlEntities = (value: string): string =>
   value.replace(/&(#x?[0-9a-f]+|[a-z][a-z0-9]+);/giu, (entity, token: string) => {
     if (token.startsWith("#")) {
@@ -25,7 +45,13 @@ export const decodeHtmlEntities = (value: string): string =>
       const rawCodePoint = isHex ? token.slice(2) : token.slice(1);
       const codePoint = Number.parseInt(rawCodePoint, isHex ? 16 : 10);
 
-      if (!Number.isFinite(codePoint) || codePoint <= 0 || codePoint > 0x10ffff) {
+      if (
+        !Number.isFinite(codePoint) ||
+        codePoint <= 0 ||
+        codePoint > MAX_UNICODE_CODE_POINT ||
+        isSurrogateCodePoint(codePoint) ||
+        isDisallowedControlCodePoint(codePoint)
+      ) {
         return entity;
       }
 

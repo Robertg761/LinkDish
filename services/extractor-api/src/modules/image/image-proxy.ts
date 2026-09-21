@@ -24,6 +24,7 @@ type ImageProxyRejectionReason =
   | "image_too_large"
   | "invalid_content_type"
   | "invalid_image_bytes"
+  | "invalid_width"
   | "private_address"
   | "redirect_limit"
   | "source_unreachable"
@@ -88,7 +89,7 @@ export const parseImageProxyQuery = (query: unknown): { sourceUrl: URL; width: n
   const width = Number.parseInt(rawWidth, 10);
 
   if (!allowedWidths.has(width) || String(width) !== rawWidth) {
-    reject("source_unreachable", "Image width must be one of 96, 480, or 1200.");
+    reject("invalid_width", "Image width must be one of 96, 480, or 1200.");
   }
 
   return {

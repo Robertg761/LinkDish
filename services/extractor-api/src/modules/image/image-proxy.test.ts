@@ -37,6 +37,19 @@ describe("parseImageProxyQuery", () => {
     ).toThrow(ImageProxyError);
   });
 
+  it("reports an unsupported width with an accurate reason", () => {
+    expect(() =>
+      parseImageProxyQuery({
+        url: "https://images.example.com/recipe.jpg",
+        w: "320"
+      })
+    ).toThrowError(
+      expect.objectContaining({
+        reason: "invalid_width"
+      })
+    );
+  });
+
   it("rejects credentials and non-http urls", () => {
     expect(() =>
       parseImageProxyQuery({

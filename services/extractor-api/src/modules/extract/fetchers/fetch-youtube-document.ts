@@ -1,18 +1,48 @@
 import { load } from "cheerio";
 
-import { browserLikeHeaders, createTimeoutSignal } from "./shared.js";
+import { extractorApiEnv } from "../../../config/env.js";
+import { isSourceUrlRejection, validatePublicSourceUrl } from "../source-url-safety.js";
 
+import {
+  browserLikeHeaders,
+  createTimeoutSignal,
+  isHtmlLikeContentType,
+  readLimitedResponseText,
+  ResponseBodyTooLargeError
+} from "./shared.js";
+
+import type { ValidateSourceUrl } from "../source-url-safety.js";
 import type { YouTubeSourceDocument } from "../types.js";
+
+export interface FetchYouTubeDocumentOptions {
+  maxBytes?: number;
+  validateUrl?: ValidateSourceUrl;
+}
 
 export class YouTubeFetchError extends Error {
   public constructor(
     message: string,
-    public readonly reason: "unreachable" | "blocked" | "timeout"
+    public readonly reason: "unreachable" | "blocked" | "timeout" | "too_large"
   ) {
     super(message);
     this.name = "YouTubeFetchError";
   }
 }
+
+const readLimitedYouTubeText = async (response: Response, maxBytes: number): Promise<string> => {
+  try {
+    return await readLimitedResponseText(response, maxBytes);
+  } catch (error) {
+    if (error instanceof ResponseBodyTooLargeError) {
+      throw new YouTubeFetchError(
+        `Failed to fetch YouTube document: ${error.message}`,
+        "too_large"
+      );
+    }
+
+    throw error;
+  }
+};
 
 const fetchTranscriptFromLibrary = async (videoId: string): Promise<string | null> => {
   try {
@@ -40,7 +70,9 @@ const decodeCaptionText = (value: string): string =>
 const fetchTranscriptFromCaptionTrack = async (
   pageHtml: string,
   fetchImplementation: typeof fetch,
-  timeoutMs: number
+  timeoutMs: number,
+  maxBytes: number,
+  validateUrl: ValidateSourceUrl
 ): Promise<string | null> => {
   const captionTrackMatch = pageHtml.match(/"captionTracks":(\[[^\]]+\])/);
 
@@ -64,6 +96,17 @@ const fetchTranscriptFromCaptionTrack = async (
       return null;
     }
 
+    /*
+     * The caption baseUrl is parsed out of the watch page, so it is
+     * attacker-influenced content and has to pass the same SSRF validation as
+     * every other fetch on the extract path.
+     */
+    const captionUrlSafety = await validateUrl(captionUrl);
+
+    if (isSourceUrlRejection(captionUrlSafety)) {
+      return null;
+    }
+
     const timeout = createTimeoutSignal(timeoutMs);
 
     try {
@@ -78,7 +121,7 @@ const fetchTranscriptFromCaptionTrack = async (
         return null;
       }
 
-      const xml = await response.text();
+      const xml = await readLimitedYouTubeText(response, maxBytes);
       const segments = [...xml.matchAll(/<text[^>]*>([\s\S]*?)<\/text>/g)]
         .map((match) => decodeCaptionText(match[1] ?? ""))
         .filter(Boolean);
@@ -102,8 +145,11 @@ export const fetchYouTubeDocument = async (
   url: string,
   videoId: string,
   fetchImplementation: typeof fetch,
-  timeoutMs: number
+  timeoutMs: number,
+  options?: FetchYouTubeDocumentOptions
 ): Promise<YouTubeSourceDocument> => {
+  const maxBytes = options?.maxBytes ?? extractorApiEnv.FETCH_MAX_RESPONSE_BYTES;
+  const validateUrl = options?.validateUrl ?? validatePublicSourceUrl;
   const oEmbedUrl = `https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`;
   const oEmbedTimeout = createTimeoutSignal(timeoutMs);
   const oEmbedResponse = await fetchImplementation(oEmbedUrl, {
@@ -120,7 +166,7 @@ export const fetchYouTubeDocument = async (
     );
   }
 
-  const metadata = (await oEmbedResponse.json()) as {
+  const metadata = JSON.parse(await readLimitedYouTubeText(oEmbedResponse, maxBytes)) as {
     title?: string;
     author_name?: string;
   };
@@ -138,7 +184,14 @@ export const fetchYouTubeDocument = async (
     );
   }
 
-  const pageHtml = await watchResponse.text();
+  if (!isHtmlLikeContentType(watchResponse.headers.get("content-type"))) {
+    throw new YouTubeFetchError(
+      "Refused non-HTML YouTube watch page content type.",
+      "unreachable"
+    );
+  }
+
+  const pageHtml = await readLimitedYouTubeText(watchResponse, maxBytes);
   const $ = load(pageHtml);
   const title =
     metadata.title ??
@@ -151,7 +204,13 @@ export const fetchYouTubeDocument = async (
     (metadata.author_name ? `Creator: ${metadata.author_name}` : null);
   const transcript =
     (await fetchTranscriptFromLibrary(videoId)) ??
-    (await fetchTranscriptFromCaptionTrack(pageHtml, fetchImplementation, timeoutMs));
+    (await fetchTranscriptFromCaptionTrack(
+      pageHtml,
+      fetchImplementation,
+      timeoutMs,
+      maxBytes,
+      validateUrl
+    ));
   const chapters = parseChapterLines(description ?? "");
 
   return {

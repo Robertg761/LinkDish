@@ -19,6 +19,7 @@ import {
   ScrollView,
   StyleSheet,
   Switch,
+  Text,
   useWindowDimensions,
   View
 } from "react-native";
@@ -50,6 +51,7 @@ import type { Recipe } from "@linkdish/recipe-domain";
 import type { GestureResponderEvent } from "react-native";
 
 const COOK_MODE_KEEP_AWAKE_TAG = "linkdish-cook-mode";
+const COOK_MODE_CONTROL_MAX_FONT_SCALE = 1.4;
 const COOK_MODE_HINT_STORAGE_KEY = "linkdish.hasSeenCookModeHints";
 const COOK_MODE_REVIEW_REQUESTED_STORAGE_KEY = "linkdish.reviewRequested.v1";
 const COOK_MODE_SWIPE_HORIZONTAL_DOMINANCE = 1.15;
@@ -592,6 +594,7 @@ export const RecipeResultCard = ({
         {heroImageUrl ? (
           <Image
             accessibilityIgnoresInvertColors
+            accessible={false}
             resizeMode="cover"
             source={{ uri: heroImageUrl }}
             style={[styles.heroImage, { height: heroImageHeight }]}
@@ -937,7 +940,7 @@ const CookingModeModal = ({
   }, []);
 
   useEffect(() => {
-    if (!visible || activeTimers.length === 0) {
+    if (!visible || runningTimerCount === 0) {
       return;
     }
 
@@ -948,7 +951,7 @@ const CookingModeModal = ({
     return () => {
       clearInterval(intervalId);
     };
-  }, [activeTimers.length, visible]);
+  }, [runningTimerCount, visible]);
 
   useEffect(() => {
     const newlyCompletedTimers = activeTimers.filter(
@@ -1379,7 +1382,12 @@ const CookingModeModal = ({
             onPress={() => startTimer(duration, durationIndex)}
             style={({ pressed }) => [styles.stepTimerChip, pressed && styles.pressed]}
           >
-            <AppText style={styles.stepTimerChipText}>{duration.label}</AppText>
+            <Text
+              maxFontSizeMultiplier={COOK_MODE_CONTROL_MAX_FONT_SCALE}
+              style={styles.stepTimerChipText}
+            >
+              {duration.label}
+            </Text>
             <MaterialCommunityIcons color={appColors.accent} name="play" size={14} />
           </Pressable>
         ))}
@@ -1421,20 +1429,22 @@ const CookingModeModal = ({
                 name={completed ? "check" : "timer-outline"}
                 size={14}
               />
-              <AppText
+              <Text
+                maxFontSizeMultiplier={COOK_MODE_CONTROL_MAX_FONT_SCALE}
                 style={[
                   styles.activeTimerChipText,
                   completed && styles.activeTimerChipTextComplete
                 ]}
               >
                 {completed ? "Done" : formatTimerRemaining(remainingSeconds)}
-              </AppText>
-              <AppText
+              </Text>
+              <Text
+                maxFontSizeMultiplier={COOK_MODE_CONTROL_MAX_FONT_SCALE}
                 numberOfLines={1}
                 style={[styles.activeTimerLabel, completed && styles.activeTimerChipTextComplete]}
               >
                 {timer.label}
-              </AppText>
+              </Text>
             </Pressable>
           );
         })}
@@ -1614,8 +1624,15 @@ const CookingModeModal = ({
                     size={18}
                   />
                 </Reanimated.View>
-                <AppText style={styles.keepAwakeMiddleText}>Keep awake</AppText>
+                <Text
+                  maxFontSizeMultiplier={COOK_MODE_CONTROL_MAX_FONT_SCALE}
+                  style={styles.keepAwakeMiddleText}
+                >
+                  Keep awake
+                </Text>
                 <Switch
+                  accessibilityLabel="Keep screen awake"
+                  accessibilityHint="Stops the screen from sleeping while you cook."
                   onValueChange={setKeepAwake}
                   thumbColor={keepAwake ? appColors.accent : appColors.surface}
                   trackColor={{ false: appColors.border, true: appColors.accentSoft }}
@@ -1637,7 +1654,12 @@ const CookingModeModal = ({
                 ]}
               >
                 {isLastStep ? (
-                  <AppText style={styles.finishButtonText}>Finish</AppText>
+                  <Text
+                    maxFontSizeMultiplier={COOK_MODE_CONTROL_MAX_FONT_SCALE}
+                    style={styles.finishButtonText}
+                  >
+                    Finish
+                  </Text>
                 ) : (
                   <MaterialCommunityIcons color={appColors.canvas} name="arrow-right" size={24} />
                 )}
@@ -1734,10 +1756,11 @@ const styles = StyleSheet.create({
   arrowButton: {
     alignItems: "center",
     borderRadius: 14,
-    height: 44,
     justifyContent: "center",
+    minHeight: 44,
     minWidth: 44,
-    paddingHorizontal: 8
+    paddingHorizontal: 8,
+    paddingVertical: 4
   },
   arrowButtonPrimary: {
     backgroundColor: appColors.accent
@@ -1915,6 +1938,7 @@ const styles = StyleSheet.create({
     color: appColors.canvas,
     fontSize: 14,
     fontWeight: "700",
+    lineHeight: 20,
     paddingHorizontal: 6
   },
   keepAwakeMiddleContainer: {
@@ -1926,7 +1950,8 @@ const styles = StyleSheet.create({
   keepAwakeMiddleText: {
     color: appColors.text,
     fontSize: 13,
-    fontWeight: "600"
+    fontWeight: "600",
+    lineHeight: 18
   },
   keepAwakeMiddleSwitch: {
     transform: [{ scaleX: 0.8 }, { scaleY: 0.8 }]
