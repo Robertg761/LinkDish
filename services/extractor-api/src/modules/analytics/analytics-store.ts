@@ -150,6 +150,11 @@ const getPool = (): Pool => {
 
   pool ??= new Pool({
     connectionString: extractorApiEnv.ANALYTICS_DATABASE_URL,
+    // The extract route awaits its analytics write, so an unreachable or
+    // slow-handshaking analytics database would otherwise stall every import
+    // until the function itself times out. Fail fast and let the caller's
+    // catch drop the event instead.
+    connectionTimeoutMillis: 5_000,
     max: 4,
     ...(ssl ? { ssl } : {})
   });

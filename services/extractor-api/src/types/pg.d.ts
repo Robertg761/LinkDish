@@ -1,6 +1,11 @@
 declare module "pg" {
   export class Pool {
-    constructor(config: { connectionString: string; max?: number; ssl?: unknown });
+    constructor(config: {
+      connectionString: string;
+      connectionTimeoutMillis?: number;
+      max?: number;
+      ssl?: unknown;
+    });
     query(
       text: string,
       params?: unknown[]
