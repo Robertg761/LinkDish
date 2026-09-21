@@ -54,6 +54,13 @@ const storeMocks = vi.hoisted(() => ({
   getSharedRecipeOwnerLabel: vi.fn(
     (recipe: SharedRecipe) => recipe.ownerDisplayName ?? recipe.ownerEmail
   ),
+  getSourceHost: vi.fn((sourceUrl: string) => {
+    try {
+      return new URL(sourceUrl).hostname.replace(/^www\./iu, "");
+    } catch {
+      return "unknown";
+    }
+  }),
   incrementSavedRecipeTimesCooked: vi.fn(),
   saveSharedRecipeCopy: vi.fn(),
   sharedRecipeToWebSavedRecipe: vi.fn((recipe: SharedRecipe): WebSavedRecipe => {
@@ -89,6 +96,7 @@ vi.mock("./saved-recipe-store", () => ({
   duplicateSavedRecipe: storeMocks.duplicateSavedRecipe,
   getSavedRecipeById: storeMocks.getSavedRecipeById,
   getSharedRecipeOwnerLabel: storeMocks.getSharedRecipeOwnerLabel,
+  getSourceHost: storeMocks.getSourceHost,
   incrementSavedRecipeTimesCooked: storeMocks.incrementSavedRecipeTimesCooked,
   saveSharedRecipeCopy: storeMocks.saveSharedRecipeCopy,
   sharedRecipeToWebSavedRecipe: storeMocks.sharedRecipeToWebSavedRecipe,
@@ -295,5 +303,80 @@ describe("RecipePage shared route", () => {
     expect(screen.getByText("4 cans beans")).toBeInTheDocument();
     expect(screen.getByText("Salt to taste")).toBeInTheDocument();
     expect(screen.getByText("Some ingredients can’t be scaled automatically.")).toBeInTheDocument();
+  });
+});
+
+describe("RecipePage saved route", () => {
+  const savedRecipeWithMalformedSource: WebSavedRecipe = {
+    createdAt: "2026-06-02T12:00:00.000Z",
+    extraction: {
+      fetchMode: "http",
+      provenance: ["jsonld"],
+      strategy: "recipe-schema",
+      warnings: []
+    },
+    id: "recipe_local",
+    recipe: {
+      ...sharedRecipe.recipe,
+      sourceUrl: "recipes/legacy-import",
+      title: "Legacy Import"
+    },
+    // A legacy record whose host was never derived and whose URL is unparseable.
+    sourceHost: "",
+    sourceUrl: "recipes/legacy-import",
+    sync: { status: "local_only" },
+    timesCooked: 0,
+    updatedAt: "2026-06-02T12:00:00.000Z"
+  };
+
+  beforeEach(() => {
+    authMocks.user = {
+      billingPlan: "family",
+      email: "owner@example.com",
+      id: "user_owner"
+    };
+    analyticsMocks.trackWebEvent.mockReset();
+    storeMocks.getSavedRecipeById.mockReset();
+    storeMocks.getSavedRecipeById.mockResolvedValue(savedRecipeWithMalformedSource);
+    storeMocks.updateSavedRecipe.mockReset();
+  });
+
+  const renderSavedRecipePage = () => {
+    render(
+      <MemoryRouter initialEntries={["/recipes/recipe_local"]}>
+        <Routes>
+          <Route path="/recipes/:id" element={<RecipePage />} />
+          <Route path="/" element={<div>Cookbook route</div>} />
+        </Routes>
+      </MemoryRouter>
+    );
+  };
+
+  it("renders a recipe whose stored source URL cannot be parsed", async () => {
+    renderSavedRecipePage();
+
+    expect(await screen.findByRole("heading", { name: "Legacy Import" })).toBeInTheDocument();
+    expect(screen.getByText("unknown")).toBeInTheDocument();
+  });
+
+  it("exposes the edit modal as a labelled, focus-trapped dialog", async () => {
+    renderSavedRecipePage();
+
+    expect(await screen.findByRole("heading", { name: "Legacy Import" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+
+    const dialog = screen.getByRole("dialog", { name: "Edit Recipe" });
+    expect(dialog).toHaveAttribute("aria-modal", "true");
+
+    await waitFor(() => {
+      expect(dialog.contains(document.activeElement)).toBe(true);
+    });
+
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Edit Recipe" })).not.toBeInTheDocument();
+    });
   });
 });

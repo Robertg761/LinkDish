@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 
 interface RecipeImageWithFallbackProps {
   src: string;
@@ -15,6 +15,11 @@ export const RecipeImageWithFallback: React.FC<RecipeImageWithFallbackProps> = (
   fallback
 }) => {
   const [failed, setFailed] = useState(false);
+
+  // A new source deserves a fresh attempt; otherwise the fallback sticks.
+  useEffect(() => {
+    setFailed(false);
+  }, [src]);
 
   if (failed) {
     return <>{fallback}</>;

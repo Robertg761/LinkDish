@@ -5,6 +5,7 @@ import { Card } from "../../components/Card";
 import { Icon } from "../../components/Icon";
 import { isStandaloneMode } from "../../platform/detect-installation";
 import { isIos } from "../../platform/detect-ios";
+import { safeGetItem, safeSetItem } from "../../platform/safe-storage";
 import "./InstallPrompt.css";
 
 // Interface for beforeinstallprompt event
@@ -27,13 +28,13 @@ export const InstallPrompt: React.FC = () => {
       return;
     }
 
-    const hasExtracted = localStorage.getItem("linkdish:web:has-extracted-recipe") === "true";
+    const hasExtracted = safeGetItem("linkdish:web:has-extracted-recipe") === "true";
     if (!hasExtracted) {
       // Only show install education after user has successfully extracted at least one recipe
       return;
     }
 
-    const dismissed = localStorage.getItem("linkdish:web:install-prompt-dismissed") === "true";
+    const dismissed = safeGetItem("linkdish:web:install-prompt-dismissed") === "true";
     if (dismissed) {
       setIsDismissed(true);
       return;
@@ -78,7 +79,7 @@ export const InstallPrompt: React.FC = () => {
   };
 
   const handleDismiss = () => {
-    localStorage.setItem("linkdish:web:install-prompt-dismissed", "true");
+    safeSetItem("linkdish:web:install-prompt-dismissed", "true");
     setIsDismissed(true);
     setShowPrompt(false);
   };

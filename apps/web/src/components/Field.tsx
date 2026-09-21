@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useId } from "react";
 import "./Field.css";
 
 interface FieldProps extends React.InputHTMLAttributes<HTMLInputElement> {
@@ -17,11 +17,11 @@ export const Field: React.FC<FieldProps> = ({
   className = "",
   ...props
 }) => {
+  // useId keeps the label/input association stable across renders; a random id
+  // changed on every render and broke `htmlFor`.
+  const generatedId = useId();
   const inputId =
-    id ||
-    (label
-      ? `field-${label.toLowerCase().replace(/\s+/g, "-")}`
-      : `field-${Math.random().toString(36).substring(7)}`);
+    id || (label ? `field-${label.toLowerCase().replace(/\s+/g, "-")}` : `field-${generatedId}`);
   const errorId = `${inputId}-error`;
 
   return (
