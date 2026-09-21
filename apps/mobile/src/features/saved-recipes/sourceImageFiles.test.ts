@@ -69,8 +69,8 @@ describe("recipe scan image files", () => {
     vi.restoreAllMocks();
   });
 
-  it("writes base64 scans to the filesystem and returns file uris", async () => {
-    const images = await persistRecipeSourceImages("saved-1", [
+  it("writes base64 scans to the filesystem and returns file uris", () => {
+    const images = persistRecipeSourceImages("saved-1", [
       { mimeType: "image/jpeg", uri: "data:image/jpeg;base64,AAAABBBB" }
     ]);
 
@@ -84,20 +84,20 @@ describe("recipe scan image files", () => {
     expect(images?.[0]?.uri.endsWith(".jpg")).toBe(true);
   });
 
-  it("leaves already persisted scans untouched", async () => {
+  it("leaves already persisted scans untouched", () => {
     const stored = [
       { mimeType: "image/png" as const, uri: "file:///documents/recipe-scans/saved-1-0.png" }
     ];
 
-    await expect(persistRecipeSourceImages("saved-1", stored)).resolves.toEqual(stored);
+    expect(persistRecipeSourceImages("saved-1", stored)).toEqual(stored);
     expect(fileSystemMocks.writes).toHaveLength(0);
   });
 
-  it("keeps the rest of a scan set when one write fails", async () => {
+  it("keeps the rest of a scan set when one write fails", () => {
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
     fileSystemMocks.failWritesFor = "saved-2-0";
 
-    const images = await persistRecipeSourceImages("saved-2", [
+    const images = persistRecipeSourceImages("saved-2", [
       { mimeType: "image/jpeg", uri: "data:image/jpeg;base64,FIRST" },
       { mimeType: "image/png", uri: "data:image/png;base64,SECOND" }
     ]);
@@ -107,8 +107,8 @@ describe("recipe scan image files", () => {
     expect(fileSystemMocks.writes).toHaveLength(1);
   });
 
-  it("returns undefined when there is nothing to persist", async () => {
-    await expect(persistRecipeSourceImages("saved-3", undefined)).resolves.toBeUndefined();
-    await expect(persistRecipeSourceImages("saved-3", [])).resolves.toBeUndefined();
+  it("returns undefined when there is nothing to persist", () => {
+    expect(persistRecipeSourceImages("saved-3", undefined)).toBeUndefined();
+    expect(persistRecipeSourceImages("saved-3", [])).toBeUndefined();
   });
 });

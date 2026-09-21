@@ -16,11 +16,12 @@ import {
 } from "./saved-recipe-store";
 
 import type { Recipe } from "@linkdish/recipe-domain";
+import type * as RecipeDomain from "@linkdish/recipe-domain";
 
 const starterSeedMocks = vi.hoisted(() => ({ fail: false }));
 
 vi.mock("@linkdish/recipe-domain", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@linkdish/recipe-domain")>();
+  const actual = await importOriginal<typeof RecipeDomain>();
 
   return {
     ...actual,

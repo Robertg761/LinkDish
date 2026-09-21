@@ -116,25 +116,23 @@ export interface SaveRecipeResult extends SaveLimitStatus {
  * Cookbooks written by older builds stored the full `data:` URL in the record,
  * which is what used to make the cookbook too large for AsyncStorage to persist.
  */
-const migrateLegacySourceImages = async (
+const migrateLegacySourceImages = (
   records: SavedRecipeRecord[]
-): Promise<{ didMigrate: boolean; records: SavedRecipeRecord[] }> => {
+): { didMigrate: boolean; records: SavedRecipeRecord[] } => {
   if (!records.some((record) => record.sourceImages?.some(isDataUrlSourceImage))) {
     return { didMigrate: false, records };
   }
 
-  const migratedRecords = await Promise.all(
-    records.map(async (record) => {
-      if (!record.sourceImages?.some(isDataUrlSourceImage)) {
-        return record;
-      }
+  const migratedRecords = records.map((record) => {
+    if (!record.sourceImages?.some(isDataUrlSourceImage)) {
+      return record;
+    }
 
-      return {
-        ...record,
-        sourceImages: await persistRecipeSourceImages(record.id, record.sourceImages)
-      };
-    })
-  );
+    return {
+      ...record,
+      sourceImages: persistRecipeSourceImages(record.id, record.sourceImages)
+    };
+  });
 
   return { didMigrate: true, records: migratedRecords };
 };
@@ -274,7 +272,7 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
           }
         }
 
-        const { records: migratedRecipes } = await migrateLegacySourceImages(loadedRecipes);
+        const { records: migratedRecipes } = migrateLegacySourceImages(loadedRecipes);
         const shouldSeedStarterRecipes =
           status !== "corrupt" && migratedRecipes.length === 0 && storedSeeded !== "true";
         const hydratedRecipes = shouldSeedStarterRecipes
@@ -509,7 +507,7 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
       id: recordId,
       sharedAt: existingRecord?.sharedAt,
       sharedRecipeId: existingRecord?.sharedRecipeId,
-      sourceImages: await persistRecipeSourceImages(recordId, createdRecord.sourceImages),
+      sourceImages: persistRecipeSourceImages(recordId, createdRecord.sourceImages),
       timesCooked: existingRecord?.timesCooked ?? createdRecord.timesCooked
     };
 

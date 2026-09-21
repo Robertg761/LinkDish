@@ -1,6 +1,6 @@
+import { extractorApiEnv } from "../../../config/env.js";
 import { isSourceUrlRejection, validatePublicSourceUrl } from "../source-url-safety.js";
 
-import { extractorApiEnv } from "../../../config/env.js";
 
 import {
   browserLikeHeaders,

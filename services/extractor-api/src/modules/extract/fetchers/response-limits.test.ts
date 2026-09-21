@@ -44,6 +44,15 @@ const createStreamingResponse = ({
   });
 };
 
+
+const requestUrlOf = (input: RequestInfo | URL): string => {
+  if (typeof input === "string") {
+    return input;
+  }
+
+  return input instanceof URL ? input.href : input.url;
+};
+
 describe("readLimitedResponseText", () => {
   it("aborts a streamed body once it passes the byte cap", async () => {
     const response = createStreamingResponse({ totalBytes: 256 * 1024 });
@@ -209,21 +218,23 @@ describe("fetchYouTubeDocument safety", () => {
 
   it("refuses to fetch a caption track that fails source URL validation", async () => {
     const captionUrl = "http://169.254.169.254/latest/meta-data";
-    const fetchImplementation = vi.fn(async (input: RequestInfo | URL) => {
-      const requestUrl = String(input);
+    const fetchImplementation = vi.fn((input: RequestInfo | URL) => {
+      const requestUrl = requestUrlOf(input);
 
       if (requestUrl.includes("oembed")) {
-        return oEmbedResponse();
+        return Promise.resolve(oEmbedResponse());
       }
 
       if (requestUrl.includes("watch")) {
-        return watchPage(captionUrl);
+        return Promise.resolve(watchPage(captionUrl));
       }
 
-      return new Response("<transcript><text>secret</text></transcript>", {
-        status: 200,
-        headers: { "content-type": "text/xml" }
-      });
+      return Promise.resolve(
+        new Response("<transcript><text>secret</text></transcript>", {
+          status: 200,
+          headers: { "content-type": "text/xml" }
+        })
+      );
     }) as unknown as typeof fetch;
 
     const document = await fetchYouTubeDocument(
@@ -244,20 +255,20 @@ describe("fetchYouTubeDocument safety", () => {
     expect(document.transcript).toBeNull();
     expect(
       (fetchImplementation as unknown as ReturnType<typeof vi.fn>).mock.calls.some((call) =>
-        String(call[0]).includes("169.254.169.254")
+        requestUrlOf(call[0] as RequestInfo | URL).includes("169.254.169.254")
       )
     ).toBe(false);
   });
 
   it("rejects an oversized watch page instead of buffering it", async () => {
-    const fetchImplementation = vi.fn(async (input: RequestInfo | URL) => {
-      const requestUrl = String(input);
+    const fetchImplementation = vi.fn((input: RequestInfo | URL) => {
+      const requestUrl = requestUrlOf(input);
 
       if (requestUrl.includes("oembed")) {
-        return oEmbedResponse();
+        return Promise.resolve(oEmbedResponse());
       }
 
-      return createStreamingResponse({ totalBytes: 256 * 1024 });
+      return Promise.resolve(createStreamingResponse({ totalBytes: 256 * 1024 }));
     }) as unknown as typeof fetch;
 
     await expect(
