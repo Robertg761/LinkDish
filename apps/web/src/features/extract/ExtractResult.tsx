@@ -6,6 +6,7 @@ import { Button } from "../../components/Button";
 import { Icon } from "../../components/Icon";
 import { RecipeImageWithFallback } from "../../components/RecipeImageWithFallback";
 import { requestSaveFeedback } from "../../lib/delight-events";
+import { safeSetItem } from "../../platform/safe-storage";
 import { buildRecipeImageUrl, getRecipeImageOrNull } from "../../lib/recipe-image";
 import { saveRecipe, forceSaveRecipe, syncRecipeToHousehold } from "../library/saved-recipe-store";
 import { CookMode } from "../recipes/CookMode";
@@ -34,7 +35,13 @@ interface ExtractResultProps {
   onReset: () => void;
 }
 
-const prefersReducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+const prefersReducedMotion = () => {
+  try {
+    return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+  } catch {
+    return false;
+  }
+};
 
 const parseSafeSourceUrl = (value: string): URL | null => {
   try {
@@ -120,9 +127,17 @@ export const ExtractResult: React.FC<ExtractResultProps> = ({
         }
 
         setSaveStatus("saved");
-        playSaveFeedback();
-        // Trigger local PWA install flag
-        localStorage.setItem("linkdish:web:has-extracted-recipe", "true");
+
+        // The recipe is already saved at this point, so nothing below may
+        // throw its way into the catch and report a success as a failure.
+        try {
+          playSaveFeedback();
+        } catch (feedbackError) {
+          console.warn("Save feedback failed:", feedbackError);
+        }
+
+        // Trigger local PWA install flag (best effort; storage may be blocked).
+        safeSetItem("linkdish:web:has-extracted-recipe", "true");
       } else {
         if (res.error === "limit_exceeded") {
           setSaveStatus("error");
@@ -137,7 +152,7 @@ export const ExtractResult: React.FC<ExtractResultProps> = ({
     } catch (err) {
       console.error("Save error:", err);
       setSaveStatus("error");
-      setErrorMessage("Could not save recipe to IndexedDB.");
+      setErrorMessage("We could not save this recipe on this device. Please try again.");
     }
   };
 
@@ -175,11 +190,16 @@ export const ExtractResult: React.FC<ExtractResultProps> = ({
       }
 
       setSaveStatus("saved");
-      playSaveFeedback();
+
+      try {
+        playSaveFeedback();
+      } catch (feedbackError) {
+        console.warn("Save feedback failed:", feedbackError);
+      }
     } catch (err) {
       console.error("Force save error:", err);
       setSaveStatus("error");
-      setErrorMessage("Could not overwrite the recipe.");
+      setErrorMessage("We could not replace the saved recipe. Please try again.");
     }
   };
 
@@ -373,7 +393,7 @@ export const ExtractResult: React.FC<ExtractResultProps> = ({
 
         {extraction.warnings.length > 0 && (
           <section className="recipe-section recipe-warnings-section">
-            <h4 className="warnings-title">Extraction Notes</h4>
+            <h2 className="warnings-title">Extraction Notes</h2>
             <ul className="warnings-list">
               {extraction.warnings.map((warn, idx) => (
                 <li key={idx} className="warning-item">

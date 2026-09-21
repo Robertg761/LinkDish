@@ -184,7 +184,7 @@ export const AccountPage: React.FC = () => {
     e.preventDefault();
     setDeleteError("");
 
-    if (deleteConfirmEmail.trim() !== user?.email) {
+    if (deleteConfirmEmail.trim().toLowerCase() !== (user?.email ?? "").toLowerCase()) {
       setDeleteError("Email address does not match your current account email.");
       return;
     }
@@ -248,6 +248,7 @@ export const AccountPage: React.FC = () => {
 
             <div className="profile-form">
               <Field
+                aria-label="Display name"
                 placeholder="Display name"
                 value={displayName}
                 onChange={(e) => {
@@ -375,6 +376,7 @@ export const AccountPage: React.FC = () => {
 
               <form onSubmit={handleDeleteAccountSubmit} className="delete-form">
                 <Field
+                  aria-label="Confirm your email"
                   placeholder="Confirm your email"
                   value={deleteConfirmEmail}
                   onChange={(e) => setDeleteConfirmEmail(e.target.value)}
@@ -425,6 +427,7 @@ export const AccountPage: React.FC = () => {
               (loginState === "idle" || loginState === "sending_code" ? (
                 <form onSubmit={handleRequestCode} className="login-form">
                   <Field
+                    aria-label="Email address"
                     placeholder="Email address"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
@@ -442,6 +445,7 @@ export const AccountPage: React.FC = () => {
                     We sent a 6-digit verification code to <strong>{email}</strong>.
                   </p>
                   <Field
+                    aria-label="6-digit verification code"
                     placeholder="6-digit code"
                     value={code}
                     onChange={(e) => setCode(e.target.value)}

@@ -10,6 +10,7 @@ import { createPortal } from "react-dom";
 import { trackWebEvent } from "../../analytics/client";
 import { ConfirmationDialog } from "../../components/ConfirmationDialog";
 import { Icon } from "../../components/Icon";
+import { useModalFocusTrap } from "../../components/use-modal-focus-trap";
 import {
   COOK_MODE_DONE_LABEL,
   COOK_MODE_FINALE_TITLE,
@@ -291,6 +292,7 @@ export const CookMode: React.FC<CookModeProps> = ({
   const [timers, setTimers] = useState<ActiveCookTimer[]>([]);
   const [now, setNow] = useState(() => Date.now());
   const [leaveConfirmationVisible, setLeaveConfirmationVisible] = useState(false);
+  const cookModeDialogRef = useRef<HTMLDivElement>(null);
   const stepTouchStartRef = useRef<{ x: number; y: number } | null>(null);
   const stepTapGestureRef = useRef<{ hasMoved: boolean; x: number; y: number } | null>(null);
   const suppressStepClickUntilRef = useRef(0);
@@ -511,12 +513,17 @@ export const CookMode: React.FC<CookModeProps> = ({
       clearTransitionTimers();
       isStepTransitionAnimatingRef.current = false;
       setTransitionPhase("idle");
+      // Drop any running timers so reopening never shows stale chips and the
+      // one-second tick interval stops while the modal is closed.
+      setTimers((currentTimers) => (currentTimers.length === 0 ? currentTimers : []));
       return;
     }
 
     setCurrentStepIndex(0);
     setIsFinaleVisible(false);
     setIsIngredientsExpanded(false);
+    setTimers([]);
+    setNow(Date.now());
     setCheckedIngredientKeys(new Set());
     setKeepAwake(true);
     setTransitionDirection(1);
@@ -563,14 +570,16 @@ export const CookMode: React.FC<CookModeProps> = ({
   }, [leaveConfirmationVisible, visible]);
 
   useEffect(() => {
-    if (!timers.some((timer) => timer.endsAt > Date.now())) {
+    if (!visible || !timers.some((timer) => timer.endsAt > Date.now())) {
       return;
     }
 
     const intervalId = window.setInterval(() => setNow(Date.now()), 1000);
 
     return () => window.clearInterval(intervalId);
-  }, [timers]);
+  }, [timers, visible]);
+
+  useModalFocusTrap({ active: visible, containerRef: cookModeDialogRef });
 
   const requestNotificationPermissionOnce = useCallback(() => {
     if (
@@ -867,7 +876,9 @@ export const CookMode: React.FC<CookModeProps> = ({
       aria-label={`Cooking mode for ${recipe.title}`}
       aria-modal="true"
       className="cook-mode-screen"
+      ref={cookModeDialogRef}
       role="dialog"
+      tabIndex={-1}
     >
       <div className="cook-mode-header">
         <div className="cook-mode-title-wrap">

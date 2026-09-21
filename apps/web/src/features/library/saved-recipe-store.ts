@@ -1,6 +1,7 @@
 import { createStarterRecipeSeedRecords } from "@linkdish/recipe-domain";
 
 import { apiClient } from "../../api/client";
+import { safeGetItem, safeSetItem } from "../../platform/safe-storage";
 import { getLinkDishWebDb, SAVED_RECIPES_STORE_NAME } from "../../storage/linkdish-db";
 
 import type { WebSavedRecipe } from "./saved-recipe-types";
@@ -43,7 +44,8 @@ export async function getSavedRecipes(): Promise<WebSavedRecipe[]> {
   return recipes.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
 }
 
-const getSourceHost = (sourceUrl: string): string => {
+/** Hostname for a recipe source, or "unknown" when the URL cannot be parsed. */
+export const getSourceHost = (sourceUrl: string): string => {
   try {
     return new URL(sourceUrl).hostname.replace(/^www\./i, "");
   } catch {
@@ -52,20 +54,19 @@ const getSourceHost = (sourceUrl: string): string => {
 };
 
 export async function seedStarterRecipesIfNeeded(): Promise<void> {
-  if (typeof localStorage === "undefined") {
+  if (typeof window === "undefined") {
     return;
   }
 
-  const hasSeededStarterRecipes =
-    localStorage.getItem(STARTER_RECIPES_SEEDED_STORAGE_KEY) === "true";
+  const hasSeededStarterRecipes = safeGetItem(STARTER_RECIPES_SEEDED_STORAGE_KEY) === "true";
   if (hasSeededStarterRecipes) {
     return;
   }
 
   const existingRecipes = await getSavedRecipes();
-  localStorage.setItem(STARTER_RECIPES_SEEDED_STORAGE_KEY, "true");
 
   if (existingRecipes.length > 0) {
+    safeSetItem(STARTER_RECIPES_SEEDED_STORAGE_KEY, "true");
     return;
   }
 
@@ -97,6 +98,10 @@ export async function seedStarterRecipesIfNeeded(): Promise<void> {
 
     await store.put(savedRecipe);
   }
+
+  // Only mark the library as seeded once every starter recipe is written, so a
+  // failure part-way through can be retried on the next launch.
+  safeSetItem(STARTER_RECIPES_SEEDED_STORAGE_KEY, "true");
 }
 
 export async function getSavedRecipeById(id: string): Promise<WebSavedRecipe | undefined> {
@@ -285,11 +290,7 @@ export function sharedRecipeToWebSavedRecipe(sharedRecipe: SharedRecipe): WebSav
 }
 
 export function getSharedRecipeSourceHost(sharedRecipe: SharedRecipe): string {
-  try {
-    return new URL(sharedRecipe.recipe.sourceUrl).hostname.replace(/^www\./i, "");
-  } catch {
-    return "unknown";
-  }
+  return getSourceHost(sharedRecipe.recipe.sourceUrl);
 }
 
 export function getSharedRecipeOwnerLabel(

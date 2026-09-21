@@ -424,4 +424,71 @@ describe("CookMode", () => {
     expect(screen.getByText("Salt to taste")).toBeInTheDocument();
     expect(screen.getByText("Some ingredients can’t be scaled automatically.")).toBeInTheDocument();
   });
+
+  it("moves focus into the cook mode dialog, traps Tab, and restores focus on close", () => {
+    render(<CookMode recipe={recipe} />);
+
+    const trigger = screen.getByRole("button", { name: /cook mode/i });
+    trigger.focus();
+    fireEvent.click(trigger);
+
+    const dialog = screen.getByRole("dialog", { name: "Cooking mode for Pancakes" });
+    expect(dialog.contains(document.activeElement)).toBe(true);
+
+    const focusable = Array.from(
+      dialog.querySelectorAll<HTMLElement>(
+        "a[href], button:not(:disabled), input:not(:disabled), [tabindex]:not([tabindex='-1'])"
+      )
+    );
+    const firstElement = focusable[0];
+    const lastElement = focusable[focusable.length - 1];
+    expect(firstElement).toBeDefined();
+
+    lastElement?.focus();
+    fireEvent.keyDown(window, { key: "Tab" });
+    expect(document.activeElement).toBe(firstElement);
+
+    firstElement?.focus();
+    fireEvent.keyDown(window, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(lastElement);
+
+    fireEvent.click(screen.getByRole("button", { name: "Close cooking mode" }));
+
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it("clears running timers and the tick interval when cook mode closes", () => {
+    const setIntervalSpy = vi.spyOn(window, "setInterval");
+    const clearIntervalSpy = vi.spyOn(window, "clearInterval");
+
+    render(
+      <CookMode
+        recipe={{
+          ...recipe,
+          steps: [{ index: 1, text: "Rest the batter for 1 minute." }]
+        }}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /cook mode/i }));
+    fireEvent.click(screen.getByRole("button", { name: /1 minute/i }));
+
+    expect(screen.getByText("Step 1 · 1 minute")).toBeInTheDocument();
+    const intervalId = setIntervalSpy.mock.results.at(-1)?.value as number | undefined;
+    expect(intervalId).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Close cooking mode" }));
+    const confirmation = screen.getByRole("dialog", { name: "Timers are still running" });
+    fireEvent.click(within(confirmation).getByRole("button", { name: "Leave" }));
+
+    expect(clearIntervalSpy).toHaveBeenCalledWith(intervalId);
+
+    fireEvent.click(screen.getByRole("button", { name: /cook mode/i }));
+
+    expect(screen.queryByText("Step 1 · 1 minute")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Active timers")).not.toBeInTheDocument();
+
+    setIntervalSpy.mockRestore();
+    clearIntervalSpy.mockRestore();
+  });
 });

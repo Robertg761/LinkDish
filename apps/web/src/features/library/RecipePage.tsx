@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useId, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useParams, useNavigate } from "react-router-dom";
 
@@ -12,6 +12,7 @@ import { ConfirmationDialog } from "../../components/ConfirmationDialog";
 import { ErrorState } from "../../components/ErrorState";
 import { Icon } from "../../components/Icon";
 import { RecipeImageWithFallback } from "../../components/RecipeImageWithFallback";
+import { useModalFocusTrap } from "../../components/use-modal-focus-trap";
 import { buildRecipeImageUrl, getRecipeImageOrNull } from "../../lib/recipe-image";
 import { createShareCardBlob } from "../../lib/share-card";
 import {
@@ -32,6 +33,7 @@ import {
   duplicateSavedRecipe,
   getSharedRecipeOwnerLabel,
   getSavedRecipeById,
+  getSourceHost,
   incrementSavedRecipeTimesCooked,
   saveSharedRecipeCopy,
   sharedRecipeToWebSavedRecipe,
@@ -142,6 +144,11 @@ export const RecipePage: React.FC = () => {
     "delete" | "duplicate" | "sync" | "edit" | "shareCard" | null
   >(null);
   const [editorOpen, setEditorOpen] = useState(false);
+  const editorRef = useRef<HTMLDivElement>(null);
+  const editorTitleId = useId();
+  const closeEditor = React.useCallback(() => {
+    setEditorOpen(false);
+  }, []);
   const [editorError, setEditorError] = useState("");
   const [draftTitle, setDraftTitle] = useState("");
   const [draftServings, setDraftServings] = useState("");
@@ -191,6 +198,8 @@ export const RecipePage: React.FC = () => {
       setLoading(false);
     }
   };
+
+  useModalFocusTrap({ active: editorOpen, containerRef: editorRef, onEscape: closeEditor });
 
   useEffect(() => {
     setLoading(true);
@@ -478,7 +487,8 @@ export const RecipePage: React.FC = () => {
   })();
 
   const sortedSteps = [...recipe.recipe.steps].sort((a, b) => a.index - b.index);
-  const sourceHost = recipe.sourceHost || new URL(recipe.sourceUrl).hostname.replace(/^www\./i, "");
+  // Legacy, imported and household-synced records can carry an unparseable URL.
+  const sourceHost = recipe.sourceHost || getSourceHost(recipe.sourceUrl);
   const headerImageUrl = buildRecipeImageUrl(getRecipeImageOrNull(recipe.recipe.image), 1200);
   const hasAlternateUnits = hasAlternateIngredientUnits(recipe.recipe.ingredients);
   const hasUnscalable = hasUnscalableIngredients(recipe.recipe.ingredients);
@@ -775,9 +785,17 @@ export const RecipePage: React.FC = () => {
       {editorOpen &&
         createPortal(
           <div className="recipe-editor-backdrop" role="presentation">
-            <Card className="recipe-editor-modal" variant="default">
+            <Card
+              aria-labelledby={editorTitleId}
+              aria-modal="true"
+              className="recipe-editor-modal"
+              ref={editorRef}
+              role="dialog"
+              tabIndex={-1}
+              variant="default"
+            >
               <div className="recipe-editor-header">
-                <h2>Edit Recipe</h2>
+                <h2 id={editorTitleId}>Edit Recipe</h2>
                 <button
                   aria-label="Close editor"
                   className="recipe-editor-close"

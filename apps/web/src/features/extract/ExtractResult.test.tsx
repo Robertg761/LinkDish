@@ -1,8 +1,8 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import React from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { saveRecipe } from "../library/saved-recipe-store";
+import { saveRecipe, syncRecipeToHousehold } from "../library/saved-recipe-store";
 
 import { ExtractResult } from "./ExtractResult";
 
@@ -78,7 +78,17 @@ describe("ExtractResult", () => {
       id: "user_1"
     };
     vi.mocked(saveRecipe).mockReset();
+    vi.mocked(syncRecipeToHousehold).mockReset();
     upgradeMocks.requestUpgradeSheet.mockReset();
+    localStorage.clear();
+  });
+
+  const activeSpies: Array<{ mockRestore: () => void }> = [];
+
+  afterEach(() => {
+    activeSpies.splice(0).forEach((spy) => {
+      spy.mockRestore();
+    });
   });
 
   it("renders recipe details as a quiet meta line", () => {
@@ -160,5 +170,73 @@ describe("ExtractResult", () => {
     await waitFor(() => {
       expect(upgradeMocks.requestUpgradeSheet).toHaveBeenCalledWith("save_limit");
     });
+  });
+
+  const savedRecipeFixture = {
+    createdAt: "2026-07-01T00:00:00.000Z",
+    extraction: {
+      fetchMode: "http" as const,
+      provenance: ["jsonld" as const],
+      strategy: "recipe-schema" as const,
+      warnings: []
+    },
+    id: "saved-1",
+    recipe,
+    sourceHost: "example.com",
+    sourceUrl: "https://example.com/rice",
+    sync: { status: "local_only" as const },
+    timesCooked: 0,
+    updatedAt: "2026-07-01T00:00:00.000Z"
+  };
+
+  const renderResult = (warnings: string[] = []) =>
+    render(
+      <ExtractResult
+        recipe={recipe}
+        sourceUrl="https://example.com/rice"
+        extraction={{
+          fetchMode: "http",
+          provenance: ["jsonld"],
+          strategy: "recipe-schema",
+          warnings
+        }}
+        onReset={vi.fn()}
+      />
+    );
+
+  it("reports a successful save even when localStorage refuses writes", async () => {
+    vi.mocked(saveRecipe).mockResolvedValue({ recipe: savedRecipeFixture, success: true });
+    vi.mocked(syncRecipeToHousehold).mockResolvedValue(savedRecipeFixture);
+    activeSpies.push(
+      vi.spyOn(window.localStorage, "setItem").mockImplementation(() => {
+        throw new DOMException("The quota has been exceeded.", "QuotaExceededError");
+      })
+    );
+
+    renderResult();
+
+    fireEvent.click(screen.getByRole("button", { name: /save recipe/i }));
+
+    expect(await screen.findByRole("button", { name: /saved in library/i })).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("uses plain language when a save fails", async () => {
+    vi.mocked(saveRecipe).mockRejectedValue(new Error("db closed"));
+    activeSpies.push(vi.spyOn(console, "error").mockImplementation(() => undefined));
+
+    renderResult();
+
+    fireEvent.click(screen.getByRole("button", { name: /save recipe/i }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent ?? "").not.toMatch(/indexeddb/i);
+    expect(alert).toHaveTextContent("We could not save this recipe on this device. Please try again.");
+  });
+
+  it("keeps the extraction notes heading at the same level as the other sections", () => {
+    renderResult(["Servings were estimated."]);
+
+    expect(screen.getByRole("heading", { level: 2, name: "Extraction Notes" })).toBeInTheDocument();
   });
 });

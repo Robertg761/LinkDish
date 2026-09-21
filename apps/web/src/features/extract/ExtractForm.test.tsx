@@ -151,4 +151,12 @@ describe("ExtractForm", () => {
 
     expect(cameraClick).toHaveBeenCalledTimes(1);
   });
+
+  it("gives the recipe URL input an accessible name", () => {
+    render(<ExtractForm onSubmit={vi.fn()} loading={false} />);
+
+    expect(screen.getByRole("textbox", { name: "Recipe URL" })).toBe(
+      screen.getByPlaceholderText("https://example.com/my-recipe")
+    );
+  });
 });

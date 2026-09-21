@@ -1,9 +1,10 @@
 import { AuthenticateWithRedirectCallback } from "@clerk/clerk-react";
 import React, { lazy, Suspense } from "react";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 
 import { RouteAnalytics } from "../analytics/RouteAnalytics";
 import { AppShell } from "../components/AppShell";
+import { ErrorBoundary } from "../components/ErrorBoundary";
 import { LoadingState } from "../components/LoadingState";
 import { LibraryPage } from "../features/library/LibraryPage";
 import { UpgradeSheetProvider } from "../features/upgrade/UpgradeSheet";
@@ -47,6 +48,37 @@ const SupportPage = lazy(() =>
   import("../components/SupportPage").then((module) => ({ default: module.SupportPage }))
 );
 
+const AppRoutes: React.FC = () => {
+  const location = useLocation();
+
+  return (
+    // Keyed by route so navigating away from a broken page clears the fallback.
+    <ErrorBoundary key={location.pathname}>
+      <Suspense fallback={<LoadingState message="Loading LinkDish..." />}>
+        <Routes>
+          <Route path="/" element={<LibraryPage />} />
+          <Route path="/featured/:slug" element={<FeaturedRecipePage />} />
+          <Route path="/import" element={<ExtractPage />} />
+          <Route path="/library" element={<Navigate to="/" replace />} />
+          <Route path="/recipes/shared/:sharedId" element={<RecipePage />} />
+          <Route path="/recipes/:id" element={<RecipePage />} />
+          <Route path="/account" element={<AccountPage />} />
+          <Route path="/household" element={<HouseholdPage />} />
+          <Route path="/shopping" element={<ShoppingListPage />} />
+          <Route path="/pricing" element={<PricingPage />} />
+          <Route path="/install" element={<InstallPage />} />
+          <Route path="/privacy" element={<PrivacyPage />} />
+          <Route path="/support" element={<SupportPage />} />
+          <Route path="/sso-callback" element={<AuthenticateWithRedirectCallback />} />
+
+          {/* Catch-all 404 handler redirecting to home */}
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </Suspense>
+    </ErrorBoundary>
+  );
+};
+
 export const App: React.FC = () => {
   return (
     <AppProviders>
@@ -54,27 +86,7 @@ export const App: React.FC = () => {
         <RouteAnalytics />
         <UpgradeSheetProvider>
           <AppShell>
-            <Suspense fallback={<LoadingState message="Loading LinkDish..." />}>
-              <Routes>
-                <Route path="/" element={<LibraryPage />} />
-                <Route path="/featured/:slug" element={<FeaturedRecipePage />} />
-                <Route path="/import" element={<ExtractPage />} />
-                <Route path="/library" element={<Navigate to="/" replace />} />
-                <Route path="/recipes/shared/:sharedId" element={<RecipePage />} />
-                <Route path="/recipes/:id" element={<RecipePage />} />
-                <Route path="/account" element={<AccountPage />} />
-                <Route path="/household" element={<HouseholdPage />} />
-                <Route path="/shopping" element={<ShoppingListPage />} />
-                <Route path="/pricing" element={<PricingPage />} />
-                <Route path="/install" element={<InstallPage />} />
-                <Route path="/privacy" element={<PrivacyPage />} />
-                <Route path="/support" element={<SupportPage />} />
-                <Route path="/sso-callback" element={<AuthenticateWithRedirectCallback />} />
-
-                {/* Catch-all 404 handler redirecting to home */}
-                <Route path="*" element={<Navigate to="/" replace />} />
-              </Routes>
-            </Suspense>
+            <AppRoutes />
           </AppShell>
         </UpgradeSheetProvider>
       </BrowserRouter>

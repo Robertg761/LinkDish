@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import React from "react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -14,6 +14,13 @@ const authMocks = vi.hoisted(() => ({
   logout: vi.fn(),
   refreshUser: vi.fn(),
   requestLoginCode: vi.fn(),
+  user: null as {
+    avatarEmoji?: string | null;
+    billingPlan?: string;
+    displayName?: string | null;
+    email: string;
+    id: string;
+  } | null,
   verifyLoginCode: vi.fn()
 }));
 
@@ -25,8 +32,8 @@ vi.mock("../../api/client", () => ({
 
 vi.mock("../../auth/AuthProvider", () => ({
   useAuth: () => ({
-    user: null,
-    isAuthenticated: false,
+    user: authMocks.user,
+    isAuthenticated: Boolean(authMocks.user),
     authMode: "clerk_beta",
     emailCodeEnabled: true,
     clerkEnabled: authMocks.clerkEnabled,
@@ -52,6 +59,7 @@ describe("AccountPage auth options", () => {
     authMocks.logout.mockReset();
     authMocks.refreshUser.mockReset();
     authMocks.requestLoginCode.mockReset();
+    authMocks.user = null;
     authMocks.verifyLoginCode.mockReset();
   });
 
@@ -122,5 +130,104 @@ describe("AccountPage auth options", () => {
     fireEvent.click(screen.getByRole("button", { name: /continue with google/i }));
 
     expect(authMocks.loginWithGoogle).toHaveBeenCalledWith("/pricing");
+  });
+
+  it("gives the sign-in fields accessible names", () => {
+    render(
+      <MemoryRouter>
+        <AccountPage />
+      </MemoryRouter>
+    );
+
+    expect(screen.getByRole("textbox", { name: /email address/i })).toBeInTheDocument();
+  });
+
+  it("gives the verification code input an accessible name", async () => {
+    authMocks.requestLoginCode.mockResolvedValue(undefined);
+
+    render(
+      <MemoryRouter>
+        <AccountPage />
+      </MemoryRouter>
+    );
+
+    fireEvent.change(screen.getByRole("textbox", { name: /email address/i }), {
+      target: { value: "cook@example.com" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: /email sign-in code/i }));
+
+    expect(
+      await screen.findByRole("textbox", { name: /6-digit verification code/i })
+    ).toBeInTheDocument();
+  });
+});
+
+describe("AccountPage account deletion", () => {
+  beforeEach(() => {
+    authMocks.clerkEnabled = true;
+    authMocks.clerkReady = true;
+    authMocks.deleteAccount.mockReset();
+    authMocks.deleteAccount.mockResolvedValue(undefined);
+    authMocks.hasClerkPublishableKey = true;
+    authMocks.refreshUser.mockReset();
+    authMocks.user = {
+      avatarEmoji: null,
+      billingPlan: "free",
+      displayName: "Cook",
+      email: "Cook@Example.com",
+      id: "user_1"
+    };
+  });
+
+  const openDeleteForm = () => {
+    render(
+      <MemoryRouter>
+        <AccountPage />
+      </MemoryRouter>
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /delete account/i }));
+  };
+
+  it("accepts the confirmation email in any casing", async () => {
+    openDeleteForm();
+
+    const confirmField = screen.getByRole("textbox", { name: /confirm your email/i });
+    fireEvent.change(confirmField, { target: { value: "cook@example.com" } });
+
+    const submitButton = screen.getByRole("button", { name: /delete account/i });
+    expect(submitButton).toBeEnabled();
+
+    fireEvent.click(submitButton);
+
+    await waitFor(() => {
+      expect(authMocks.deleteAccount).toHaveBeenCalledWith("cook@example.com");
+    });
+    expect(
+      screen.queryByText("Email address does not match your current account email.")
+    ).not.toBeInTheDocument();
+  });
+
+  it("still rejects a different email address", async () => {
+    openDeleteForm();
+
+    fireEvent.change(screen.getByRole("textbox", { name: /confirm your email/i }), {
+      target: { value: "someone@else.com" }
+    });
+
+    const form = screen.getByRole("textbox", { name: /confirm your email/i }).closest("form");
+    fireEvent.submit(form!);
+
+    expect(
+      await screen.findByText("Email address does not match your current account email.")
+    ).toBeInTheDocument();
+    expect(authMocks.deleteAccount).not.toHaveBeenCalled();
+  });
+
+  it("gives the profile and delete fields accessible names", () => {
+    openDeleteForm();
+
+    expect(screen.getByRole("textbox", { name: /display name/i })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: /confirm your email/i })).toBeInTheDocument();
   });
 });

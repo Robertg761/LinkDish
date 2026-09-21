@@ -1,3 +1,5 @@
+import { safeGetItem, safeSetItem } from "../../platform/safe-storage";
+
 import type { AccountUser } from "@linkdish/api-contracts";
 
 export type WebBillingTier = "free" | "plus" | "family";
@@ -69,7 +71,7 @@ export const getWebBillingTier = (user: AccountUser | null | undefined): WebBill
 
 export const readWebBillingUsage = (): WebBillingUsage => {
   try {
-    const rawUsage = localStorage.getItem(BILLING_USAGE_STORAGE_KEY);
+    const rawUsage = safeGetItem(BILLING_USAGE_STORAGE_KEY);
     if (!rawUsage) {
       return emptyUsage();
     }
@@ -88,7 +90,9 @@ export const readWebBillingUsage = (): WebBillingUsage => {
 };
 
 const writeWebBillingUsage = (usage: WebBillingUsage) => {
-  localStorage.setItem(BILLING_USAGE_STORAGE_KEY, JSON.stringify(usage));
+  // Usage tracking is best effort: a blocked storage area must never fail an
+  // import that already succeeded.
+  safeSetItem(BILLING_USAGE_STORAGE_KEY, JSON.stringify(usage));
 };
 
 const getLimitMessage = (plan: WebBillingPlan): BillingGateResult => ({

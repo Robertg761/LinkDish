@@ -198,6 +198,7 @@ export const ExtractForm: React.FC<ExtractFormProps> = ({ onSubmit, onImagesSubm
         }}
       />
       <Field
+        aria-label="Recipe URL"
         className={nudgeInput ? "extract-url-field-nudge" : ""}
         inputRef={urlInputRef}
         placeholder="https://example.com/my-recipe"

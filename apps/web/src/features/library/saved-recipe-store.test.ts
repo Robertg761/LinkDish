@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 
 import { resetLinkDishWebDbForTests } from "../../storage/linkdish-db";
 
@@ -10,11 +10,29 @@ import {
   generateDeterministicId,
   getDb,
   getSavedRecipeById,
+  getSourceHost,
   incrementSavedRecipeTimesCooked,
   seedStarterRecipesIfNeeded
 } from "./saved-recipe-store";
 
 import type { Recipe } from "@linkdish/recipe-domain";
+
+const starterSeedMocks = vi.hoisted(() => ({ fail: false }));
+
+vi.mock("@linkdish/recipe-domain", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@linkdish/recipe-domain")>();
+
+  return {
+    ...actual,
+    createStarterRecipeSeedRecords: () => {
+      if (starterSeedMocks.fail) {
+        throw new Error("starter seed unavailable");
+      }
+
+      return actual.createStarterRecipeSeedRecords();
+    }
+  };
+});
 
 const idbMocks = vi.hoisted(() => ({
   openDB: vi.fn(),
@@ -143,6 +161,15 @@ describe("saved-recipe-store", () => {
     mockStore.clear();
     resetLinkDishWebDbForTests();
     localStorage.clear();
+    starterSeedMocks.fail = false;
+  });
+
+  const activeSpies: Array<{ mockRestore: () => void }> = [];
+
+  afterEach(() => {
+    activeSpies.splice(0).forEach((spy) => {
+      spy.mockRestore();
+    });
   });
 
   it("opens v1 records under the v2 IndexedDB schema with missing images treated as null", async () => {
@@ -341,5 +368,36 @@ describe("saved-recipe-store", () => {
 
     expect(res.success).toBe(true);
     expect(await countSavedRecipes()).toBe(11);
+  });
+
+  it("does not mark starter recipes as seeded when seeding fails", async () => {
+    starterSeedMocks.fail = true;
+
+    await expect(seedStarterRecipesIfNeeded()).rejects.toThrow("starter seed unavailable");
+    expect(localStorage.getItem("linkdish:web:starter-recipes-seeded:v1")).toBeNull();
+    expect(await countSavedRecipes()).toBe(0);
+
+    starterSeedMocks.fail = false;
+    await seedStarterRecipesIfNeeded();
+
+    expect(await countSavedRecipes()).toBe(3);
+    expect(localStorage.getItem("linkdish:web:starter-recipes-seeded:v1")).toBe("true");
+  });
+
+  it("still seeds starter recipes when localStorage refuses writes", async () => {
+    activeSpies.push(
+      vi.spyOn(window.localStorage, "setItem").mockImplementation(() => {
+        throw new DOMException("The quota has been exceeded.", "QuotaExceededError");
+      })
+    );
+
+    await expect(seedStarterRecipesIfNeeded()).resolves.toBeUndefined();
+    expect(await countSavedRecipes()).toBe(3);
+  });
+
+  it("exposes a source host helper that tolerates malformed URLs", () => {
+    expect(getSourceHost("https://www.example.com/recipes/1")).toBe("example.com");
+    expect(getSourceHost("not a url")).toBe("unknown");
+    expect(getSourceHost("")).toBe("unknown");
   });
 });
