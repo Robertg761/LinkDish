@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   addShoppingItemsToList,
   parseShoppingItems,
+  readShoppingItems,
   recipeIngredientsToShoppingInputs,
   serializeShoppingItems,
   setShoppingItemCheckedInList,
@@ -165,5 +166,16 @@ describe("shopping store helpers", () => {
         text: "Pepper to taste"
       }
     ]);
+  });
+
+  it("reports corrupt shopping blobs instead of reading them as an empty list", () => {
+    const item = buildItem();
+
+    expect(readShoppingItems(null)).toEqual({ items: [], status: "empty" });
+    expect(readShoppingItems(serializeShoppingItems([item]))).toMatchObject({ status: "ok" });
+    expect(readShoppingItems("[]")).toEqual({ items: [], status: "ok" });
+    expect(readShoppingItems('[{"id":"a"')).toEqual({ items: [], status: "corrupt" });
+    expect(readShoppingItems('{"items":[]}')).toEqual({ items: [], status: "corrupt" });
+    expect(parseShoppingItems('[{"id":"a"')).toEqual([]);
   });
 });

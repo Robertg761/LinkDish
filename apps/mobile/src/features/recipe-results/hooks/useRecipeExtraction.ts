@@ -382,7 +382,13 @@ export const useRecipeExtraction = (
           const successState: SuccessfulExtractionState = {
             state: "success",
             recipe: response.recipe,
-            sourceImages: "images" in request ? request.images : undefined,
+            sourceImages:
+              "images" in request
+                ? request.images?.map((image) => ({
+                    mimeType: image.mimeType,
+                    uri: image.dataUrl
+                  }))
+                : undefined,
             strategy: response.extraction.strategy,
             warnings: response.extraction.warnings,
             fetchMode: response.extraction.fetchMode,

@@ -2,6 +2,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 
 import { extractorApiEnv } from "../../config/env.js";
 import { getAuthenticatedUser } from "../auth/auth-service.js";
+import { createBoundedExpiringMap } from "../bounded-expiring-map.js";
 import { getActiveHouseholdQuotaForUser } from "../households/household-service.js";
 import {
   getHeader,
@@ -63,8 +64,14 @@ interface QuotaUsageEntry {
   quotaLimit: number;
 }
 
-const inMemoryQuotaCounts = new Map<string, number>();
+const maxInMemoryQuotaEntries = 10_000;
+const inMemoryQuotaCounts = createBoundedExpiringMap<number>({
+  maxEntries: maxInMemoryQuotaEntries
+});
 const quotaAccountingVersion = "v4";
+
+/* Exposed for tests and diagnostics: the fallback store must stay bounded. */
+export const getInMemoryQuotaEntryCount = (): number => inMemoryQuotaCounts.size();
 
 const freePlan = (): QuotaPlan => ({
   id: "free",
@@ -256,9 +263,15 @@ const readWithUpstash = async (key: string): Promise<number> => {
   return Math.max(0, Math.floor(parsedValue));
 };
 
-const incrementInMemory = (key: string): number => {
-  const nextValue = (inMemoryQuotaCounts.get(key) ?? 0) + 1;
-  inMemoryQuotaCounts.set(key, nextValue);
+const incrementInMemory = (key: string, ttlSeconds?: number): number => {
+  const now = Date.now();
+  const nextValue = (inMemoryQuotaCounts.get(key, now) ?? 0) + 1;
+  inMemoryQuotaCounts.set(
+    key,
+    nextValue,
+    ttlSeconds === undefined ? null : now + ttlSeconds * 1_000,
+    now
+  );
   return nextValue;
 };
 
@@ -311,7 +324,7 @@ const incrementUsageKey = async (key: string, ttlSeconds?: number): Promise<numb
     return incrementWithUpstash(key, ttlSeconds);
   }
 
-  return incrementInMemory(key);
+  return incrementInMemory(key, ttlSeconds);
 };
 
 const readUsage = async (

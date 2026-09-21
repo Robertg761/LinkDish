@@ -52,7 +52,13 @@ export interface FetchResult {
   blockedSignals: string[];
 }
 
-export type InternalFetchFailureKind = "blocked" | "not_found" | "timeout" | "unreachable";
+export type InternalFetchFailureKind =
+  | "blocked"
+  | "not_found"
+  | "timeout"
+  | "too_large"
+  | "unreachable"
+  | "unsupported_content_type";
 
 export interface BrowserFetcher {
   fetch(url: string): Promise<FetchResult>;

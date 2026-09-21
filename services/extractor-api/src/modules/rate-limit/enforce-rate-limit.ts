@@ -1,4 +1,5 @@
 import { extractorApiEnv } from "../../config/env.js";
+import { createBoundedExpiringMap } from "../bounded-expiring-map.js";
 import {
   getRequestAddress,
   hashServerSideIdentity,
@@ -35,8 +36,14 @@ export class RateLimitUnavailableError extends Error {
   }
 }
 
-const inMemoryRateLimitCounts = new Map<string, InMemoryRateLimitEntry>();
+const maxInMemoryRateLimitEntries = 10_000;
+const inMemoryRateLimitCounts = createBoundedExpiringMap<InMemoryRateLimitEntry>({
+  maxEntries: maxInMemoryRateLimitEntries
+});
 const rateLimitVersion = "v1";
+
+/* Exposed for tests and diagnostics: the fallback store must stay bounded. */
+export const getInMemoryRateLimitEntryCount = (): number => inMemoryRateLimitCounts.size();
 
 export interface PublicEndpointRateLimitPolicy {
   max: number;
@@ -126,7 +133,7 @@ const checkRateLimitInMemory = (
   retryAfterSeconds: number;
 } => {
   const now = Date.now();
-  const existingEntry = inMemoryRateLimitCounts.get(key);
+  const existingEntry = inMemoryRateLimitCounts.get(key, now);
   const entry =
     existingEntry && existingEntry.resetAtMs > now
       ? existingEntry
@@ -136,7 +143,7 @@ const checkRateLimitInMemory = (
         };
 
   entry.count += 1;
-  inMemoryRateLimitCounts.set(key, entry);
+  inMemoryRateLimitCounts.set(key, entry, entry.resetAtMs, now);
 
   return {
     count: entry.count,

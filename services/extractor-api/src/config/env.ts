@@ -38,6 +38,7 @@ const parsedExtractorApiEnv = readEnv(
     RATE_LIMIT_MAX: z.coerce.number().int().positive().default(60),
     FETCH_HTTP_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
     FETCH_HTTP_RETRIES: z.coerce.number().int().min(0).default(2),
+    FETCH_MAX_RESPONSE_BYTES: z.coerce.number().int().positive().default(5 * 1024 * 1024),
     BROWSER_FETCH_ENABLED: z
       .union([trimmedBooleanString, z.boolean()])
       .default("true")
@@ -142,6 +143,11 @@ const parsedExtractorApiEnv = readEnv(
       .transform((value) => value === true || value === "true"),
     ANALYTICS_DATABASE_URL: trimmedOptionalString().pipe(z.string().url().optional()),
     ANALYTICS_HASH_SECRET: trimmedOptionalString(),
+    ANALYTICS_DATABASE_CA_CERT: trimmedOptionalString(),
+    ANALYTICS_DATABASE_ALLOW_INSECURE_TLS: z
+      .union([trimmedBooleanString, z.boolean()])
+      .default("false")
+      .transform((value) => value === true || value === "true"),
     ANALYTICS_RETENTION_DAYS: z.coerce.number().int().positive().default(180),
     ANALYTICS_ROLLUP_RETENTION_DAYS: z.coerce.number().int().positive().default(1095),
     GOOGLE_PLAY_PACKAGE_NAME: trimmedString().default("com.linkdish.app"),

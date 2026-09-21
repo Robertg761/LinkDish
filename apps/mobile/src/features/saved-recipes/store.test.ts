@@ -9,6 +9,7 @@ import {
   incrementSavedRecipeTimesCooked,
   savedRecipeRecordToSharedRecipeRequest,
   parseSavedRecipeRecords,
+  readSavedRecipeRecords,
   removeSavedRecipeRecord,
   restoreSavedRecipeState,
   searchSavedRecipeRecords,
@@ -86,8 +87,8 @@ describe("saved recipe store helpers", () => {
       },
       sourceImages: [
         {
-          dataUrl: "data:image/jpeg;base64,abc123",
-          mimeType: "image/jpeg"
+          mimeType: "image/jpeg",
+          uri: "file:///documents/recipe-scans/scan-1.jpg"
         }
       ]
     });
@@ -98,6 +99,67 @@ describe("saved recipe store helpers", () => {
     expect(
       parseSavedRecipeRecords(serializeSavedRecipeRecords([savedRecipe]))[0]?.sourceImages
     ).toEqual(state.sourceImages);
+  });
+
+  it("never writes base64 scan payloads into the persisted cookbook blob", () => {
+    const state = buildSuccessState({
+      recipe: {
+        ...buildSuccessState().recipe,
+        sourceUrl: "https://linkdish.app/image-imports/test",
+        sourceType: "image"
+      },
+      sourceImages: [
+        {
+          mimeType: "image/jpeg",
+          uri: "data:image/jpeg;base64,abc123"
+        }
+      ]
+    });
+    const savedRecipe = createSavedRecipeRecord(state, "2026-04-19T12:00:00.000Z");
+    const serialized = serializeSavedRecipeRecords([savedRecipe]);
+
+    expect(serialized).not.toContain("base64");
+    expect(serialized).not.toContain("abc123");
+    expect(parseSavedRecipeRecords(serialized)[0]?.sourceImages).toBeUndefined();
+    expect(parseSavedRecipeRecords(serialized)[0]?.recipe.title).toBe(savedRecipe.recipe.title);
+  });
+
+  it("reads legacy base64 scan photos so they can be migrated to files", () => {
+    const savedRecipe = createSavedRecipeRecord(buildSuccessState(), "2026-04-19T12:00:00.000Z");
+    const legacyBlob = JSON.stringify([
+      {
+        ...savedRecipe,
+        sourceImages: [
+          {
+            dataUrl: "data:image/png;base64,legacy123",
+            mimeType: "image/png"
+          }
+        ]
+      }
+    ]);
+
+    expect(parseSavedRecipeRecords(legacyBlob)[0]?.sourceImages).toEqual([
+      {
+        mimeType: "image/png",
+        uri: "data:image/png;base64,legacy123"
+      }
+    ]);
+  });
+
+  it("reports corrupt cookbook blobs instead of reading them as an empty cookbook", () => {
+    const savedRecipe = createSavedRecipeRecord(buildSuccessState(), "2026-04-19T12:00:00.000Z");
+
+    expect(readSavedRecipeRecords(null)).toEqual({ records: [], status: "empty" });
+    expect(readSavedRecipeRecords("")).toEqual({ records: [], status: "empty" });
+    expect(readSavedRecipeRecords(serializeSavedRecipeRecords([savedRecipe]))).toMatchObject({
+      status: "ok"
+    });
+    expect(readSavedRecipeRecords("[]")).toEqual({ records: [], status: "ok" });
+    expect(readSavedRecipeRecords('{"savedRecipes":')).toEqual({ records: [], status: "corrupt" });
+    expect(readSavedRecipeRecords('{"not":"an array"}')).toEqual({
+      records: [],
+      status: "corrupt"
+    });
   });
 
   it("moves an existing saved recipe to the front when saved again", () => {
@@ -306,8 +368,8 @@ describe("saved recipe store helpers", () => {
     const state = buildSuccessState({
       sourceImages: [
         {
-          dataUrl: "data:image/jpeg;base64,abc123",
-          mimeType: "image/jpeg"
+          mimeType: "image/jpeg",
+          uri: "file:///documents/recipe-scans/scan-1.jpg"
         }
       ]
     });

@@ -41,9 +41,57 @@ const analyticsMocks = vi.hoisted(() => ({
   trackMobileEvent: vi.fn()
 }));
 
+const fileSystemMocks = vi.hoisted(() => ({
+  writes: [] as Array<{ content: string; uri: string }>
+}));
+
 vi.mock("@react-native-async-storage/async-storage", () => ({
   default: asyncStorageMocks
 }));
+
+vi.mock("expo-file-system", () => {
+  class Directory {
+    public exists = false;
+
+    public uri: string;
+
+    public constructor(...parts: Array<{ uri: string } | string>) {
+      this.uri = parts
+        .map((part) => (typeof part === "string" ? part : part.uri).replace(/\/+$/u, ""))
+        .join("/");
+    }
+
+    public create() {
+      this.exists = true;
+    }
+  }
+
+  class File {
+    public uri: string;
+
+    public constructor(...parts: Array<{ uri: string } | string>) {
+      this.uri = parts
+        .map((part) => (typeof part === "string" ? part : part.uri).replace(/\/+$/u, ""))
+        .join("/");
+    }
+
+    public create() {
+      // no-op in tests
+    }
+
+    public write(content: string) {
+      fileSystemMocks.writes.push({ content, uri: this.uri });
+    }
+  }
+
+  return {
+    Directory,
+    File,
+    Paths: {
+      document: { uri: "file:///documents/" }
+    }
+  };
+});
 
 vi.mock("../../analytics/client", () => ({
   trackMobileEvent: analyticsMocks.trackMobileEvent
@@ -245,6 +293,7 @@ beforeEach(() => {
   asyncStorageMocks.removeItem.mockResolvedValue(undefined);
   asyncStorageMocks.setItem.mockResolvedValue(undefined);
   analyticsMocks.trackMobileEvent.mockReset();
+  fileSystemMocks.writes.splice(0);
 
   apiMocks.createExtractorApiClient.mockReturnValue(createMockClient());
   apiMocks.createSharedRecipe.mockResolvedValue({
@@ -458,5 +507,162 @@ describe("SavedRecipesProvider household save entitlement", () => {
     expect(fifteenthPersonalResult!).toMatchObject({ allowed: true, saved: true });
     expect(latestSavedRecipes?.savedRecipes.filter((recipe) => !recipe.isStarter)).toHaveLength(15);
     expect(latestSavedRecipes?.savedRecipes.filter((recipe) => recipe.isStarter)).toHaveLength(3);
+  });
+
+  it("keeps scan photos out of the cookbook storage blob", async () => {
+    await renderProvider();
+
+    let result: Awaited<ReturnType<NonNullable<typeof latestSavedRecipes>["saveRecipe"]>>;
+
+    await act(async () => {
+      result = await latestSavedRecipes!.saveRecipe({
+        ...buildSuccessState(42),
+        sourceImages: [{ mimeType: "image/jpeg", uri: "data:image/jpeg;base64,SCANBYTES" }]
+      });
+      await flushAsyncWork();
+    });
+
+    expect(result!).toMatchObject({ allowed: true, saved: true });
+    expect(fileSystemMocks.writes).toHaveLength(1);
+    expect(fileSystemMocks.writes[0]?.content).toBe("SCANBYTES");
+
+    const savedImage = latestSavedRecipes?.savedRecipes[0]?.sourceImages?.[0];
+    expect(savedImage?.uri.startsWith("file:///documents/")).toBe(true);
+
+    const cookbookWrites = asyncStorageMocks.setItem.mock.calls.filter(
+      ([key]) => key === "linkdish.savedRecipes"
+    );
+    expect(cookbookWrites.length).toBeGreaterThan(0);
+
+    for (const [, value] of cookbookWrites) {
+      expect(String(value)).not.toContain("SCANBYTES");
+      expect(String(value)).not.toContain("base64");
+    }
+  });
+
+  it("migrates legacy base64 scan photos onto the filesystem when loading", async () => {
+    const storedRecipe = buildSavedRecipes(1)[0]!;
+    asyncStorageMocks.getItem.mockImplementation((key: string) =>
+      Promise.resolve(
+        key === "linkdish.savedRecipes"
+          ? JSON.stringify([
+              {
+                ...storedRecipe,
+                sourceImages: [{ dataUrl: "data:image/png;base64,LEGACYBYTES", mimeType: "image/png" }]
+              }
+            ])
+          : key === "linkdish.starterRecipesSeeded.v1"
+            ? "true"
+            : null
+      )
+    );
+
+    await renderProvider();
+
+    expect(fileSystemMocks.writes).toHaveLength(1);
+    expect(fileSystemMocks.writes[0]?.content).toBe("LEGACYBYTES");
+    expect(latestSavedRecipes?.savedRecipes[0]?.sourceImages?.[0]?.uri.startsWith("file://")).toBe(
+      true
+    );
+
+    const cookbookWrites = asyncStorageMocks.setItem.mock.calls.filter(
+      ([key]) => key === "linkdish.savedRecipes"
+    );
+    expect(cookbookWrites.length).toBeGreaterThan(0);
+
+    for (const [, value] of cookbookWrites) {
+      expect(String(value)).not.toContain("LEGACYBYTES");
+    }
+  });
+
+  it("reports a failure instead of pretending a recipe was saved", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    await renderProvider();
+
+    asyncStorageMocks.setItem.mockImplementation((key: string) =>
+      key === "linkdish.savedRecipes"
+        ? Promise.reject(new Error("Row too big to fit into CursorWindow"))
+        : Promise.resolve(undefined)
+    );
+
+    let result: Awaited<ReturnType<NonNullable<typeof latestSavedRecipes>["saveRecipe"]>>;
+
+    await act(async () => {
+      result = await latestSavedRecipes!.saveRecipe(buildSuccessState(43));
+      await flushAsyncWork();
+    });
+
+    expect(result!).toMatchObject({ reason: "persist_failed", saved: false });
+    expect(result!.message).toBeTruthy();
+    expect(
+      latestSavedRecipes?.savedRecipes.some(
+        (recipe) => recipe.recipe.sourceUrl === buildSuccessState(43).recipe.sourceUrl
+      )
+    ).toBe(false);
+  });
+
+  it("does not overwrite a corrupt cookbook blob with an empty cookbook", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const corruptBlob = '[{"savedAt":"2026-04-19T12:00:00.000Z","recipe":{"title":"Soup"';
+    asyncStorageMocks.getItem.mockImplementation((key: string) =>
+      Promise.resolve(
+        key === "linkdish.savedRecipes"
+          ? corruptBlob
+          : key === "linkdish.starterRecipesSeeded.v1"
+            ? "true"
+            : null
+      )
+    );
+
+    await renderProvider();
+
+    expect(latestSavedRecipes?.hasLoadedSavedRecipes).toBe(true);
+    expect(latestSavedRecipes?.savedRecipes).toHaveLength(0);
+    expect(
+      asyncStorageMocks.setItem.mock.calls.some(([key]) => key === "linkdish.savedRecipes")
+    ).toBe(false);
+    expect(asyncStorageMocks.setItem).toHaveBeenCalledWith(
+      "linkdish.savedRecipes.corrupt.v1",
+      corruptBlob
+    );
+
+    await act(async () => {
+      await latestSavedRecipes!.saveRecipe(buildSuccessState(44));
+      await flushAsyncWork();
+    });
+
+    expect(
+      asyncStorageMocks.setItem.mock.calls.some(([key]) => key === "linkdish.savedRecipes")
+    ).toBe(true);
+  });
+
+  it("returns a typed reason when the free save limit is reached", async () => {
+    storeSavedRecipes(buildSavedRecipes(15));
+
+    await renderProvider();
+
+    let saveResult: Awaited<ReturnType<NonNullable<typeof latestSavedRecipes>["saveRecipe"]>>;
+    let cloneResult: ReturnType<NonNullable<typeof latestSavedRecipes>["cloneRecipe"]>;
+
+    await act(async () => {
+      saveResult = await latestSavedRecipes!.saveRecipe(buildSuccessState(60));
+      cloneResult = latestSavedRecipes!.cloneRecipe(latestSavedRecipes!.savedRecipes[0]!.id);
+      await flushAsyncWork();
+    });
+
+    expect(latestSavedRecipes?.getSaveLimitStatus()).toMatchObject({
+      allowed: false,
+      reason: "save_limit_reached"
+    });
+    expect(saveResult!).toMatchObject({
+      allowed: false,
+      reason: "save_limit_reached",
+      saved: false
+    });
+    expect(cloneResult!).toMatchObject({
+      allowed: false,
+      reason: "save_limit_reached",
+      saved: false
+    });
   });
 });

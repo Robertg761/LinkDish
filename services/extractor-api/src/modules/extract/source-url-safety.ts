@@ -3,6 +3,7 @@ import { isIP } from "node:net";
 
 export type SourceUrlRejectionReason =
   | "blocked_hostname"
+  | "blocked_port"
   | "dns_lookup_failed"
   | "private_address"
   | "unsupported_protocol";
@@ -33,6 +34,16 @@ export const isSourceUrlRejection = (
 ): result is SourceUrlSafetyRejection => result.safe === false;
 
 const blockedHostnames = new Set(["localhost", "localhost."]);
+
+/*
+ * Without a port restriction the fetcher doubles as a port scanner and can be
+ * pointed at non-HTTP services (ssh, smtp, redis, postgres, ...). Only the
+ * ports that actually serve HTTP on the public internet are allowed.
+ */
+const allowedPorts = new Set([80, 443, 591, 3000, 8000, 8008, 8080, 8081, 8443, 8888]);
+
+const isAllowedPort = (parsedUrl: URL): boolean =>
+  parsedUrl.port === "" || allowedPorts.has(Number.parseInt(parsedUrl.port, 10));
 
 const parseIpv4Address = (address: string): number[] | null => {
   const octets = address.split(".");
@@ -75,6 +86,7 @@ const isPrivateIpv4Address = (address: string): boolean => {
     (first === 169 && second === 254) ||
     (first === 172 && second >= 16 && second <= 31) ||
     (first === 192 && second === 0) ||
+    (first === 192 && second === 88 && third === 99) ||
     (first === 192 && second === 168) ||
     (first === 192 && second === 0 && third === 2) ||
     (first === 198 && (second === 18 || second === 19)) ||
@@ -166,12 +178,26 @@ export const validatePublicSourceUrl = async (
   }
 
   if (isIP(hostname)) {
-    return isPublicIpAddress(hostname)
+    if (!isPublicIpAddress(hostname)) {
+      return {
+        reason: "private_address",
+        safe: false
+      };
+    }
+
+    return isAllowedPort(parsedUrl)
       ? { safe: true }
       : {
-          reason: "private_address",
+          reason: "blocked_port",
           safe: false
         };
+  }
+
+  if (!isAllowedPort(parsedUrl)) {
+    return {
+      reason: "blocked_port",
+      safe: false
+    };
   }
 
   let resolvedAddresses: Array<{ address: string; family: number }>;

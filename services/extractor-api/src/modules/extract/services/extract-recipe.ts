@@ -189,6 +189,32 @@ const mapFetchErrorToResponse = (
       });
     }
 
+    if (error.reason === "too_large") {
+      return extractRecipeResponseSchema.parse({
+        status: "failure",
+        reason: "source_unreachable",
+        userMessage: "That page is too large for LinkDish to read.",
+        recovery: {
+          retryable: false,
+          allowFallback: false,
+          suggestedAction: "try_another_url"
+        }
+      });
+    }
+
+    if (error.reason === "unsupported_content_type") {
+      return extractRecipeResponseSchema.parse({
+        status: "failure",
+        reason: "unsupported_source",
+        userMessage: "That link does not point to a web page LinkDish can read.",
+        recovery: {
+          retryable: false,
+          allowFallback: false,
+          suggestedAction: "try_another_url"
+        }
+      });
+    }
+
     if (error.reason === "not_found") {
       return extractRecipeResponseSchema.parse({
         status: "failure",

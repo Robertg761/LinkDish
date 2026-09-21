@@ -53,6 +53,7 @@ import { EXTRACTION_ERROR_LINES, selectFlavorCopyLine } from "../src/theme/flavo
 import { pressedOpacity, pressedScale } from "../src/theme/interactions";
 import { appColors } from "../src/theme/tokens";
 
+import type { RecipeSourceImage } from "../src/features/recipe-results/types";
 import type { Recipe } from "@linkdish/recipe-domain";
 
 export const EXTRACTION_LOADING_COPY = [
@@ -735,7 +736,7 @@ export default function RecipeScreen() {
                   onPress={() => setIsSourceImageViewerVisible(true)}
                   style={({ pressed }) => [styles.sourceThumbnailButton, pressed && styles.pressed]}
                 >
-                  <Image source={{ uri: image.dataUrl }} style={styles.sourceThumbnail} />
+                  <Image source={{ uri: image.uri }} style={styles.sourceThumbnail} />
                 </Pressable>
               ))}
             </ScrollView>
@@ -1161,7 +1162,7 @@ function SourceImageViewer({
   onClose,
   visible
 }: {
-  images: { dataUrl: string; mimeType: string }[];
+  images: RecipeSourceImage[];
   onClose: () => void;
   visible: boolean;
 }) {
@@ -1186,7 +1187,7 @@ function SourceImageViewer({
             <View key={`${image.mimeType}-${index}`} style={styles.sourceViewerImageFrame}>
               <Image
                 resizeMode="contain"
-                source={{ uri: image.dataUrl }}
+                source={{ uri: image.uri }}
                 style={styles.sourceViewerImage}
               />
               <AppText muted style={styles.sourceViewerCaption}>

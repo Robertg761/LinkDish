@@ -97,17 +97,61 @@ let schemaReady = false;
 const enabled = (): boolean => extractorApiEnv.ANALYTICS_ENABLED;
 const configured = (): boolean => Boolean(extractorApiEnv.ANALYTICS_DATABASE_URL);
 
+const localDatabaseHostnames = new Set(["localhost", "localhost.", "127.0.0.1", "::1", "[::1]"]);
+
+const isLocalDatabaseUrl = (databaseUrl: string): boolean => {
+  try {
+    const hostname = new URL(databaseUrl).hostname.toLowerCase();
+    return localDatabaseHostnames.has(hostname) || hostname.endsWith(".localhost");
+  } catch {
+    return false;
+  }
+};
+
+/*
+ * The analytics link carries hashed user ids, source hostnames and correlation
+ * ids, so remote connections verify the server certificate. Disabling
+ * verification now requires an explicit opt-in env var rather than being the
+ * default for every non-localhost URL.
+ */
+export const buildAnalyticsPoolSslConfig = ():
+  | undefined
+  | { ca?: string; rejectUnauthorized: boolean } => {
+  const databaseUrl = extractorApiEnv.ANALYTICS_DATABASE_URL;
+
+  if (!databaseUrl || isLocalDatabaseUrl(databaseUrl)) {
+    return undefined;
+  }
+
+  if (extractorApiEnv.ANALYTICS_DATABASE_ALLOW_INSECURE_TLS) {
+    console.warn(
+      "ANALYTICS_DATABASE_ALLOW_INSECURE_TLS is enabled: analytics database certificates are not verified."
+    );
+
+    return {
+      rejectUnauthorized: false
+    };
+  }
+
+  return {
+    ...(extractorApiEnv.ANALYTICS_DATABASE_CA_CERT
+      ? { ca: extractorApiEnv.ANALYTICS_DATABASE_CA_CERT }
+      : {}),
+    rejectUnauthorized: true
+  };
+};
+
 const getPool = (): Pool => {
   if (!extractorApiEnv.ANALYTICS_DATABASE_URL) {
     throw new Error("ANALYTICS_DATABASE_URL is not configured.");
   }
 
+  const ssl = buildAnalyticsPoolSslConfig();
+
   pool ??= new Pool({
     connectionString: extractorApiEnv.ANALYTICS_DATABASE_URL,
     max: 4,
-    ssl: extractorApiEnv.ANALYTICS_DATABASE_URL.includes("localhost")
-      ? undefined
-      : { rejectUnauthorized: false }
+    ...(ssl ? { ssl } : {})
   });
 
   return pool;

@@ -1,3 +1,4 @@
+import { extractorApiEnv } from "../../../config/env.js";
 import { isSourceUrlRejection, validatePublicSourceUrl } from "../source-url-safety.js";
 
 import {
@@ -171,7 +172,8 @@ class AvailableBrowserFetcher implements BrowserFetcher {
   public constructor(
     private readonly timeoutMs: number,
     private readonly concurrency: number,
-    private readonly validateUrl: ValidateSourceUrl
+    private readonly validateUrl: ValidateSourceUrl,
+    private readonly maxBytes: number
   ) {}
 
   private async getBrowser(): Promise<BrowserHandle> {
@@ -252,6 +254,19 @@ class AvailableBrowserFetcher implements BrowserFetcher {
       await assertSafeBrowserUrl(finalUrl, this.validateUrl);
       const html = await activePage.content();
       const statusCode = response?.status() ?? 200;
+      const htmlBytes = Buffer.byteLength(html, "utf8");
+
+      if (htmlBytes > this.maxBytes) {
+        /* Bail before cheerio/jsdom re-parse the document several times. */
+        throw new BrowserFetchError(
+          `Browser fetch returned ${htmlBytes} bytes, above the ${this.maxBytes} byte limit.`,
+          "too_large",
+          ["response_too_large"],
+          statusCode,
+          finalUrl
+        );
+      }
+
       const blockedSignals = detectBlockedSignals({
         html,
         statusCode
@@ -349,12 +364,14 @@ export const createBrowserFetcher = (options: {
   enabled: boolean;
   timeoutMs: number;
   concurrency: number;
+  maxBytes?: number;
   validateUrl?: ValidateSourceUrl;
 }): BrowserFetcher =>
   options.enabled
     ? new AvailableBrowserFetcher(
         options.timeoutMs,
         options.concurrency,
-        options.validateUrl ?? validatePublicSourceUrl
+        options.validateUrl ?? validatePublicSourceUrl,
+        options.maxBytes ?? extractorApiEnv.FETCH_MAX_RESPONSE_BYTES
       )
     : new UnavailableBrowserFetcher();

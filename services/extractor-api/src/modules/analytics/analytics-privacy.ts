@@ -79,3 +79,20 @@ export const hashAnalyticsUserId = (userId: string): string =>
     .update("\0")
     .update(userId)
     .digest("hex");
+
+const uuidPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
+
+/*
+ * The x-linkdish-client-id header is unvalidated client input that ends up in a
+ * Postgres `uuid` column. A non-UUID value made the insert throw and took the
+ * whole 25-event batch down with it, so anything that is not a UUID is dropped
+ * here instead.
+ */
+export const normalizeAnalyticsClientId = (
+  value: string | null | undefined
+): string | undefined => {
+  const normalizedValue = value?.trim().toLowerCase();
+
+  return normalizedValue && uuidPattern.test(normalizedValue) ? normalizedValue : undefined;
+};
