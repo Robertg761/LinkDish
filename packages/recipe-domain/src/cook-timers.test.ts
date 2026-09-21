@@ -214,3 +214,33 @@ describe("parseStepDurations", () => {
     expect(durationCorpus).toHaveLength(66);
   });
 });
+
+describe("duration bounds (bug 6)", () => {
+  it("clamps absurdly long durations to a 24 hour ceiling", () => {
+    expect(parseStepDurations("Bake for 999999999 hours")).toEqual([
+      { label: "999999999 hours", minSeconds: 24 * hour, maxSeconds: 24 * hour }
+    ]);
+    expect(parseStepDurations("Rest for 30-9999 hours")).toEqual([
+      { label: "30-9999 hours", minSeconds: 24 * hour, maxSeconds: 24 * hour }
+    ]);
+  });
+
+  it("keeps every clamped duration inside the int32 setTimeout range", () => {
+    for (const duration of parseStepDurations("Bake for 999999999 hours")) {
+      expect(duration.maxSeconds * 1000).toBeLessThanOrEqual(2 ** 31 - 1);
+    }
+  });
+
+  it("drops zero-length durations", () => {
+    expect(parseStepDurations("Rest 0 minutes")).toEqual([]);
+    expect(parseStepDurations("Bake 0 hours, then rest 5 minutes")).toEqual([
+      { label: "5 minutes", minSeconds: 5 * minute, maxSeconds: 5 * minute }
+    ]);
+  });
+
+  it("reads the same vulgar fractions the ingredient parser reads", () => {
+    expect(parseStepDurations("Chill ⅙ hour")).toEqual([
+      { label: "⅙ hour", minSeconds: 10 * minute, maxSeconds: 10 * minute }
+    ]);
+  });
+});
