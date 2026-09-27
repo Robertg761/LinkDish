@@ -1,90 +1,41 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 
 import { Button } from "../../components/Button";
 import { Card } from "../../components/Card";
 import { Icon } from "../../components/Icon";
-import { isStandaloneMode } from "../../platform/detect-installation";
-import { isIos } from "../../platform/detect-ios";
+import { useInstallPrompt } from "../../platform/install-prompt";
 import { safeGetItem, safeSetItem } from "../../platform/safe-storage";
 import "./InstallPrompt.css";
 
-// Interface for beforeinstallprompt event
-interface BeforeInstallPromptEvent extends Event {
-  readonly platforms: string[];
-  readonly userChoice: Promise<{
-    outcome: "accepted" | "dismissed";
-    platform: string;
-  }>;
-  prompt(): Promise<void>;
-}
+const HAS_EXTRACTED_STORAGE_KEY = "linkdish:web:has-extracted-recipe";
+const DISMISSED_STORAGE_KEY = "linkdish:web:install-prompt-dismissed";
 
 export const InstallPrompt: React.FC = () => {
-  const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
-  const [showPrompt, setShowPrompt] = useState(false);
-  const [isDismissed, setIsDismissed] = useState(false);
-
-  useEffect(() => {
-    if (isStandaloneMode()) {
-      return;
-    }
-
-    const hasExtracted = safeGetItem("linkdish:web:has-extracted-recipe") === "true";
-    if (!hasExtracted) {
-      // Only show install education after user has successfully extracted at least one recipe
-      return;
-    }
-
-    const dismissed = safeGetItem("linkdish:web:install-prompt-dismissed") === "true";
-    if (dismissed) {
-      setIsDismissed(true);
-      return;
-    }
-
-    // Always show prompt for iOS manual flow if not standalone
-    if (isIos()) {
-      setShowPrompt(true);
-    }
-
-    const handleBeforeInstallPrompt = (e: Event) => {
-      e.preventDefault();
-      setDeferredPrompt(e as BeforeInstallPromptEvent);
-      setShowPrompt(true);
-    };
-
-    window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
-
-    return () => {
-      window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
-    };
-  }, []);
+  // The browser's install event is captured at boot (see platform/install-prompt), so it is
+  // available here even though this card mounts long after the event fired.
+  const { canInstall, isInstalled, platform, promptInstall } = useInstallPrompt();
+  const [isDismissed, setIsDismissed] = useState(
+    () => safeGetItem(DISMISSED_STORAGE_KEY) === "true"
+  );
+  const [hasPrompted, setHasPrompted] = useState(false);
+  // Only show install education after the user has successfully extracted at least one recipe.
+  const [hasExtracted] = useState(() => safeGetItem(HAS_EXTRACTED_STORAGE_KEY) === "true");
+  const isIosDevice = platform === "ios";
 
   const handleInstallClick = async () => {
-    if (!deferredPrompt) return;
-
-    const promptEvent = deferredPrompt;
-    setDeferredPrompt(null);
-
-    try {
-      await promptEvent.prompt();
-      const { outcome } = await promptEvent.userChoice;
-
-      if (outcome === "accepted") {
-        setShowPrompt(false);
-      }
-    } catch (err) {
-      console.warn("Install prompt failed:", err);
-    } finally {
-      setShowPrompt(false);
-    }
+    setHasPrompted(true);
+    await promptInstall();
   };
 
   const handleDismiss = () => {
-    safeSetItem("linkdish:web:install-prompt-dismissed", "true");
+    safeSetItem(DISMISSED_STORAGE_KEY, "true");
     setIsDismissed(true);
-    setShowPrompt(false);
   };
 
-  if (!showPrompt || isDismissed) {
+  const showPrompt =
+    !isInstalled && hasExtracted && !isDismissed && !hasPrompted && (isIosDevice || canInstall);
+
+  if (!showPrompt) {
     return null;
   }
 
@@ -113,13 +64,13 @@ export const InstallPrompt: React.FC = () => {
       </div>
 
       <div className="install-prompt-actions">
-        {isIos() ? (
+        {isIosDevice ? (
           <p className="install-ios-instructions">
             Tap <span className="share-icon">⎙</span> (Share) in Safari, then choose{" "}
             <strong>Add to Home Screen</strong>.
           </p>
         ) : (
-          <Button variant="primary" onClick={handleInstallClick} disabled={!deferredPrompt}>
+          <Button variant="primary" onClick={handleInstallClick} disabled={!canInstall}>
             Install App
           </Button>
         )}

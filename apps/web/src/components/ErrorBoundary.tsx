@@ -1,5 +1,8 @@
 import React from "react";
 
+import { trackWebError } from "../analytics/client";
+import { isChunkLoadError, retryFailedLazyImports } from "../platform/lazy";
+
 import { Button } from "./Button";
 import "./ErrorBoundary.css";
 
@@ -27,9 +30,16 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
 
   override componentDidCatch(error: Error, errorInfo: React.ErrorInfo): void {
     console.error("Unhandled render error:", error, errorInfo.componentStack);
+    // React does not re-dispatch caught render errors to window "error", so report them here.
+    trackWebError(error, window.location.pathname, "error_boundary");
   }
 
   private handleRetry = (): void => {
+    if (isChunkLoadError(this.state.error)) {
+      // React.lazy caches a failed import; let lazyWithRetry components import again.
+      retryFailedLazyImports();
+    }
+
     this.setState({ error: null });
     this.props.onReset?.();
   };
