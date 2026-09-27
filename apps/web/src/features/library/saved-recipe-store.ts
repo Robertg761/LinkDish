@@ -1,5 +1,3 @@
-import { createStarterRecipeSeedRecords } from "@linkdish/recipe-domain";
-
 import { apiClient } from "../../api/client";
 import { isCachedUserPremium } from "../../auth/auth-cache";
 import { emitDataChange } from "../../data/change-feed";
@@ -294,6 +292,9 @@ export async function seedStarterRecipesIfNeeded(): Promise<void> {
     return;
   }
 
+  // Only first-run visitors need the starter recipes (and the recipe-domain code that builds
+  // them), so they load on demand instead of sitting in the entry bundle.
+  const { createStarterRecipeSeedRecords } = await import("@linkdish/recipe-domain");
   const db = await getDb();
   const starterRecipes = createStarterRecipeSeedRecords();
   const tx = db.transaction(STORE_NAME, "readwrite");
