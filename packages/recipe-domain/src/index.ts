@@ -19,3 +19,4 @@ export * from "./durations.js";
 export * from "./grocery-categories.js";
 export * from "./shopping-aggregate.js";
 export * from "./urls.js";
+export * from "./search.js";
