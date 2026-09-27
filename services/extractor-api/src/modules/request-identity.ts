@@ -44,6 +44,16 @@ export const getRequestAddress = (headers: RequestHeaders, identity?: RequestIde
     ? identity.remoteAddress?.trim() || "unknown"
     : (getForwardedAddress(headers) ?? "unknown");
 
+/*
+ * The post-deploy live canary marks its requests. They skip durable analytics
+ * and read around the extraction result cache so they always exercise a real
+ * extraction. The header is caller-controlled, which is fine: it only makes a
+ * request slower, never cheaper.
+ */
+export const isLiveCanaryRequest = (headers: RequestHeaders): boolean =>
+  getHeader(headers, "x-linkdish-canary") != null ||
+  getHeader(headers, "x-linkdish-client-id") === "live-canary";
+
 export const hashServerSideIdentity = (purpose: string, value: string): string =>
   createHash("sha256")
     .update(`linkdish-${purpose}-v1`)
