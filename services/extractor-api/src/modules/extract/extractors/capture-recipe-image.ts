@@ -1,6 +1,7 @@
-import { load } from "cheerio";
+import { getParsedHtmlDocument, type ParsedHtmlDocument } from "../html/parsed-html-document.js";
 
 import type { RecipeImage } from "../../../../../../packages/recipe-domain/src/index.js";
+import type { HtmlSourceDocument } from "../types.js";
 
 type RecipeImageSource = RecipeImage["source"];
 
@@ -143,9 +144,15 @@ const findJsonLdImage = (value: unknown, baseUrl: string): RecipeImage | null =>
 const looksLikeChromeImage = (url: string): boolean =>
   /(?:logo|icon|sprite|avatar|badge|pixel|spacer|placeholder|tracking|\.svg(?:\?|$))/iu.test(url);
 
-const getMetaContent = ($: ReturnType<typeof load>, selectors: string[]): string | null => {
-  for (const selector of selectors) {
-    const content = $(selector).first().attr("content")?.trim();
+type MetaSelector = readonly ["name" | "property", string];
+
+/* First non-empty trimmed content, in selector order (same as `$(selector).first().attr()`). */
+const getMetaContent = (
+  parsed: ParsedHtmlDocument,
+  selectors: readonly MetaSelector[]
+): string | null => {
+  for (const [attribute, value] of selectors) {
+    const content = parsed.metaContent(attribute, value)?.trim();
 
     if (content) {
       return content;
@@ -156,16 +163,16 @@ const getMetaContent = ($: ReturnType<typeof load>, selectors: string[]): string
 };
 
 const imageFromMeta = (
-  $: ReturnType<typeof load>,
+  parsed: ParsedHtmlDocument,
   baseUrl: string,
   source: RecipeImageSource,
-  selectors: string[],
+  selectors: readonly MetaSelector[],
   dimensionSelectors?: {
-    height: string[];
-    width: string[];
+    height: readonly MetaSelector[];
+    width: readonly MetaSelector[];
   }
 ): RecipeImage | null => {
-  const url = normalizeImageUrl(getMetaContent($, selectors), baseUrl);
+  const url = normalizeImageUrl(getMetaContent(parsed, selectors), baseUrl);
 
   if (!url) {
     return null;
@@ -177,35 +184,45 @@ const imageFromMeta = (
       url
     },
     {
-      height: dimensionSelectors ? getMetaContent($, dimensionSelectors.height) : undefined,
-      width: dimensionSelectors ? getMetaContent($, dimensionSelectors.width) : undefined
+      height: dimensionSelectors ? getMetaContent(parsed, dimensionSelectors.height) : undefined,
+      width: dimensionSelectors ? getMetaContent(parsed, dimensionSelectors.width) : undefined
     }
   );
 };
 
-export const captureRecipeImage = (html: string, baseUrl: string): RecipeImage | null => {
-  const $ = load(html);
+export const captureRecipeImage = (
+  source: HtmlSourceDocument | ParsedHtmlDocument | string,
+  baseUrl: string
+): RecipeImage | null => {
+  const parsed = getParsedHtmlDocument(source);
+  const { $ } = parsed;
 
-  for (const script of $('script[type="application/ld+json"]').toArray()) {
-    try {
-      const image = findJsonLdImage(JSON.parse($(script).text()), baseUrl);
+  for (const block of parsed.jsonLdBlocks) {
+    const image = findJsonLdImage(block, baseUrl);
 
-      if (image) {
-        return image;
-      }
-    } catch {
-      continue;
+    if (image) {
+      return image;
     }
   }
 
   const openGraphImage = imageFromMeta(
-    $,
+    parsed,
     baseUrl,
     "og",
-    ['meta[property="og:image:secure_url"]', 'meta[property="og:image"]', 'meta[name="og:image"]'],
+    [
+      ["property", "og:image:secure_url"],
+      ["property", "og:image"],
+      ["name", "og:image"]
+    ],
     {
-      height: ['meta[property="og:image:height"]', 'meta[name="og:image:height"]'],
-      width: ['meta[property="og:image:width"]', 'meta[name="og:image:width"]']
+      height: [
+        ["property", "og:image:height"],
+        ["name", "og:image:height"]
+      ],
+      width: [
+        ["property", "og:image:width"],
+        ["name", "og:image:width"]
+      ]
     }
   );
 
@@ -213,9 +230,9 @@ export const captureRecipeImage = (html: string, baseUrl: string): RecipeImage |
     return openGraphImage;
   }
 
-  const twitterImage = imageFromMeta($, baseUrl, "twitter", [
-    'meta[name="twitter:image"]',
-    'meta[name="twitter:image:src"]'
+  const twitterImage = imageFromMeta(parsed, baseUrl, "twitter", [
+    ["name", "twitter:image"],
+    ["name", "twitter:image:src"]
   ]);
 
   if (twitterImage) {

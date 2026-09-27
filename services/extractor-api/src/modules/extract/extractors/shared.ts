@@ -5,6 +5,17 @@ import type {
   RecipeNutrition
 } from "../../../../../../packages/recipe-domain/src/index.js";
 import type { ExtractionCandidate } from "../types.js";
+import type { CheerioAPI } from "cheerio";
+
+/*
+ * Section helpers accept either raw HTML or an already-parsed cheerio root so
+ * the extractors can run all of them over one shared parse. Parsed roots are
+ * only read, never mutated.
+ */
+export type HtmlInput = string | CheerioAPI;
+
+const toCheerio = (input: HtmlInput): CheerioAPI =>
+  typeof input === "string" ? load(input) : input;
 
 const ingredientPattern =
   /(^|\s)(\d+([/.]\d+)?|one|two|three|four|five|six|seven|eight|nine|ten)\s+(cup|cups|tbsp|tablespoon|tablespoons|tsp|teaspoon|teaspoons|oz|ounce|ounces|g|gram|grams|kg|ml|l|lb|lbs|clove|cloves|can|cans|package|packages)/i;
@@ -97,8 +108,8 @@ export const buildFieldProvenance = (source: {
   nutrition: source.nutrition ?? null
 });
 
-export const extractSectionListItems = (html: string, headingPattern: RegExp): string[] => {
-  const $ = load(html);
+export const extractSectionListItems = (html: HtmlInput, headingPattern: RegExp): string[] => {
+  const $ = toCheerio(html);
   const headings = $("h1, h2, h3, h4, strong, b").toArray();
 
   for (const heading of headings) {
@@ -135,8 +146,8 @@ export const extractSectionListItems = (html: string, headingPattern: RegExp): s
   return [];
 };
 
-export const extractSectionContent = (html: string, headingPattern: RegExp): string[] => {
-  const $ = load(html);
+export const extractSectionContent = (html: HtmlInput, headingPattern: RegExp): string[] => {
+  const $ = toCheerio(html);
   const headings = $("h1, h2, h3, h4, strong, b").toArray();
 
   for (const heading of headings) {
@@ -175,8 +186,8 @@ export const extractSectionContent = (html: string, headingPattern: RegExp): str
   return [];
 };
 
-export const extractItemsFromSelectors = (html: string, selectors: string[]): string[] => {
-  const $ = load(html);
+export const extractItemsFromSelectors = (html: HtmlInput, selectors: string[]): string[] => {
+  const $ = toCheerio(html);
   const items: string[] = [];
 
   for (const selector of selectors) {
@@ -204,8 +215,8 @@ export const extractItemsFromSelectors = (html: string, selectors: string[]): st
   return uniqueNonEmptyText(items);
 };
 
-export const extractTextBlocks = (html: string): string[] => {
-  const $ = load(html);
+export const extractTextBlocks = (html: HtmlInput): string[] => {
+  const $ = toCheerio(html);
 
   return uniqueNonEmptyText(
     $("p, li")

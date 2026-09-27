@@ -1,5 +1,4 @@
-import { load } from "cheerio";
-
+import { getParsedHtmlDocument, type ParsedHtmlDocument } from "../../html/parsed-html-document.js";
 import { getDomainAdapter } from "../../source-detection/domain-adapters.js";
 import { captureRecipeImage } from "../capture-recipe-image.js";
 import {
@@ -50,20 +49,11 @@ interface LooseNutritionShape {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
 
-const extractJsonLdRecipe = (html: string): JsonLdRecipe | null => {
-  const $ = load(html);
-  const scripts = $('script[type="application/ld+json"]').toArray();
+const extractJsonLdRecipe = (document: ParsedHtmlDocument): JsonLdRecipe | null => {
   const candidates: JsonLdRecipe[] = [];
 
-  for (const script of scripts) {
-    const rawValue = $(script).text().trim();
-
-    if (!rawValue) {
-      continue;
-    }
-
+  for (const parsed of document.jsonLdBlocks) {
     try {
-      const parsed = JSON.parse(rawValue) as unknown;
       const queue: Record<string, unknown>[] = [];
 
       if (Array.isArray(parsed)) {
@@ -184,11 +174,12 @@ const normalizeNutrition = (
 };
 
 export const extractRecipeWebpage = (document: HtmlSourceDocument): ExtractionCandidate | null => {
-  const jsonLdRecipe = extractJsonLdRecipe(document.html);
-  const $ = load(document.html);
-  const pageTitle = $("h1").first().text().trim() || document.title || $("title").text().trim();
+  const parsed = getParsedHtmlDocument(document);
+  const { $ } = parsed;
+  const jsonLdRecipe = extractJsonLdRecipe(parsed);
+  const pageTitle = parsed.firstHeadingText.trim() || document.title || parsed.titleText.trim();
   const adapter = getDomainAdapter(new URL(document.finalUrl).hostname.toLowerCase());
-  const image = captureRecipeImage(document.html, document.finalUrl);
+  const image = captureRecipeImage(parsed, document.finalUrl);
 
   if (jsonLdRecipe) {
     return {
@@ -328,31 +319,34 @@ export const extractRecipeWebpage = (document: HtmlSourceDocument): ExtractionCa
   }
 
   const adapterIngredientItems = adapter
-    ? extractItemsFromSelectors(document.html, adapter.selectors.ingredients)
+    ? extractItemsFromSelectors($, adapter.selectors.ingredients)
     : [];
-  const adapterStepItems = adapter
-    ? extractItemsFromSelectors(document.html, adapter.selectors.steps)
-    : [];
+  const adapterStepItems = adapter ? extractItemsFromSelectors($, adapter.selectors.steps) : [];
   const ingredientItems =
     adapterIngredientItems.length > 0
       ? adapterIngredientItems
       : [
-          ...extractSectionListItems(document.html, /ingredients?/i),
-          ...extractSectionContent(document.html, /ingredients?/i)
+          ...extractSectionListItems($, /ingredients?/i),
+          ...extractSectionContent($, /ingredients?/i)
         ];
   const stepItems =
     adapterStepItems.length > 0
       ? adapterStepItems
       : [
-          ...extractSectionListItems(document.html, /(instructions?|directions?|method)/i),
-          ...extractSectionContent(document.html, /(instructions?|directions?|method|steps?)/i)
+          ...extractSectionListItems($, /(instructions?|directions?|method)/i),
+          ...extractSectionContent($, /(instructions?|directions?|method|steps?)/i)
         ];
   const textSignals = parseTextRecipeSignals([...ingredientItems, ...stepItems]);
-  const combinedText = $.text();
 
   if (!textSignals.signals.recipeLike) {
     return null;
   }
+
+  const combinedText = $.text();
+  const yieldText = combinedText.match(/yield[:\s]+([^\n.]+)/i)?.[1];
+  const prepTimeMinutes = extractMinutesFromText(combinedText, "prep");
+  const cookTimeMinutes = extractMinutesFromText(combinedText, "cook");
+  const nutrition = extractNutritionFromText(combinedText);
 
   return {
     recipe: {
@@ -362,10 +356,10 @@ export const extractRecipeWebpage = (document: HtmlSourceDocument): ExtractionCa
       image,
       ingredients: toIngredientLines(ingredientItems),
       steps: toStepLines(stepItems),
-      servings: parseServingsText($.text().match(/yield[:\s]+([^\n.]+)/i)?.[1] ?? null),
-      prepTimeMinutes: extractMinutesFromText(combinedText, "prep"),
-      cookTimeMinutes: extractMinutesFromText(combinedText, "cook"),
-      nutrition: extractNutritionFromText(combinedText)
+      servings: parseServingsText(yieldText ?? null),
+      prepTimeMinutes,
+      cookTimeMinutes,
+      nutrition
     },
     strategy: "recipe-adapter-dom",
     evidence: [
@@ -379,10 +373,10 @@ export const extractRecipeWebpage = (document: HtmlSourceDocument): ExtractionCa
       title: "visible-text",
       ingredients: "visible-text",
       steps: "visible-text",
-      servings: $.text().match(/yield[:\s]+([^\n.]+)/i)?.[1] ? "visible-text" : null,
-      prepTimeMinutes: extractMinutesFromText(combinedText, "prep") == null ? null : "visible-text",
-      cookTimeMinutes: extractMinutesFromText(combinedText, "cook") == null ? null : "visible-text",
-      nutrition: extractNutritionFromText(combinedText) ? "visible-text" : null
+      servings: yieldText ? "visible-text" : null,
+      prepTimeMinutes: prepTimeMinutes == null ? null : "visible-text",
+      cookTimeMinutes: cookTimeMinutes == null ? null : "visible-text",
+      nutrition: nutrition ? "visible-text" : null
     }),
     signals: textSignals.signals
   };

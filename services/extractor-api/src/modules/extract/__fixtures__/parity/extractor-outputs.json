@@ -1,0 +1,1316 @@
+{
+  "recipe-jsonld.html": {
+    "url": "https://fixtures.linkdish.test/recipe-jsonld",
+    "title": "One-Pan Tomato Pasta",
+    "description": null,
+    "detection": {
+      "sourceType": "recipe-webpage",
+      "confidence": "high",
+      "reasons": ["Detected Recipe JSON-LD in fetched HTML."],
+      "adapterKey": null
+    },
+    "webpage": {
+      "recipe": {
+        "title": "One-Pan Tomato Pasta",
+        "sourceUrl": "https://fixtures.linkdish.test/recipe-jsonld",
+        "sourceType": "recipe-webpage",
+        "image": {
+          "url": "https://cdn.example.test/images/tomato-pasta.jpg",
+          "source": "jsonld",
+          "width": 1200,
+          "height": 900
+        },
+        "ingredients": [
+          {
+            "text": "12 oz spaghetti"
+          },
+          {
+            "text": "2 cups cherry tomatoes"
+          },
+          {
+            "text": "3 cloves garlic"
+          },
+          {
+            "text": "2 tbsp olive oil"
+          }
+        ],
+        "steps": [
+          {
+            "index": 1,
+            "text": "Boil the pasta in salted water."
+          },
+          {
+            "index": 2,
+            "text": "Saute tomatoes and garlic in olive oil."
+          },
+          {
+            "index": 3,
+            "text": "Toss the pasta with the tomato mixture and serve."
+          }
+        ],
+        "servings": "4 servings",
+        "prepTimeMinutes": 10,
+        "cookTimeMinutes": 20,
+        "nutrition": {
+          "calories": "480 kcal",
+          "protein": "18 g",
+          "carbohydrates": "62 g",
+          "fat": "14 g",
+          "fiber": "4 g",
+          "sugar": "6 g",
+          "sodium": "420 mg"
+        }
+      },
+      "strategy": "recipe-schema",
+      "evidence": ["Detected Recipe JSON-LD on the page."],
+      "warnings": [],
+      "provenance": ["jsonld"],
+      "fieldProvenance": {
+        "title": "jsonld",
+        "ingredients": "jsonld",
+        "steps": "jsonld",
+        "servings": "jsonld",
+        "prepTimeMinutes": "jsonld",
+        "cookTimeMinutes": "jsonld",
+        "nutrition": "jsonld"
+      },
+      "signals": {
+        "requiredFieldsInferred": false,
+        "titleConfidence": "strong",
+        "timesFromStructuredMetadata": true,
+        "recipeLike": true,
+        "detectionConfidence": "high",
+        "sectionCohesion": "strong",
+        "transcriptQuality": "weak",
+        "usedBrowserFallback": false,
+        "blockedSourceSignals": 0
+      }
+    },
+    "article": null,
+    "image": {
+      "url": "https://cdn.example.test/images/tomato-pasta.jpg",
+      "source": "jsonld",
+      "width": 1200,
+      "height": 900
+    },
+    "shell": false,
+    "thin": true,
+    "notFound": false,
+    "fallbackInput": "Extract a clean cooking recipe from the provided source.\n\nOnly return recipe data that is directly supported by the source. Be conservative with inferences.\n\nPreserve ingredient grouping exactly when the source has sections. For example, if a recipe has Cake and Frosting ingredients, attach section \"Cake\" to cake ingredients and section \"Frosting\" to frosting ingredients.\n\nMethod steps must make ingredient usage clear enough for cook mode. When a step uses only one section or a subset of ingredients, name that section or ingredients in the step text instead of relying on the user to look back.\n\nSource type: recipe-webpage\n\nDetection confidence: high\n\nFetch mode: http\n\nSource URL: https://fixtures.linkdish.test/recipe-jsonld\n\nDeterministic candidate:\n\n{\n  \"title\": \"One-Pan Tomato Pasta\",\n  \"ingredients\": [\n    {\n      \"text\": \"12 oz spaghetti\"\n    },\n    {\n      \"text\": \"2 cups cherry tomatoes\"\n    },\n    {\n      \"text\": \"3 cloves garlic\"\n    },\n    {\n      \"text\": \"2 tbsp olive oil\"\n    }\n  ],\n  \"steps\": [\n    {\n      \"index\": 1,\n      \"text\": \"Boil the pasta in salted water.\"\n    },\n    {\n      \"index\": 2,\n      \"text\": \"Saute tomatoes and garlic in olive oil.\"\n    },\n    {\n      \"index\": 3,\n      \"text\": \"Toss the pasta with the tomato mixture and serve.\"\n    }\n  ],\n  \"servings\": \"4 servings\",\n  \"prepTimeMinutes\": 10,\n  \"cookTimeMinutes\": 20,\n  \"nutrition\": {\n    \"calories\": \"480 kcal\",\n    \"protein\": \"18 g\",\n    \"carbohydrates\": \"62 g\",\n    \"fat\": \"14 g\",\n    \"fiber\": \"4 g\",\n    \"sugar\": \"6 g\",\n    \"sodium\": \"420 mg\"\n  },\n  \"warnings\": [],\n  \"evidence\": [\n    \"Detected Recipe JSON-LD on the page.\"\n  ]\n}\n\nSource document:\n\nPage title: One-Pan Tomato Pasta\nMeta description: Unknown\nHeadings: One-Pan Tomato Pasta\nVisible text excerpt: One-Pan Tomato Pasta",
+    "helpers": {
+      "sectionList": [],
+      "sectionContent": [],
+      "selectors": [],
+      "textBlocks": []
+    }
+  },
+  "recipe-microdata.html": {
+    "url": "https://fixtures.linkdish.test/recipe-microdata",
+    "title": "Creamy Mushroom Orzo",
+    "description": null,
+    "detection": {
+      "sourceType": "recipe-webpage",
+      "confidence": "high",
+      "reasons": ["Detected recipe microdata in fetched HTML."],
+      "adapterKey": null
+    },
+    "webpage": {
+      "recipe": {
+        "title": "Creamy Mushroom Orzo",
+        "sourceUrl": "https://fixtures.linkdish.test/recipe-microdata",
+        "sourceType": "recipe-webpage",
+        "image": null,
+        "ingredients": [
+          {
+            "text": "1 cup orzo"
+          },
+          {
+            "text": "8 oz mushrooms"
+          },
+          {
+            "text": "2 cups stock"
+          }
+        ],
+        "steps": [
+          {
+            "index": 1,
+            "text": "Saute the mushrooms until golden."
+          },
+          {
+            "index": 2,
+            "text": "Toast the orzo and add the stock."
+          },
+          {
+            "index": 3,
+            "text": "Simmer until creamy and serve."
+          }
+        ],
+        "servings": "2 servings",
+        "prepTimeMinutes": 5,
+        "cookTimeMinutes": 18,
+        "nutrition": null
+      },
+      "strategy": "recipe-schema",
+      "evidence": ["Detected recipe microdata on the page."],
+      "warnings": ["Recipe JSON-LD was unavailable, so microdata was used instead."],
+      "provenance": ["microdata", "visible-text"],
+      "fieldProvenance": {
+        "title": "microdata",
+        "ingredients": "microdata",
+        "steps": "microdata",
+        "servings": "microdata",
+        "prepTimeMinutes": "microdata",
+        "cookTimeMinutes": "microdata",
+        "nutrition": "visible-text"
+      },
+      "signals": {
+        "requiredFieldsInferred": false,
+        "titleConfidence": "strong",
+        "timesFromStructuredMetadata": true,
+        "recipeLike": true,
+        "detectionConfidence": "high",
+        "sectionCohesion": "strong",
+        "transcriptQuality": "weak",
+        "usedBrowserFallback": false,
+        "blockedSourceSignals": 0
+      }
+    },
+    "article": {
+      "recipe": {
+        "title": "Creamy Mushroom Orzo",
+        "sourceUrl": "https://fixtures.linkdish.test/recipe-microdata",
+        "sourceType": "article",
+        "image": null,
+        "ingredients": [
+          {
+            "text": "2 servings"
+          },
+          {
+            "text": "1 cup orzo"
+          },
+          {
+            "text": "8 oz mushrooms"
+          },
+          {
+            "text": "2 cups stock"
+          }
+        ],
+        "steps": [
+          {
+            "index": 1,
+            "text": "Saute the mushrooms until golden."
+          },
+          {
+            "index": 2,
+            "text": "Toast the orzo and add the stock."
+          },
+          {
+            "index": 3,
+            "text": "Simmer until creamy and serve."
+          }
+        ],
+        "servings": "2 servings",
+        "prepTimeMinutes": null,
+        "cookTimeMinutes": null,
+        "nutrition": null
+      },
+      "strategy": "article-pattern",
+      "evidence": ["Parsed article content with Readability and section heuristics."],
+      "warnings": ["Article extraction relies on pattern matching and may need fallback review."],
+      "provenance": ["readability", "visible-text"],
+      "fieldProvenance": {
+        "title": "visible-text",
+        "ingredients": "visible-text",
+        "steps": "visible-text",
+        "servings": "visible-text",
+        "prepTimeMinutes": null,
+        "cookTimeMinutes": null,
+        "nutrition": null
+      },
+      "signals": {
+        "requiredFieldsInferred": true,
+        "titleConfidence": "weak",
+        "timesFromStructuredMetadata": false,
+        "recipeLike": true,
+        "detectionConfidence": "low",
+        "sectionCohesion": "medium",
+        "transcriptQuality": "missing",
+        "usedBrowserFallback": false,
+        "blockedSourceSignals": 0
+      }
+    },
+    "image": null,
+    "shell": false,
+    "thin": false,
+    "notFound": false,
+    "fallbackInput": "Extract a clean cooking recipe from the provided source.\n\nOnly return recipe data that is directly supported by the source. Be conservative with inferences.\n\nPreserve ingredient grouping exactly when the source has sections. For example, if a recipe has Cake and Frosting ingredients, attach section \"Cake\" to cake ingredients and section \"Frosting\" to frosting ingredients.\n\nMethod steps must make ingredient usage clear enough for cook mode. When a step uses only one section or a subset of ingredients, name that section or ingredients in the step text instead of relying on the user to look back.\n\nSource type: recipe-webpage\n\nDetection confidence: high\n\nFetch mode: http\n\nSource URL: https://fixtures.linkdish.test/recipe-microdata\n\nDeterministic candidate:\n\n{\n  \"title\": \"Creamy Mushroom Orzo\",\n  \"ingredients\": [\n    {\n      \"text\": \"1 cup orzo\"\n    },\n    {\n      \"text\": \"8 oz mushrooms\"\n    },\n    {\n      \"text\": \"2 cups stock\"\n    }\n  ],\n  \"steps\": [\n    {\n      \"index\": 1,\n      \"text\": \"Saute the mushrooms until golden.\"\n    },\n    {\n      \"index\": 2,\n      \"text\": \"Toast the orzo and add the stock.\"\n    },\n    {\n      \"index\": 3,\n      \"text\": \"Simmer until creamy and serve.\"\n    }\n  ],\n  \"servings\": \"2 servings\",\n  \"prepTimeMinutes\": 5,\n  \"cookTimeMinutes\": 18,\n  \"nutrition\": null,\n  \"warnings\": [\n    \"Recipe JSON-LD was unavailable, so microdata was used instead.\"\n  ],\n  \"evidence\": [\n    \"Detected recipe microdata on the page.\"\n  ]\n}\n\nSource document:\n\nPage title: Creamy Mushroom Orzo\nMeta description: Unknown\nHeadings: Creamy Mushroom Orzo\nVisible text excerpt: Creamy Mushroom Orzo 2 servings 1 cup orzo 8 oz mushrooms 2 cups stock Saute the mushrooms until golden. Toast the orzo and add the stock. Simmer until creamy and serve.",
+    "helpers": {
+      "sectionList": [],
+      "sectionContent": [],
+      "selectors": ["1 cup orzo", "8 oz mushrooms", "2 cups stock"],
+      "textBlocks": [
+        "2 servings",
+        "1 cup orzo",
+        "8 oz mushrooms",
+        "2 cups stock",
+        "Saute the mushrooms until golden.",
+        "Toast the orzo and add the stock.",
+        "Simmer until creamy and serve."
+      ]
+    }
+  },
+  "recipe-visible-nutrition.html": {
+    "url": "https://fixtures.linkdish.test/recipe-visible-nutrition",
+    "title": "Skillet White Beans",
+    "description": null,
+    "detection": {
+      "sourceType": "recipe-webpage",
+      "confidence": "medium",
+      "reasons": ["Detected strong recipe-like DOM structure in fetched HTML."],
+      "adapterKey": null
+    },
+    "webpage": {
+      "recipe": {
+        "title": "Skillet White Beans",
+        "sourceUrl": "https://fixtures.linkdish.test/recipe-visible-nutrition",
+        "sourceType": "recipe-webpage",
+        "image": null,
+        "ingredients": [
+          {
+            "text": "2 cans white beans"
+          },
+          {
+            "text": "2 tbsp olive oil"
+          },
+          {
+            "text": "1 lemon"
+          }
+        ],
+        "steps": [
+          {
+            "index": 1,
+            "text": "Warm the oil and add the beans."
+          },
+          {
+            "index": 2,
+            "text": "Cook until the beans are silky and hot."
+          },
+          {
+            "index": 3,
+            "text": "Finish with lemon juice and serve."
+          },
+          {
+            "index": 4,
+            "text": "Prep time: 5 min. Cook time: 12 min. Yield: 4 servings."
+          },
+          {
+            "index": 5,
+            "text": "Nutrition Calories 280 Protein 11 g Carbohydrates 31 g Fat 10 g Fiber 9 g Sugar 2 g Sodium 480 mg"
+          }
+        ],
+        "servings": "4 servings",
+        "prepTimeMinutes": 5,
+        "cookTimeMinutes": null,
+        "nutrition": {
+          "calories": "280 calories",
+          "protein": "11 g",
+          "carbohydrates": "31 g",
+          "fat": "10 g",
+          "fiber": "9 g",
+          "sugar": "2 g",
+          "sodium": "480 mg"
+        }
+      },
+      "strategy": "recipe-adapter-dom",
+      "evidence": [
+        "Used section-based heuristics after structured recipe metadata was unavailable."
+      ],
+      "warnings": ["Recipe details were inferred from visible page sections."],
+      "provenance": ["visible-text"],
+      "fieldProvenance": {
+        "title": "visible-text",
+        "ingredients": "visible-text",
+        "steps": "visible-text",
+        "servings": "visible-text",
+        "prepTimeMinutes": "visible-text",
+        "cookTimeMinutes": null,
+        "nutrition": "visible-text"
+      },
+      "signals": {
+        "requiredFieldsInferred": true,
+        "titleConfidence": "weak",
+        "timesFromStructuredMetadata": false,
+        "recipeLike": true,
+        "detectionConfidence": "low",
+        "sectionCohesion": "medium",
+        "transcriptQuality": "missing",
+        "usedBrowserFallback": false,
+        "blockedSourceSignals": 0
+      }
+    },
+    "article": null,
+    "image": null,
+    "shell": false,
+    "thin": false,
+    "notFound": false,
+    "fallbackInput": "Extract a clean cooking recipe from the provided source.\n\nOnly return recipe data that is directly supported by the source. Be conservative with inferences.\n\nPreserve ingredient grouping exactly when the source has sections. For example, if a recipe has Cake and Frosting ingredients, attach section \"Cake\" to cake ingredients and section \"Frosting\" to frosting ingredients.\n\nMethod steps must make ingredient usage clear enough for cook mode. When a step uses only one section or a subset of ingredients, name that section or ingredients in the step text instead of relying on the user to look back.\n\nSource type: recipe-webpage\n\nDetection confidence: medium\n\nFetch mode: http\n\nSource URL: https://fixtures.linkdish.test/recipe-visible-nutrition\n\nDeterministic candidate:\n\n{\n  \"title\": \"Skillet White Beans\",\n  \"ingredients\": [\n    {\n      \"text\": \"2 cans white beans\"\n    },\n    {\n      \"text\": \"2 tbsp olive oil\"\n    },\n    {\n      \"text\": \"1 lemon\"\n    }\n  ],\n  \"steps\": [\n    {\n      \"index\": 1,\n      \"text\": \"Warm the oil and add the beans.\"\n    },\n    {\n      \"index\": 2,\n      \"text\": \"Cook until the beans are silky and hot.\"\n    },\n    {\n      \"index\": 3,\n      \"text\": \"Finish with lemon juice and serve.\"\n    },\n    {\n      \"index\": 4,\n      \"text\": \"Prep time: 5 min. Cook time: 12 min. Yield: 4 servings.\"\n    },\n    {\n      \"index\": 5,\n      \"text\": \"Nutrition Calories 280 Protein 11 g Carbohydrates 31 g Fat 10 g Fiber 9 g Sugar 2 g Sodium 480 mg\"\n    }\n  ],\n  \"servings\": \"4 servings\",\n  \"prepTimeMinutes\": 5,\n  \"cookTimeMinutes\": null,\n  \"nutrition\": {\n    \"calories\": \"280 calories\",\n    \"protein\": \"11 g\",\n    \"carbohydrates\": \"31 g\",\n    \"fat\": \"10 g\",\n    \"fiber\": \"9 g\",\n    \"sugar\": \"2 g\",\n    \"sodium\": \"480 mg\"\n  },\n  \"warnings\": [\n    \"Recipe details were inferred from visible page sections.\"\n  ],\n  \"evidence\": [\n    \"Used section-based heuristics after structured recipe metadata was unavailable.\"\n  ]\n}\n\nSource document:\n\nPage title: Skillet White Beans\nMeta description: Unknown\nHeadings: Skillet White Beans | Ingredients | Instructions | Nutrition\nVisible text excerpt: Skillet White Beans Ingredients 2 cans white beans 2 tbsp olive oil 1 lemon Instructions Warm the oil and add the beans. Cook until the beans are silky and hot. Finish with lemon juice and serve. Prep time: 5 min. Cook time: 12 min. Yield: 4 servings. Nutrition Calories 280 Protein 11 g Carbohydrates 31 g Fat 10 g Fiber 9 g Sugar 2 g Sodium 480 mg",
+    "helpers": {
+      "sectionList": ["2 cans white beans", "2 tbsp olive oil", "1 lemon"],
+      "sectionContent": [
+        "Warm the oil and add the beans.",
+        "Cook until the beans are silky and hot.",
+        "Finish with lemon juice and serve.",
+        "Prep time: 5 min. Cook time: 12 min. Yield: 4 servings.",
+        "Nutrition Calories 280 Protein 11 g Carbohydrates 31 g Fat 10 g Fiber 9 g Sugar 2 g Sodium 480 mg"
+      ],
+      "selectors": ["2 cans white beans", "2 tbsp olive oil", "1 lemon"],
+      "textBlocks": [
+        "2 cans white beans",
+        "2 tbsp olive oil",
+        "1 lemon",
+        "Warm the oil and add the beans.",
+        "Cook until the beans are silky and hot.",
+        "Finish with lemon juice and serve.",
+        "Prep time: 5 min. Cook time: 12 min. Yield: 4 servings.",
+        "Calories 280 Protein 11 g Carbohydrates 31 g Fat 10 g Fiber 9 g Sugar 2 g Sodium 480 mg"
+      ]
+    }
+  },
+  "article-recipe.html": {
+    "url": "https://fixtures.linkdish.test/article-recipe",
+    "title": "My Cozy Weeknight Soup",
+    "description": null,
+    "detection": {
+      "sourceType": "recipe-webpage",
+      "confidence": "medium",
+      "reasons": ["Detected strong recipe-like DOM structure in fetched HTML."],
+      "adapterKey": null
+    },
+    "webpage": {
+      "recipe": {
+        "title": "My Cozy Weeknight Soup",
+        "sourceUrl": "https://fixtures.linkdish.test/article-recipe",
+        "sourceType": "recipe-webpage",
+        "image": {
+          "source": "og",
+          "url": "https://fixtures.linkdish.test/images/cozy-weeknight-soup.jpg",
+          "width": 1200,
+          "height": 800
+        },
+        "ingredients": [
+          {
+            "text": "1 tbsp olive oil"
+          },
+          {
+            "text": "1 onion, diced"
+          },
+          {
+            "text": "4 cups vegetable stock"
+          },
+          {
+            "text": "1 can white beans"
+          }
+        ],
+        "steps": [
+          {
+            "index": 1,
+            "text": "Heat the oil and cook the onion until soft."
+          },
+          {
+            "index": 2,
+            "text": "Add the stock and beans, then simmer for 20 minutes."
+          },
+          {
+            "index": 3,
+            "text": "Season to taste and serve warm."
+          },
+          {
+            "index": 4,
+            "text": "Prep time: 10 min. Cook time: 20 min. Serves 4 people."
+          },
+          {
+            "index": 5,
+            "text": "Nutrition per serving: Calories 320, Protein 14 g, Carbohydrates 28 g, Fat 9 g, Fiber 8 g, Sugar 4 g, Sodium 540 mg."
+          }
+        ],
+        "servings": null,
+        "prepTimeMinutes": 10,
+        "cookTimeMinutes": null,
+        "nutrition": {
+          "calories": "320 calories",
+          "protein": "14 g",
+          "carbohydrates": "28 g",
+          "fat": "9 g",
+          "fiber": "8 g",
+          "sugar": "4 g",
+          "sodium": "540 mg"
+        }
+      },
+      "strategy": "recipe-adapter-dom",
+      "evidence": [
+        "Used section-based heuristics after structured recipe metadata was unavailable."
+      ],
+      "warnings": ["Recipe details were inferred from visible page sections."],
+      "provenance": ["visible-text"],
+      "fieldProvenance": {
+        "title": "visible-text",
+        "ingredients": "visible-text",
+        "steps": "visible-text",
+        "servings": null,
+        "prepTimeMinutes": "visible-text",
+        "cookTimeMinutes": null,
+        "nutrition": "visible-text"
+      },
+      "signals": {
+        "requiredFieldsInferred": true,
+        "titleConfidence": "weak",
+        "timesFromStructuredMetadata": false,
+        "recipeLike": true,
+        "detectionConfidence": "low",
+        "sectionCohesion": "medium",
+        "transcriptQuality": "missing",
+        "usedBrowserFallback": false,
+        "blockedSourceSignals": 0
+      }
+    },
+    "article": {
+      "recipe": {
+        "title": "My Cozy Weeknight Soup",
+        "sourceUrl": "https://fixtures.linkdish.test/article-recipe",
+        "sourceType": "article",
+        "image": {
+          "source": "og",
+          "url": "https://fixtures.linkdish.test/images/cozy-weeknight-soup.jpg",
+          "width": 1200,
+          "height": 800
+        },
+        "ingredients": [
+          {
+            "text": "1 tbsp olive oil"
+          },
+          {
+            "text": "1 onion, diced"
+          },
+          {
+            "text": "4 cups vegetable stock"
+          },
+          {
+            "text": "1 can white beans"
+          }
+        ],
+        "steps": [
+          {
+            "index": 1,
+            "text": "Heat the oil and cook the onion until soft."
+          },
+          {
+            "index": 2,
+            "text": "Add the stock and beans, then simmer for 20 minutes."
+          },
+          {
+            "index": 3,
+            "text": "Season to taste and serve warm."
+          },
+          {
+            "index": 4,
+            "text": "Prep time: 10 min. Cook time: 20 min. Serves 4 people."
+          },
+          {
+            "index": 5,
+            "text": "Nutrition per serving: Calories 320, Protein 14 g, Carbohydrates 28 g, Fat 9 g, Fiber 8 g, Sugar 4 g, Sodium 540 mg."
+          }
+        ],
+        "servings": "4 people",
+        "prepTimeMinutes": 10,
+        "cookTimeMinutes": null,
+        "nutrition": {
+          "calories": "320 calories",
+          "protein": "14 g",
+          "carbohydrates": "28 g",
+          "fat": "9 g",
+          "fiber": "8 g",
+          "sugar": "4 g",
+          "sodium": "540 mg"
+        }
+      },
+      "strategy": "article-pattern",
+      "evidence": ["Parsed article content with Readability and section heuristics."],
+      "warnings": ["Article extraction relies on pattern matching and may need fallback review."],
+      "provenance": ["readability", "visible-text"],
+      "fieldProvenance": {
+        "title": "visible-text",
+        "ingredients": "visible-text",
+        "steps": "visible-text",
+        "servings": "visible-text",
+        "prepTimeMinutes": "visible-text",
+        "cookTimeMinutes": null,
+        "nutrition": "visible-text"
+      },
+      "signals": {
+        "requiredFieldsInferred": true,
+        "titleConfidence": "weak",
+        "timesFromStructuredMetadata": false,
+        "recipeLike": true,
+        "detectionConfidence": "low",
+        "sectionCohesion": "medium",
+        "transcriptQuality": "missing",
+        "usedBrowserFallback": false,
+        "blockedSourceSignals": 0
+      }
+    },
+    "image": {
+      "source": "og",
+      "url": "https://fixtures.linkdish.test/images/cozy-weeknight-soup.jpg",
+      "width": 1200,
+      "height": 800
+    },
+    "shell": false,
+    "thin": false,
+    "notFound": false,
+    "fallbackInput": "Extract a clean cooking recipe from the provided source.\n\nOnly return recipe data that is directly supported by the source. Be conservative with inferences.\n\nPreserve ingredient grouping exactly when the source has sections. For example, if a recipe has Cake and Frosting ingredients, attach section \"Cake\" to cake ingredients and section \"Frosting\" to frosting ingredients.\n\nMethod steps must make ingredient usage clear enough for cook mode. When a step uses only one section or a subset of ingredients, name that section or ingredients in the step text instead of relying on the user to look back.\n\nSource type: recipe-webpage\n\nDetection confidence: medium\n\nFetch mode: http\n\nSource URL: https://fixtures.linkdish.test/article-recipe\n\nDeterministic candidate:\n\n{\n  \"title\": \"My Cozy Weeknight Soup\",\n  \"ingredients\": [\n    {\n      \"text\": \"1 tbsp olive oil\"\n    },\n    {\n      \"text\": \"1 onion, diced\"\n    },\n    {\n      \"text\": \"4 cups vegetable stock\"\n    },\n    {\n      \"text\": \"1 can white beans\"\n    }\n  ],\n  \"steps\": [\n    {\n      \"index\": 1,\n      \"text\": \"Heat the oil and cook the onion until soft.\"\n    },\n    {\n      \"index\": 2,\n      \"text\": \"Add the stock and beans, then simmer for 20 minutes.\"\n    },\n    {\n      \"index\": 3,\n      \"text\": \"Season to taste and serve warm.\"\n    },\n    {\n      \"index\": 4,\n      \"text\": \"Prep time: 10 min. Cook time: 20 min. Serves 4 people.\"\n    },\n    {\n      \"index\": 5,\n      \"text\": \"Nutrition per serving: Calories 320, Protein 14 g, Carbohydrates 28 g, Fat 9 g, Fiber 8 g, Sugar 4 g, Sodium 540 mg.\"\n    }\n  ],\n  \"servings\": null,\n  \"prepTimeMinutes\": 10,\n  \"cookTimeMinutes\": null,\n  \"nutrition\": {\n    \"calories\": \"320 calories\",\n    \"protein\": \"14 g\",\n    \"carbohydrates\": \"28 g\",\n    \"fat\": \"9 g\",\n    \"fiber\": \"8 g\",\n    \"sugar\": \"4 g\",\n    \"sodium\": \"540 mg\"\n  },\n  \"warnings\": [\n    \"Recipe details were inferred from visible page sections.\"\n  ],\n  \"evidence\": [\n    \"Used section-based heuristics after structured recipe metadata was unavailable.\"\n  ]\n}\n\nSource document:\n\nPage title: My Cozy Weeknight Soup\nMeta description: Unknown\nHeadings: My Cozy Weeknight Soup | Ingredients | Instructions\nVisible text excerpt: My Cozy Weeknight Soup This simple pantry soup comes together quickly and feeds four people. Ingredients 1 tbsp olive oil 1 onion, diced 4 cups vegetable stock 1 can white beans Instructions Heat the oil and cook the onion until soft. Add the stock and beans, then simmer for 20 minutes. Season to taste and serve warm. Prep time: 10 min. Cook time: 20 min. Serves 4 people. Nutrition per serving: Calories 320, Protein 14 g, Carbohydrates 28 g, Fat 9 g, Fiber 8 g, Sugar 4 g, Sodium 540 mg.",
+    "helpers": {
+      "sectionList": [
+        "1 tbsp olive oil",
+        "1 onion, diced",
+        "4 cups vegetable stock",
+        "1 can white beans"
+      ],
+      "sectionContent": [
+        "Heat the oil and cook the onion until soft.",
+        "Add the stock and beans, then simmer for 20 minutes.",
+        "Season to taste and serve warm.",
+        "Prep time: 10 min. Cook time: 20 min. Serves 4 people.",
+        "Nutrition per serving: Calories 320, Protein 14 g, Carbohydrates 28 g, Fat 9 g, Fiber 8 g, Sugar 4 g, Sodium 540 mg."
+      ],
+      "selectors": [
+        "1 tbsp olive oil",
+        "1 onion, diced",
+        "4 cups vegetable stock",
+        "1 can white beans"
+      ],
+      "textBlocks": [
+        "This simple pantry soup comes together quickly and feeds four people.",
+        "1 tbsp olive oil",
+        "1 onion, diced",
+        "4 cups vegetable stock",
+        "1 can white beans",
+        "Heat the oil and cook the onion until soft.",
+        "Add the stock and beans, then simmer for 20 minutes.",
+        "Season to taste and serve warm.",
+        "Prep time: 10 min. Cook time: 20 min. Serves 4 people.",
+        "Nutrition per serving: Calories 320, Protein 14 g, Carbohydrates 28 g, Fat 9 g, Fiber 8 g, Sugar 4 g, Sodium 540 mg."
+      ]
+    }
+  },
+  "article-weak.html": {
+    "url": "https://fixtures.linkdish.test/article-weak",
+    "title": "Skillet Dinner Notes",
+    "description": null,
+    "detection": {
+      "sourceType": "article",
+      "confidence": "low",
+      "reasons": ["Fell back to article classification after URL heuristics."],
+      "adapterKey": null
+    },
+    "webpage": {
+      "recipe": {
+        "title": "Skillet Dinner Notes",
+        "sourceUrl": "https://fixtures.linkdish.test/article-weak",
+        "sourceType": "recipe-webpage",
+        "image": null,
+        "ingredients": [
+          {
+            "text": "1 lb chicken thighs"
+          },
+          {
+            "text": "2 tbsp chili paste"
+          },
+          {
+            "text": "I eyeballed the rest and served it hot."
+          }
+        ],
+        "steps": [],
+        "servings": null,
+        "prepTimeMinutes": null,
+        "cookTimeMinutes": null,
+        "nutrition": null
+      },
+      "strategy": "recipe-adapter-dom",
+      "evidence": [
+        "Used section-based heuristics after structured recipe metadata was unavailable."
+      ],
+      "warnings": ["Recipe details were inferred from visible page sections."],
+      "provenance": ["visible-text"],
+      "fieldProvenance": {
+        "title": "visible-text",
+        "ingredients": "visible-text",
+        "steps": "visible-text",
+        "servings": null,
+        "prepTimeMinutes": null,
+        "cookTimeMinutes": null,
+        "nutrition": null
+      },
+      "signals": {
+        "requiredFieldsInferred": true,
+        "titleConfidence": "weak",
+        "timesFromStructuredMetadata": false,
+        "recipeLike": true,
+        "detectionConfidence": "low",
+        "sectionCohesion": "weak",
+        "transcriptQuality": "missing",
+        "usedBrowserFallback": false,
+        "blockedSourceSignals": 0
+      }
+    },
+    "article": {
+      "recipe": {
+        "title": "Skillet Dinner Notes",
+        "sourceUrl": "https://fixtures.linkdish.test/article-weak",
+        "sourceType": "article",
+        "image": null,
+        "ingredients": [
+          {
+            "text": "1 lb chicken thighs"
+          },
+          {
+            "text": "2 tbsp chili paste"
+          },
+          {
+            "text": "I eyeballed the rest and served it hot."
+          }
+        ],
+        "steps": [],
+        "servings": null,
+        "prepTimeMinutes": null,
+        "cookTimeMinutes": null,
+        "nutrition": null
+      },
+      "strategy": "article-pattern",
+      "evidence": ["Parsed article content with Readability and section heuristics."],
+      "warnings": ["Article extraction relies on pattern matching and may need fallback review."],
+      "provenance": ["readability", "visible-text"],
+      "fieldProvenance": {
+        "title": "visible-text",
+        "ingredients": "visible-text",
+        "steps": "visible-text",
+        "servings": null,
+        "prepTimeMinutes": null,
+        "cookTimeMinutes": null,
+        "nutrition": null
+      },
+      "signals": {
+        "requiredFieldsInferred": true,
+        "titleConfidence": "weak",
+        "timesFromStructuredMetadata": false,
+        "recipeLike": true,
+        "detectionConfidence": "low",
+        "sectionCohesion": "weak",
+        "transcriptQuality": "missing",
+        "usedBrowserFallback": false,
+        "blockedSourceSignals": 0
+      }
+    },
+    "image": null,
+    "shell": false,
+    "thin": false,
+    "notFound": false,
+    "fallbackInput": "Extract a clean cooking recipe from the provided source.\n\nOnly return recipe data that is directly supported by the source. Be conservative with inferences.\n\nPreserve ingredient grouping exactly when the source has sections. For example, if a recipe has Cake and Frosting ingredients, attach section \"Cake\" to cake ingredients and section \"Frosting\" to frosting ingredients.\n\nMethod steps must make ingredient usage clear enough for cook mode. When a step uses only one section or a subset of ingredients, name that section or ingredients in the step text instead of relying on the user to look back.\n\nSource type: article\n\nDetection confidence: low\n\nFetch mode: http\n\nSource URL: https://fixtures.linkdish.test/article-weak\n\nDeterministic candidate:\n\n{\n  \"title\": \"Skillet Dinner Notes\",\n  \"ingredients\": [\n    {\n      \"text\": \"1 lb chicken thighs\"\n    },\n    {\n      \"text\": \"2 tbsp chili paste\"\n    },\n    {\n      \"text\": \"I eyeballed the rest and served it hot.\"\n    }\n  ],\n  \"steps\": [],\n  \"servings\": null,\n  \"prepTimeMinutes\": null,\n  \"cookTimeMinutes\": null,\n  \"nutrition\": null,\n  \"warnings\": [\n    \"Recipe details were inferred from visible page sections.\"\n  ],\n  \"evidence\": [\n    \"Used section-based heuristics after structured recipe metadata was unavailable.\"\n  ]\n}\n\nSource document:\n\nPage title: Skillet Dinner Notes\nMeta description: Unknown\nHeadings: Skillet Dinner Notes | Ingredients\nVisible text excerpt: Skillet Dinner Notes This was a quick dinner I made after work. Ingredients 1 lb chicken thighs 2 tbsp chili paste I eyeballed the rest and served it hot.",
+    "helpers": {
+      "sectionList": ["1 lb chicken thighs", "2 tbsp chili paste"],
+      "sectionContent": [],
+      "selectors": ["1 lb chicken thighs", "2 tbsp chili paste"],
+      "textBlocks": [
+        "This was a quick dinner I made after work.",
+        "1 lb chicken thighs",
+        "2 tbsp chili paste",
+        "I eyeballed the rest and served it hot."
+      ]
+    }
+  },
+  "article-no-recipe.html": {
+    "url": "https://fixtures.linkdish.test/article-no-recipe",
+    "title": "Design Systems and Team Velocity",
+    "description": null,
+    "detection": {
+      "sourceType": "recipe-webpage",
+      "confidence": "medium",
+      "reasons": ["Matched recipe-oriented URL heuristics."],
+      "adapterKey": null
+    },
+    "webpage": null,
+    "article": null,
+    "image": null,
+    "shell": false,
+    "thin": false,
+    "notFound": false,
+    "fallbackInput": "Extract a clean cooking recipe from the provided source.\n\nOnly return recipe data that is directly supported by the source. Be conservative with inferences.\n\nPreserve ingredient grouping exactly when the source has sections. For example, if a recipe has Cake and Frosting ingredients, attach section \"Cake\" to cake ingredients and section \"Frosting\" to frosting ingredients.\n\nMethod steps must make ingredient usage clear enough for cook mode. When a step uses only one section or a subset of ingredients, name that section or ingredients in the step text instead of relying on the user to look back.\n\nSource type: recipe-webpage\n\nDetection confidence: medium\n\nFetch mode: http\n\nSource URL: https://fixtures.linkdish.test/article-no-recipe\n\nDeterministic candidate:\n\nNo deterministic candidate was available.\n\nSource document:\n\nPage title: Design Systems and Team Velocity\nMeta description: Unknown\nHeadings: Design Systems and Team Velocity\nVisible text excerpt: Design Systems and Team Velocity This article explores collaboration patterns for scaling product design teams. It discusses tokens, review workflows, and documentation systems.",
+    "helpers": {
+      "sectionList": [],
+      "sectionContent": [],
+      "selectors": [],
+      "textBlocks": [
+        "This article explores collaboration patterns for scaling product design teams.",
+        "It discusses tokens, review workflows, and documentation systems."
+      ]
+    }
+  },
+  "recipe-graph-wprm.html": {
+    "url": "https://fixture-kitchen.test/lemon-herb-roast-chicken/",
+    "title": "Lemon Herb Roast Chicken",
+    "description": "Crispy skin, juicy meat, one pan.",
+    "detection": {
+      "sourceType": "recipe-webpage",
+      "confidence": "high",
+      "reasons": ["Detected Recipe JSON-LD in fetched HTML."],
+      "adapterKey": null
+    },
+    "webpage": {
+      "recipe": {
+        "title": "Lemon Herb Roast Chicken",
+        "sourceUrl": "https://fixture-kitchen.test/lemon-herb-roast-chicken/",
+        "sourceType": "recipe-webpage",
+        "image": {
+          "url": "https://fixture-kitchen.test/images/roast-chicken-article.jpg",
+          "source": "jsonld",
+          "width": 1200,
+          "height": 800
+        },
+        "ingredients": [
+          {
+            "text": "1 (4 lb) whole chicken"
+          },
+          {
+            "text": "2 lemons, halved"
+          },
+          {
+            "text": "6 cloves garlic, smashed"
+          },
+          {
+            "text": "2 tbsp olive oil (divided)"
+          },
+          {
+            "text": "1 tsp kosher salt, plus more"
+          },
+          {
+            "text": "fresh thyme"
+          }
+        ],
+        "steps": [
+          {
+            "index": 1,
+            "text": "Heat the oven to 425F."
+          },
+          {
+            "index": 2,
+            "text": "Pat the chicken dry and season it all over with salt."
+          },
+          {
+            "index": 3,
+            "text": "Roast for 70 minutes."
+          },
+          {
+            "index": 4,
+            "text": "Rest 10 minutes before carving."
+          }
+        ],
+        "servings": "4, 4 servings",
+        "prepTimeMinutes": 15,
+        "cookTimeMinutes": 70,
+        "nutrition": {
+          "calories": "520 kcal",
+          "protein": "48 g",
+          "carbohydrates": null,
+          "fat": "30 g",
+          "fiber": null,
+          "sugar": null,
+          "sodium": null
+        }
+      },
+      "strategy": "recipe-schema",
+      "evidence": ["Detected Recipe JSON-LD on the page."],
+      "warnings": [],
+      "provenance": ["jsonld"],
+      "fieldProvenance": {
+        "title": "jsonld",
+        "ingredients": "jsonld",
+        "steps": "jsonld",
+        "servings": "jsonld",
+        "prepTimeMinutes": "jsonld",
+        "cookTimeMinutes": "jsonld",
+        "nutrition": "jsonld"
+      },
+      "signals": {
+        "requiredFieldsInferred": false,
+        "titleConfidence": "strong",
+        "timesFromStructuredMetadata": true,
+        "recipeLike": true,
+        "detectionConfidence": "high",
+        "sectionCohesion": "strong",
+        "transcriptQuality": "weak",
+        "usedBrowserFallback": false,
+        "blockedSourceSignals": 0
+      }
+    },
+    "article": {
+      "recipe": {
+        "title": "Lemon Herb Roast Chicken",
+        "sourceUrl": "https://fixture-kitchen.test/lemon-herb-roast-chicken/",
+        "sourceType": "article",
+        "image": {
+          "url": "https://fixture-kitchen.test/images/roast-chicken-article.jpg",
+          "source": "jsonld",
+          "width": 1200,
+          "height": 800
+        },
+        "ingredients": [
+          {
+            "text": "1 (4 lb) whole chicken"
+          },
+          {
+            "text": "2 lemons, halved"
+          },
+          {
+            "text": "Heat the oven to 425F."
+          },
+          {
+            "text": "Calories: 520kcal Protein: 48g Fat: 30g Sodium: 900mg"
+          }
+        ],
+        "steps": [
+          {
+            "index": 1,
+            "text": "Heat the oven to 425F."
+          },
+          {
+            "index": 2,
+            "text": "Roast until golden."
+          },
+          {
+            "index": 3,
+            "text": "Calories: 520kcal Protein: 48g Fat: 30g Sodium: 900mg"
+          },
+          {
+            "index": 4,
+            "text": "This site is protected by reCAPTCHA and the Google Privacy Policy applies."
+          }
+        ],
+        "servings": null,
+        "prepTimeMinutes": null,
+        "cookTimeMinutes": null,
+        "nutrition": {
+          "calories": "520kcal",
+          "protein": "48g",
+          "carbohydrates": null,
+          "fat": "30g",
+          "fiber": null,
+          "sugar": null,
+          "sodium": "900mg"
+        }
+      },
+      "strategy": "article-pattern",
+      "evidence": ["Parsed article content with Readability and section heuristics."],
+      "warnings": ["Article extraction relies on pattern matching and may need fallback review."],
+      "provenance": ["readability", "visible-text"],
+      "fieldProvenance": {
+        "title": "visible-text",
+        "ingredients": "visible-text",
+        "steps": "visible-text",
+        "servings": null,
+        "prepTimeMinutes": null,
+        "cookTimeMinutes": null,
+        "nutrition": "visible-text"
+      },
+      "signals": {
+        "requiredFieldsInferred": true,
+        "titleConfidence": "weak",
+        "timesFromStructuredMetadata": false,
+        "recipeLike": true,
+        "detectionConfidence": "low",
+        "sectionCohesion": "medium",
+        "transcriptQuality": "missing",
+        "usedBrowserFallback": false,
+        "blockedSourceSignals": 0
+      }
+    },
+    "image": {
+      "url": "https://fixture-kitchen.test/images/roast-chicken-article.jpg",
+      "source": "jsonld",
+      "width": 1200,
+      "height": 800
+    },
+    "shell": false,
+    "thin": false,
+    "notFound": false,
+    "fallbackInput": "Extract a clean cooking recipe from the provided source.\n\nOnly return recipe data that is directly supported by the source. Be conservative with inferences.\n\nPreserve ingredient grouping exactly when the source has sections. For example, if a recipe has Cake and Frosting ingredients, attach section \"Cake\" to cake ingredients and section \"Frosting\" to frosting ingredients.\n\nMethod steps must make ingredient usage clear enough for cook mode. When a step uses only one section or a subset of ingredients, name that section or ingredients in the step text instead of relying on the user to look back.\n\nSource type: recipe-webpage\n\nDetection confidence: high\n\nFetch mode: http\n\nSource URL: https://fixture-kitchen.test/lemon-herb-roast-chicken/\n\nDeterministic candidate:\n\n{\n  \"title\": \"Lemon Herb Roast Chicken\",\n  \"ingredients\": [\n    {\n      \"text\": \"1 (4 lb) whole chicken\"\n    },\n    {\n      \"text\": \"2 lemons, halved\"\n    },\n    {\n      \"text\": \"6 cloves garlic, smashed\"\n    },\n    {\n      \"text\": \"2 tbsp olive oil (divided)\"\n    },\n    {\n      \"text\": \"1 tsp kosher salt, plus more\"\n    },\n    {\n      \"text\": \"fresh thyme\"\n    }\n  ],\n  \"steps\": [\n    {\n      \"index\": 1,\n      \"text\": \"Heat the oven to 425F.\"\n    },\n    {\n      \"index\": 2,\n      \"text\": \"Pat the chicken dry and season it all over with salt.\"\n    },\n    {\n      \"index\": 3,\n      \"text\": \"Roast for 70 minutes.\"\n    },\n    {\n      \"index\": 4,\n      \"text\": \"Rest 10 minutes before carving.\"\n    }\n  ],\n  \"servings\": \"4, 4 servings\",\n  \"prepTimeMinutes\": 15,\n  \"cookTimeMinutes\": 70,\n  \"nutrition\": {\n    \"calories\": \"520 kcal\",\n    \"protein\": \"48 g\",\n    \"carbohydrates\": null,\n    \"fat\": \"30 g\",\n    \"fiber\": null,\n    \"sugar\": null,\n    \"sodium\": null\n  },\n  \"warnings\": [],\n  \"evidence\": [\n    \"Detected Recipe JSON-LD on the page.\"\n  ]\n}\n\nSource document:\n\nPage title: Lemon Herb Roast Chicken\nMeta description: Crispy skin, juicy meat, one pan.\nHeadings: Lemon Herb Roast Chicken | Lemon Herb Roast Chicken\nVisible text excerpt: Lemon Herb Roast Chicken Jump to Recipe Lemon Herb Roast Chicken 1 (4 lb) whole chicken 2 lemons, halved Heat the oven to 425F. Roast until golden. Calories: 520kcal Protein: 48g Fat: 30g Sodium: 900mg This site is protected by reCAPTCHA and the Google Privacy Policy applies.",
+    "helpers": {
+      "sectionList": [],
+      "sectionContent": [],
+      "selectors": ["1 (4 lb) whole chicken", "2 lemons, halved"],
+      "textBlocks": [
+        "Jump to Recipe",
+        "1 (4 lb) whole chicken",
+        "2 lemons, halved",
+        "This site is protected by reCAPTCHA and the Google Privacy Policy applies."
+      ]
+    }
+  },
+  "recipe-adapter-dom.html": {
+    "url": "https://www.seriouseats.com/crispy-smashed-potatoes",
+    "title": "Crispy Smashed Potatoes Recipe",
+    "description": null,
+    "detection": {
+      "sourceType": "recipe-webpage",
+      "confidence": "medium",
+      "reasons": ["Detected strong recipe-like DOM structure in fetched HTML."],
+      "adapterKey": "seriouseats"
+    },
+    "webpage": {
+      "recipe": {
+        "title": "Crispy Smashed Potatoes",
+        "sourceUrl": "https://www.seriouseats.com/crispy-smashed-potatoes",
+        "sourceType": "recipe-webpage",
+        "image": {
+          "source": "og",
+          "url": "https://www.seriouseats.com/images/smashed-potatoes.jpg",
+          "width": 1200
+        },
+        "ingredients": [
+          {
+            "text": "2 pounds small Yukon Gold potatoes"
+          },
+          {
+            "text": "1/4 cup extra-virgin olive oil"
+          },
+          {
+            "text": "Kosher salt, to taste"
+          }
+        ],
+        "steps": [
+          {
+            "index": 1,
+            "text": "Boil potatoes in salted water until tender, about 20 minutes."
+          },
+          {
+            "index": 2,
+            "text": "Drain, then smash each potato flat with the bottom of a measuring cup."
+          },
+          {
+            "index": 3,
+            "text": "Roast with olive oil at 450F until deeply browned and crisp, 40 to 45 minutes."
+          }
+        ],
+        "servings": "4 to 6 servings",
+        "prepTimeMinutes": 10,
+        "cookTimeMinutes": 65,
+        "nutrition": {
+          "calories": "210 calories",
+          "protein": "3g",
+          "carbohydrates": "28g",
+          "fat": "10g",
+          "fiber": "3g",
+          "sugar": null,
+          "sodium": "320mg"
+        }
+      },
+      "strategy": "recipe-adapter-dom",
+      "evidence": [
+        "Used adapter-aware selectors for seriouseats after structured recipe metadata was unavailable."
+      ],
+      "warnings": ["Recipe details were inferred from visible page sections."],
+      "provenance": ["visible-text"],
+      "fieldProvenance": {
+        "title": "visible-text",
+        "ingredients": "visible-text",
+        "steps": "visible-text",
+        "servings": "visible-text",
+        "prepTimeMinutes": "visible-text",
+        "cookTimeMinutes": "visible-text",
+        "nutrition": "visible-text"
+      },
+      "signals": {
+        "requiredFieldsInferred": true,
+        "titleConfidence": "weak",
+        "timesFromStructuredMetadata": false,
+        "recipeLike": true,
+        "detectionConfidence": "low",
+        "sectionCohesion": "medium",
+        "transcriptQuality": "missing",
+        "usedBrowserFallback": false,
+        "blockedSourceSignals": 0
+      }
+    },
+    "article": {
+      "recipe": {
+        "title": "Crispy Smashed Potatoes Recipe",
+        "sourceUrl": "https://www.seriouseats.com/crispy-smashed-potatoes",
+        "sourceType": "article",
+        "image": {
+          "source": "og",
+          "url": "https://www.seriouseats.com/images/smashed-potatoes.jpg",
+          "width": 1200
+        },
+        "ingredients": [
+          {
+            "text": "2 pounds small Yukon Gold potatoes"
+          },
+          {
+            "text": "1/4 cup extra-virgin olive oil"
+          },
+          {
+            "text": "Kosher salt, to taste"
+          }
+        ],
+        "steps": [
+          {
+            "index": 1,
+            "text": "Boil potatoes in salted water until tender, about 20 minutes."
+          },
+          {
+            "index": 2,
+            "text": "Drain, then smash each potato flat with the bottom of a measuring cup."
+          },
+          {
+            "index": 3,
+            "text": "Roast with olive oil at 450F until deeply browned and crisp, 40 to 45 minutes."
+          }
+        ],
+        "servings": "4 to 6 servings",
+        "prepTimeMinutes": 10,
+        "cookTimeMinutes": 65,
+        "nutrition": {
+          "calories": "210 calories",
+          "protein": "3g",
+          "carbohydrates": "28g",
+          "fat": "10g",
+          "fiber": "3g",
+          "sugar": null,
+          "sodium": "320mg"
+        }
+      },
+      "strategy": "article-pattern",
+      "evidence": ["Parsed article content with Readability and seriouseats selector hints."],
+      "warnings": ["Article extraction relies on pattern matching and may need fallback review."],
+      "provenance": ["readability", "visible-text"],
+      "fieldProvenance": {
+        "title": "visible-text",
+        "ingredients": "visible-text",
+        "steps": "visible-text",
+        "servings": "visible-text",
+        "prepTimeMinutes": "visible-text",
+        "cookTimeMinutes": "visible-text",
+        "nutrition": "visible-text"
+      },
+      "signals": {
+        "requiredFieldsInferred": true,
+        "titleConfidence": "weak",
+        "timesFromStructuredMetadata": false,
+        "recipeLike": true,
+        "detectionConfidence": "low",
+        "sectionCohesion": "medium",
+        "transcriptQuality": "missing",
+        "usedBrowserFallback": false,
+        "blockedSourceSignals": 0
+      }
+    },
+    "image": {
+      "source": "og",
+      "url": "https://www.seriouseats.com/images/smashed-potatoes.jpg",
+      "width": 1200
+    },
+    "shell": false,
+    "thin": false,
+    "notFound": false,
+    "fallbackInput": "Extract a clean cooking recipe from the provided source.\n\nOnly return recipe data that is directly supported by the source. Be conservative with inferences.\n\nPreserve ingredient grouping exactly when the source has sections. For example, if a recipe has Cake and Frosting ingredients, attach section \"Cake\" to cake ingredients and section \"Frosting\" to frosting ingredients.\n\nMethod steps must make ingredient usage clear enough for cook mode. When a step uses only one section or a subset of ingredients, name that section or ingredients in the step text instead of relying on the user to look back.\n\nSource type: recipe-webpage\n\nDetection confidence: medium\n\nFetch mode: http\n\nSource URL: https://www.seriouseats.com/crispy-smashed-potatoes\n\nDeterministic candidate:\n\n{\n  \"title\": \"Crispy Smashed Potatoes\",\n  \"ingredients\": [\n    {\n      \"text\": \"2 pounds small Yukon Gold potatoes\"\n    },\n    {\n      \"text\": \"1/4 cup extra-virgin olive oil\"\n    },\n    {\n      \"text\": \"Kosher salt, to taste\"\n    }\n  ],\n  \"steps\": [\n    {\n      \"index\": 1,\n      \"text\": \"Boil potatoes in salted water until tender, about 20 minutes.\"\n    },\n    {\n      \"index\": 2,\n      \"text\": \"Drain, then smash each potato flat with the bottom of a measuring cup.\"\n    },\n    {\n      \"index\": 3,\n      \"text\": \"Roast with olive oil at 450F until deeply browned and crisp, 40 to 45 minutes.\"\n    }\n  ],\n  \"servings\": \"4 to 6 servings\",\n  \"prepTimeMinutes\": 10,\n  \"cookTimeMinutes\": 65,\n  \"nutrition\": {\n    \"calories\": \"210 calories\",\n    \"protein\": \"3g\",\n    \"carbohydrates\": \"28g\",\n    \"fat\": \"10g\",\n    \"fiber\": \"3g\",\n    \"sugar\": null,\n    \"sodium\": \"320mg\"\n  },\n  \"warnings\": [\n    \"Recipe details were inferred from visible page sections.\"\n  ],\n  \"evidence\": [\n    \"Used adapter-aware selectors for seriouseats after structured recipe metadata was unavailable.\"\n  ]\n}\n\nSource document:\n\nPage title: Crispy Smashed Potatoes Recipe\nMeta description: Unknown\nHeadings: Crispy Smashed Potatoes | Notes\nVisible text excerpt: Recipes Dinner Sides Crispy Smashed Potatoes Yield: 4 to 6 servings. Prep time: 10 minutes. Cook time: 1 hour 5 minutes. 2 pounds small Yukon Gold potatoes 1/4 cup extra-virgin olive oil Kosher salt, to taste 2 pounds small Yukon Gold potatoes Boil potatoes in salted water until tender, about 20 minutes. Drain, then smash each potato flat with the bottom of a measuring cup. Roast with olive oil at 450F until deeply browned and crisp, 40 to 45 minutes. Calories 210 Protein 3g Carbs 28g Fat 10g Fiber 3g Sodium 320mg Notes Leftovers keep for 3 days.",
+    "helpers": {
+      "sectionList": [],
+      "sectionContent": [],
+      "selectors": [
+        "2 pounds small Yukon Gold potatoes",
+        "1/4 cup extra-virgin olive oil",
+        "Kosher salt, to taste",
+        "Boil potatoes in salted water until tender, about 20 minutes.",
+        "Drain, then smash each potato flat with the bottom of a measuring cup.",
+        "Roast with olive oil at 450F until deeply browned and crisp, 40 to 45 minutes.",
+        "Dinner",
+        "Sides"
+      ],
+      "textBlocks": [
+        "Dinner",
+        "Sides",
+        "Yield: 4 to 6 servings. Prep time: 10 minutes. Cook time: 1 hour 5 minutes.",
+        "2 pounds small Yukon Gold potatoes",
+        "1/4 cup extra-virgin olive oil",
+        "Kosher salt, to taste",
+        "Boil potatoes in salted water until tender, about 20 minutes.",
+        "Drain, then smash each potato flat with the bottom of a measuring cup.",
+        "Roast with olive oil at 450F until deeply browned and crisp, 40 to 45 minutes.",
+        "Leftovers keep for 3 days."
+      ]
+    }
+  },
+  "article-sections.html": {
+    "url": "https://blog.fixture.test/2024/01/grandmothers-tomato-soup",
+    "title": "My Grandmother's Tomato Soup | A Food Blog",
+    "description": null,
+    "detection": {
+      "sourceType": "article",
+      "confidence": "low",
+      "reasons": ["Fell back to article classification after URL heuristics."],
+      "adapterKey": null
+    },
+    "webpage": null,
+    "article": {
+      "recipe": {
+        "title": "My Grandmother's Tomato Soup | A Food Blog",
+        "sourceUrl": "https://blog.fixture.test/2024/01/grandmothers-tomato-soup",
+        "sourceType": "article",
+        "image": {
+          "source": "twitter",
+          "url": "https://blog.fixture.test/media/tomato-soup.jpg"
+        },
+        "ingredients": [
+          {
+            "text": "Prep time: 15 minutes"
+          },
+          {
+            "text": "Cook time: 45 minutes"
+          },
+          {
+            "text": "2 tbsp butter"
+          },
+          {
+            "text": "1 onion, chopped"
+          },
+          {
+            "text": "2 cloves garlic, minced"
+          },
+          {
+            "text": "2 cans (28 oz) whole tomatoes"
+          },
+          {
+            "text": "2 cups vegetable stock"
+          },
+          {
+            "text": "1/2 cup heavy cream"
+          },
+          {
+            "text": "Melt the butter in a large pot and cook the onion until soft, about 8 minutes."
+          },
+          {
+            "text": "Add the garlic and cook for 1 minute, then add the tomatoes and stock."
+          },
+          {
+            "text": "Simmer for 30 minutes, blend until smooth, and stir in the cream."
+          },
+          {
+            "text": "Calories: 190 Protein: 4 g Carbohydrates: 18 g Fat: 11 g Sugar: 9 g Sodium: 640 mg"
+          }
+        ],
+        "steps": [
+          {
+            "index": 1,
+            "text": "Every winter my grandmother made this soup on Sundays. It takes about an hour and feeds a crowd of 6 people with bread on the side."
+          },
+          {
+            "index": 2,
+            "text": "Cook time: 45 minutes"
+          },
+          {
+            "index": 3,
+            "text": "Melt the butter in a large pot and cook the onion until soft, about 8 minutes."
+          },
+          {
+            "index": 4,
+            "text": "Add the garlic and cook for 1 minute, then add the tomatoes and stock."
+          },
+          {
+            "index": 5,
+            "text": "Simmer for 30 minutes, blend until smooth, and stir in the cream."
+          },
+          {
+            "index": 6,
+            "text": "Calories: 190 Protein: 4 g Carbohydrates: 18 g Fat: 11 g Sugar: 9 g Sodium: 640 mg"
+          }
+        ],
+        "servings": "6 people",
+        "prepTimeMinutes": 15,
+        "cookTimeMinutes": 45,
+        "nutrition": {
+          "calories": "190 calories",
+          "protein": "4 g",
+          "carbohydrates": "18 g",
+          "fat": "11 g",
+          "fiber": null,
+          "sugar": "9 g",
+          "sodium": "640 mg"
+        }
+      },
+      "strategy": "article-pattern",
+      "evidence": ["Parsed article content with Readability and section heuristics."],
+      "warnings": ["Article extraction relies on pattern matching and may need fallback review."],
+      "provenance": ["readability", "visible-text"],
+      "fieldProvenance": {
+        "title": "visible-text",
+        "ingredients": "visible-text",
+        "steps": "visible-text",
+        "servings": "visible-text",
+        "prepTimeMinutes": "visible-text",
+        "cookTimeMinutes": "visible-text",
+        "nutrition": "visible-text"
+      },
+      "signals": {
+        "requiredFieldsInferred": true,
+        "titleConfidence": "weak",
+        "timesFromStructuredMetadata": false,
+        "recipeLike": true,
+        "detectionConfidence": "low",
+        "sectionCohesion": "medium",
+        "transcriptQuality": "missing",
+        "usedBrowserFallback": false,
+        "blockedSourceSignals": 0
+      }
+    },
+    "image": {
+      "source": "twitter",
+      "url": "https://blog.fixture.test/media/tomato-soup.jpg"
+    },
+    "shell": false,
+    "thin": false,
+    "notFound": false,
+    "fallbackInput": "Extract a clean cooking recipe from the provided source.\n\nOnly return recipe data that is directly supported by the source. Be conservative with inferences.\n\nPreserve ingredient grouping exactly when the source has sections. For example, if a recipe has Cake and Frosting ingredients, attach section \"Cake\" to cake ingredients and section \"Frosting\" to frosting ingredients.\n\nMethod steps must make ingredient usage clear enough for cook mode. When a step uses only one section or a subset of ingredients, name that section or ingredients in the step text instead of relying on the user to look back.\n\nSource type: article\n\nDetection confidence: low\n\nFetch mode: http\n\nSource URL: https://blog.fixture.test/2024/01/grandmothers-tomato-soup\n\nDeterministic candidate:\n\n{\n  \"title\": \"My Grandmother's Tomato Soup | A Food Blog\",\n  \"ingredients\": [\n    {\n      \"text\": \"Prep time: 15 minutes\"\n    },\n    {\n      \"text\": \"Cook time: 45 minutes\"\n    },\n    {\n      \"text\": \"2 tbsp butter\"\n    },\n    {\n      \"text\": \"1 onion, chopped\"\n    },\n    {\n      \"text\": \"2 cloves garlic, minced\"\n    },\n    {\n      \"text\": \"2 cans (28 oz) whole tomatoes\"\n    },\n    {\n      \"text\": \"2 cups vegetable stock\"\n    },\n    {\n      \"text\": \"1/2 cup heavy cream\"\n    },\n    {\n      \"text\": \"Melt the butter in a large pot and cook the onion until soft, about 8 minutes.\"\n    },\n    {\n      \"text\": \"Add the garlic and cook for 1 minute, then add the tomatoes and stock.\"\n    },\n    {\n      \"text\": \"Simmer for 30 minutes, blend until smooth, and stir in the cream.\"\n    },\n    {\n      \"text\": \"Calories: 190 Protein: 4 g Carbohydrates: 18 g Fat: 11 g Sugar: 9 g Sodium: 640 mg\"\n    }\n  ],\n  \"steps\": [\n    {\n      \"index\": 1,\n      \"text\": \"Every winter my grandmother made this soup on Sundays. It takes about an hour and feeds a crowd of 6 people with bread on the side.\"\n    },\n    {\n      \"index\": 2,\n      \"text\": \"Cook time: 45 minutes\"\n    },\n    {\n      \"index\": 3,\n      \"text\": \"Melt the butter in a large pot and cook the onion until soft, about 8 minutes.\"\n    },\n    {\n      \"index\": 4,\n      \"text\": \"Add the garlic and cook for 1 minute, then add the tomatoes and stock.\"\n    },\n    {\n      \"index\": 5,\n      \"text\": \"Simmer for 30 minutes, blend until smooth, and stir in the cream.\"\n    },\n    {\n      \"index\": 6,\n      \"text\": \"Calories: 190 Protein: 4 g Carbohydrates: 18 g Fat: 11 g Sugar: 9 g Sodium: 640 mg\"\n    }\n  ],\n  \"servings\": \"6 people\",\n  \"prepTimeMinutes\": 15,\n  \"cookTimeMinutes\": 45,\n  \"nutrition\": {\n    \"calories\": \"190 calories\",\n    \"protein\": \"4 g\",\n    \"carbohydrates\": \"18 g\",\n    \"fat\": \"11 g\",\n    \"fiber\": null,\n    \"sugar\": \"9 g\",\n    \"sodium\": \"640 mg\"\n  },\n  \"warnings\": [\n    \"Article extraction relies on pattern matching and may need fallback review.\"\n  ],\n  \"evidence\": [\n    \"Parsed article content with Readability and section heuristics.\"\n  ]\n}\n\nSource document:\n\nPage title: My Grandmother's Tomato Soup | A Food Blog\nMeta description: Unknown\nHeadings: Popular posts | My Grandmother's Tomato Soup | What you need | How to make it | Nutrition\nVisible text excerpt: My Grandmother's Tomato Soup Every winter my grandmother made this soup on Sundays. It takes about an hour and feeds a crowd of 6 people with bread on the side. Prep time: 15 minutes Cook time: 45 minutes What you need Ingredients 2 tbsp butter 1 onion, chopped 2 cloves garlic, minced 2 cans (28 oz) whole tomatoes 2 cups vegetable stock 1/2 cup heavy cream How to make it Directions Melt the butter in a large pot and cook the onion until soft, about 8 minutes. Add the garlic and cook for 1 minute, then add the tomatoes and stock. Simmer for 30 minutes, blend until smooth, and stir in the cream. Nutrition Calories: 190 Protein: 4 g Carbohydrates: 18 g Fat: 11 g Sugar: 9 g Sodium: 640 mg",
+    "helpers": {
+      "sectionList": [],
+      "sectionContent": [],
+      "selectors": [
+        "Ten ways to use leftover rice",
+        "How to sharpen a knife",
+        "2 tbsp butter",
+        "1 onion, chopped",
+        "2 cloves garlic, minced",
+        "2 cans (28 oz) whole tomatoes",
+        "2 cups vegetable stock",
+        "1/2 cup heavy cream"
+      ],
+      "textBlocks": [
+        "Ten ways to use leftover rice",
+        "How to sharpen a knife",
+        "Every winter my grandmother made this soup on Sundays. It takes about an hour and feeds a crowd of 6 people with bread on the side.",
+        "Prep time: 15 minutes",
+        "Cook time: 45 minutes",
+        "Ingredients",
+        "2 tbsp butter",
+        "1 onion, chopped",
+        "2 cloves garlic, minced",
+        "2 cans (28 oz) whole tomatoes",
+        "2 cups vegetable stock",
+        "1/2 cup heavy cream",
+        "Directions",
+        "Melt the butter in a large pot and cook the onion until soft, about 8 minutes.",
+        "Add the garlic and cook for 1 minute, then add the tomatoes and stock.",
+        "Simmer for 30 minutes, blend until smooth, and stir in the cream.",
+        "Calories: 190 Protein: 4 g Carbohydrates: 18 g Fat: 11 g Sugar: 9 g Sodium: 640 mg",
+        "© A Food Blog. Advertisement."
+      ]
+    }
+  }
+}
