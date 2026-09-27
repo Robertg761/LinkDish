@@ -51,6 +51,10 @@ export interface AdminEnvironmentProfile {
     browserFetchConcurrency: number;
     llmFallbackTimeoutMs: number;
     llmFallbackDailyBudgetUsd: number;
+    extractRequestDeadlineMs: number;
+    extractCacheEnabled: boolean;
+    extractCacheTtlSeconds: number;
+    recipeTextCleanupEnabled: boolean;
   };
   plans: Array<{
     id: "free" | "plus" | "family";
@@ -78,6 +82,10 @@ const defaults = {
   browserFetchConcurrency: 2,
   llmFallbackTimeoutMs: 30_000,
   llmFallbackDailyBudgetUsd: 0,
+  extractRequestDeadlineMs: 50_000,
+  extractCacheEnabled: true,
+  extractCacheTtlSeconds: 604_800,
+  recipeTextCleanupEnabled: true,
   freeLifetimeImports: 3,
   plusMonthlyImports: 100,
   familyMonthlyImports: 250,
@@ -144,6 +152,9 @@ const getRuntimeProfile = (): RawProfile => ({
     BILLING_ENFORCEMENT_ENABLED: String(extractorApiEnv.BILLING_ENFORCEMENT_ENABLED),
     BROWSER_FETCH_CONCURRENCY: String(extractorApiEnv.BROWSER_FETCH_CONCURRENCY),
     BROWSER_FETCH_ENABLED: String(extractorApiEnv.BROWSER_FETCH_ENABLED),
+    EXTRACT_CACHE_ENABLED: String(extractorApiEnv.EXTRACT_CACHE_ENABLED),
+    EXTRACT_CACHE_TTL_SECONDS: String(extractorApiEnv.EXTRACT_CACHE_TTL_SECONDS),
+    EXTRACT_REQUEST_DEADLINE_MS: String(extractorApiEnv.EXTRACT_REQUEST_DEADLINE_MS),
     FREE_LIFETIME_IMPORT_LIMIT: String(extractorApiEnv.FREE_LIFETIME_IMPORT_LIMIT),
     FAMILY_MONTHLY_IMPORT_LIMIT: String(extractorApiEnv.FAMILY_MONTHLY_IMPORT_LIMIT),
     GEMINI_API_KEY: extractorApiEnv.GEMINI_API_KEY ?? "",
@@ -156,6 +167,7 @@ const getRuntimeProfile = (): RawProfile => ({
     PLUS_MONTHLY_IMPORT_LIMIT: String(extractorApiEnv.PLUS_MONTHLY_IMPORT_LIMIT),
     RATE_LIMIT_MAX: String(extractorApiEnv.RATE_LIMIT_MAX),
     RATE_LIMIT_WINDOW_MS: String(extractorApiEnv.RATE_LIMIT_WINDOW_MS),
+    RECIPE_TEXT_CLEANUP_ENABLED: String(extractorApiEnv.RECIPE_TEXT_CLEANUP_ENABLED),
     REVENUECAT_ENTITLEMENT_ID: extractorApiEnv.REVENUECAT_ENTITLEMENT_ID,
     REVENUECAT_FAMILY_ENTITLEMENT_ID: extractorApiEnv.REVENUECAT_FAMILY_ENTITLEMENT_ID,
     REVENUECAT_PLUS_ENTITLEMENT_ID: extractorApiEnv.REVENUECAT_PLUS_ENTITLEMENT_ID,
@@ -328,6 +340,26 @@ export const getAdminEnvironmentProfile = (
         rawProfile.values,
         "LLM_FALLBACK_DAILY_BUDGET_USD",
         defaults.llmFallbackDailyBudgetUsd
+      ),
+      extractRequestDeadlineMs: getNumber(
+        rawProfile.values,
+        "EXTRACT_REQUEST_DEADLINE_MS",
+        defaults.extractRequestDeadlineMs
+      ),
+      extractCacheEnabled: getBoolean(
+        rawProfile.values,
+        "EXTRACT_CACHE_ENABLED",
+        defaults.extractCacheEnabled
+      ),
+      extractCacheTtlSeconds: getNumber(
+        rawProfile.values,
+        "EXTRACT_CACHE_TTL_SECONDS",
+        defaults.extractCacheTtlSeconds
+      ),
+      recipeTextCleanupEnabled: getBoolean(
+        rawProfile.values,
+        "RECIPE_TEXT_CLEANUP_ENABLED",
+        defaults.recipeTextCleanupEnabled
       )
     },
     plans: [

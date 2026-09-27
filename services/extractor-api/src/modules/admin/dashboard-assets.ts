@@ -1661,6 +1661,14 @@ export const adminDashboardHtml = `<!doctype html>
           ["Active model", text(profile.llm.activeModel)],
           ["Daily LLM budget", usd.format(profile.runtime.llmFallbackDailyBudgetUsd)],
           ["Fallback timeout", profile.runtime.llmFallbackTimeoutMs + " ms"],
+          ["Extract deadline", profile.runtime.extractRequestDeadlineMs + " ms"],
+          [
+            "Result cache",
+            profile.runtime.extractCacheEnabled
+              ? "On (" + Math.round(profile.runtime.extractCacheTtlSeconds / 3600) + " h)"
+              : "Off"
+          ],
+          ["Text cleanup", profile.runtime.recipeTextCleanupEnabled ? "When needed" : "Off"],
           ["RevenueCat Plus entitlement", profile.billing.revenueCatEntitlementId],
           ["RevenueCat Family entitlement", profile.billing.revenueCatFamilyEntitlementId],
           [
