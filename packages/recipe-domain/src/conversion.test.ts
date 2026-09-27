@@ -313,6 +313,14 @@ describe("getDisplayIngredient", () => {
     }
   });
 
+  it("swaps counts and unitless lines to their metric alternate too", () => {
+    for (const text of ["1 stick (113g) butter", "2 [300 g] onions", "3 cups (360g) flour"]) {
+      expect(getDisplayIngredientText(text, { units: "metric" }), text).toBe(
+        legacyAlternateText(text, 1)
+      );
+    }
+  });
+
   it("reports flags", () => {
     expect(getDisplayIngredient("2 cups flour", { units: "metric", scale: 0.5 })).toEqual({
       text: "120 g flour",

@@ -613,7 +613,8 @@ export const convertParsedQuantity = (
   const primaryInTarget = primaryDefinition?.system === target;
   const altInTarget = altDefinition != null && altQty != null && altDefinition.system === target;
 
-  if (primaryDefinition && primaryDefinition.kind !== "count" && !primaryInTarget && altInTarget) {
+  // Counts swap too ("1 stick (113g) butter" → "113 g butter"), as the old alternate toggle did.
+  if (!primaryInTarget && altInTarget) {
     // The author's own amount in the target system beats any computed conversion.
     const promoted = convertAmount(altQty, altDefinition, target, {
       ingredient: parsed.item,
