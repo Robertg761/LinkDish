@@ -100,7 +100,8 @@ export type FormatParsedIngredientOptions = {
 const MIN_SCALE_FACTOR = 0.05;
 const MAX_SCALE_FACTOR = 50;
 
-const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const REGEXP_SPECIAL_PATTERN = /[.*+?^${}()|[\]\\]/g;
+const escapeRegExp = (value: string): string => value.replace(REGEXP_SPECIAL_PATTERN, "\\$&");
 
 const NUMBER_OR_WORD = `(?:${NUMBER_PHRASE_PATTERN}|${WORD_NUMBER_PATTERN})`;
 const RANGE_SEPARATOR = String.raw`\s*(?:-|–|—|\bto\b|\bor\b)\s*`;

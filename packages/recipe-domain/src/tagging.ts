@@ -617,8 +617,11 @@ const CUISINE_NAME_PATTERNS: ReadonlyMap<RecipeCuisine, RegExp> = new Map(
   ])
 );
 
+/** Matches nothing; every cuisine has a name pattern, so this is only a type-level fallback. */
+const NEVER_MATCHES_PATTERN = /(?!)/u;
+
 const compileCuisineName = (cuisine: RecipeCuisine): RegExp =>
-  CUISINE_NAME_PATTERNS.get(cuisine) ?? compileWords([cuisine]);
+  CUISINE_NAME_PATTERNS.get(cuisine) ?? NEVER_MATCHES_PATTERN;
 
 const TITLE_WEIGHT = 3;
 const INGREDIENT_WEIGHT = 1;

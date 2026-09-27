@@ -129,12 +129,16 @@ const stripDelimitedSegments = (text: string, opening: string, closing: string):
   return result;
 };
 
+const APOSTROPHE_PATTERN = /['’]/g;
+const NON_WORD_PATTERN = /[^a-z0-9]+/g;
+const WHITESPACE_PATTERN = /\s+/;
+
 const normalizeTokens = (text: string): string[] =>
   stripDelimitedSegments(stripDelimitedSegments(text.toLowerCase(), "[", "]"), "(", ")")
-    .replace(/['’]/g, "")
-    .replace(/[^a-z0-9]+/g, " ")
+    .replace(APOSTROPHE_PATTERN, "")
+    .replace(NON_WORD_PATTERN, " ")
     .trim()
-    .split(/\s+/)
+    .split(WHITESPACE_PATTERN)
     .filter(Boolean)
     .map(singularize);
 
