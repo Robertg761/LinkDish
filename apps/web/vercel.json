@@ -7,7 +7,7 @@
       "headers": [
         {
           "key": "Content-Security-Policy",
-          "value": "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; script-src 'self' https://cdn.jsdelivr.net https://clerk.linkdish.ca https://*.clerk.com https://*.clerk.dev https://*.clerk.accounts.dev; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' data: https://cdn.jsdelivr.net; img-src 'self' data: blob: https:; connect-src 'self' https://api.linkdish.ca https://linkdish-api.vercel.app https://clerk.linkdish.ca https://*.clerk.com https://*.clerk.dev https://*.clerk.accounts.dev https://*.revenuecat.com https://*.stripe.com wss://*.clerk.com; frame-src https://accounts.linkdish.ca https://clerk.linkdish.ca https://*.clerk.com https://*.clerk.dev https://*.clerk.accounts.dev https://*.revenuecat.com https://*.stripe.com; worker-src 'self' blob:; manifest-src 'self'; form-action 'self' https://accounts.linkdish.ca https://clerk.linkdish.ca https://*.clerk.com; upgrade-insecure-requests"
+          "value": "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; script-src 'self' https://clerk.linkdish.ca https://*.clerk.com https://*.clerk.dev https://*.clerk.accounts.dev; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob: https:; connect-src 'self' https://api.linkdish.ca https://linkdish-api.vercel.app https://clerk.linkdish.ca https://*.clerk.com https://*.clerk.dev https://*.clerk.accounts.dev https://*.revenuecat.com https://*.stripe.com wss://*.clerk.com; frame-src https://accounts.linkdish.ca https://clerk.linkdish.ca https://*.clerk.com https://*.clerk.dev https://*.clerk.accounts.dev https://*.revenuecat.com https://*.stripe.com; worker-src 'self' blob:; manifest-src 'self'; form-action 'self' https://accounts.linkdish.ca https://clerk.linkdish.ca https://*.clerk.com; upgrade-insecure-requests"
         },
         {
           "key": "Strict-Transport-Security",
@@ -32,6 +32,51 @@
         {
           "key": "X-Frame-Options",
           "value": "DENY"
+        }
+      ]
+    },
+    {
+      "source": "/assets/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        }
+      ]
+    },
+    {
+      "source": "/fonts/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        }
+      ]
+    },
+    {
+      "source": "/workbox-(.*).js",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        }
+      ]
+    },
+    {
+      "source": "/(sw.js|registerSW.js|manifest.webmanifest|index.html)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-cache"
+        }
+      ]
+    },
+    {
+      "source": "/",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-cache"
         }
       ]
     }
