@@ -78,7 +78,7 @@ describe("InstallPrompt card", () => {
 
     render(<InstallPrompt />);
 
-    const install = screen.getByRole("button", { name: "Install App" });
+    const install = screen.getByRole("button", { name: "Install app" });
     expect(install).toBeEnabled();
 
     await act(async () => {
@@ -87,25 +87,25 @@ describe("InstallPrompt card", () => {
     });
 
     expect(event.prompt).toHaveBeenCalled();
-    expect(screen.queryByRole("button", { name: "Install App" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Install app" })).not.toBeInTheDocument();
   });
 
   it("stays hidden before the first extraction, without an install event, or once dismissed", () => {
     fireBeforeInstallPrompt();
     const { unmount } = render(<InstallPrompt />);
-    expect(screen.queryByText("Add LinkDish to Home Screen")).not.toBeInTheDocument();
+    expect(screen.queryByText("Add LinkDish to your home screen")).not.toBeInTheDocument();
     unmount();
 
     localStorage.setItem("linkdish:web:has-extracted-recipe", "true");
     resetInstallPromptForTests();
     const second = render(<InstallPrompt />);
-    expect(screen.queryByText("Add LinkDish to Home Screen")).not.toBeInTheDocument();
+    expect(screen.queryByText("Add LinkDish to your home screen")).not.toBeInTheDocument();
     second.unmount();
 
     fireBeforeInstallPrompt();
     render(<InstallPrompt />);
-    fireEvent.click(screen.getByRole("button", { name: "Dismiss prompt" }));
-    expect(screen.queryByText("Add LinkDish to Home Screen")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss install tip" }));
+    expect(screen.queryByText("Add LinkDish to your home screen")).not.toBeInTheDocument();
     expect(localStorage.getItem("linkdish:web:install-prompt-dismissed")).toBe("true");
   });
 });
