@@ -22,3 +22,6 @@ export * from "./urls.js";
 export * from "./search.js";
 export * from "./tagging.js";
 export * from "./meal-plan.js";
+export * from "./backup.js";
+export * from "./recipe-import.js";
+export * from "./recipe-export.js";
