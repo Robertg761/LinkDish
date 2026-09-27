@@ -1,6 +1,4 @@
-import { load } from "cheerio";
-
-import type { HtmlSourceDocument, InternalFetchFailureKind } from "../types.js";
+import type { InternalFetchFailureKind } from "../types.js";
 
 export const browserLikeHeaders = {
   accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
@@ -147,24 +145,129 @@ export const sleep = async (durationMs: number) =>
     setTimeout(resolve, durationMs);
   });
 
+/*
+ * A per-operation timeout that also follows an optional parent signal (the
+ * request deadline, or a billing denial that cancels speculative work).
+ * `timedOut()` distinguishes our own timeout from a parent abort, and `abort()`
+ * cancels an operation whose result is no longer needed.
+ */
 export const createTimeoutSignal = (
-  timeoutMs: number
+  timeoutMs: number,
+  parentSignal?: AbortSignal
 ): {
   signal: AbortSignal;
   cleanup: () => void;
+  timedOut: () => boolean;
+  abort: () => void;
 } => {
   const controller = new AbortController();
+  let didTimeOut = false;
   const timeoutId = setTimeout(
-    () => controller.abort(new Error(`timeout:${timeoutMs}`)),
-    timeoutMs
+    () => {
+      didTimeOut = true;
+      controller.abort(new Error(`timeout:${timeoutMs}`));
+    },
+    Math.max(0, timeoutMs)
   );
+  const abortFromParent = () => controller.abort(parentSignal?.reason);
+
+  if (parentSignal?.aborted) {
+    abortFromParent();
+  } else {
+    parentSignal?.addEventListener("abort", abortFromParent, { once: true });
+  }
 
   return {
     signal: controller.signal,
-    cleanup: () => clearTimeout(timeoutId)
+    cleanup: () => {
+      clearTimeout(timeoutId);
+      parentSignal?.removeEventListener("abort", abortFromParent);
+    },
+    timedOut: () => didTimeOut,
+    abort: () => controller.abort(new Error("cancelled"))
   };
 };
 
+const hiddenElementNames = new Set(["noscript", "script", "style", "svg", "template"]);
+const tagNamePattern = /^<([a-z][a-z0-9-]*)/i;
+
+/* Challenge and wall pages are small; a long article is never "thin". */
+const maxWallPageHtmlChars = 150_000;
+const maxWallPageVisibleTextChars = 1_000;
+const suspiciousStatusCodes = new Set([401, 402, 403, 429, 451, 503]);
+
+/*
+ * These scanners run on attacker-supplied markup before any DOM parse, so they
+ * use forward-only indexOf scans (linear time) rather than backtracking
+ * regular expressions.
+ */
+const extractTitleText = (html: string): string => {
+  const lowerHtml = html.toLowerCase();
+  const openIndex = lowerHtml.indexOf("<title");
+  const contentStart = openIndex === -1 ? -1 : lowerHtml.indexOf(">", openIndex);
+  const closeIndex = contentStart === -1 ? -1 : lowerHtml.indexOf("</title", contentStart);
+
+  return closeIndex === -1
+    ? ""
+    : html
+        .slice(contentStart + 1, closeIndex)
+        .replace(/\s+/g, " ")
+        .trim();
+};
+
+/* Readable text only: comments, scripts, styles, SVG and markup are dropped. */
+export const extractVisibleHtmlText = (html: string): string => {
+  const lowerHtml = html.toLowerCase();
+  const parts: string[] = [];
+  let index = 0;
+
+  while (index < html.length) {
+    const tagStart = html.indexOf("<", index);
+
+    if (tagStart === -1) {
+      parts.push(html.slice(index));
+      break;
+    }
+
+    parts.push(html.slice(index, tagStart), " ");
+
+    if (html.startsWith("<!--", tagStart)) {
+      const commentEnd = html.indexOf("-->", tagStart + 4);
+      index = commentEnd === -1 ? html.length : commentEnd + 3;
+      continue;
+    }
+
+    const tagEnd = html.indexOf(">", tagStart + 1);
+
+    if (tagEnd === -1) {
+      break;
+    }
+
+    const tagName = tagNamePattern.exec(html.slice(tagStart, Math.min(tagEnd, tagStart + 64)))?.[1];
+    const normalizedTagName = tagName?.toLowerCase();
+
+    if (normalizedTagName && hiddenElementNames.has(normalizedTagName)) {
+      const closeIndex = lowerHtml.indexOf(`</${normalizedTagName}`, tagEnd + 1);
+      const closeEnd = closeIndex === -1 ? -1 : html.indexOf(">", closeIndex);
+      index = closeEnd === -1 ? html.length : closeEnd + 1;
+      continue;
+    }
+
+    index = tagEnd + 1;
+  }
+
+  return parts.join("").replace(/\s+/g, " ").trim();
+};
+
+/*
+ * Anti-bot markers used to be matched anywhere in the raw HTML, so ordinary
+ * recipe pages that load cdnjs.cloudflare.com, the Cloudflare Insights beacon or
+ * a reCAPTCHA comment form were flagged as blocked and paid for a 3-15 s
+ * browser render. Markers now count when they are in the page title, or when
+ * the response already looks like a wall: a blocking status (401/402/403/429/451/503),
+ * where the raw markup is still inspected, or a page with almost no readable
+ * text, where only the readable text is inspected.
+ */
 export const detectBlockedSignals = ({
   html,
   statusCode,
@@ -175,19 +278,31 @@ export const detectBlockedSignals = ({
   extraPatterns?: RegExp[];
 }): string[] => {
   const blockedSignals: string[] = [];
-  const normalizedHtml = html.toLowerCase();
+  const patterns = [...defaultBlockedPatterns, ...extraPatterns];
+  const title = extractTitleText(html);
+  const suspiciousStatus = suspiciousStatusCodes.has(statusCode);
 
   if (statusCode === 403 || statusCode === 429) {
     blockedSignals.push(`status:${statusCode}`);
   }
 
-  for (const pattern of [...defaultBlockedPatterns, ...extraPatterns]) {
-    if (pattern.test(normalizedHtml)) {
+  const visibleText =
+    suspiciousStatus || html.length <= maxWallPageHtmlChars ? extractVisibleHtmlText(html) : null;
+  const looksLikeWallPage =
+    visibleText !== null && visibleText.length <= maxWallPageVisibleTextChars;
+  const inspectedTexts = [
+    title,
+    ...(suspiciousStatus || looksLikeWallPage ? [visibleText ?? ""] : []),
+    ...(suspiciousStatus ? [html] : [])
+  ];
+
+  for (const pattern of patterns) {
+    if (inspectedTexts.some((text) => pattern.test(text))) {
       blockedSignals.push(pattern.source);
     }
   }
 
-  if (/<title>\s*just a moment/i.test(normalizedHtml)) {
+  if (/^just a moment/i.test(title)) {
     blockedSignals.push("challenge-title");
   }
 
@@ -210,32 +325,8 @@ export const classifyFetchStatusCode = (statusCode: number): InternalFetchFailur
   return null;
 };
 
-export const looksLikeShellHtml = (html: string): boolean => {
-  const $ = load(html);
-  const visibleText = $("body").text().replace(/\s+/g, " ").trim();
-  const rootMarkerCount = $("#__next, #root, #app, [data-reactroot], [id*='app']").length;
-  const scriptCount = $("script").length;
-
-  return visibleText.length < 180 && rootMarkerCount > 0 && scriptCount > 8;
-};
-
-export const looksLikeThinHtml = (html: string): boolean => {
-  const $ = load(html);
-  const visibleText = $("body").text().replace(/\s+/g, " ").trim();
-
-  return visibleText.length < 100 && html.replace(/\s+/g, "").length < 1500;
-};
-
 export const looksLikeNotFoundTitle = (title: string | null): boolean =>
   title ? notFoundTitlePatterns.some((pattern) => pattern.test(title)) : false;
-
-export const looksLikeNotFoundHtml = (html: string): boolean => {
-  const $ = load(html);
-  const title = $("title").text().trim();
-  const h1 = $("h1").first().text().trim();
-
-  return looksLikeNotFoundTitle(title) || looksLikeNotFoundTitle(h1);
-};
 
 const tokenizeUrlPath = (value: string): string[] =>
   value
@@ -283,43 +374,4 @@ export const looksLikeUnrelatedRedirect = ({
   const overlap = requestedTokens.filter((token) => finalTokens.includes(token));
 
   return overlap.length === 0;
-};
-
-export const buildHtmlSourceDocument = ({
-  url,
-  finalUrl,
-  html,
-  contentType,
-  blockedSignals,
-  statusCode
-}: {
-  url: string;
-  finalUrl: string;
-  html: string;
-  contentType: string | null;
-  blockedSignals: string[];
-  statusCode: number;
-}): HtmlSourceDocument => {
-  const $ = load(html);
-  const title =
-    $('meta[property="og:title"]').attr("content")?.trim() ||
-    $('meta[name="twitter:title"]').attr("content")?.trim() ||
-    $("title").text().trim() ||
-    null;
-  const description =
-    $('meta[property="og:description"]').attr("content")?.trim() ||
-    $('meta[name="description"]').attr("content")?.trim() ||
-    null;
-
-  return {
-    kind: "html",
-    url,
-    finalUrl,
-    html,
-    contentType,
-    title,
-    description,
-    blockedSignals,
-    statusCode
-  };
 };

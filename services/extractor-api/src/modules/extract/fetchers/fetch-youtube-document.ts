@@ -3,6 +3,7 @@ import { load } from "cheerio";
 import { extractorApiEnv } from "../../../config/env.js";
 import { isSourceUrlRejection, validatePublicSourceUrl } from "../source-url-safety.js";
 
+import { YouTubeFetchError } from "./errors.js";
 import {
   browserLikeHeaders,
   createTimeoutSignal,
@@ -14,19 +15,13 @@ import {
 import type { ValidateSourceUrl } from "../source-url-safety.js";
 import type { YouTubeSourceDocument } from "../types.js";
 
+export { YouTubeFetchError } from "./errors.js";
+
 export interface FetchYouTubeDocumentOptions {
   maxBytes?: number;
   validateUrl?: ValidateSourceUrl;
-}
-
-export class YouTubeFetchError extends Error {
-  public constructor(
-    message: string,
-    public readonly reason: "unreachable" | "blocked" | "timeout" | "too_large"
-  ) {
-    super(message);
-    this.name = "YouTubeFetchError";
-  }
+  /** The request deadline or a cancellation. */
+  signal?: AbortSignal;
 }
 
 const readLimitedYouTubeText = async (response: Response, maxBytes: number): Promise<string> => {
@@ -44,10 +39,31 @@ const readLimitedYouTubeText = async (response: Response, maxBytes: number): Pro
   }
 };
 
-const fetchTranscriptFromLibrary = async (videoId: string): Promise<string | null> => {
+/*
+ * youtube-transcript does its own networking without a timeout or abort
+ * signal, so it is raced against the request budget instead of being awaited
+ * unbounded.
+ */
+const fetchTranscriptFromLibrary = async (
+  videoId: string,
+  timeoutMs: number,
+  signal?: AbortSignal
+): Promise<string | null> => {
+  const timeout = createTimeoutSignal(timeoutMs, signal);
+
   try {
-    const { YoutubeTranscript } = await import("youtube-transcript");
-    const transcript = await YoutubeTranscript.fetchTranscript(videoId);
+    const transcriptPromise = import("youtube-transcript").then(({ YoutubeTranscript }) =>
+      YoutubeTranscript.fetchTranscript(videoId)
+    );
+    const abortPromise = new Promise<null>((resolve) => {
+      if (timeout.signal.aborted) {
+        resolve(null);
+        return;
+      }
+
+      timeout.signal.addEventListener("abort", () => resolve(null), { once: true });
+    });
+    const transcript = await Promise.race([transcriptPromise.catch(() => null), abortPromise]);
 
     if (!Array.isArray(transcript) || transcript.length === 0) {
       return null;
@@ -56,6 +72,8 @@ const fetchTranscriptFromLibrary = async (videoId: string): Promise<string | nul
     return transcript.map((entry) => entry.text).join(" ");
   } catch {
     return null;
+  } finally {
+    timeout.cleanup();
   }
 };
 
@@ -72,7 +90,8 @@ const fetchTranscriptFromCaptionTrack = async (
   fetchImplementation: typeof fetch,
   timeoutMs: number,
   maxBytes: number,
-  validateUrl: ValidateSourceUrl
+  validateUrl: ValidateSourceUrl,
+  signal?: AbortSignal
 ): Promise<string | null> => {
   const captionTrackMatch = pageHtml.match(/"captionTracks":(\[[^\]]+\])/);
 
@@ -107,7 +126,7 @@ const fetchTranscriptFromCaptionTrack = async (
       return null;
     }
 
-    const timeout = createTimeoutSignal(timeoutMs);
+    const timeout = createTimeoutSignal(timeoutMs, signal);
 
     try {
       const response = await fetchImplementation(captionUrl, {
@@ -141,6 +160,17 @@ const parseChapterLines = (text: string): string[] =>
     .map((line) => line.trim())
     .filter((line) => /^\d{1,2}:\d{2}(?::\d{2})?\s+/.test(line));
 
+const toYouTubeRequestError = (error: unknown, signal: AbortSignal): YouTubeFetchError => {
+  if (error instanceof YouTubeFetchError) {
+    return error;
+  }
+
+  return new YouTubeFetchError(
+    error instanceof Error ? error.message : "YouTube request failed.",
+    signal.aborted ? "timeout" : "unreachable"
+  );
+};
+
 export const fetchYouTubeDocument = async (
   url: string,
   videoId: string,
@@ -151,73 +181,96 @@ export const fetchYouTubeDocument = async (
   const maxBytes = options?.maxBytes ?? extractorApiEnv.FETCH_MAX_RESPONSE_BYTES;
   const validateUrl = options?.validateUrl ?? validatePublicSourceUrl;
   const oEmbedUrl = `https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`;
-  const oEmbedTimeout = createTimeoutSignal(timeoutMs);
-  const oEmbedResponse = await fetchImplementation(oEmbedUrl, {
+  const oEmbedTimeout = createTimeoutSignal(timeoutMs, options?.signal);
+  const watchTimeout = createTimeoutSignal(timeoutMs, options?.signal);
+
+  /* The oEmbed metadata and the watch page are independent, so they load in parallel. */
+  const oEmbedRequest = fetchImplementation(oEmbedUrl, {
     headers: {
       "accept-language": browserLikeHeaders["accept-language"]
     },
     signal: oEmbedTimeout.signal
-  }).finally(() => oEmbedTimeout.cleanup());
-
-  if (!oEmbedResponse.ok) {
-    throw new YouTubeFetchError(
-      `Failed to fetch YouTube metadata: ${oEmbedResponse.status}`,
-      oEmbedResponse.status === 403 || oEmbedResponse.status === 429 ? "blocked" : "unreachable"
-    );
-  }
-
-  const metadata = JSON.parse(await readLimitedYouTubeText(oEmbedResponse, maxBytes)) as {
-    title?: string;
-    author_name?: string;
-  };
-
-  const watchTimeout = createTimeoutSignal(timeoutMs);
-  const watchResponse = await fetchImplementation(url, {
+  });
+  const watchRequest = fetchImplementation(url, {
     headers: browserLikeHeaders,
     signal: watchTimeout.signal
-  }).finally(() => watchTimeout.cleanup());
+  });
 
-  if (!watchResponse.ok) {
-    throw new YouTubeFetchError(
-      `Failed to fetch YouTube watch page: ${watchResponse.status}`,
-      watchResponse.status === 403 || watchResponse.status === 429 ? "blocked" : "unreachable"
-    );
+  void watchRequest.catch(() => undefined);
+
+  try {
+    const oEmbedResponse = await oEmbedRequest.catch((error: unknown) => {
+      throw toYouTubeRequestError(error, oEmbedTimeout.signal);
+    });
+
+    if (!oEmbedResponse.ok) {
+      throw new YouTubeFetchError(
+        `Failed to fetch YouTube metadata: ${oEmbedResponse.status}`,
+        oEmbedResponse.status === 403 || oEmbedResponse.status === 429 ? "blocked" : "unreachable"
+      );
+    }
+
+    const metadata = JSON.parse(await readLimitedYouTubeText(oEmbedResponse, maxBytes)) as {
+      title?: string;
+      author_name?: string;
+    };
+    const watchResponse = await watchRequest.catch((error: unknown) => {
+      throw toYouTubeRequestError(error, watchTimeout.signal);
+    });
+
+    if (!watchResponse.ok) {
+      throw new YouTubeFetchError(
+        `Failed to fetch YouTube watch page: ${watchResponse.status}`,
+        watchResponse.status === 403 || watchResponse.status === 429 ? "blocked" : "unreachable"
+      );
+    }
+
+    if (!isHtmlLikeContentType(watchResponse.headers.get("content-type"))) {
+      throw new YouTubeFetchError(
+        "Refused non-HTML YouTube watch page content type.",
+        "unreachable"
+      );
+    }
+
+    const pageHtml = await readLimitedYouTubeText(watchResponse, maxBytes);
+    const $ = load(pageHtml);
+    const title =
+      metadata.title ??
+      $('meta[property="og:title"]').attr("content")?.trim() ??
+      $("title").text().trim() ??
+      null;
+    const description =
+      $('meta[property="og:description"]').attr("content")?.trim() ??
+      $('meta[name="description"]').attr("content")?.trim() ??
+      (metadata.author_name ? `Creator: ${metadata.author_name}` : null);
+    const transcript =
+      (await fetchTranscriptFromLibrary(videoId, timeoutMs, options?.signal)) ??
+      (await fetchTranscriptFromCaptionTrack(
+        pageHtml,
+        fetchImplementation,
+        timeoutMs,
+        maxBytes,
+        validateUrl,
+        options?.signal
+      ));
+    const chapters = parseChapterLines(description ?? "");
+
+    return {
+      kind: "youtube",
+      url,
+      videoId,
+      title,
+      description,
+      transcript,
+      chapters,
+      pageHtml
+    };
+  } catch (error) {
+    /* Do not keep downloading a watch page nobody will read. */
+    watchTimeout.abort();
+    throw error;
+  } finally {
+    oEmbedTimeout.cleanup();
+    watchTimeout.cleanup();
   }
-
-  if (!isHtmlLikeContentType(watchResponse.headers.get("content-type"))) {
-    throw new YouTubeFetchError("Refused non-HTML YouTube watch page content type.", "unreachable");
-  }
-
-  const pageHtml = await readLimitedYouTubeText(watchResponse, maxBytes);
-  const $ = load(pageHtml);
-  const title =
-    metadata.title ??
-    $('meta[property="og:title"]').attr("content")?.trim() ??
-    $("title").text().trim() ??
-    null;
-  const description =
-    $('meta[property="og:description"]').attr("content")?.trim() ??
-    $('meta[name="description"]').attr("content")?.trim() ??
-    (metadata.author_name ? `Creator: ${metadata.author_name}` : null);
-  const transcript =
-    (await fetchTranscriptFromLibrary(videoId)) ??
-    (await fetchTranscriptFromCaptionTrack(
-      pageHtml,
-      fetchImplementation,
-      timeoutMs,
-      maxBytes,
-      validateUrl
-    ));
-  const chapters = parseChapterLines(description ?? "");
-
-  return {
-    kind: "youtube",
-    url,
-    videoId,
-    title,
-    description,
-    transcript,
-    chapters,
-    pageHtml
-  };
 };

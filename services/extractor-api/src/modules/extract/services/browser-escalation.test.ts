@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { shouldUseBrowserFallback } from "./runtime";
+import { shouldUseBrowserFallback } from "./browser-escalation";
 
 describe("shouldUseBrowserFallback", () => {
   it("keeps complete Recipe JSON-LD on the HTTP extraction path", () => {

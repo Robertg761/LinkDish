@@ -30,7 +30,11 @@ const buildCandidateSummary = (input: FallbackExtractionInput): string => {
   );
 };
 
-const buildHtmlSourceSummary = (html: string): string => {
+/*
+ * Parses its own copy of the page: it strips scripts and styles, so it must not
+ * touch the shared read-only parse used by detection and the extractors.
+ */
+export const buildHtmlSourceSummary = (html: string): string => {
   const $ = load(html);
   $("script, style, noscript, template, svg, iframe").remove();
 
@@ -63,7 +67,7 @@ const buildHtmlSourceSummary = (html: string): string => {
 export const buildFallbackInputText = (input: FallbackExtractionInput): string => {
   const sourceDocument =
     input.sourceDocument.kind === "html"
-      ? buildHtmlSourceSummary(input.sourceDocument.html)
+      ? (input.sourceSummary ?? buildHtmlSourceSummary(input.sourceDocument.html))
       : input.sourceDocument.kind === "youtube"
         ? [
             `Title: ${input.sourceDocument.title ?? "Unknown"}`,

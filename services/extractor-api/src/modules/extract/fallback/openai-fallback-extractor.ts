@@ -1,14 +1,22 @@
-import OpenAI from "openai";
 import { z } from "zod";
 
-import { buildFallbackInputText } from "./build-fallback-input.js";
+import { fallbackResponseReserveMs } from "./budget.js";
 import { FallbackProviderError } from "./errors.js";
+import { loadFallbackInputBuilder } from "./load-fallback-input.js";
 
 import type {
   FallbackExtractionInput,
   FallbackRecipeExtractor,
   ExtractionCandidate
 } from "../types.js";
+import type OpenAI from "openai";
+
+/*
+ * The SDK defaults to a 10 minute timeout with 2 retries, which could hold a
+ * request far past the function's maxDuration. Each call now gets one attempt
+ * bounded by LLM_FALLBACK_TIMEOUT_MS and the request deadline.
+ */
+const openAiMaxRetries = 0;
 
 const fallbackRecipePayloadSchema = z.object({
   title: z.string().min(1),
@@ -164,9 +172,7 @@ const toExtractionCandidate = (
   }
 });
 
-const buildOpenAiInput = (input: FallbackExtractionInput) => {
-  const prompt = buildFallbackInputText(input);
-
+const buildOpenAiInput = (input: FallbackExtractionInput, prompt: string) => {
   if (input.sourceDocument.kind !== "image") {
     return prompt;
   }
@@ -192,28 +198,66 @@ const buildOpenAiInput = (input: FallbackExtractionInput) => {
 class AvailableOpenAiFallbackExtractor implements FallbackRecipeExtractor {
   public readonly available = true;
   public readonly providerName = "openai" as const;
+  private clientPromise: Promise<OpenAI> | null = null;
 
   public constructor(
-    private readonly client: OpenAI,
-    private readonly model: string
+    private readonly apiKey: string,
+    private readonly model: string,
+    private readonly timeoutMs: number
   ) {}
 
+  /* The SDK (~150 ms to import) loads on the first OpenAI call, not on every cold start. */
+  private getClient(): Promise<OpenAI> {
+    this.clientPromise ??= import("openai").then(
+      ({ default: OpenAIClient }) =>
+        new OpenAIClient({
+          apiKey: this.apiKey,
+          maxRetries: openAiMaxRetries,
+          timeout: this.timeoutMs
+        })
+    );
+
+    return this.clientPromise;
+  }
+
   public async extract(input: FallbackExtractionInput): Promise<ExtractionCandidate | null> {
+    const timeoutMs = input.deadline
+      ? input.deadline.budgetMs(this.timeoutMs, fallbackResponseReserveMs)
+      : this.timeoutMs;
+
+    if (timeoutMs <= 0) {
+      throw new FallbackProviderError(
+        "Not enough request time left for the OpenAI fallback.",
+        "fallback_failed"
+      );
+    }
+
     try {
-      const response = await this.client.responses.create({
-        model: this.model,
-        instructions:
-          "You extract structured cooking recipes from URLs, webpages, articles, YouTube transcripts, and recipe images. Preserve ingredient sections and method context exactly when visible. Return only the schema requested.",
-        input: buildOpenAiInput(input),
-        text: {
-          format: {
-            type: "json_schema",
-            name: "linkdish_recipe_extraction",
-            strict: true,
-            schema: fallbackRecipeJsonSchema
+      const [client, { buildFallbackInputText }] = await Promise.all([
+        this.getClient(),
+        loadFallbackInputBuilder()
+      ]);
+      const response = await client.responses.create(
+        {
+          model: this.model,
+          instructions:
+            "You extract structured cooking recipes from URLs, webpages, articles, YouTube transcripts, and recipe images. Preserve ingredient sections and method context exactly when visible. Return only the schema requested.",
+          input: buildOpenAiInput(input, buildFallbackInputText(input)),
+          text: {
+            format: {
+              type: "json_schema",
+              name: "linkdish_recipe_extraction",
+              strict: true,
+              schema: fallbackRecipeJsonSchema
+            }
           }
+        },
+        {
+          maxRetries: openAiMaxRetries,
+          timeout: timeoutMs,
+          ...(input.deadline ? { signal: input.deadline.signal } : {})
         }
-      });
+      );
 
       if (!response.output_text) {
         return null;
@@ -247,13 +291,20 @@ class UnavailableOpenAiFallbackExtractor implements FallbackRecipeExtractor {
   }
 }
 
+export const defaultOpenAiTimeoutMs = 30_000;
+
 export const createOpenAiFallbackExtractor = (
   apiKey: string | undefined,
-  model: string | undefined
+  model: string | undefined,
+  options: { timeoutMs?: number } = {}
 ): FallbackRecipeExtractor => {
   if (!apiKey || !model) {
     return new UnavailableOpenAiFallbackExtractor();
   }
 
-  return new AvailableOpenAiFallbackExtractor(new OpenAI({ apiKey }), model);
+  return new AvailableOpenAiFallbackExtractor(
+    apiKey,
+    model,
+    options.timeoutMs ?? defaultOpenAiTimeoutMs
+  );
 };

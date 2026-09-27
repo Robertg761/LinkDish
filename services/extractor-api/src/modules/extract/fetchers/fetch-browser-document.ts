@@ -1,43 +1,67 @@
 import { extractorApiEnv } from "../../../config/env.js";
+import { buildHtmlSourceDocument } from "../html/parsed-html-document.js";
 import { isSourceUrlRejection, validatePublicSourceUrl } from "../source-url-safety.js";
 
-import {
-  browserLikeHeaders,
-  buildHtmlSourceDocument,
-  classifyFetchStatusCode,
-  detectBlockedSignals
-} from "./shared.js";
+import { BrowserFetchError } from "./errors.js";
+import { browserLikeHeaders, classifyFetchStatusCode, detectBlockedSignals } from "./shared.js";
 
-import type { ValidateSourceUrl } from "../source-url-safety.js";
-import type { BrowserFetcher, FetchResult, InternalFetchFailureKind } from "../types.js";
+import type { SourceUrlSafetyResult, ValidateSourceUrl } from "../source-url-safety.js";
+import type { BrowserFetcher, BrowserFetchOptions, FetchResult } from "../types.js";
 
-export class BrowserFetchError extends Error {
-  public constructor(
-    message: string,
-    public readonly reason: InternalFetchFailureKind,
-    public readonly blockedSignals: string[] = [],
-    public readonly statusCode?: number,
-    public readonly finalUrl?: string
-  ) {
-    super(message);
-    this.name = "BrowserFetchError";
-  }
-}
+export { BrowserFetchError } from "./errors.js";
 
 let activeBrowserFetches = 0;
 const browserWaiters: Array<() => void> = [];
 
-const acquireBrowserSlot = async (limit: number) => {
+/*
+ * A request waits for a browser slot for at most this long (less when its
+ * deadline is closer), so a burst of renders on one instance cannot hold a
+ * request past the function's maxDuration.
+ */
+export const defaultBrowserQueueTimeoutMs = 10_000;
+
+const acquireBrowserSlot = async (
+  limit: number,
+  { signal, timeoutMs }: { signal?: AbortSignal | undefined; timeoutMs: number }
+): Promise<void> => {
+  if (signal?.aborted) {
+    throw new BrowserFetchError("Browser fetch was cancelled before it started.", "timeout");
+  }
+
   if (activeBrowserFetches < limit) {
     activeBrowserFetches += 1;
     return;
   }
 
-  await new Promise<void>((resolve) => {
-    browserWaiters.push(() => {
+  await new Promise<void>((resolve, reject) => {
+    const stopWaiting = () => {
+      clearTimeout(timeoutId);
+      signal?.removeEventListener("abort", onAbort);
+      const waiterIndex = browserWaiters.indexOf(waiter);
+
+      if (waiterIndex !== -1) {
+        browserWaiters.splice(waiterIndex, 1);
+      }
+    };
+    const waiter = () => {
+      stopWaiting();
       activeBrowserFetches += 1;
       resolve();
-    });
+    };
+    const onAbort = () => {
+      stopWaiting();
+      reject(new BrowserFetchError("Browser fetch was cancelled while queued.", "timeout"));
+    };
+    const timeoutId = setTimeout(
+      () => {
+        stopWaiting();
+        reject(new BrowserFetchError("Timed out waiting for a browser slot.", "timeout"));
+      },
+      Math.max(0, timeoutMs)
+    );
+
+    signal?.addEventListener("abort", onAbort, { once: true });
+    browserWaiters.push(waiter);
   });
 };
 
@@ -54,7 +78,7 @@ class UnavailableBrowserFetcher implements BrowserFetcher {
   public readonly available = false;
 
   public fetch(): Promise<FetchResult> {
-    throw new BrowserFetchError("Browser fetcher is unavailable.", "unreachable");
+    return Promise.reject(new BrowserFetchError("Browser fetcher is unavailable.", "unreachable"));
   }
 
   public dispose(): Promise<void> {
@@ -99,8 +123,20 @@ type BrowserHandle = {
   close(): Promise<void>;
 };
 
+/* Rendering only needs the DOM, so everything that does not build it is dropped. */
+const blockedResourceTypes = new Set([
+  "eventsource",
+  "font",
+  "image",
+  "manifest",
+  "media",
+  "stylesheet",
+  "texttrack",
+  "websocket"
+]);
+
 const shouldAbortRequest = (resourceType: string, requestUrl: string): boolean => {
-  if (["image", "font", "media"].includes(resourceType)) {
+  if (blockedResourceTypes.has(resourceType)) {
     return true;
   }
 
@@ -144,6 +180,35 @@ const assertSafeBrowserUrl = async (url: string, validateUrl: ValidateSourceUrl)
       url
     );
   }
+};
+
+/*
+ * A rendered page issues dozens of sub-requests to a handful of hosts. Each
+ * one is still validated, but the DNS-backed check runs once per origin for the
+ * lifetime of a single render instead of once per request.
+ */
+const createPerRenderUrlValidator = (validateUrl: ValidateSourceUrl): ValidateSourceUrl => {
+  const resultsByOrigin = new Map<string, Promise<SourceUrlSafetyResult>>();
+
+  return (url: string) => {
+    let origin: string;
+
+    try {
+      const parsedUrl = new URL(url);
+      origin = `${parsedUrl.protocol}//${parsedUrl.host}`;
+    } catch {
+      return validateUrl(url);
+    }
+
+    let result = resultsByOrigin.get(origin);
+
+    if (!result) {
+      result = validateUrl(url);
+      resultsByOrigin.set(origin, result);
+    }
+
+    return result;
+  };
 };
 
 const launchBrowser = async (): Promise<BrowserHandle> => {
@@ -196,10 +261,21 @@ class AvailableBrowserFetcher implements BrowserFetcher {
     await browser?.close().catch(() => undefined);
   }
 
-  private async fetchWithBrowser(url: string): Promise<FetchResult> {
+  private async fetchWithBrowser(url: string, options: BrowserFetchOptions): Promise<FetchResult> {
     let browser: BrowserHandle | null = null;
     let context: BrowserContextHandle | null = null;
     let page: PageHandle | null = null;
+    const signal = options.signal;
+    const validateUrl = createPerRenderUrlValidator(this.validateUrl);
+    const navigationTimeoutMs = Math.max(
+      1,
+      Math.min(this.timeoutMs, options.timeoutMs ?? this.timeoutMs)
+    );
+    const closeContextOnAbort = () => {
+      void context?.close().catch(() => undefined);
+    };
+
+    signal?.addEventListener("abort", closeContextOnAbort, { once: true });
 
     try {
       await assertSafeBrowserUrl(url, this.validateUrl);
@@ -210,6 +286,11 @@ class AvailableBrowserFetcher implements BrowserFetcher {
         locale: "en-US",
         serviceWorkers: "block"
       });
+
+      if (signal?.aborted) {
+        throw new BrowserFetchError("Browser fetch was cancelled.", "timeout");
+      }
+
       await context.route("**/*", async (route) => {
         const request = route.request();
         const requestUrl = request.url();
@@ -219,7 +300,7 @@ class AvailableBrowserFetcher implements BrowserFetcher {
           return;
         }
 
-        const requestSafety = await this.validateUrl(requestUrl);
+        const requestSafety = await validateUrl(requestUrl);
         if (isSourceUrlRejection(requestSafety)) {
           await route.abort();
           return;
@@ -238,7 +319,7 @@ class AvailableBrowserFetcher implements BrowserFetcher {
 
       const response = await activePage.goto(url, {
         waitUntil: "domcontentloaded",
-        timeout: this.timeoutMs
+        timeout: navigationTimeoutMs
       });
 
       await Promise.any(
@@ -257,7 +338,7 @@ class AvailableBrowserFetcher implements BrowserFetcher {
       const htmlBytes = Buffer.byteLength(html, "utf8");
 
       if (htmlBytes > this.maxBytes) {
-        /* Bail before cheerio/jsdom re-parse the document several times. */
+        /* Bail before the document is parsed. */
         throw new BrowserFetchError(
           `Browser fetch returned ${htmlBytes} bytes, above the ${this.maxBytes} byte limit.`,
           "too_large",
@@ -269,7 +350,8 @@ class AvailableBrowserFetcher implements BrowserFetcher {
 
       const blockedSignals = detectBlockedSignals({
         html,
-        statusCode
+        statusCode,
+        ...(options.blockSignalPatterns ? { extraPatterns: options.blockSignalPatterns } : {})
       });
       const failureKind = classifyFetchStatusCode(statusCode);
 
@@ -300,6 +382,10 @@ class AvailableBrowserFetcher implements BrowserFetcher {
         throw error;
       }
 
+      if (signal?.aborted) {
+        throw new BrowserFetchError("Browser fetch was cancelled or ran out of time.", "timeout");
+      }
+
       console.warn(
         JSON.stringify({
           event: "browser_fetch_failed",
@@ -313,6 +399,8 @@ class AvailableBrowserFetcher implements BrowserFetcher {
         error instanceof Error && /timeout/i.test(error.message) ? "timeout" : "unreachable"
       );
     } finally {
+      signal?.removeEventListener("abort", closeContextOnAbort);
+
       if (page) {
         await page.close().catch(() => undefined);
       }
@@ -327,16 +415,22 @@ class AvailableBrowserFetcher implements BrowserFetcher {
     }
   }
 
-  public async fetch(url: string): Promise<FetchResult> {
-    await acquireBrowserSlot(this.concurrency);
+  public async fetch(url: string, options: BrowserFetchOptions = {}): Promise<FetchResult> {
+    await acquireBrowserSlot(this.concurrency, {
+      signal: options.signal,
+      timeoutMs: Math.min(
+        defaultBrowserQueueTimeoutMs,
+        options.queueTimeoutMs ?? defaultBrowserQueueTimeoutMs
+      )
+    });
 
     try {
       try {
-        return await this.fetchWithBrowser(url);
+        return await this.fetchWithBrowser(url, options);
       } catch (error) {
-        if (isBrowserClosedError(error)) {
+        if (isBrowserClosedError(error) && !options.signal?.aborted) {
           await this.resetBrowser();
-          return this.fetchWithBrowser(url);
+          return this.fetchWithBrowser(url, options);
         }
 
         throw error;
