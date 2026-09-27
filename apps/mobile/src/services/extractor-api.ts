@@ -20,7 +20,9 @@ const wait = (durationMs: number) =>
   });
 
 export const shouldRetryTransientExtractionError = (error: unknown) => {
-  if (error instanceof ExtractorApiError) {
+  // Network failures now arrive as ExtractorApiError (kind "network", status 0); they keep
+  // their original message, so they still take the "Network request failed" check below.
+  if (error instanceof ExtractorApiError && error.kind !== "network") {
     return error.statusCode >= 500 || TRANSIENT_STATUS_CODES.has(error.statusCode);
   }
 
