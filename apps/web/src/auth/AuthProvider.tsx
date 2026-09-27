@@ -26,6 +26,7 @@ import {
   setLegacySessionToken,
   removeLegacySessionToken
 } from "./auth-storage";
+import { hasClerkSessionHint } from "./clerk-session-hint";
 
 import type { AccountUser, AuthConfigResponse, AuthMode } from "@linkdish/api-contracts";
 
@@ -347,8 +348,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           return;
         }
 
-        if (!clerkWaitExpired) {
-          // Clerk is still loading: stay in `loading` rather than flashing signed-out UI.
+        if (!clerkWaitExpired && hasClerkSessionHint()) {
+          // Someone may be signed in and Clerk is still loading: stay in `loading` rather than
+          // flashing signed-out UI. (Without Clerk's session cookie there is nobody to wait for.)
           setLoading(true);
           return;
         }

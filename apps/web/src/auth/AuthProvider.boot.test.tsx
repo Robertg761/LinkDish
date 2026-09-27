@@ -92,10 +92,18 @@ const renderAuth = () =>
 
 const authText = () => screen.getByTestId("auth").textContent;
 
+const setClerkSessionCookie = (value: string | null) => {
+  document.cookie =
+    value === null
+      ? "__client_uat=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/"
+      : `__client_uat=${value}; path=/`;
+};
+
 describe("AuthProvider boot", () => {
   beforeEach(() => {
     localStorage.clear();
     sessionStorage.clear();
+    setClerkSessionCookie(null);
     seen.length = 0;
     vi.stubEnv("VITE_CLERK_PUBLISHABLE_KEY", "pk_test");
     apiClientMocks.getAuthConfig.mockReset();
@@ -163,6 +171,7 @@ describe("AuthProvider boot", () => {
   });
 
   it("stays loading until Clerk has loaded, then resolves the Clerk session", async () => {
+    setClerkSessionCookie("1790000000");
     clerkMocks.auth.isLoaded = false;
     apiClientMocks.getAuthConfig.mockResolvedValue(clerkConfig);
     apiClientMocks.getSession.mockResolvedValue({ authenticated: true, user });
@@ -191,6 +200,7 @@ describe("AuthProvider boot", () => {
 
   it("stops waiting for a Clerk script that never loads", async () => {
     vi.useFakeTimers();
+    setClerkSessionCookie("1790000000");
     clerkMocks.auth.isLoaded = false;
     apiClientMocks.getAuthConfig.mockResolvedValue(clerkConfig);
 
@@ -204,6 +214,26 @@ describe("AuthProvider boot", () => {
       await vi.advanceTimersByTimeAsync(8_000);
     });
     expect(authText()).toBe("anonymous");
+  });
+
+  it("does not wait for Clerk when no Clerk session can exist", async () => {
+    setClerkSessionCookie("0");
+    clerkMocks.auth.isLoaded = false;
+    apiClientMocks.getAuthConfig.mockResolvedValue(clerkConfig);
+
+    const { rerender } = renderAuth();
+    await waitFor(() => expect(authText()).toBe("anonymous"));
+
+    // Clerk's own answer still wins once it loads.
+    clerkMocks.auth.isLoaded = true;
+    clerkMocks.auth.isSignedIn = true;
+    apiClientMocks.getSession.mockResolvedValue({ authenticated: true, user });
+    rerender(
+      <AuthProvider>
+        <Probe />
+      </AuthProvider>
+    );
+    await waitFor(() => expect(authText()).toBe("user:cook@example.com"));
   });
 
   it("uses a cached config without waiting for the network", () => {
