@@ -306,16 +306,57 @@ const runMemoryCommand = (command: string[]): UpstashResponse => {
   }
 };
 
-export const runStoreTransaction = async (commands: string[][]): Promise<UpstashResponse[]> => {
+export interface StoreRequestOptions {
+  /*
+   * Upper bound for the Upstash round trip. Hot-path optional reads and writes
+   * (result cache, hand-off, entitlement cache) pass a short one so a slow
+   * store degrades to a cache miss instead of stalling the request.
+   */
+  timeoutMs?: number;
+}
+
+const fetchUpstash = async (
+  path: string,
+  init: RequestInit,
+  options: StoreRequestOptions
+): Promise<Response> => {
+  if (!options.timeoutMs) {
+    return fetch(getUpstashUrl(path), init);
+  }
+
+  try {
+    return await fetch(getUpstashUrl(path), {
+      ...init,
+      signal: AbortSignal.timeout(options.timeoutMs)
+    });
+  } catch (error) {
+    if (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")) {
+      throw new KeyValueStoreUnavailableError(
+        `Upstash request timed out after ${options.timeoutMs}ms.`
+      );
+    }
+
+    throw error;
+  }
+};
+
+export const runStoreTransaction = async (
+  commands: string[][],
+  options: StoreRequestOptions = {}
+): Promise<UpstashResponse[]> => {
   if (!isKeyValueStoreConfigured()) {
     return commands.map(runMemoryCommand);
   }
 
-  const response = await fetch(getUpstashUrl("/multi-exec"), {
-    method: "POST",
-    headers: getHeaders(),
-    body: JSON.stringify(commands)
-  });
+  const response = await fetchUpstash(
+    "/multi-exec",
+    {
+      method: "POST",
+      headers: getHeaders(),
+      body: JSON.stringify(commands)
+    },
+    options
+  );
 
   if (!response.ok) {
     throw new KeyValueStoreUnavailableError(`Upstash transaction failed with ${response.status}.`);
@@ -330,8 +371,11 @@ export const runStoreTransaction = async (commands: string[][]): Promise<Upstash
   return body;
 };
 
-export const runStoreCommand = async (command: string[]): Promise<UpstashResponse> => {
-  const result = await runStoreTransaction([command]);
+export const runStoreCommand = async (
+  command: string[],
+  options: StoreRequestOptions = {}
+): Promise<UpstashResponse> => {
+  const result = await runStoreTransaction([command], options);
   const first = result[0] ?? {};
 
   if (first.error) {
@@ -341,17 +385,27 @@ export const runStoreCommand = async (command: string[]): Promise<UpstashRespons
   return first;
 };
 
-export const getStoreString = async (key: string): Promise<string | null> => {
-  const result = await runStoreCommand(["GET", key]);
+export const getStoreString = async (
+  key: string,
+  options: StoreRequestOptions = {}
+): Promise<string | null> => {
+  const result = await runStoreCommand(["GET", key], options);
   return typeof result.result === "string" ? result.result : null;
 };
 
-export const getStoreStrings = async (keys: string[]): Promise<Array<string | null>> => {
+/* One round trip (a single /multi-exec) for any number of keys. */
+export const getStoreStrings = async (
+  keys: string[],
+  options: StoreRequestOptions = {}
+): Promise<Array<string | null>> => {
   if (keys.length === 0) {
     return [];
   }
 
-  const results = await runStoreTransaction(keys.map((key) => ["GET", key]));
+  const results = await runStoreTransaction(
+    keys.map((key) => ["GET", key]),
+    options
+  );
 
   return results.map((result) => {
     if (result.error) {
@@ -365,7 +419,7 @@ export const getStoreStrings = async (keys: string[]): Promise<Array<string | nu
 export const setStoreString = async (
   key: string,
   value: string,
-  options?: SetOptions
+  options?: SetOptions & StoreRequestOptions
 ): Promise<boolean> => {
   const command = ["SET", key, value];
 
@@ -377,7 +431,10 @@ export const setStoreString = async (
     command.push("EX", String(options.ttlSeconds));
   }
 
-  const result = await runStoreCommand(command);
+  const result = await runStoreCommand(
+    command,
+    options?.timeoutMs ? { timeoutMs: options.timeoutMs } : {}
+  );
   return result.result === "OK";
 };
 
