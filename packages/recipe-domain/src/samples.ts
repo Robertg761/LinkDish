@@ -1,4 +1,4 @@
-import type { Recipe, RecipeConfidence } from "./index.js";
+import type { Recipe, RecipeConfidence } from "./recipe-schema.js";
 
 export type StarterRecipeSample = {
   id: `starter-${string}`;

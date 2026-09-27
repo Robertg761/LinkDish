@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { matchStepIngredients, SAMPLE_RECIPES } from "./index";
+import { createStepIngredientMatcher, matchStepIngredients, SAMPLE_RECIPES } from "./index";
 
 const recipeById = (id: string) => {
   const sample = SAMPLE_RECIPES.find((candidate) => candidate.id === id);
@@ -68,5 +68,29 @@ describe("matchStepIngredients", () => {
         "1 cup stock (with spinach)"
       ])
     ).toEqual([0]);
+  });
+});
+
+describe("createStepIngredientMatcher", () => {
+  it("matches every starter step exactly like matchStepIngredients", () => {
+    for (const sample of SAMPLE_RECIPES) {
+      const match = createStepIngredientMatcher(sample.recipe.ingredients);
+
+      for (const step of sample.recipe.steps) {
+        expect(match(step.text), step.text).toEqual(
+          matchStepIngredients(step.text, sample.recipe.ingredients)
+        );
+      }
+    }
+  });
+
+  it("links the parenthetical-alternate lines of a featured recipe by their item", () => {
+    const match = createStepIngredientMatcher([
+      "3 cups (360g) King Arthur Unbleached All-Purpose Flour",
+      "1 (15-ounce) can chickpeas, drained",
+      "2 large eggs, beaten"
+    ]);
+
+    expect(match("Whisk the eggs, then fold in the flour and chickpeas.")).toEqual([0, 1, 2]);
   });
 });
