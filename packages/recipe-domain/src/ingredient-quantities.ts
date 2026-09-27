@@ -57,6 +57,16 @@ export type ParsedIngredientQuantity = {
   altStyle?: "paren" | undefined;
   /** Set only for lines that carry a package size; see `IngredientPackageSize`. */
   packageSize?: IngredientPackageSize | undefined;
+  /** Set only for compound amounts: the "2 tablespoons" in "1 cup plus 2 tablespoons flour". */
+  addition?: IngredientAddition | undefined;
+};
+
+/** A second amount added to the first ("1 cup plus 2 tablespoons"); same kind of unit. */
+export type IngredientAddition = {
+  qty: number;
+  /** Canonical unit. */
+  unit: string;
+  joiner: "plus" | "+" | "and";
 };
 
 export type FormatParsedIngredientOptions = {
@@ -108,6 +118,11 @@ const UNIT_TOKEN_PATTERN = /^([A-Za-z]+)(\.)?(?:(\s+)([A-Za-z]+)(\.)?)?/;
 /** What may follow a unit: whitespace, punctuation that closes or separates, or the end. */
 const UNIT_BOUNDARY_PATTERN = /^(?:$|[\s,;:)\]([/*])/;
 const LEADING_OF_PATTERN = /^\s*of\b\s*/i;
+/** "plus", "+" or "and" joining a second amount: "1 cup plus 2 tablespoons". */
+const ADDITION_JOINER_PATTERN = new RegExp(
+  `^(plus|\\+|and)\\s*(?=[\\d.${VULGAR_FRACTION_CHARACTERS}])`,
+  "i"
+);
 const LEADING_GROUP_PATTERN = /^([([])([^()[\]]*)([)\]])\s*/;
 const MULTIPLIER_PATTERN = /^[x×]\s*(?=[\d.])/i;
 /** "15-ounce" → "15 ounce", length-preserving so the original spelling can be sliced back out. */
@@ -413,6 +428,24 @@ export const parseIngredientQuantity = (text: string): ParsedIngredientQuantity 
     }
   }
 
+  let addition: IngredientAddition | undefined;
+  const joiner = unit && unit.kind !== "count" ? ADDITION_JOINER_PATTERN.exec(rest) : null;
+
+  if (unit && joiner && typeof value === "number") {
+    // "1 cup plus 2 tablespoons": a second amount of the same kind that adds to the first.
+    const extra = parseAmount(rest.slice(joiner[0].length));
+
+    if (extra?.unit && extra.unit.kind === unit.kind && typeof extra.value === "number") {
+      const word = (joiner[1] ?? "").toLowerCase();
+      addition = {
+        qty: extra.value,
+        unit: extra.unit.canonical,
+        joiner: word === "+" ? "+" : word === "and" ? "and" : "plus"
+      };
+      rest = extra.rest;
+    }
+  }
+
   let altQty: ParsedQuantityValue = null;
   let altUnit: string | null = null;
   let altStyle: "paren" | "bracket" | undefined;
@@ -457,7 +490,8 @@ export const parseIngredientQuantity = (text: string): ParsedIngredientQuantity 
     item,
     confident: true,
     ...(altStyle === "paren" ? { altStyle } : {}),
-    ...(packageSize ? { packageSize } : {})
+    ...(packageSize ? { packageSize } : {}),
+    ...(addition ? { addition } : {})
   };
 };
 
@@ -574,6 +608,15 @@ export const formatParsedIngredient = (
 
   if (parsed.packageSize?.afterUnit) {
     parts.push(renderPackageSize(parsed.packageSize));
+  }
+
+  if (parsed.addition) {
+    const additionValue = parsed.addition.qty * factor;
+    const additionText = measuredText(additionValue, getUnitDefinition(parsed.addition.unit));
+    parts.push(
+      parsed.addition.joiner,
+      `${additionText} ${formatUnitLabel(parsed.addition.unit, displayedValue(additionText, additionValue))}`
+    );
   }
 
   if (parsed.altQty != null && parsed.altUnit) {

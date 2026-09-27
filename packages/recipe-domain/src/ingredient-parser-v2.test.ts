@@ -311,3 +311,27 @@ describe("amounts inside the item text (bug 15)", () => {
     );
   });
 });
+
+describe("compound amounts (bug 16)", () => {
+  it("reads '1 cup plus 2 tablespoons' as one amount and scales both parts", () => {
+    expect(parseIngredientQuantity("1 cup plus 2 tablespoons (140g) flour")).toEqual({
+      qty: 1,
+      unit: "cup",
+      addition: { qty: 2, unit: "Tbsp", joiner: "plus" },
+      altQty: 140,
+      altUnit: "g",
+      altStyle: "paren",
+      item: "flour",
+      confident: true
+    });
+    expect(scaled("1 cup plus 2 tablespoons flour", 2)).toBe("2 cups plus 4 Tbsp flour");
+    expect(scaled("2 tbsp + 1 tsp sugar", 2)).toBe("4 Tbsp + 2 tsp sugar");
+    expect(scaled("1 cup and 2 tablespoons milk", 0.5)).toBe("½ cup and 1 Tbsp milk");
+  });
+
+  it("only joins amounts of the same kind", () => {
+    expect(parseIngredientQuantity("1 cup plus 2 eggs").addition).toBeUndefined();
+    expect(parseIngredientQuantity("1 cup plus 100 g flour").addition).toBeUndefined();
+    expect(parseIngredientQuantity("2 eggs plus 1 yolk").addition).toBeUndefined();
+  });
+});

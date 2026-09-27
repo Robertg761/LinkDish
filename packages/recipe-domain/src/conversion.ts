@@ -626,10 +626,24 @@ export const convertParsedQuantity = (
       unit: promoted?.unit ?? altDefinition.canonical,
       altQty: null,
       altUnit: null,
-      altStyle: undefined
+      altStyle: undefined,
+      // The alternate covers the whole amount, including "plus 2 tablespoons".
+      addition: undefined
     };
   } else if (primaryDefinition) {
-    const converted = convertAmount(qty, primaryDefinition, target, {
+    // "1 cup plus 2 tablespoons" converts as one amount (1 ⅛ cups → 135 g).
+    const additionDefinition = getUnitDefinition(parsed.addition?.unit);
+    const foldedQty =
+      parsed.addition && additionDefinition?.base && primaryDefinition.base
+        ? mapValue(
+            qty,
+            (end) =>
+              end +
+              ((parsed.addition?.qty ?? 0) * factor * (additionDefinition.base ?? 0)) /
+                (primaryDefinition.base ?? 1)
+          )
+        : qty;
+    const converted = convertAmount(foldedQty, primaryDefinition, target, {
       ingredient: parsed.item,
       useDensity,
       rescaled
@@ -642,6 +656,7 @@ export const convertParsedQuantity = (
         ...result,
         qty: converted.value,
         unit: converted.unit,
+        addition: undefined,
         // Once the main amount is in the target system, an alternate in the other one is noise.
         ...(unitChanged && altDefinition && altDefinition.system !== target
           ? { altQty: null, altUnit: null, altStyle: undefined }

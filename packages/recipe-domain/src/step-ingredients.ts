@@ -207,19 +207,14 @@ const buildCandidate = (ingredient: IngredientInput, index: number): IngredientC
 };
 
 /**
- * Finds ingredient indexes that are explicitly referenced by a recipe step.
- *
- * Matching is case- and plural-insensitive, ignores parsed quantities/units,
- * and intentionally avoids generic one-word matches when they could point at
- * the wrong ingredient.
+ * Prepares ingredient matching once for a whole recipe and returns a function that matches one
+ * step. Parsing and tokenizing every ingredient is the expensive part, so cook mode can build
+ * the matcher when a recipe opens and call it per step (up to 300 × 300 at the schema limits)
+ * instead of re-parsing every ingredient for every step.
  */
-export const matchStepIngredients = (
-  stepText: string,
+export const createStepIngredientMatcher = (
   ingredients: readonly IngredientInput[]
-): number[] => {
-  const stepTokens = normalizeTokens(stepText);
-  const stepTokenSet = new Set(stepTokens);
-  const normalizedStep = ` ${stepTokens.join(" ")} `;
+): ((stepText: string) => number[]) => {
   const candidates = ingredients
     .map((ingredient, index) => buildCandidate(ingredient, index))
     .filter((candidate): candidate is IngredientCandidate => candidate != null);
@@ -231,25 +226,43 @@ export const matchStepIngredients = (
     }
   }
 
-  const matches: number[] = [];
-  const hasSingleAlias = (alias: string): boolean =>
-    stepTokens.some(
-      (token, index) => token === alias && !preparedContextWords.has(stepTokens[index + 1] ?? "")
-    );
+  return (stepText: string): number[] => {
+    const stepTokens = normalizeTokens(stepText);
+    const stepTokenSet = new Set(stepTokens);
+    const normalizedStep = ` ${stepTokens.join(" ")} `;
+    const matches: number[] = [];
+    const hasSingleAlias = (alias: string): boolean =>
+      stepTokens.some(
+        (token, index) => token === alias && !preparedContextWords.has(stepTokens[index + 1] ?? "")
+      );
 
-  for (const candidate of candidates) {
-    const phraseMatched = candidate.phrases.some((phrase) =>
-      normalizedStep.includes(` ${phrase} `)
-    );
-    const singleMatched = candidate.singleAliases.some(
-      (alias) =>
-        (aliasCounts.get(alias) ?? 0) === 1 && stepTokenSet.has(alias) && hasSingleAlias(alias)
-    );
+    for (const candidate of candidates) {
+      const phraseMatched = candidate.phrases.some((phrase) =>
+        normalizedStep.includes(` ${phrase} `)
+      );
+      const singleMatched = candidate.singleAliases.some(
+        (alias) =>
+          (aliasCounts.get(alias) ?? 0) === 1 && stepTokenSet.has(alias) && hasSingleAlias(alias)
+      );
 
-    if (phraseMatched || singleMatched) {
-      matches.push(candidate.index);
+      if (phraseMatched || singleMatched) {
+        matches.push(candidate.index);
+      }
     }
-  }
 
-  return matches;
+    return matches;
+  };
 };
+
+/**
+ * Finds ingredient indexes that are explicitly referenced by a recipe step.
+ *
+ * Matching is case- and plural-insensitive, ignores parsed quantities/units,
+ * and intentionally avoids generic one-word matches when they could point at
+ * the wrong ingredient. To match many steps of one recipe, build a matcher once with
+ * `createStepIngredientMatcher`.
+ */
+export const matchStepIngredients = (
+  stepText: string,
+  ingredients: readonly IngredientInput[]
+): number[] => createStepIngredientMatcher(ingredients)(stepText);

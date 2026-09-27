@@ -421,3 +421,23 @@ describe("convertTemperaturesInText", () => {
     }
   });
 });
+
+describe("compound amounts in conversion (bug 16)", () => {
+  it("converts '1 cup plus 2 tablespoons' as one amount", () => {
+    expect(convertIngredientLine("1 cup plus 2 tablespoons flour", "metric").text).toBe(
+      "140 g flour"
+    );
+    expect(convertIngredientLine("1 cup plus 2 tablespoons flour", "us", { scale: 2 }).text).toBe(
+      "2 ¼ cups flour"
+    );
+    expect(convertIngredientLine("1 cup plus 2 tablespoons (140g) flour", "metric").text).toBe(
+      "140 g flour"
+    );
+  });
+
+  it("keeps the compound as written when nothing needs converting", () => {
+    expect(convertIngredientLine("1 cup plus 2 tablespoons flour", "us").text).toBe(
+      "1 cup plus 2 Tbsp flour"
+    );
+  });
+});

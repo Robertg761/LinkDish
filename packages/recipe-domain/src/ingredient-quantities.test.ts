@@ -278,7 +278,9 @@ describe("scale round-trip", () => {
     "2 large eggs, beaten",
     "1 red bell pepper, thinly sliced",
     "4 tablespoons (57g) melted butter or 1/4 cup (50g) vegetable oil",
-    "one onion"
+    "one onion",
+    "1 cup plus 2 tablespoons (140g) flour",
+    "2 tbsp + 1 tsp sugar"
   ];
   const roundTripFactors = [0.05, 0.25, 0.5, 0.665, 1, 1.05, 1.4, 1.5, 2, 3, 50, 1e21, 1e-9];
 
