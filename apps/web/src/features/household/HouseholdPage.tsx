@@ -275,7 +275,7 @@ export const HouseholdPage: React.FC = () => {
                       void copyInvite(lastInvite);
                     }}
                   >
-                    <Icon name="content-copy" size={18} /> Copy
+                    <Icon name="copy" size={18} /> Copy
                   </Button>
                 </div>
               )}

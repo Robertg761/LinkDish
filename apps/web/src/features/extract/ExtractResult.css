@@ -153,7 +153,11 @@
 }
 
 .section-title::after {
-  background: linear-gradient(90deg, rgba(var(--color-border-rgb), 0.6), transparent);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--color-border) 60%, transparent),
+    transparent
+  );
   content: "";
   flex: 1;
   height: 1px;
@@ -286,7 +290,11 @@
 }
 
 .warnings-title::after {
-  background: linear-gradient(90deg, rgba(var(--color-border-rgb), 0.6), transparent);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--color-border) 60%, transparent),
+    transparent
+  );
   content: "";
   flex: 1;
   height: 1px;

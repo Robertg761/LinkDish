@@ -1,0 +1,183 @@
+.sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-sheet);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: var(--color-scrim);
+  animation: sheet-backdrop-in var(--duration-base) var(--ease-standard) both;
+}
+
+.sheet {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-height: calc(100dvh - 24px - env(safe-area-inset-top, 0px));
+  overflow: hidden;
+  border: 1px solid var(--color-border-subtle);
+  border-bottom: 0;
+  border-radius: var(--radius-sheet) var(--radius-sheet) 0 0;
+  background: var(--color-surface-raised);
+  box-shadow: var(--shadow-lg);
+  color: var(--color-ink);
+  outline: none;
+  animation: sheet-slide-up var(--duration-slow) var(--ease-out) both;
+}
+
+.sheet:not(.is-dragging) {
+  transition: translate var(--duration-base) var(--ease-out);
+}
+
+.sheet-handle-zone {
+  display: flex;
+  flex-shrink: 0;
+  justify-content: center;
+  padding: 10px 0 2px;
+  cursor: grab;
+  touch-action: none;
+}
+
+.sheet-handle {
+  width: 40px;
+  height: 5px;
+  border-radius: var(--radius-pill);
+  background: var(--color-border-strong);
+}
+
+.sheet-header {
+  display: flex;
+  flex-shrink: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 20px 8px;
+}
+
+.sheet-header-hidden-title {
+  justify-content: flex-end;
+  padding-bottom: 0;
+}
+
+.sheet-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.sheet-title {
+  color: var(--color-ink);
+  font-family: var(--font-family-serif);
+  font-size: 1.625rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+
+.sheet-description {
+  color: var(--color-ink-muted);
+  font-size: var(--text-small);
+  line-height: 1.5;
+}
+
+.sheet-close {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  margin: -2px -6px 0 0;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--color-surface-tint);
+  color: var(--color-ink-muted);
+  cursor: pointer;
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.sheet-close:hover:not(:disabled) {
+  background: var(--color-border);
+  color: var(--color-ink);
+}
+
+.sheet-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+  padding: 8px 20px 20px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.sheet-footer {
+  display: flex;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 20px calc(14px + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid var(--color-border-subtle);
+  background: var(--color-surface-raised);
+}
+
+.sheet-footer > .btn {
+  flex: 1 1 0;
+}
+
+.sheet-body:last-child {
+  padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+}
+
+@media (min-width: 768px) {
+  .sheet-backdrop {
+    align-items: center;
+    padding: 32px;
+  }
+
+  .sheet {
+    max-width: 520px;
+    max-height: min(820px, calc(100dvh - 64px));
+    border-bottom: 1px solid var(--color-border-subtle);
+    border-radius: var(--radius-sheet);
+    animation-name: sheet-pop-in;
+    animation-duration: var(--duration-base);
+  }
+
+  .sheet-sm {
+    max-width: 420px;
+  }
+
+  .sheet-lg {
+    max-width: 720px;
+  }
+
+  .sheet-handle-zone {
+    display: none;
+  }
+
+  .sheet-header {
+    padding: 24px 24px 8px;
+  }
+
+  .sheet-body {
+    padding: 8px 24px 24px;
+  }
+
+  .sheet-body:last-child {
+    padding-bottom: 28px;
+  }
+
+  .sheet-footer {
+    padding: 16px 24px;
+  }
+
+  .sheet-footer > .btn {
+    flex: 0 0 auto;
+  }
+}

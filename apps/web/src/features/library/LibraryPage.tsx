@@ -6,8 +6,8 @@ import { apiClient, ExtractorApiError } from "../../api/client";
 import { useAuth } from "../../auth/AuthProvider";
 import { Button, ButtonLink } from "../../components/Button";
 import { Icon } from "../../components/Icon";
+import { RecipeImage } from "../../components/RecipeImage";
 import { EMPTY_LIBRARY_LINES, pickFlavorLine } from "../../lib/flavor-copy";
-import { getRecipeMonogram } from "../../lib/recipe-image";
 import { buildRecipeMetaLine } from "../recipes/recipe-meta";
 import { useUpgradeSheet } from "../upgrade/UpgradeSheet";
 
@@ -22,6 +22,7 @@ import {
 } from "./saved-recipe-store";
 
 import type { WebSavedRecipe } from "./saved-recipe-types";
+import type { IconName } from "../../components/Icon";
 import type { SharedRecipe } from "@linkdish/api-contracts";
 import type { Recipe } from "@linkdish/recipe-domain";
 
@@ -161,10 +162,16 @@ const sortSharedRecipes = (
   return applySortDirection(sorted.sort(RECENT_TIEBREAKER), direction);
 };
 
-const RecipeMonogramTile = ({ recipe }: { recipe: Pick<Recipe, "title"> }) => (
-  <div className="recipe-row-monogram" aria-hidden="true">
-    {getRecipeMonogram(recipe.title)}
-  </div>
+// Photo thumbnail through the image proxy; falls back to the Fraunces monogram.
+const RecipeMonogramTile = ({ recipe }: { recipe: Pick<Recipe, "title" | "image"> }) => (
+  <RecipeImage
+    aspectRatio="1"
+    className="recipe-row-thumb"
+    image={recipe.image}
+    sizes="72px"
+    title={recipe.title}
+    widths={[96, 480]}
+  />
 );
 
 const IconAction = ({
@@ -177,7 +184,7 @@ const IconAction = ({
   active?: boolean;
   ariaLabel: string;
   disabled?: boolean;
-  icon: string;
+  icon: IconName;
   onClick: () => void;
 }) => (
   <button
@@ -511,7 +518,7 @@ export const LibraryPage: React.FC = () => {
           </Link>
           <IconAction
             ariaLabel={`Duplicate ${recipe.recipe.title}`}
-            icon="content-copy"
+            icon="copy"
             onClick={() => {
               void handleDuplicate(recipe);
             }}
@@ -542,7 +549,7 @@ export const LibraryPage: React.FC = () => {
           ) : (
             <IconAction
               ariaLabel={`Remove ${recipe.recipe.title}`}
-              icon="bookmark-remove-outline"
+              icon="bookmark-minus"
               onClick={() => setPendingRemoveId(recipe.id)}
             />
           )}
@@ -557,8 +564,8 @@ export const LibraryPage: React.FC = () => {
               disabled={syncingId === recipe.id}
               icon={
                 recipe.sync?.status === "synced"
-                  ? "account-multiple-check-outline"
-                  : "account-multiple-plus-outline"
+                  ? "user-check"
+                  : "user-plus"
               }
               onClick={() => {
                 void handleSync(recipe);
@@ -612,7 +619,7 @@ export const LibraryPage: React.FC = () => {
           <IconAction
             ariaLabel={`Save copy of ${sharedRecipe.recipe.title}`}
             disabled={savingCopyId === sharedRecipe.id}
-            icon="content-copy"
+            icon="copy"
             onClick={() => {
               void handleSaveSharedCopy(sharedRecipe);
             }}
@@ -643,7 +650,7 @@ export const LibraryPage: React.FC = () => {
           ) : isOwner ? (
             <IconAction
               ariaLabel={`Remove ${sharedRecipe.recipe.title} from Family`}
-              icon="bookmark-remove-outline"
+              icon="bookmark-minus"
               onClick={() => setPendingRemoveId(sharedRecipe.id)}
             />
           ) : null}
@@ -684,14 +691,14 @@ export const LibraryPage: React.FC = () => {
               }`}
               onClick={handleFamilyTabClick}
             >
-              {familyTabLocked ? <Icon name="lock-outline" size={14} /> : null}
+              {familyTabLocked ? <Icon name="lock" size={14} /> : null}
               Family
             </button>
           </div>
 
           <div className="library-utility-row">
             <label className="library-search" htmlFor="recipe-search">
-              <Icon name="magnify" size={19} />
+              <Icon name="search" size={19} />
               <input
                 id="recipe-search"
                 type="text"
@@ -782,10 +789,10 @@ export const LibraryPage: React.FC = () => {
               <Icon
                 name={
                   search
-                    ? "magnify"
+                    ? "search"
                     : visiblePersonalRecipes
-                      ? "book-open-page-variant"
-                      : "account-group-outline"
+                      ? "book-open"
+                      : "users"
                 }
                 size={28}
                 color="currentColor"
@@ -840,7 +847,7 @@ export const LibraryPage: React.FC = () => {
                     className="library-sign-in-prompt-close"
                     onClick={() => setFamilySignInPromptVisible(false)}
                   >
-                    <Icon name="close" size={20} />
+                    <Icon name="x" size={20} />
                   </button>
                 </div>
                 <p>

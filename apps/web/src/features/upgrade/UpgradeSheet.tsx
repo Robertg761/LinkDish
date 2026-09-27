@@ -171,7 +171,7 @@ export const UpgradeSheetProvider: React.FC<UpgradeSheetProviderProps> = ({ chil
                 onClick={() => setActiveTrigger(null)}
                 type="button"
               >
-                <Icon name="close" size={20} />
+                <Icon name="x" size={20} />
               </button>
             </div>
             <p className="upgrade-sheet-message">{copy.message}</p>

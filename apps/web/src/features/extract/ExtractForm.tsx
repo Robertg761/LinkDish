@@ -220,7 +220,7 @@ export const ExtractForm: React.FC<ExtractFormProps> = ({ onSubmit, onImagesSubm
             disabled={isBusy || !onImagesSubmit}
             onClick={openScanOptions}
           >
-            <Icon name="camera-outline" size={22} color="var(--color-accent)" />
+            <Icon name="camera" size={22} color="var(--color-accent)" />
           </button>
         }
       />
@@ -253,7 +253,7 @@ export const ExtractForm: React.FC<ExtractFormProps> = ({ onSubmit, onImagesSubm
                 onClick={() => chooseImageSource("camera")}
               >
                 <span className="scan-options-icon">
-                  <Icon name="camera-outline" size={24} color="var(--color-accent)" />
+                  <Icon name="camera" size={24} color="var(--color-accent)" />
                 </span>
                 <span className="scan-options-copy">
                   <span className="scan-options-row-title">Take photo</span>
@@ -266,7 +266,7 @@ export const ExtractForm: React.FC<ExtractFormProps> = ({ onSubmit, onImagesSubm
                 onClick={() => chooseImageSource("library")}
               >
                 <span className="scan-options-icon">
-                  <Icon name="image-multiple-outline" size={24} color="var(--color-accent)" />
+                  <Icon name="images" size={24} color="var(--color-accent)" />
                 </span>
                 <span className="scan-options-copy">
                   <span className="scan-options-row-title">Choose from Library</span>

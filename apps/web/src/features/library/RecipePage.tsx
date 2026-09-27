@@ -590,6 +590,7 @@ export const RecipePage: React.FC = () => {
               src={headerImageUrl}
               imageClassName="recipe-header-image"
               fallback={null}
+              priority
             />
           ) : null}
           <h1 className="recipe-title">{recipe.recipe.title}</h1>
@@ -620,7 +621,7 @@ export const RecipePage: React.FC = () => {
             <div className="detail-actions-group">
               {(!isSharedRoute || canEditSharedRecipe) && (
                 <Button variant="outline" onClick={openEditor}>
-                  <Icon name="pencil-outline" size={18} /> Edit
+                  <Icon name="pencil" size={18} /> Edit
                 </Button>
               )}
               <Button
@@ -628,28 +629,28 @@ export const RecipePage: React.FC = () => {
                 onClick={handleDuplicate}
                 loading={actionLoading === "duplicate"}
               >
-                <Icon name="content-copy" size={18} /> {isSharedRoute ? "Save copy" : "Duplicate"}
+                <Icon name="copy" size={18} /> {isSharedRoute ? "Save copy" : "Duplicate"}
               </Button>
               {isAuthenticated && !isSharedRoute && (
                 <Button variant="outline" onClick={handleSync} loading={actionLoading === "sync"}>
-                  <Icon name="cloud-upload-outline" size={18} /> Sync
+                  <Icon name="cloud-upload" size={18} /> Sync
                 </Button>
               )}
               <Button variant="outline" onClick={handleShare}>
-                <Icon name="share-variant-outline" size={18} /> Share
+                <Icon name="share" size={18} /> Share
               </Button>
               <Button variant="outline" onClick={() => void openShoppingSheet()}>
-                <Icon name="basket-outline" size={18} /> Add to shopping list
+                <Icon name="shopping-basket" size={18} /> Add to shopping list
               </Button>
               <Button
                 variant="outline"
                 onClick={handleShareCard}
                 loading={actionLoading === "shareCard"}
               >
-                <Icon name="image-outline" size={18} /> Share card
+                <Icon name="image" size={18} /> Share card
               </Button>
               <Button variant="outline" onClick={handlePrint}>
-                <Icon name="printer-outline" size={18} /> Print Recipe
+                <Icon name="printer" size={18} /> Print Recipe
               </Button>
               {(!isSharedRoute || canEditSharedRecipe) && (
                 <Button
@@ -657,7 +658,7 @@ export const RecipePage: React.FC = () => {
                   onClick={() => setDeleteConfirmationVisible(true)}
                   loading={actionLoading === "delete"}
                 >
-                  <Icon name="delete-outline" size={18} /> {isSharedRoute ? "Unshare" : "Delete"}
+                  <Icon name="trash" size={18} /> {isSharedRoute ? "Unshare" : "Delete"}
                 </Button>
               )}
             </div>
@@ -802,7 +803,7 @@ export const RecipePage: React.FC = () => {
                   onClick={() => setEditorOpen(false)}
                   type="button"
                 >
-                  <Icon name="close" size={20} />
+                  <Icon name="x" size={20} />
                 </button>
               </div>
 

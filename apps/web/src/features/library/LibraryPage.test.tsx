@@ -183,7 +183,7 @@ describe("LibraryPage", () => {
     expect(titleLink).toHaveAttribute("href", "/recipes/recipe_1");
 
     const personalRow = titleLink.closest(".recipe-row");
-    expect(personalRow?.querySelector(".recipe-row-monogram")).toHaveTextContent("P");
+    expect(personalRow?.querySelector(".recipe-row-thumb")).toHaveTextContent("P");
 
     const removeButton = screen.getByRole("button", { name: "Remove Personal Rice" });
     const duplicateButton = screen.getByRole("button", { name: "Duplicate Personal Rice" });

@@ -890,7 +890,7 @@ export const CookMode: React.FC<CookModeProps> = ({
           onClick={requestClose}
           type="button"
         >
-          <Icon name="close" size={22} />
+          <Icon name="x" size={22} />
         </button>
       </div>
 
@@ -1094,7 +1094,7 @@ export const CookMode: React.FC<CookModeProps> = ({
 
           <label className="cook-mode-keep-awake-middle-container">
             <Icon
-              name="brightness-5"
+              name="sun"
               size={18}
               color={keepAwake ? "var(--color-accent)" : "var(--color-muted)"}
               className={`cook-mode-keep-awake-icon${keepAwake ? " is-on" : ""}`}

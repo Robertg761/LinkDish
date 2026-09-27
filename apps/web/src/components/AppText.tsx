@@ -2,7 +2,7 @@ import React from "react";
 import "./AppText.css";
 
 interface AppTextProps {
-  variant?: "display" | "headline" | "title" | "body" | "label";
+  variant?: "display" | "headline" | "title" | "body" | "small" | "label";
   muted?: boolean;
   as?: React.ElementType;
   children: React.ReactNode;
@@ -23,6 +23,7 @@ export const AppText: React.FC<AppTextProps> = ({
     headline: "h2",
     title: "h3",
     body: "p",
+    small: "p",
     label: "span"
   };
   const Tag = as || defaultTags[variant] || "p";

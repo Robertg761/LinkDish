@@ -16,27 +16,33 @@ const profileEmojiOptions = ["🍳", "🥘", "🥗", "🍜", "🍕", "🥐", "�
 const accountUtilityLinks = [
   {
     description: "Daily list for groceries and staples",
-    icon: "basket-outline",
+    icon: "shopping-basket",
     label: "Shopping list",
     to: "/shopping"
   },
   {
     description: "Family members and shared recipes",
-    icon: "account-multiple-outline",
+    icon: "users",
     label: "Household",
     to: "/household"
   },
   {
     description: "Plan details and upgrade options",
-    icon: "star-circle-outline",
+    icon: "crown",
     label: "Plans",
     to: "/pricing"
   },
   {
     description: "Add LinkDish to your home screen",
-    icon: "download-outline",
+    icon: "smartphone-download",
     label: "Install app",
     to: "/install"
+  },
+  {
+    description: "Theme, units and cooking preferences",
+    icon: "settings",
+    label: "Settings",
+    to: "/settings"
   }
 ] as const;
 
@@ -352,7 +358,7 @@ export const AccountPage: React.FC = () => {
 
             <div className="account-signout-action">
               <Button variant="outline-danger" onClick={logout} fullWidth>
-                <Icon name="logout" size={18} /> Sign out
+                <Icon name="log-out" size={18} /> Sign out
               </Button>
             </div>
           </Card>
@@ -395,7 +401,7 @@ export const AccountPage: React.FC = () => {
                       deleteConfirmEmail.trim().toLowerCase() !== user.email.toLowerCase()
                     }
                   >
-                    <Icon name="delete-outline" size={18} /> Delete account
+                    <Icon name="trash" size={18} /> Delete account
                   </Button>
                   <Button
                     variant="ghost"

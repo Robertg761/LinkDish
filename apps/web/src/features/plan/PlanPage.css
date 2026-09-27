@@ -1,0 +1,96 @@
+.plan-week {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+  margin: 0 0 20px;
+  padding: 0;
+  list-style: none;
+}
+
+.plan-day {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px 2px 12px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.plan-day-name {
+  color: var(--color-ink-muted);
+  font-size: 0.6875rem;
+  font-weight: 750;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.plan-day-date {
+  color: var(--color-ink);
+  font-family: var(--font-family-serif);
+  font-size: 1.375rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.plan-day-slot {
+  display: none;
+  color: var(--color-ink-subtle);
+  font-size: var(--text-caption);
+}
+
+.plan-day.is-today {
+  border-color: transparent;
+  background: var(--color-primary);
+}
+
+.plan-day.is-today .plan-day-name,
+.plan-day.is-today .plan-day-date,
+.plan-day.is-today .plan-day-slot {
+  color: var(--color-on-primary);
+}
+
+.plan-empty-card {
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-card);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-xs);
+}
+
+@media (min-width: 768px) {
+  .plan-week {
+    gap: 12px;
+    margin-bottom: 28px;
+  }
+
+  .plan-day {
+    align-items: flex-start;
+    gap: 6px;
+    min-height: 132px;
+    padding: 14px 14px 16px;
+  }
+
+  .plan-day-date {
+    font-size: 1.75rem;
+  }
+
+  .plan-day-slot {
+    display: block;
+    width: 100%;
+    margin-top: auto;
+    padding: 8px 10px;
+    border: 1.5px dashed var(--color-border);
+    border-radius: var(--radius-xs);
+    text-align: center;
+  }
+
+  .plan-day.is-today .plan-day-slot {
+    border-color: color-mix(in srgb, var(--color-on-primary) 45%, transparent);
+  }
+
+  .plan-empty-card .empty-state {
+    padding: 48px 24px 56px;
+  }
+}

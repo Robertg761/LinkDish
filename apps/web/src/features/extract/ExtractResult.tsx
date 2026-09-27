@@ -277,7 +277,7 @@ export const ExtractResult: React.FC<ExtractResultProps> = ({
             </Button>
             {saveStatus === "saved" ? (
               <Button variant="outline" disabled>
-                <Icon name="bookmark-check-outline" size={18} /> Saved in Library
+                <Icon name="bookmark-check" size={18} /> Saved in Library
               </Button>
             ) : saveStatus === "duplicate_prompt" ? (
               <div className="duplicate-actions">
@@ -295,7 +295,7 @@ export const ExtractResult: React.FC<ExtractResultProps> = ({
                 onClick={handleSave}
                 loading={saveStatus === "saving" || saveStatus === "syncing"}
               >
-                <Icon name="bookmark-plus-outline" size={18} /> Save Recipe
+                <Icon name="bookmark-plus" size={18} /> Save Recipe
               </Button>
             )}
           </div>

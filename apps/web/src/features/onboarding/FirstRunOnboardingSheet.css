@@ -1,12 +1,12 @@
 .first-run-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 130;
+  z-index: var(--z-sheet);
   display: flex;
   align-items: flex-end;
   justify-content: center;
   padding: 20px;
-  background: rgba(31, 28, 24, 0.3);
+  background: var(--color-scrim);
 }
 
 .first-run-sheet {
@@ -15,10 +15,10 @@
   max-height: calc(100dvh - 40px);
   overflow-y: auto;
   overscroll-behavior: contain;
-  border: 1px solid rgba(var(--color-border-rgb), 0.9);
+  border: 1px solid color-mix(in srgb, var(--color-border) 90%, transparent);
   border-radius: var(--radius-lg) var(--radius-lg) var(--radius-md) var(--radius-md);
   background: var(--color-canvas);
-  box-shadow: 0 24px 72px rgba(var(--color-shadow-rgb), 0.2);
+  box-shadow: var(--shadow-lg);
   padding: 24px;
 }
 
@@ -32,13 +32,13 @@
 
 .first-run-art-panel {
   fill: var(--color-accent-soft);
-  stroke: rgba(var(--color-accent-rgb), 0.16);
+  stroke: color-mix(in srgb, var(--color-primary) 16%, transparent);
   stroke-width: 1.5;
 }
 
 .first-run-art-soft-panel {
   fill: var(--color-surface);
-  stroke: rgba(var(--color-border-rgb), 0.92);
+  stroke: color-mix(in srgb, var(--color-border) 92%, transparent);
   stroke-width: 1.5;
 }
 
@@ -46,13 +46,13 @@
 .first-run-art-url,
 .first-run-art-family-front {
   fill: var(--color-surface);
-  stroke: rgba(var(--color-border-rgb), 0.92);
+  stroke: color-mix(in srgb, var(--color-border) 92%, transparent);
   stroke-width: 1.5;
 }
 
 .first-run-art-family-back {
-  fill: #cfdcd2;
-  stroke: rgba(var(--color-border-rgb), 0.92);
+  fill: var(--color-primary-soft-hover);
+  stroke: color-mix(in srgb, var(--color-border) 92%, transparent);
   stroke-width: 1.5;
 }
 
@@ -67,11 +67,11 @@
 }
 
 .first-run-art-muted-fill {
-  fill: rgba(var(--color-muted-rgb), 0.34);
+  fill: color-mix(in srgb, var(--color-ink-muted) 34%, transparent);
 }
 
 .first-run-art-butter {
-  fill: #e9bd5a;
+  fill: var(--color-butter);
 }
 
 .first-run-art-arrow,

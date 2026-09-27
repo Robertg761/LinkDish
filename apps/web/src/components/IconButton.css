@@ -1,0 +1,96 @@
+.icon-btn {
+  --icon-btn-size: 40px;
+  --icon-btn-bg: transparent;
+  --icon-btn-fg: var(--color-ink-muted);
+  --icon-btn-bg-hover: var(--color-state-hover);
+  --icon-btn-fg-hover: var(--color-ink);
+  --icon-btn-border: transparent;
+
+  position: relative;
+  display: inline-grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: var(--icon-btn-size);
+  height: var(--icon-btn-size);
+  padding: 0;
+  border: 1px solid var(--icon-btn-border);
+  border-radius: var(--radius-pill);
+  background: var(--icon-btn-bg);
+  color: var(--icon-btn-fg);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast),
+    transform var(--transition-fast);
+}
+
+/* Keep a 44px touch target even for the compact size. */
+.icon-btn::after {
+  position: absolute;
+  inset: min(0px, calc((var(--icon-btn-size) - 44px) / 2));
+  content: "";
+}
+
+.icon-btn:hover:not(:disabled) {
+  background: var(--icon-btn-bg-hover);
+  color: var(--icon-btn-fg-hover);
+}
+
+.icon-btn:active:not(:disabled) {
+  transform: scale(0.92);
+}
+
+.icon-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.icon-btn-sm {
+  --icon-btn-size: 32px;
+}
+
+.icon-btn-lg {
+  --icon-btn-size: 48px;
+}
+
+.icon-btn-tonal {
+  --icon-btn-bg: var(--color-primary-soft);
+  --icon-btn-fg: var(--color-on-primary-soft);
+  --icon-btn-bg-hover: var(--color-primary-soft-hover);
+  --icon-btn-fg-hover: var(--color-on-primary-soft);
+}
+
+.icon-btn-outline {
+  --icon-btn-bg: var(--color-surface);
+  --icon-btn-fg: var(--color-ink);
+  --icon-btn-border: var(--color-border);
+  --icon-btn-bg-hover: var(--color-surface-raised);
+  --icon-btn-fg-hover: var(--color-ink);
+}
+
+.icon-btn-filled {
+  --icon-btn-bg: var(--color-primary);
+  --icon-btn-fg: var(--color-on-primary);
+  --icon-btn-bg-hover: var(--color-primary-hover);
+  --icon-btn-fg-hover: var(--color-on-primary);
+}
+
+.icon-btn-accent {
+  --icon-btn-bg: var(--color-tomato);
+  --icon-btn-fg: var(--color-on-tomato);
+  --icon-btn-bg-hover: var(--color-tomato-hover);
+  --icon-btn-fg-hover: var(--color-on-tomato);
+}
+
+.icon-btn-danger {
+  --icon-btn-fg: var(--color-danger);
+  --icon-btn-bg-hover: var(--color-danger-soft);
+  --icon-btn-fg-hover: var(--color-on-danger-soft);
+}
+
+.icon-btn.is-pressed {
+  --icon-btn-fg: var(--color-tomato);
+  --icon-btn-fg-hover: var(--color-tomato-hover);
+}

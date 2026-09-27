@@ -230,7 +230,7 @@ export const ShoppingListPage: React.FC = () => {
           }}
           type="button"
         >
-          <Icon name="trash-can-outline" size={18} />
+          <Icon name="trash" size={18} />
         </button>
       </div>
     );

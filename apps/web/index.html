@@ -1,20 +1,74 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <title>LinkDish</title>
+    <title>LinkDish — Paste a link. Get cooking.</title>
+    <meta
+      name="description"
+      content="LinkDish turns any recipe link, video or photo into a clean cookbook entry with the ingredients, steps and photo intact. Cook calmly, plan the week and shop once."
+    />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#f4efe7" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#1a1816" media="(prefers-color-scheme: dark)" />
+    <script>
+      // Apply the saved theme before first paint so dark-mode users never see a
+      // flash of the light theme. Mirrors applyThemePreference() in
+      // src/preferences/preferences-store.ts.
+      (function () {
+        try {
+          var raw = localStorage.getItem("linkdish:web:preferences:v1");
+          var theme = raw ? JSON.parse(raw).theme : null;
+          if (theme !== "light" && theme !== "dark") return;
+          document.documentElement.setAttribute("data-theme", theme);
+          var color = theme === "dark" ? "#1a1816" : "#f4efe7";
+          var metas = document.querySelectorAll('meta[name="theme-color"]');
+          for (var i = 0; i < metas.length; i++) metas[i].setAttribute("content", color);
+        } catch (error) {
+          // Storage can be blocked; the system theme still applies.
+        }
+      })();
+    </script>
+
     <link rel="icon" type="image/png" href="/icons/icon-192.png" />
-    <link rel="manifest" href="/manifest.webmanifest" />
-    <link rel="preload" href="/fonts/Fraunces-SemiBold.woff2" as="font" type="font/woff2" crossorigin />
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@mdi/font@7.4.47/css/materialdesignicons.min.css">
-    
-    <!-- iOS / Safari App Shell Meta Tags -->
-    <meta name="theme-color" content="#f4efe7" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+    <link rel="preload" href="/fonts/Fraunces-Bold.woff2" as="font" type="font/woff2" crossorigin />
+    <link
+      rel="preload"
+      href="/fonts/Fraunces-SemiBold.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
+
+    <!-- Share previews -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="LinkDish" />
+    <meta property="og:title" content="LinkDish — Paste a link. Get cooking." />
+    <meta
+      property="og:description"
+      content="Save recipes from any website, video or photo into one calm cookbook. Cook step by step, plan the week and shop once."
+    />
+    <meta property="og:image" content="https://linkdish.ca/assets/social-card-20260729.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="LinkDish turns a recipe link into a clean recipe card."
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="LinkDish — Paste a link. Get cooking." />
+    <meta
+      name="twitter:description"
+      content="Save recipes from any website, video or photo into one calm cookbook."
+    />
+    <meta name="twitter:image" content="https://linkdish.ca/assets/social-card-20260729.png" />
+
+    <!-- iOS / Safari app shell -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="LinkDish" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
     <meta name="format-detection" content="telephone=no" />
   </head>
   <body>

@@ -1,0 +1,100 @@
+.search-field {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 48px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-xs);
+  transition:
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+.search-field:hover {
+  border-color: var(--color-border-strong);
+}
+
+.search-field:focus-within {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-focus-ring-strong);
+}
+
+.search-field-lg {
+  min-height: 56px;
+}
+
+.search-field-icon {
+  position: absolute;
+  left: 16px;
+  color: var(--color-ink-muted);
+  pointer-events: none;
+}
+
+.search-field-input {
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  min-height: inherit;
+  padding: 0 48px 0 44px;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  color: var(--color-ink);
+  font-size: var(--text-body);
+  outline: none;
+  appearance: none;
+}
+
+.search-field-lg .search-field-input {
+  padding-left: 48px;
+  font-size: var(--text-body-lg);
+}
+
+.search-field-input::placeholder {
+  color: var(--color-placeholder);
+  opacity: 1;
+}
+
+.search-field-input::-webkit-search-cancel-button,
+.search-field-input::-webkit-search-decoration {
+  appearance: none;
+}
+
+.search-field-clear {
+  position: absolute;
+  right: 8px;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--color-surface-tint);
+  color: var(--color-ink-muted);
+  cursor: pointer;
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.search-field-clear:hover {
+  background: var(--color-border);
+  color: var(--color-ink);
+}
+
+.search-field-hint {
+  position: absolute;
+  right: 12px;
+  padding: 3px 7px;
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+  background: var(--color-canvas);
+  color: var(--color-ink-muted);
+  font-family: var(--font-family-sans);
+  font-size: 0.75rem;
+  font-weight: 650;
+  pointer-events: none;
+}

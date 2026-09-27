@@ -1,0 +1,64 @@
+.badge {
+  --badge-bg: var(--color-surface-tint);
+  --badge-fg: var(--color-ink-muted);
+  --badge-solid-bg: var(--color-ink);
+  --badge-solid-fg: var(--color-ink-inverse);
+
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 20px;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  font-size: 0.6875rem;
+  font-variant-numeric: lining-nums tabular-nums;
+  font-weight: 750;
+  letter-spacing: 0.03em;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.badge-soft {
+  background: var(--badge-bg);
+  color: var(--badge-fg);
+}
+
+.badge-solid {
+  background: var(--badge-solid-bg);
+  color: var(--badge-solid-fg);
+}
+
+.badge-primary {
+  --badge-bg: var(--color-primary-soft);
+  --badge-fg: var(--color-on-primary-soft);
+  --badge-solid-bg: var(--color-primary);
+  --badge-solid-fg: var(--color-on-primary);
+}
+
+.badge-tomato {
+  --badge-bg: var(--color-tomato-soft);
+  --badge-fg: var(--color-on-tomato-soft);
+  --badge-solid-bg: var(--color-tomato);
+  --badge-solid-fg: var(--color-on-tomato);
+}
+
+.badge-butter {
+  --badge-bg: var(--color-butter-soft);
+  --badge-fg: var(--color-on-butter);
+  --badge-solid-bg: var(--color-butter);
+  --badge-solid-fg: var(--color-on-butter);
+}
+
+.badge-success {
+  --badge-bg: var(--color-success-soft);
+  --badge-fg: var(--color-success);
+  --badge-solid-bg: var(--color-success);
+  --badge-solid-fg: var(--color-ink-inverse);
+}
+
+.badge-danger {
+  --badge-bg: var(--color-danger-soft);
+  --badge-fg: var(--color-on-danger-soft);
+  --badge-solid-bg: var(--color-danger);
+  --badge-solid-fg: var(--color-on-danger);
+}

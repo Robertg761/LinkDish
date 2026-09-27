@@ -1,34 +1,127 @@
 .chip {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 5px 10px;
-  border-radius: 9999px;
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.1px;
-  line-height: 1;
+  gap: 5px;
+  min-height: 26px;
+  padding: 4px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  font-size: 0.75rem;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  line-height: 1.1;
   white-space: nowrap;
+}
+
+.chip-sm {
+  min-height: 22px;
+  padding: 3px 8px;
+  font-size: 0.6875rem;
+}
+
+.chip-default {
+  background-color: var(--color-surface-tint);
+  color: var(--color-ink-muted);
+}
+
+.chip-accent {
+  background-color: var(--color-primary-soft);
+  color: var(--color-on-primary-soft);
+}
+
+.chip-tomato {
+  background-color: var(--color-tomato-soft);
+  color: var(--color-on-tomato-soft);
+}
+
+.chip-butter {
+  background-color: var(--color-butter-soft);
+  color: var(--color-on-butter);
+}
+
+.chip-outline {
+  border-color: var(--color-border);
+  background-color: transparent;
+  color: var(--color-ink-muted);
+}
+
+a.chip,
+button.chip {
+  cursor: pointer;
   transition:
     background-color var(--transition-fast),
     border-color var(--transition-fast),
     color var(--transition-fast);
 }
 
-.chip-default {
-  background-color: var(--color-accent-soft);
-  border: 1px solid transparent;
-  color: var(--color-accent);
-}
-
-.chip-accent {
-  background-color: var(--color-accent-soft);
-  border: 1px solid transparent;
-  color: var(--color-accent);
-}
-
 a.chip:hover,
-button.chip:hover,
-.chip[role="button"]:hover {
-  background-color: var(--color-accent-soft);
+button.chip:hover {
+  border-color: var(--color-border-strong);
+  text-decoration: none;
+}
+
+/* FilterChip */
+.filter-chip {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface);
+  color: var(--color-ink);
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast),
+    transform var(--transition-fast);
+}
+
+.filter-chip:hover:not(:disabled) {
+  border-color: var(--color-border-strong);
+  background: var(--color-surface-raised);
+}
+
+.filter-chip:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.filter-chip.is-selected {
+  border-color: transparent;
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+}
+
+.filter-chip.is-selected:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--color-primary-hover);
+}
+
+.filter-chip:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.filter-chip-count {
+  min-width: 20px;
+  padding: 2px 6px;
+  border-radius: var(--radius-pill);
+  background: var(--color-surface-tint);
+  color: var(--color-ink-muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+.filter-chip.is-selected .filter-chip-count {
+  background: color-mix(in srgb, var(--color-on-primary) 20%, transparent);
+  color: var(--color-on-primary);
 }

@@ -92,7 +92,7 @@ export const InstallPrompt: React.FC = () => {
     <Card className="install-prompt-card animate-fade-in" variant="subtle">
       <div className="install-prompt-header">
         <Icon
-          name="cellphone-arrow-down"
+          name="smartphone-download"
           size={28}
           color="var(--color-accent)"
           className="install-prompt-icon"
@@ -108,7 +108,7 @@ export const InstallPrompt: React.FC = () => {
           onClick={handleDismiss}
           aria-label="Dismiss prompt"
         >
-          <Icon name="close" size={20} />
+          <Icon name="x" size={20} />
         </button>
       </div>
 

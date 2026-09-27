@@ -127,7 +127,7 @@ export const AddRecipeToShoppingSheet: React.FC<AddRecipeToShoppingSheetProps> =
             onClick={onClose}
             type="button"
           >
-            <Icon name="close" size={20} />
+            <Icon name="x" size={20} />
           </button>
         </div>
 

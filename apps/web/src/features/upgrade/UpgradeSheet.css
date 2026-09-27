@@ -1,22 +1,22 @@
 .upgrade-sheet-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 140;
+  z-index: var(--z-dialog);
   display: flex;
   align-items: flex-end;
   justify-content: center;
   padding: 20px;
-  background: rgba(31, 28, 24, 0.34);
+  background: var(--color-scrim);
 }
 
 .upgrade-sheet {
   width: min(100%, 760px);
   max-height: min(86vh, 760px);
   overflow-y: auto;
-  border: 1px solid rgba(var(--color-border-rgb), 0.86);
+  border: 1px solid color-mix(in srgb, var(--color-border) 86%, transparent);
   border-radius: var(--radius-lg) var(--radius-lg) var(--radius-md) var(--radius-md);
   background: linear-gradient(180deg, var(--color-canvas), var(--color-surface));
-  box-shadow: 0 24px 72px rgba(var(--color-shadow-rgb), 0.22);
+  box-shadow: var(--shadow-lg);
   padding: 22px;
 }
 
@@ -67,7 +67,7 @@
   height: 40px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
-  background: rgba(255, 253, 248, 0.72);
+  background: color-mix(in srgb, var(--color-surface) 72%, transparent);
   color: var(--color-muted);
   cursor: pointer;
 }
@@ -81,7 +81,7 @@
 }
 
 .upgrade-sheet .pricing-card {
-  background: rgba(255, 253, 248, 0.76);
+  background: color-mix(in srgb, var(--color-surface) 76%, transparent);
 }
 
 @media (min-width: 760px) {
