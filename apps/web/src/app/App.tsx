@@ -1,5 +1,5 @@
 import { AuthenticateWithRedirectCallback } from "@clerk/clerk-react";
-import React, { lazy, Suspense, useEffect } from "react";
+import React, { Suspense, useEffect } from "react";
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 
 import { RouteAnalytics } from "../analytics/RouteAnalytics";
@@ -11,6 +11,7 @@ import { ToastProvider } from "../components/Toast";
 import { LibraryPage } from "../features/library/LibraryPage";
 import { UpgradeSheetProvider } from "../features/upgrade/UpgradeSheet";
 import { formatDocumentTitle } from "../lib/use-document-title";
+import { lazyWithRetry } from "../platform/lazy";
 import { initPreferences } from "../preferences/preferences-store";
 
 import { AppProviders } from "./providers";
@@ -18,48 +19,48 @@ import { ScrollManager } from "./ScrollManager";
 
 import type { LoadingStateVariant } from "../components/LoadingState";
 
-const AccountPage = lazy(() =>
+const AccountPage = lazyWithRetry(() =>
   import("../features/account/AccountPage").then((module) => ({ default: module.AccountPage }))
 );
-const ExtractPage = lazy(() =>
+const ExtractPage = lazyWithRetry(() =>
   import("../features/extract/ExtractPage").then((module) => ({ default: module.ExtractPage }))
 );
-const FeaturedRecipePage = lazy(() =>
+const FeaturedRecipePage = lazyWithRetry(() =>
   import("../features/featured/FeaturedRecipePage").then((module) => ({
     default: module.FeaturedRecipePage
   }))
 );
-const HouseholdPage = lazy(() =>
+const HouseholdPage = lazyWithRetry(() =>
   import("../features/household/HouseholdPage").then((module) => ({
     default: module.HouseholdPage
   }))
 );
-const InstallPage = lazy(() =>
+const InstallPage = lazyWithRetry(() =>
   import("../features/install/InstallPage").then((module) => ({ default: module.InstallPage }))
 );
-const PlanPage = lazy(() =>
+const PlanPage = lazyWithRetry(() =>
   import("../features/plan/PlanPage").then((module) => ({ default: module.PlanPage }))
 );
-const RecipePage = lazy(() =>
+const RecipePage = lazyWithRetry(() =>
   import("../features/library/RecipePage").then((module) => ({ default: module.RecipePage }))
 );
-const PricingPage = lazy(() =>
+const PricingPage = lazyWithRetry(() =>
   import("../features/pricing/PricingPage").then((module) => ({ default: module.PricingPage }))
 );
-const PrivacyPage = lazy(() =>
+const PrivacyPage = lazyWithRetry(() =>
   import("../components/PrivacyPage").then((module) => ({ default: module.PrivacyPage }))
 );
-const SettingsPage = lazy(() =>
+const SettingsPage = lazyWithRetry(() =>
   import("../features/settings/SettingsPage").then((module) => ({
     default: module.SettingsPage
   }))
 );
-const ShoppingListPage = lazy(() =>
+const ShoppingListPage = lazyWithRetry(() =>
   import("../features/shopping/ShoppingListPage").then((module) => ({
     default: module.ShoppingListPage
   }))
 );
-const SupportPage = lazy(() =>
+const SupportPage = lazyWithRetry(() =>
   import("../components/SupportPage").then((module) => ({ default: module.SupportPage }))
 );
 

@@ -1,18 +1,18 @@
-import React, { createContext, useCallback, useContext, useMemo, useRef, useState } from "react";
+import React, {
+  createContext,
+  Suspense,
+  useCallback,
+  useContext,
+  useMemo,
+  useRef,
+  useState
+} from "react";
 
 import { trackWebEvent } from "../../analytics/client";
 import { useAuth } from "../../auth/AuthProvider";
-import { Button, ButtonLink } from "../../components/Button";
-import { Icon } from "../../components/Icon";
+import { lazyWithRetry } from "../../platform/lazy";
+import { OptionalChunkBoundary } from "../../platform/OptionalChunkBoundary";
 import { getWebBillingTier } from "../billing/web-billing";
-import {
-  defaultBillingAvailability,
-  PricingPlansContent
-} from "../pricing/plans-content";
-
-import "./UpgradeSheet.css";
-
-import type { PaidBillingPlan } from "@linkdish/api-contracts";
 
 export type UpgradeSheetTrigger =
   | "family_share_no_plan"
@@ -27,41 +27,15 @@ interface UpgradeSheetContextValue {
 const UpgradeSheetContext = createContext<UpgradeSheetContextValue | null>(null);
 const SESSION_KEY_PREFIX = "linkdish:web:upgrade-sheet-viewed:";
 
-const triggerCopy: Record<
-  UpgradeSheetTrigger,
-  {
-    eyebrow: string;
-    title: string;
-    message: string;
-  }
-> = {
-  family_share_no_plan: {
-    eyebrow: "Family",
-    message:
-      "Family keeps the shared cookbook, household sync, and kitchen handoffs in one calm place.",
-    title: "Share the kitchen when your plan is ready."
-  },
-  fourth_import_month: {
-    eyebrow: "One left",
-    message:
-      "You are close to this month's free imports. Plus keeps the recipe flow open when dinner ideas are arriving fast.",
-    title: "Keep saving the good finds."
-  },
-  import_limit: {
-    eyebrow: "Limit reached",
-    message:
-      "Upgrade when you want more monthly imports, saved recipes, and a cookbook that follows you back to the stove.",
-    title: "More room for the recipes worth keeping."
-  },
-  save_limit: {
-    eyebrow: "Cookbook full",
-    message:
-      "You have 15 recipes saved on Free. Plus and Family keep every good find close, with unlimited saved recipes.",
-    title: "Your free cookbook is full."
-  }
-};
+// The sheet UI and plans content load on the first request, keeping the provider tiny.
+const UpgradeSheetDialog = lazyWithRetry(() =>
+  import("./UpgradeSheetDialog").then((module) => ({ default: module.UpgradeSheetDialog }))
+);
 
-const hasViewedTrigger = (trigger: UpgradeSheetTrigger, viewedInMemory: Set<UpgradeSheetTrigger>) => {
+const hasViewedTrigger = (
+  trigger: UpgradeSheetTrigger,
+  viewedInMemory: Set<UpgradeSheetTrigger>
+) => {
   if (viewedInMemory.has(trigger)) {
     return true;
   }
@@ -127,62 +101,25 @@ export const UpgradeSheetProvider: React.FC<UpgradeSheetProviderProps> = ({ chil
     [requestUpgradeSheet]
   );
 
-  const renderPlanActions = (checkoutPlan: PaidBillingPlan) => {
-    if (currentPlan === checkoutPlan) {
-      return (
-        <Button variant="outline" disabled fullWidth>
-          Active Plan
-        </Button>
-      );
-    }
-
-    return (
-      <ButtonLink
-        to={isAuthenticated ? `/pricing?upgrade=${checkoutPlan}` : `/account?upgrade=${checkoutPlan}`}
-        variant={checkoutPlan === "family" ? "secondary" : "primary"}
-        fullWidth
-      >
-        {isAuthenticated ? "Choose plan" : "Sign in to upgrade"}
-      </ButtonLink>
-    );
-  };
-
-  const copy = activeTrigger ? triggerCopy[activeTrigger] : null;
+  const dismiss = useCallback(() => {
+    setActiveTrigger(null);
+  }, []);
 
   return (
     <UpgradeSheetContext.Provider value={contextValue}>
       {children}
-      {activeTrigger && copy ? (
-        <div className="upgrade-sheet-backdrop" role="presentation">
-          <section
-            aria-labelledby="upgrade-sheet-title"
-            aria-modal="true"
-            className="upgrade-sheet"
-            role="dialog"
-          >
-            <div className="upgrade-sheet-header">
-              <div>
-                <p className="upgrade-sheet-eyebrow">{copy.eyebrow}</p>
-                <h2 id="upgrade-sheet-title">{copy.title}</h2>
-              </div>
-              <button
-                aria-label="Dismiss upgrade"
-                className="upgrade-sheet-close"
-                onClick={() => setActiveTrigger(null)}
-                type="button"
-              >
-                <Icon name="x" size={20} />
-              </button>
-            </div>
-            <p className="upgrade-sheet-message">{copy.message}</p>
-            <PricingPlansContent
-              billingAvailability={defaultBillingAvailability}
+      {activeTrigger ? (
+        // Keyed by trigger so a sheet that failed to load can be offered again later.
+        <OptionalChunkBoundary key={activeTrigger} name="Upgrade sheet" onError={dismiss}>
+          <Suspense fallback={null}>
+            <UpgradeSheetDialog
               currentPlan={currentPlan}
-              renderPlanActions={renderPlanActions}
-              showFreePlan={false}
+              isAuthenticated={isAuthenticated}
+              onDismiss={dismiss}
+              trigger={activeTrigger}
             />
-          </section>
-        </div>
+          </Suspense>
+        </OptionalChunkBoundary>
       ) : null}
     </UpgradeSheetContext.Provider>
   );

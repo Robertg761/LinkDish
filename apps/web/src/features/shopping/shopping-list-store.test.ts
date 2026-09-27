@@ -98,7 +98,24 @@ vi.mock("idb", () => {
           }
         };
 
-        options?.upgrade?.(db, idbMocks.oldVersion, _version, {} as never);
+        const upgradeTransaction = {
+          objectStore: (storeName: string) => ({
+            get: async (key: string) => {
+              await Promise.resolve();
+              return getStore(storeName).get(key);
+            },
+            getAllKeys: async () => {
+              await Promise.resolve();
+              return Array.from(getStore(storeName).keys());
+            },
+            put: async (value: unknown) => {
+              await Promise.resolve();
+              getStore(storeName).set((value as { id: string }).id, value);
+            }
+          })
+        };
+
+        options?.upgrade?.(db, idbMocks.oldVersion, _version, upgradeTransaction as never);
         return db;
       }
     )
@@ -132,10 +149,10 @@ describe("shopping-list-store", () => {
     });
   });
 
-  it("creates the shopping object store during the v3 migration", async () => {
+  it("creates the shopping object store when upgrading to the v4 schema", async () => {
     await getShoppingItems();
 
-    expect(idbMocks.openDB).toHaveBeenCalledWith("linkdish-web", 3, expect.any(Object));
+    expect(idbMocks.openDB).toHaveBeenCalledWith("linkdish-web", 4, expect.any(Object));
     expect(idbMocks.createObjectStore).toHaveBeenCalledWith("shoppingItems", { keyPath: "id" });
   });
 
