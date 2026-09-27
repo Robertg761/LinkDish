@@ -108,6 +108,32 @@ export const extractRecipeRequestSchema = z.union([
   extractRecipeUrlRequestSchema
 ]);
 
+export const MIN_EXTRACT_TEXT_CHARS = 20;
+export const MAX_EXTRACT_TEXT_CHARS = 20_000;
+
+/**
+ * Pasted recipe text (a caption, a note, an email). It always goes to the AI extractor, so it
+ * is metered like an explicit fallback attempt whatever `attempt` says; `attempt` is accepted
+ * (and defaults to "fallback") so callers can reuse their URL request plumbing.
+ */
+export const extractRecipeTextRequestSchema = z.object({
+  text: z.string().trim().min(MIN_EXTRACT_TEXT_CHARS).max(MAX_EXTRACT_TEXT_CHARS),
+  sourceUrl: httpUrlSchema.optional(),
+  attempt: z.enum(["primary", "fallback"]).default("fallback"),
+  correlationId: extractionCorrelationIdSchema.optional()
+});
+
+/**
+ * Every request shape POST /extract accepts: image scans, URLs and pasted text. The
+ * `ExtractRecipeRequest` type stays the image/URL union that existing callers narrow with
+ * `"images" in request` / `request.url`; text requests have their own type and client method.
+ */
+export const extractRecipeAnyRequestSchema = z.union([
+  extractRecipeImageRequestSchema,
+  extractRecipeUrlRequestSchema,
+  extractRecipeTextRequestSchema
+]);
+
 export const extractionStrategySchema = z.enum([
   "recipe-schema",
   "recipe-adapter-dom",
@@ -139,6 +165,13 @@ export const quotaStatusSchema = z.object({
   meteringMode: quotaMeteringModeSchema
 });
 
+/** GET /billing/usage: the caller's current import allowance, without counting an import. */
+export const billingUsageResponseSchema = z.object({
+  billingEnabled: z.boolean(),
+  plan: z.enum(["free", "plus", "family"]).nullable(),
+  quota: quotaStatusSchema.nullable()
+});
+
 export const fetchModeSchema = z.enum(["http", "browser"]);
 export const extractionProvenanceSchema = z.enum([
   "jsonld",
@@ -160,7 +193,10 @@ export const extractRecipeSuccessSchema = z.object({
     warnings: z.array(z.string().min(1)),
     fetchMode: fetchModeSchema,
     provenance: z.array(extractionProvenanceSchema)
-  })
+  }),
+  // Optional, additive: the caller's allowance after this import was counted. Absent when
+  // billing is disabled or for callers that are not metered.
+  quota: quotaStatusSchema.optional()
 });
 
 export const extractRecipeNeedsRetrySchema = z.object({
@@ -206,6 +242,9 @@ export const extractRecipeResponseSchema = z.discriminatedUnion("status", [
 ]);
 
 export type ExtractRecipeRequest = z.infer<typeof extractRecipeRequestSchema>;
+export type ExtractRecipeTextRequest = z.infer<typeof extractRecipeTextRequestSchema>;
+export type ExtractRecipeTextRequestInput = z.input<typeof extractRecipeTextRequestSchema>;
+export type ExtractRecipeAnyRequest = z.infer<typeof extractRecipeAnyRequestSchema>;
 export type ExtractRecipeImage = z.infer<typeof extractRecipeImageSchema>;
 export type ExtractRecipeResponse = z.infer<typeof extractRecipeResponseSchema>;
 export type ExtractRecipeSuccess = z.infer<typeof extractRecipeSuccessSchema>;
@@ -213,6 +252,7 @@ export type ExtractRecipeNeedsRetry = z.infer<typeof extractRecipeNeedsRetrySche
 export type ExtractRecipeFailure = z.infer<typeof extractRecipeFailureSchema>;
 export type QuotaMeteringMode = z.infer<typeof quotaMeteringModeSchema>;
 export type QuotaStatus = z.infer<typeof quotaStatusSchema>;
+export type BillingUsageResponse = z.infer<typeof billingUsageResponseSchema>;
 export type ExtractionStrategy = z.infer<typeof extractionStrategySchema>;
 export type Recovery = z.infer<typeof recoverySchema>;
 export type FetchMode = z.infer<typeof fetchModeSchema>;
@@ -649,7 +689,24 @@ export const analyticsEventNameSchema = z.enum([
   "android_household_viewed",
   "android_household_invite_created",
   "android_support_opened",
-  "client_error"
+  "client_error",
+  // Added with the app overhaul. Deploy the API before clients that send them: an older API
+  // drops (and, before tolerant ingestion, rejected whole batches with) unknown names.
+  "recipe_favorited",
+  "recipe_rated",
+  "recipe_tagged",
+  "collection_created",
+  "meal_plan_entry_added",
+  "meal_plan_shopping_generated",
+  "library_exported",
+  "library_imported",
+  "shopping_list_shared",
+  "cook_timer_started",
+  "command_palette_used",
+  "theme_changed",
+  "units_changed",
+  "import_queued_offline",
+  "web_vitals"
 ]);
 
 const analyticsUuidSchema = z.string().uuid();
@@ -738,13 +795,62 @@ export const analyticsEventInputSchema = z.object({
   properties: analyticsEventPropertiesSchema.default({})
 });
 
+export const MAX_ANALYTICS_EVENTS_PER_BATCH = 25;
+
 export const analyticsEventBatchRequestSchema = z.object({
-  events: z.array(analyticsEventInputSchema).min(1).max(25)
+  events: z.array(analyticsEventInputSchema).min(1).max(MAX_ANALYTICS_EVENTS_PER_BATCH)
+});
+
+/**
+ * The batch envelope the API validates first. Events are then validated one by one, so a
+ * single event with a name this API does not know yet (a newer client) or a bad property is
+ * dropped and counted instead of failing the whole batch.
+ */
+export const analyticsEventBatchEnvelopeSchema = z.object({
+  events: z.array(z.unknown()).min(1).max(MAX_ANALYTICS_EVENTS_PER_BATCH)
 });
 
 export const analyticsEventBatchResponseSchema = z.object({
-  accepted: z.number().int().nonnegative()
+  accepted: z.number().int().nonnegative(),
+  // Optional, additive: events that failed validation and were skipped.
+  dropped: z.number().int().nonnegative().optional()
 });
+
+export interface ParsedAnalyticsEventBatch {
+  events: AnalyticsEventInput[];
+  dropped: number;
+  /** Where each dropped event failed, e.g. "events.3.eventName" (no values, safe to log). */
+  droppedPaths: string[];
+}
+
+/**
+ * Validates an analytics batch leniently: null when the envelope itself is invalid (not an
+ * object, no events, too many events), otherwise the valid events plus a count of dropped ones.
+ */
+export const parseAnalyticsEventBatch = (payload: unknown): ParsedAnalyticsEventBatch | null => {
+  const envelope = analyticsEventBatchEnvelopeSchema.safeParse(payload);
+
+  if (!envelope.success) {
+    return null;
+  }
+
+  const events: AnalyticsEventInput[] = [];
+  const droppedPaths: string[] = [];
+
+  envelope.data.events.forEach((candidate, index) => {
+    const parsed = analyticsEventInputSchema.safeParse(candidate);
+
+    if (parsed.success) {
+      events.push(parsed.data);
+      return;
+    }
+
+    const firstIssuePath = parsed.error.issues[0]?.path.join(".") ?? "";
+    droppedPaths.push(firstIssuePath ? `events.${index}.${firstIssuePath}` : `events.${index}`);
+  });
+
+  return { events, dropped: droppedPaths.length, droppedPaths };
+};
 
 export type AccountUser = z.infer<typeof accountUserSchema>;
 export type UpdateAccountProfileRequest = z.infer<typeof updateAccountProfileRequestSchema>;
