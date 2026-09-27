@@ -319,6 +319,14 @@ export const loadMealPlan = (options?: { force?: boolean }): Promise<void> =>
 
 export const getMealPlanSnapshot = () => mealPlanResource.getSnapshot();
 
+/** Short aliases (`import * as mealPlan from ".../meal-plan-store"` → `mealPlan.addEntry(...)`). */
+export {
+  addMealPlanEntry as addEntry,
+  moveMealPlanEntry as moveEntry,
+  removeMealPlanEntry as removeEntry,
+  updateMealPlanEntry as updateEntry
+};
+
 export function resetMealPlanStoreForTests(): void {
   mealPlanResource.reset();
 }
