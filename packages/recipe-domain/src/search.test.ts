@@ -253,14 +253,19 @@ describe("search performance", () => {
       libraryIndex.search(query);
     }
 
-    for (const query of queries) {
-      const start = performance.now();
-      const results = libraryIndex.search(query);
-      const elapsed = performance.now() - start;
+    // The median of several runs keeps a GC pause or a busy test worker from failing the run.
+    const median = (values: number[]): number =>
+      [...values].sort((left, right) => left - right)[Math.floor(values.length / 2)] ?? 0;
 
-      expect(elapsed, `${query}: ${elapsed.toFixed(2)} ms, ${results.length} results`).toBeLessThan(
-        15
-      );
+    for (const query of queries) {
+      const timings = Array.from({ length: 7 }, () => {
+        const start = performance.now();
+        libraryIndex.search(query);
+        return performance.now() - start;
+      });
+      const elapsed = median(timings);
+
+      expect(elapsed, `${query}: median ${elapsed.toFixed(2)} ms`).toBeLessThan(15);
     }
   });
 });

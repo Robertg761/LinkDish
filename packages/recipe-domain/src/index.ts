@@ -21,3 +21,4 @@ export * from "./shopping-aggregate.js";
 export * from "./urls.js";
 export * from "./search.js";
 export * from "./tagging.js";
+export * from "./meal-plan.js";
