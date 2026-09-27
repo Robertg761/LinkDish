@@ -1,8 +1,68 @@
-import { accountUserSchema, authConfigResponseSchema } from "@linkdish/api-contracts";
-
 import { safeGetItem, safeRemoveItem, safeSetItem } from "../platform/safe-storage";
 
 import type { AccountUser, AuthConfigResponse } from "@linkdish/api-contracts";
+
+// Validated by hand (not with the zod contracts) so auth boot stays out of the zod chunk.
+
+const AUTH_MODES: ReadonlyArray<AuthConfigResponse["authMode"]> = [
+  "legacy_email_code",
+  "clerk_beta",
+  "clerk_primary"
+];
+const BILLING_PLANS: ReadonlyArray<NonNullable<AccountUser["billingPlan"]>> = [
+  "free",
+  "plus",
+  "family"
+];
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const isOptionalText = (value: unknown): value is string | null | undefined =>
+  value === undefined || value === null || typeof value === "string";
+
+const parseAuthConfig = (value: unknown): AuthConfigResponse | null => {
+  if (
+    !isRecord(value) ||
+    !AUTH_MODES.includes(value.authMode as AuthConfigResponse["authMode"]) ||
+    typeof value.clerkEnabled !== "boolean" ||
+    typeof value.emailCodeEnabled !== "boolean"
+  ) {
+    return null;
+  }
+
+  return {
+    authMode: value.authMode as AuthConfigResponse["authMode"],
+    clerkEnabled: value.clerkEnabled,
+    emailCodeEnabled: value.emailCodeEnabled
+  };
+};
+
+const parseAccountUser = (value: unknown): AccountUser | null => {
+  if (
+    !isRecord(value) ||
+    typeof value.id !== "string" ||
+    !value.id ||
+    typeof value.email !== "string" ||
+    !value.email.includes("@") ||
+    (value.billingPlan !== undefined &&
+      !BILLING_PLANS.includes(value.billingPlan as NonNullable<AccountUser["billingPlan"]>)) ||
+    !isOptionalText(value.displayName) ||
+    !isOptionalText(value.avatarEmoji)
+  ) {
+    return null;
+  }
+
+  return {
+    email: value.email,
+    id: value.id,
+    ...(value.billingPlan !== undefined
+      ? { billingPlan: value.billingPlan as NonNullable<AccountUser["billingPlan"]> }
+      : {}),
+    ...(value.displayName !== undefined ? { displayName: value.displayName } : {}),
+    ...(value.avatarEmoji !== undefined ? { avatarEmoji: value.avatarEmoji } : {})
+  };
+};
 
 /**
  * Stale-while-revalidate cache for auth boot. The last `/auth/config` answer and the last known
@@ -52,13 +112,13 @@ const readSavedAt = (value: unknown): string | null => {
 export function readCachedAuthConfig(): CachedAuthConfig | null {
   const value = readJson(AUTH_CONFIG_CACHE_KEY);
   const savedAt = readSavedAt(value);
-  const parsed = authConfigResponseSchema.safeParse((value as { config?: unknown } | null)?.config);
+  const config = parseAuthConfig((value as { config?: unknown } | null)?.config);
 
-  if (!savedAt || !parsed.success) {
+  if (!savedAt || !config) {
     return null;
   }
 
-  return { config: parsed.data, savedAt };
+  return { config, savedAt };
 }
 
 export function writeCachedAuthConfig(config: AuthConfigResponse): void {
@@ -75,13 +135,13 @@ export function readCachedAuthUser(): CachedAuthUser | null {
   }
 
   const source = (value as { source?: unknown }).source;
-  const parsed = accountUserSchema.safeParse((value as { user?: unknown }).user);
+  const user = parseAccountUser((value as { user?: unknown }).user);
 
-  if (!parsed.success || (source !== "clerk" && source !== "legacy")) {
+  if (!user || (source !== "clerk" && source !== "legacy")) {
     return null;
   }
 
-  return { savedAt, source, user: parsed.data };
+  return { savedAt, source, user };
 }
 
 export function writeCachedAuthUser(user: AccountUser, source: CachedAuthUserSource): void {
