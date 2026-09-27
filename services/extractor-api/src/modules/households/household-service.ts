@@ -37,7 +37,10 @@ import {
   upsertUserByEmail
 } from "../auth/auth-service.js";
 import { tombstoneExternalIdentitiesForUser } from "../auth/external-identity-service.js";
-import { hasActiveRevenueCatFamilyEntitlement } from "../billing/revenuecat-entitlements.js";
+import {
+  hasActiveRevenueCatFamilyEntitlement,
+  verifyActiveRevenueCatFamilyEntitlement
+} from "../billing/revenuecat-entitlements.js";
 import {
   addStoreSetMembers,
   deleteStoreKeys,
@@ -770,7 +773,7 @@ export const getHouseholdSummaryForUser = async (
 };
 
 export const createHouseholdForOwner = async (owner: AccountUser): Promise<HouseholdDetails> => {
-  if (!(await hasActiveRevenueCatFamilyEntitlement(owner.id))) {
+  if (!(await verifyActiveRevenueCatFamilyEntitlement(owner.id))) {
     throw new HouseholdError("LinkDish Family is required to create a household.", 403);
   }
 
@@ -841,7 +844,7 @@ export const createHouseholdInvite = async (
     throw new HouseholdError("Only the household owner can invite members.", 403);
   }
 
-  if (!(await hasActiveRevenueCatFamilyEntitlement(owner.id))) {
+  if (!(await verifyActiveRevenueCatFamilyEntitlement(owner.id))) {
     throw new HouseholdError("LinkDish Family is required to invite household members.", 403);
   }
 
@@ -959,7 +962,7 @@ export const acceptHouseholdInvite = async (
     throw new HouseholdError("That household no longer exists.", 404);
   }
 
-  if (!(await hasActiveRevenueCatFamilyEntitlement(preflightHousehold.ownerUserId))) {
+  if (!(await verifyActiveRevenueCatFamilyEntitlement(preflightHousehold.ownerUserId))) {
     throw new HouseholdError("This household does not have an active LinkDish Family plan.", 403);
   }
 
@@ -1070,7 +1073,7 @@ export const removeHouseholdMember = async (
     throw new HouseholdError("Only the household owner can remove members.", 403);
   }
 
-  if (!(await hasActiveRevenueCatFamilyEntitlement(owner.id))) {
+  if (!(await verifyActiveRevenueCatFamilyEntitlement(owner.id))) {
     throw new HouseholdError("LinkDish Family is required to manage household members.", 403);
   }
 

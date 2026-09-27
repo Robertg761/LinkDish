@@ -61,6 +61,34 @@ afterEach(() => {
 });
 
 describe("revenuecat-webhook-service", () => {
+  it("drops cached entitlements for every user an event concerns, even ignored ones", async () => {
+    const { handleRevenueCatWebhook } = await import("./revenuecat-webhook-service.js");
+    const { getRevenueCatEntitlementCacheKey } = await import("./revenuecat-entitlements.js");
+    const store = await import("../storage/upstash-store.js");
+    const userIds = ["linkdish_user_123", "linkdish_alias", "linkdish_old", "linkdish_new"];
+
+    for (const userId of userIds) {
+      await store.setStoreString(getRevenueCatEntitlementCacheKey(userId), "family");
+    }
+
+    const rawBody = buildPayload({
+      aliases: ["linkdish_alias"],
+      transferred_from: ["linkdish_old"],
+      transferred_to: ["linkdish_new"],
+      type: "TRANSFER"
+    });
+
+    await expect(
+      handleRevenueCatWebhook({ headers: signPayload(rawBody), rawBody })
+    ).resolves.toEqual({ action: "ignored", received: true });
+
+    for (const userId of userIds) {
+      await expect(
+        store.getStoreString(getRevenueCatEntitlementCacheKey(userId))
+      ).resolves.toBeNull();
+    }
+  });
+
   it("rejects invalid authorization before processing the payload", async () => {
     const { handleRevenueCatWebhook } = await import("./revenuecat-webhook-service.js");
     const rawBody = buildPayload();

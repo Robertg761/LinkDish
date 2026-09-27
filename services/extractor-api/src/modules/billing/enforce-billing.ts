@@ -12,7 +12,10 @@ import {
   type RequestIdentity
 } from "../request-identity.js";
 
-import { getRevenueCatBillingPlanId } from "./revenuecat-entitlements.js";
+import {
+  getRevenueCatBillingPlanId,
+  peekCachedRevenueCatBillingPlanId
+} from "./revenuecat-entitlements.js";
 
 import type {
   ExtractRecipeFailure,
@@ -153,12 +156,16 @@ const getQuotaIdentity = (
   };
 };
 
-const getQuotaPlan = async (clientId: string, allowPaidPlan: boolean): Promise<QuotaPlan> => {
+const getQuotaPlan = async (
+  clientId: string,
+  allowPaidPlan: boolean,
+  cachedPlanId: "plus" | "family" | null = null
+): Promise<QuotaPlan> => {
   if (!allowPaidPlan) {
     return freePlan();
   }
 
-  const planId = await getRevenueCatBillingPlanId(clientId);
+  const planId = cachedPlanId ?? (await getRevenueCatBillingPlanId(clientId));
 
   if (planId === "family") {
     return familyPlan();
@@ -527,12 +534,18 @@ export const authorizeExtractionRequest = async (
   }
 
   try {
-    const activeHouseholdQuota = authenticatedSession
-      ? await getActiveHouseholdQuotaForUser(authenticatedSession.user.id)
-      : null;
+    /*
+     * The household lookup (which checks the owner's cached Family
+     * entitlement) and the caller's own cached paid plan are read in parallel.
+     * RevenueCat itself is only called when neither answers the question.
+     */
+    const [activeHouseholdQuota, cachedPlanId] = await Promise.all([
+      authenticatedSession ? getActiveHouseholdQuotaForUser(authenticatedSession.user.id) : null,
+      authenticatedSession ? peekCachedRevenueCatBillingPlanId(billingClientId) : null
+    ]);
     const plan = activeHouseholdQuota
       ? familyPlan()
-      : await getQuotaPlan(billingClientId, Boolean(authenticatedSession));
+      : await getQuotaPlan(billingClientId, Boolean(authenticatedSession), cachedPlanId);
     const { billingQuotaIdentity, quotaIdentityKey } = getQuotaIdentity(
       plan,
       billingClientId,

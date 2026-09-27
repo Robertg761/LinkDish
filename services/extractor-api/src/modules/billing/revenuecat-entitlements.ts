@@ -1,4 +1,6 @@
 import { extractorApiEnv } from "../../config/env.js";
+import { hashServerSideIdentity } from "../request-identity.js";
+import { getStoreString, runStoreCommand, setStoreString } from "../storage/upstash-store.js";
 
 export type RevenueCatBillingPlanId = "free" | "plus" | "family";
 
@@ -152,6 +154,9 @@ export const grantRevenueCatPromotionalEntitlement = async ({
   );
   const body = await readRevenueCatResponse<RevenueCatSubscriberResponse>(response);
 
+  /* An admin grant changes the plan immediately; do not serve the old cached one. */
+  await invalidateRevenueCatEntitlementCache(appUserId);
+
   return body.subscriber ?? {};
 };
 
@@ -169,6 +174,87 @@ export const getRevenueCatBillingPlanIdFromSubscriber = (
   return "free";
 };
 
+/*
+ * Entitlement cache. Every import and every household request used to make one
+ * or two uncached RevenueCat calls (hundreds of milliseconds each). Paid plans
+ * ("plus"/"family") are cached per user for 5 minutes; "free" is never cached,
+ * so a purchase is picked up on the very next request, and any cached value
+ * that would grant access is dropped by the RevenueCat webhook (every
+ * verified event for the user) or overwritten by the next fresh lookup.
+ * Cache failures only ever fall back to RevenueCat.
+ */
+export const REVENUECAT_ENTITLEMENT_CACHE_TTL_SECONDS = 5 * 60;
+const entitlementCacheTimeoutMs = 1_000;
+
+export const getRevenueCatEntitlementCacheKey = (appUserId: string): string =>
+  `linkdish:entitlement:v1:${hashServerSideIdentity("entitlement-cache", appUserId)}`;
+
+type PaidPlanId = Exclude<RevenueCatBillingPlanId, "free">;
+
+const isPaidPlanId = (value: unknown): value is PaidPlanId =>
+  value === "plus" || value === "family";
+
+const readCachedPaidPlanId = async (appUserId: string): Promise<PaidPlanId | null> => {
+  try {
+    const cachedValue = await getStoreString(getRevenueCatEntitlementCacheKey(appUserId), {
+      timeoutMs: entitlementCacheTimeoutMs
+    });
+    return isPaidPlanId(cachedValue) ? cachedValue : null;
+  } catch {
+    return null;
+  }
+};
+
+const writeCachedPlanId = async (
+  appUserId: string,
+  planId: RevenueCatBillingPlanId
+): Promise<void> => {
+  try {
+    if (isPaidPlanId(planId)) {
+      await setStoreString(getRevenueCatEntitlementCacheKey(appUserId), planId, {
+        timeoutMs: entitlementCacheTimeoutMs,
+        ttlSeconds: REVENUECAT_ENTITLEMENT_CACHE_TTL_SECONDS
+      });
+      return;
+    }
+
+    await runStoreCommand(["DEL", getRevenueCatEntitlementCacheKey(appUserId)], {
+      timeoutMs: entitlementCacheTimeoutMs
+    });
+  } catch {
+    /* The cache is an optimisation; RevenueCat stays the source of truth. */
+  }
+};
+
+/* Concurrent lookups for one user in one instance share a single RevenueCat call. */
+const inflightPlanLookups = new Map<string, Promise<RevenueCatBillingPlanId>>();
+
+const lookupRevenueCatBillingPlanId = (appUserId: string): Promise<RevenueCatBillingPlanId> => {
+  const inflightLookup = inflightPlanLookups.get(appUserId);
+
+  if (inflightLookup) {
+    return inflightLookup;
+  }
+
+  const lookup = getRevenueCatSubscriber(appUserId)
+    .then(async (subscriber) => {
+      const planId = getRevenueCatBillingPlanIdFromSubscriber(subscriber);
+      await writeCachedPlanId(appUserId, planId);
+      return planId;
+    })
+    .finally(() => {
+      inflightPlanLookups.delete(appUserId);
+    });
+
+  inflightPlanLookups.set(appUserId, lookup);
+  return lookup;
+};
+
+/**
+ * A fresh RevenueCat lookup (it also refreshes the cache). Used where a stale
+ * answer would be visible or would authorise a change: account and billing
+ * screens, household creation, invites and member management.
+ */
 export const getRevenueCatBillingPlanId = async (
   appUserId: string
 ): Promise<RevenueCatBillingPlanId> => {
@@ -178,10 +264,53 @@ export const getRevenueCatBillingPlanId = async (
     return testPremiumPlanId;
   }
 
-  const subscriber = await getRevenueCatSubscriber(appUserId);
-
-  return getRevenueCatBillingPlanIdFromSubscriber(subscriber);
+  return lookupRevenueCatBillingPlanId(appUserId);
 };
 
+/** The test-premium or cached paid plan, without calling RevenueCat. */
+export const peekCachedRevenueCatBillingPlanId = async (
+  appUserId: string
+): Promise<PaidPlanId | null> =>
+  getTestPremiumBillingPlanId(appUserId) ?? (await readCachedPaidPlanId(appUserId));
+
+/** Hot-path lookup (imports, household reads): a cached paid plan, else RevenueCat. */
+export const getCachedRevenueCatBillingPlanId = async (
+  appUserId: string
+): Promise<RevenueCatBillingPlanId> =>
+  (await peekCachedRevenueCatBillingPlanId(appUserId)) ?? lookupRevenueCatBillingPlanId(appUserId);
+
+/** Cached check for household reads (quota, shared recipes, shopping list, summary). */
 export const hasActiveRevenueCatFamilyEntitlement = async (appUserId: string): Promise<boolean> =>
-  (await getRevenueCatBillingPlanId(appUserId)) === "family";
+  (await getCachedRevenueCatBillingPlanId(appUserId)) === "family";
+
+/** Fresh check for household changes that require an active Family subscription. */
+export const verifyActiveRevenueCatFamilyEntitlement = async (
+  appUserId: string
+): Promise<boolean> => (await getRevenueCatBillingPlanId(appUserId)) === "family";
+
+export const invalidateRevenueCatEntitlementCache = async (
+  ...appUserIds: Array<string | null | undefined>
+): Promise<void> => {
+  const keys = [
+    ...new Set(
+      appUserIds
+        .filter((appUserId): appUserId is string => Boolean(appUserId?.trim()))
+        .map(getRevenueCatEntitlementCacheKey)
+    )
+  ];
+
+  if (keys.length === 0) {
+    return;
+  }
+
+  try {
+    await runStoreCommand(["DEL", ...keys], { timeoutMs: entitlementCacheTimeoutMs });
+  } catch (error) {
+    console.warn(
+      JSON.stringify({
+        event: "revenuecat_entitlement_cache_invalidation_failed",
+        message: error instanceof Error ? error.message : "Unknown error"
+      })
+    );
+  }
+};
