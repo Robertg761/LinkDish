@@ -94,15 +94,7 @@ const unitDefinitions: readonly UnitDefinition[] = [
     whole: false
   },
   {
-    aliases: [
-      "fluid ounces",
-      "fluid ounce",
-      "fl. oz.",
-      "fl. oz",
-      "fl oz.",
-      "fl oz",
-      "floz"
-    ],
+    aliases: ["fluid ounces", "fluid ounce", "fl. oz.", "fl. oz", "fl oz.", "fl oz", "floz"],
     canonical: "fl oz",
     singular: "fluid ounce",
     plural: "fluid ounces",
@@ -349,7 +341,9 @@ const unconfident = (text: string): ParsedIngredientQuantity => ({
   confident: false
 });
 
-const parseQuantityValue = (text: string): { value: Exclude<ParsedQuantityValue, null>; rest: string } | null => {
+const parseQuantityValue = (
+  text: string
+): { value: Exclude<ParsedQuantityValue, null>; rest: string } | null => {
   const match = leadingQuantityPattern.exec(text);
 
   if (!match) {
@@ -363,7 +357,8 @@ const parseQuantityValue = (text: string): { value: Exclude<ParsedQuantityValue,
     return null;
   }
 
-  const value = second == null ? first : { min: Math.min(first, second), max: Math.max(first, second) };
+  const value =
+    second == null ? first : { min: Math.min(first, second), max: Math.max(first, second) };
   return {
     value,
     rest: text.slice(match[0].length).trim()
@@ -379,7 +374,10 @@ const parseUnit = (text: string): { definition: UnitDefinition; rest: string } |
     if (match) {
       return {
         definition: matcher.definition,
-        rest: trimmed.slice(match[0].length).replace(/^\s+of\b/i, "").trim()
+        rest: trimmed
+          .slice(match[0].length)
+          .replace(/^\s+of\b/i, "")
+          .trim()
       };
     }
   }
@@ -387,7 +385,9 @@ const parseUnit = (text: string): { definition: UnitDefinition; rest: string } |
   return null;
 };
 
-const parseAltQuantity = (text: string): { qty: ParsedQuantityValue; unit: string | null; rest: string } => {
+const parseAltQuantity = (
+  text: string
+): { qty: ParsedQuantityValue; unit: string | null; rest: string } => {
   const match = /^\[([^\]]+)\]\s*/.exec(text.trimStart());
 
   if (!match) {
@@ -411,7 +411,10 @@ const parseAltQuantity = (text: string): { qty: ParsedQuantityValue; unit: strin
   };
 };
 
-const scaleValue = (value: Exclude<ParsedQuantityValue, null>, factor: number): Exclude<ParsedQuantityValue, null> =>
+const scaleValue = (
+  value: Exclude<ParsedQuantityValue, null>,
+  factor: number
+): Exclude<ParsedQuantityValue, null> =>
   typeof value === "number"
     ? value * factor
     : {
@@ -488,10 +491,14 @@ const tryVulgarFraction = (value: number): string | null => {
 const formatVulgarFraction = (value: number): string =>
   tryVulgarFraction(value) ?? formatDecimal(value);
 
-const isRange = (value: Exclude<ParsedQuantityValue, null>): value is { min: number; max: number } =>
-  typeof value !== "number";
+const isRange = (
+  value: Exclude<ParsedQuantityValue, null>
+): value is { min: number; max: number } => typeof value !== "number";
 
-const formatMeasuredQuantity = (value: Exclude<ParsedQuantityValue, null>, unit: string | null): string => {
+const formatMeasuredQuantity = (
+  value: Exclude<ParsedQuantityValue, null>,
+  unit: string | null
+): string => {
   const definition = unit ? unitAliasLookup.get(unit.toLowerCase()) : undefined;
   const formatter = definition?.fractional ? formatVulgarFraction : formatDecimal;
 
@@ -538,7 +545,10 @@ const formatWholeQuantity = (value: Exclude<ParsedQuantityValue, null>): string 
  * Reads back the number that was actually rendered, so pluralization agrees
  * with the text on screen (1.05 cups renders as "1", so it reads "1 cup").
  */
-const displayedValue = (quantityText: string, fallback: Exclude<ParsedQuantityValue, null>): number => {
+const displayedValue = (
+  quantityText: string,
+  fallback: Exclude<ParsedQuantityValue, null>
+): number => {
   const lastSegment = quantityText.split(/[–—]/).pop() ?? quantityText;
   const parsed = parseNumberPhrase(lastSegment.trim());
 

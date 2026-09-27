@@ -200,7 +200,9 @@ describe("parseStepDurations", () => {
 
   it("finds every explicit timer in the starter recipes", () => {
     const timersByRecipe = SAMPLE_RECIPES.map((sample) =>
-      sample.recipe.steps.flatMap((step) => parseStepDurations(step.text).map((duration) => duration.label))
+      sample.recipe.steps.flatMap((step) =>
+        parseStepDurations(step.text).map((duration) => duration.label)
+      )
     );
 
     expect(timersByRecipe).toEqual([
