@@ -220,10 +220,14 @@ const getGeminiSnapshot = async (): Promise<AdminProviderLiveSnapshot> => {
   }
 
   try {
+    /* The key travels in a header, never in a URL that proxies or request logs can record. */
     const response = await providerJsonFetch(
-      `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(
-        extractorApiEnv.GEMINI_API_KEY
-      )}`
+      "https://generativelanguage.googleapis.com/v1beta/models",
+      {
+        headers: {
+          "x-goog-api-key": extractorApiEnv.GEMINI_API_KEY
+        }
+      }
     );
 
     if (!response.ok) {

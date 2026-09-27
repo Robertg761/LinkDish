@@ -353,6 +353,7 @@ export const registerImageRoute = (app: FastifyInstance, dependencies?: ImagePro
 
       return reply
         .header("cache-control", "public, max-age=31536000, immutable")
+        .header("cdn-cache-control", "public, s-maxage=31536000, stale-while-revalidate=86400")
         .type("image/webp")
         .send(image);
     } catch (error) {

@@ -57,11 +57,18 @@ export async function GET(request: Request) {
     const image = await getProxiedImage(sourceUrl, width);
     const body = Uint8Array.from(image);
 
+    /*
+     * Vercel's CDN only caches function responses that opt in with s-maxage or
+     * CDN-Cache-Control, so without it every new device re-fetched the origin
+     * image, re-encoded it with sharp and paid an Upstash rate-limit round
+     * trip. Proxied images are immutable per URL and width.
+     */
     return withCors(
       request,
       new Response(body, {
         headers: {
           "cache-control": "public, max-age=31536000, immutable",
+          "cdn-cache-control": "public, s-maxage=31536000, stale-while-revalidate=86400",
           "content-type": "image/webp"
         },
         status: 200
