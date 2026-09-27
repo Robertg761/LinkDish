@@ -12,3 +12,5 @@ export * from "./shopping.js";
 export * from "./units.js";
 export * from "./inflection.js";
 export * from "./number-phrases.js";
+export * from "./quantity-format.js";
+export * from "./conversion.js";

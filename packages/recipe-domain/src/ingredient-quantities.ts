@@ -68,8 +68,22 @@ export type FormatParsedIngredientOptions = {
    * omitted, embedded amounts are scaled by `factor`.
    */
   transformEmbeddedAmount?:
-    | ((value: QuantityAmount, unit: UnitDefinition) => string | null)
+    | ((
+        value: QuantityAmount,
+        unit: UnitDefinition,
+        context: EmbeddedAmountContext
+      ) => string | null)
     | undefined;
+  /**
+   * Overrides how a measured amount (the main amount or the alternate) is printed; return null
+   * for the default. Count units and unitless amounts always use whole-item rounding.
+   */
+  formatAmount?: ((value: QuantityAmount, unit: UnitDefinition) => string | null) | undefined;
+  /**
+   * The count the item text was written for, when `parsed.qty` has already been rescaled by the
+   * caller. Defaults to the parsed amount; used to re-inflect the head noun ("egg" → "eggs").
+   */
+  writtenCount?: number | undefined;
 };
 
 /** Scale factors outside this range produce unusable text, so they are clamped. */
@@ -114,6 +128,11 @@ const EMBEDDED_AMOUNT_PATTERN = new RegExp(
 );
 /** Words that make an embedded amount describe a package or a piece rather than an amount. */
 const DESCRIPTOR_BEFORE_AMOUNT_PATTERN = /\b(?:a|an|per|each|every|into)\s+$/i;
+/** "…¼ cup (" — an opening bracket right after a measurement introduces its alternate. */
+const ALTERNATE_AFTER_MEASUREMENT_PATTERN = new RegExp(
+  String.raw`(?:${EMBEDDED_UNIT_SOURCE})\.?\s*[([]\s*$`,
+  "i"
+);
 
 const unconfident = (text: string): ParsedIngredientQuantity => ({
   qty: null,
@@ -455,13 +474,25 @@ const renderPackageSize = (packageSize: IngredientPackageSize): string => {
   }
 };
 
+export type EmbeddedAmountContext = {
+  /**
+   * The amount sits in brackets right after another measurement ("¼ cup (50g) oil"), so it is
+   * that measurement's alternate rather than an amount of its own.
+   */
+  isAlternate: boolean;
+};
+
 /**
  * Rewrites every volume or mass amount inside free text. Amounts that describe a package or a
  * piece ("a 1 lb box", "per 8 oz serving") are left alone.
  */
 export const transformEmbeddedAmounts = (
   text: string,
-  transform: (value: QuantityAmount, unit: UnitDefinition) => string | null
+  transform: (
+    value: QuantityAmount,
+    unit: UnitDefinition,
+    context: EmbeddedAmountContext
+  ) => string | null
 ): string =>
   text.replace(
     EMBEDDED_AMOUNT_PATTERN,
@@ -487,7 +518,13 @@ export const transformEmbeddedAmounts = (
         return match;
       }
 
-      return transform(toRange(first, second), definition) ?? match;
+      const before = source.slice(Math.max(0, offset - 24), offset);
+
+      return (
+        transform(toRange(first, second), definition, {
+          isAlternate: ALTERNATE_AFTER_MEASUREMENT_PATTERN.test(before)
+        }) ?? match
+      );
     }
   );
 
@@ -517,10 +554,13 @@ export const formatParsedIngredient = (
   const factor = options.factor ?? 1;
   const definition = getUnitDefinition(parsed.unit);
   const scaledQty = scaleValue(parsed.qty, factor);
+  const measuredText = (value: QuantityAmount, unitDefinition: UnitDefinition | undefined) =>
+    (unitDefinition && options.formatAmount?.(value, unitDefinition)) ??
+    formatMeasuredQuantity(value, unitDefinition?.canonical ?? null);
   const quantityText =
     parsed.unit == null || definition?.whole
       ? formatWholeQuantity(scaledQty)
-      : formatMeasuredQuantity(scaledQty, parsed.unit);
+      : measuredText(scaledQty, definition);
   const shownValue = displayedValue(quantityText, scaledQty);
   const parts = [quantityText];
 
@@ -537,14 +577,23 @@ export const formatParsedIngredient = (
   }
 
   if (parsed.altQty != null && parsed.altUnit) {
-    const altText = formatAmountWithUnit(scaleValue(parsed.altQty, factor), parsed.altUnit);
+    const altValue = scaleValue(parsed.altQty, factor);
+    const altQuantityText = measuredText(altValue, getUnitDefinition(parsed.altUnit));
+    const altText = `${altQuantityText} ${formatUnitLabel(
+      parsed.altUnit,
+      displayedValue(altQuantityText, altValue)
+    )}`;
     parts.push(parsed.altStyle === "paren" ? `(${altText})` : `[${altText}]`);
   }
 
   let item = parsed.item;
 
   if (item && parsed.unit == null) {
-    item = inflectIngredientPhrase(item, maxOfValue(parsed.qty), shownValue);
+    item = inflectIngredientPhrase(
+      item,
+      options.writtenCount ?? maxOfValue(parsed.qty),
+      shownValue
+    );
   }
 
   // Amounts in a packaged line's notes describe the package ("1 package yeast (2 1/4 tsp)"),
