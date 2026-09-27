@@ -435,6 +435,12 @@ describe("compound amounts in conversion (bug 16)", () => {
     );
   });
 
+  it("keeps a metric alternate when a US amount only moves to a smaller US unit", () => {
+    expect(convertIngredientLine("1/2 cup (113g) milk", "us", { scale: 0.5 }).text).toBe(
+      "4 Tbsp (57 g) milk"
+    );
+  });
+
   it("keeps the compound as written when nothing needs converting", () => {
     expect(convertIngredientLine("1 cup plus 2 tablespoons flour", "us").text).toBe(
       "1 cup plus 2 Tbsp flour"

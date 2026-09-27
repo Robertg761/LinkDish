@@ -79,6 +79,9 @@ describe("canonicalIngredientKey", () => {
   it("recognizes pantry staples", () => {
     expect(isPantryStaple("Salt to taste")).toBe(true);
     expect(isPantryStaple("2 cups water")).toBe(true);
+    expect(
+      isPantryStaple("1/2 to 2/3 cup (113g to 152g) hot water, enough to make a soft dough")
+    ).toBe(true);
     expect(isPantryStaple("Freshly ground black pepper")).toBe(true);
     expect(isPantryStaple("2 cups flour")).toBe(false);
   });
@@ -138,6 +141,12 @@ describe("parseShoppingLine", () => {
     expect(cleanShoppingItemName("parmesan, for serving")).toBe("parmesan");
     expect(cleanShoppingItemName("black pepper to taste")).toBe("black pepper");
     expect(cleanShoppingItemName("(optional)")).toBe("(optional)");
+    // Commas inside a parenthetical do not end the name; footnote marks are dropped.
+    expect(cleanShoppingItemName("water (for a long period of simmering. If not, add less)")).toBe(
+      "water"
+    );
+    expect(cleanShoppingItemName("milk, (skim, 1%, 2% or whole, your choice)*")).toBe("milk");
+    expect(cleanShoppingItemName("semisweet chocolate chips*")).toBe("semisweet chocolate chips");
   });
 });
 

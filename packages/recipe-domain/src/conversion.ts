@@ -658,7 +658,7 @@ export const convertParsedQuantity = (
         unit: converted.unit,
         addition: undefined,
         // Once the main amount is in the target system, an alternate in the other one is noise.
-        ...(unitChanged && altDefinition && altDefinition.system !== target
+        ...(unitChanged && !primaryInTarget && altDefinition && altDefinition.system !== target
           ? { altQty: null, altUnit: null, altStyle: undefined }
           : {})
       };

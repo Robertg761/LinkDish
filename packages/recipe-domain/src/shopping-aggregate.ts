@@ -83,6 +83,8 @@ const MAX_SECTION_LENGTH_ON_ITEM = 120;
 const HIGH_SURROGATE_END_PATTERN = /[\uD800-\uDBFF]$/u;
 const PARENTHETICAL_PATTERN = /\s*(?:\([^)]*\)|\[[^\]]*\])\s*/gu;
 const NOTE_START_PATTERN = /[,;]/u;
+/** Footnote marks and stray punctuation left at the end of a name ("water*"). */
+const TRAILING_MARKS_PATTERN = /[\s*†‡.:]+$/u;
 const TRAILING_NOTE_PATTERN =
   /\s+(?:to taste|as needed|if needed|for (?:serving|garnish|garnishing|dusting|frying|greasing)|optional|divided|plus more.*)$/iu;
 const WHITESPACE_PATTERN = /\s+/gu;
@@ -217,6 +219,12 @@ const PANTRY_STAPLE_KEYS = new Set([
   "salt and black pepper",
   "kosher salt",
   "sea salt",
+  "hot water",
+  "warm water",
+  "cold water",
+  "lukewarm water",
+  "boiling water",
+  "ice water",
   "cooking spray",
   "nonstick cooking spray",
   "nonstick spray"
@@ -231,13 +239,15 @@ const foldText = (text: string): string =>
  * "chickpeas"). Falls back to the trimmed input when nothing would be left.
  */
 export const cleanShoppingItemName = (text: string): string => {
-  const noteStart = NOTE_START_PATTERN.exec(text);
-  const head = noteStart ? text.slice(0, noteStart.index) : text;
+  // Parentheticals go first: their commas ("(skim, 1% or whole)") are not the end of the name.
+  const withoutNotes = text.replace(PARENTHETICAL_PATTERN, " ");
+  const noteStart = NOTE_START_PATTERN.exec(withoutNotes);
+  const head = noteStart ? withoutNotes.slice(0, noteStart.index) : withoutNotes;
   const cleaned = head
-    .replace(PARENTHETICAL_PATTERN, " ")
     .replace(WHITESPACE_PATTERN, " ")
     .trim()
     .replace(TRAILING_NOTE_PATTERN, "")
+    .replace(TRAILING_MARKS_PATTERN, "")
     .trim();
 
   return cleaned.length > 0 ? cleaned : text.replace(WHITESPACE_PATTERN, " ").trim();

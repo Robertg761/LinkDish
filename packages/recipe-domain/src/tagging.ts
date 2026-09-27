@@ -696,6 +696,9 @@ const OVEN_PATTERN = /\b(?:bake[ds]?|oven|roast(?:ed|ing)?|broil(?:ed|ing)?)\b/i
 const HEAT_PATTERN =
   /\b(?:bake[ds]?|oven|roast|broil|fry|fried|saute|sear|simmer|boil|grill|microwave|toast|cook|heat|melt(?:ed)?)\b/i;
 const CHILL_PATTERN = /\b(?:refrigerat\w*|chill\w*|freez\w*|set in the fridge|fridge)\b/i;
+const SENTENCE_SPLIT_PATTERN = /(?<=[.!?])\s+|\n+/u;
+const ALTERNATIVE_SENTENCE_PATTERN =
+  /\b(?:alternately|alternatively|optionally|if you (?:prefer|like|have|want)|you (?:can|could) also|or you can|instead of)\b/i;
 const VESSEL_PATTERN =
   /\b(?:skillet|saucepan|stockpot|dutch oven|wok|pot|frying pan|baking dish|sheet pan|roasting pan)\b/gi;
 
@@ -705,7 +708,11 @@ const inferMethods = (
   course: RecipeCourse | null
 ): Array<TagSuggestion<RecipeMethod>> => {
   const title = fold([recipe.title, ...(recipe.keywords ?? [])].join(" · "));
-  const steps = fold(stepText);
+  // "Alternately, you can grill the ribs": an optional method is not how the recipe cooks.
+  const steps = fold(stepText)
+    .split(SENTENCE_SPLIT_PATTERN)
+    .filter((sentence) => !ALTERNATIVE_SENTENCE_PATTERN.test(sentence))
+    .join(" ");
   const methods: Array<TagSuggestion<RecipeMethod>> = [];
   const add = (value: RecipeMethod, reason: string) => methods.push({ value, reason });
   const either = (pattern: RegExp) => pattern.test(title) || pattern.test(steps);

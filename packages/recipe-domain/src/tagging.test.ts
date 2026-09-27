@@ -125,7 +125,15 @@ describe("inferRecipeTags fixtures", () => {
         ["1 cup cream", "1 box chocolate wafers"],
         ["Layer the wafers and cream, then refrigerate overnight."]
       ),
-      fixture("Roast Chicken", ["1 whole chicken"], ["Roast in a 425°F oven for 1 hour."])
+      fixture("Roast Chicken", ["1 whole chicken"], ["Roast in a 425°F oven for 1 hour."]),
+      fixture(
+        "Barbecue Ribs (Oven)",
+        ["4 lbs pork ribs"],
+        [
+          "Bake for 2 hours.",
+          "Alternately, you can grill the ribs on your grill to cook on the sauce."
+        ]
+      )
     ].map((recipe) => inferRecipeTags(recipe).method.map((entry) => entry.value));
 
     expect(methods).toEqual([
@@ -137,6 +145,7 @@ describe("inferRecipeTags fixtures", () => {
       ["one-pot"],
       ["no-bake"],
       ["no-bake"],
+      ["bake"],
       ["bake"]
     ]);
   });
