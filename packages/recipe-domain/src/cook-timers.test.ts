@@ -188,7 +188,71 @@ const durationCorpus: Array<{ text: string; expected: ExpectedDuration[] }> = [
   { text: "Pour sauce over 4 chicken thighs.", expected: [] },
   { text: "Let guests arrive around 6.", expected: [] },
   { text: "Move to rack number 2 in the oven.", expected: [] },
-  { text: "Leave space for about 20 cookies.", expected: [] }
+  { text: "Leave space for about 20 cookies.", expected: [] },
+  // (bug 10) A hyphenated mixed number is one and a half, not a range from one down to a half.
+  {
+    text: "Braise, covered, for 1-1/2 hours.",
+    expected: [{ label: "1-1/2 hours", minSeconds: 90 * minute, maxSeconds: 90 * minute }]
+  },
+  // (bug 11) Glued, unicode and spelled-out numbers.
+  {
+    text: "Let the dough rise 1½ hours.",
+    expected: [{ label: "1½ hours", minSeconds: 90 * minute, maxSeconds: 90 * minute }]
+  },
+  {
+    text: "Simmer 10mins, stirring.",
+    expected: [{ label: "10mins", minSeconds: 10 * minute, maxSeconds: 10 * minute }]
+  },
+  {
+    text: "Chill 1⁄2 hour.",
+    expected: [{ label: "1/2 hour", minSeconds: 30 * minute, maxSeconds: 30 * minute }]
+  },
+  {
+    text: "Cook for five minutes, then drain.",
+    expected: [{ label: "five minutes", minSeconds: 5 * minute, maxSeconds: 5 * minute }]
+  },
+  {
+    text: "Let it stand for half an hour.",
+    expected: [{ label: "half an hour", minSeconds: 30 * minute, maxSeconds: 30 * minute }]
+  },
+  {
+    text: "Rest the batter .5 hour.",
+    expected: [{ label: ".5 hour", minSeconds: 30 * minute, maxSeconds: 30 * minute }]
+  },
+  // (bug 15) Compound durations become one timer.
+  {
+    text: "Braise for 1 hour 30 minutes, until tender.",
+    expected: [{ label: "1 hour 30 minutes", minSeconds: 90 * minute, maxSeconds: 90 * minute }]
+  },
+  {
+    text: "Roast about 1 hr, 15 min.",
+    expected: [{ label: "about 1 hr, 15 min", minSeconds: 75 * minute, maxSeconds: 75 * minute }]
+  },
+  {
+    text: "Smoke 2 hours and 45 minutes.",
+    expected: [
+      { label: "2 hours and 45 minutes", minSeconds: 165 * minute, maxSeconds: 165 * minute }
+    ]
+  },
+  {
+    text: "Pressure cook 1h 30m.",
+    expected: [{ label: "1h 30m", minSeconds: 90 * minute, maxSeconds: 90 * minute }]
+  },
+  {
+    text: "Blend 1 minute 30 seconds.",
+    expected: [{ label: "1 minute 30 seconds", minSeconds: 90, maxSeconds: 90 }]
+  },
+  {
+    text: "Bake 2 hours, then rest 30 minutes.",
+    expected: [
+      { label: "2 hours", minSeconds: 2 * hour, maxSeconds: 2 * hour },
+      { label: "30 minutes", minSeconds: 30 * minute, maxSeconds: 30 * minute }
+    ]
+  },
+  { text: "Start the slow cooker at 7:30am.", expected: [] },
+  { text: "Serve one per person.", expected: [] },
+  { text: "Roll into a 12-inch round.", expected: [] },
+  { text: "Cut into 2 cm pieces.", expected: [] }
 ];
 
 describe("parseStepDurations", () => {
@@ -213,7 +277,7 @@ describe("parseStepDurations", () => {
   });
 
   it("documents the labeled corpus size", () => {
-    expect(durationCorpus).toHaveLength(66);
+    expect(durationCorpus).toHaveLength(83);
   });
 });
 

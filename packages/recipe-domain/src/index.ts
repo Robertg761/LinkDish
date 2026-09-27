@@ -9,3 +9,6 @@ export * from "./cook-timers.js";
 export * from "./ingredient-quantities.js";
 export * from "./step-ingredients.js";
 export * from "./shopping.js";
+export * from "./units.js";
+export * from "./inflection.js";
+export * from "./number-phrases.js";

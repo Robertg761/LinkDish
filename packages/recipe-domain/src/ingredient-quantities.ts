@@ -1,6 +1,47 @@
-import { NUMBER_PHRASE_PATTERN, parseNumberPhrase } from "./number-phrases.js";
+import {
+  displayedValue,
+  formatMeasuredQuantity,
+  formatUnitLabel,
+  formatWholeQuantity,
+  maxOfValue,
+  scaleValue
+} from "./format-internal.js";
+import { inflectIngredientPhrase } from "./inflection.js";
+import {
+  NUMBER_PHRASE_PATTERN,
+  normalizeFractionSlashes,
+  parseNumberPhrase,
+  VULGAR_FRACTION_CHARACTERS,
+  WORD_NUMBER_PATTERN
+} from "./number-phrases.js";
+import {
+  getUnitDefinition,
+  MEASUREMENT_UNIT_ALIASES,
+  UNIT_ALIAS_LOOKUP,
+  UNIT_CASE_SENSITIVE_LOOKUP
+} from "./units.js";
+
+import type { UnitDefinition } from "./units.js";
 
 export type ParsedQuantityValue = number | { min: number; max: number } | null;
+
+type QuantityAmount = Exclude<ParsedQuantityValue, null>;
+
+/**
+ * The size of one package, written between the count and the unit ("1 (15-ounce) can"), after
+ * a packaging unit ("2 cans (14 oz)"), glued to the count ("2 14.5-oz cans") or as a multiplier
+ * ("2 x 400g tins"). It describes each package, so it never scales.
+ */
+export type IngredientPackageSize = {
+  /** The size exactly as written, without delimiters: "15-ounce", "14 oz", "400g". */
+  text: string;
+  qty: QuantityAmount;
+  /** Canonical unit of the size ("oz", "g"). */
+  unit: string;
+  style: "paren" | "bracket" | "bare" | "times";
+  /** True for "1 can (15 oz)", false for "1 (15 oz) can". */
+  afterUnit: boolean;
+};
 
 export type ParsedIngredientQuantity = {
   qty: ParsedQuantityValue;
@@ -9,328 +50,70 @@ export type ParsedIngredientQuantity = {
   altUnit: string | null;
   item: string;
   confident: boolean;
-};
-
-type UnitDefinition = {
-  aliases: readonly string[];
   /**
-   * Aliases that only match with their exact casing. Used for single letters
-   * where case is the only thing separating two units ("T" tablespoon vs
-   * "t" teaspoon).
+   * Set only when the alternate amount was written in parentheses ("3 cups (360g) flour"). The
+   * default, absent, means square brackets ("2 cups [280 g] flour").
    */
-  caseSensitiveAliases?: readonly string[];
-  canonical: string;
-  singular: string;
-  plural: string;
-  compact?: string;
-  fractional: boolean;
-  whole: boolean;
+  altStyle?: "paren" | undefined;
+  /** Set only for lines that carry a package size; see `IngredientPackageSize`. */
+  packageSize?: IngredientPackageSize | undefined;
 };
 
-/**
- * Fractions the renderer is allowed to print, smallest first. Anything not in
- * this list is rendered as a decimal rather than snapped to a nearby fraction.
- */
-const fractionCandidates: ReadonlyArray<{ value: number; label: string }> = [
-  { value: 1 / 8, label: "⅛" },
-  { value: 1 / 6, label: "⅙" },
-  { value: 1 / 4, label: "¼" },
-  { value: 1 / 3, label: "⅓" },
-  { value: 3 / 8, label: "⅜" },
-  { value: 1 / 2, label: "½" },
-  { value: 5 / 8, label: "⅝" },
-  { value: 2 / 3, label: "⅔" },
-  { value: 3 / 4, label: "¾" },
-  { value: 7 / 8, label: "⅞" }
-];
-
-/**
- * How far a value may sit from a printable fraction, relative to the value
- * itself, before the renderer gives up and prints a decimal. 1/16 keeps
- * ordinary rounding (1.05 cups -> "1") while refusing to call 1/16 tsp "⅛".
- */
-const fractionRelativeTolerance = 1 / 16;
+export type FormatParsedIngredientOptions = {
+  /** Multiplier applied to the amount, the alternate amount and amounts inside the item text. */
+  factor?: number | undefined;
+  /**
+   * Rewrites volume/mass amounts found inside the item text ("…or ¼ cup (50g) oil"). Receives
+   * the amount and its unit, returns the replacement text or null to keep the original. When
+   * omitted, embedded amounts are scaled by `factor`.
+   */
+  transformEmbeddedAmount?:
+    | ((value: QuantityAmount, unit: UnitDefinition) => string | null)
+    | undefined;
+};
 
 /** Scale factors outside this range produce unusable text, so they are clamped. */
-const minScaleFactor = 0.05;
-const maxScaleFactor = 50;
-
-const unitDefinitions: readonly UnitDefinition[] = [
-  {
-    aliases: ["tablespoons", "tablespoon", "tbsp.", "tbsp", "tbs.", "tbs"],
-    caseSensitiveAliases: ["T"],
-    canonical: "Tbsp",
-    singular: "tablespoon",
-    plural: "tablespoons",
-    compact: "Tbsp",
-    fractional: true,
-    whole: false
-  },
-  {
-    aliases: ["teaspoons", "teaspoon", "tsp.", "tsp"],
-    caseSensitiveAliases: ["t"],
-    canonical: "tsp",
-    singular: "teaspoon",
-    plural: "teaspoons",
-    compact: "tsp",
-    fractional: true,
-    whole: false
-  },
-  {
-    aliases: ["cups", "cup", "c.", "c"],
-    canonical: "cup",
-    singular: "cup",
-    plural: "cups",
-    fractional: true,
-    whole: false
-  },
-  {
-    aliases: ["pounds", "pound", "lbs.", "lbs", "lb."],
-    canonical: "lb",
-    singular: "pound",
-    plural: "pounds",
-    compact: "lb",
-    fractional: false,
-    whole: false
-  },
-  {
-    aliases: ["fluid ounces", "fluid ounce", "fl. oz.", "fl. oz", "fl oz.", "fl oz", "floz"],
-    canonical: "fl oz",
-    singular: "fluid ounce",
-    plural: "fluid ounces",
-    compact: "fl oz",
-    fractional: true,
-    whole: false
-  },
-  {
-    aliases: ["ounces", "ounce", "oz."],
-    canonical: "oz",
-    singular: "ounce",
-    plural: "ounces",
-    compact: "oz",
-    fractional: false,
-    whole: false
-  },
-  {
-    aliases: ["grams", "gram"],
-    canonical: "g",
-    singular: "gram",
-    plural: "grams",
-    compact: "g",
-    fractional: false,
-    whole: false
-  },
-  {
-    aliases: ["kilograms", "kilogram"],
-    canonical: "kg",
-    singular: "kilogram",
-    plural: "kilograms",
-    compact: "kg",
-    fractional: false,
-    whole: false
-  },
-  {
-    aliases: ["milliliters", "milliliter"],
-    canonical: "ml",
-    singular: "milliliter",
-    plural: "milliliters",
-    compact: "ml",
-    fractional: false,
-    whole: false
-  },
-  {
-    aliases: ["liters", "liter"],
-    canonical: "l",
-    singular: "liter",
-    plural: "liters",
-    compact: "l",
-    fractional: false,
-    whole: false
-  },
-  {
-    aliases: ["quarts", "quart", "qts.", "qts", "qt.", "qt"],
-    canonical: "qt",
-    singular: "quart",
-    plural: "quarts",
-    compact: "qt",
-    fractional: true,
-    whole: false
-  },
-  {
-    aliases: ["pints", "pint", "pts.", "pts", "pt.", "pt"],
-    canonical: "pt",
-    singular: "pint",
-    plural: "pints",
-    compact: "pt",
-    fractional: true,
-    whole: false
-  },
-  {
-    aliases: ["gallons", "gallon", "gal.", "gal"],
-    canonical: "gal",
-    singular: "gallon",
-    plural: "gallons",
-    compact: "gal",
-    fractional: true,
-    whole: false
-  },
-  {
-    aliases: ["cans", "can"],
-    canonical: "can",
-    singular: "can",
-    plural: "cans",
-    fractional: false,
-    whole: true
-  },
-  {
-    aliases: ["cloves", "clove"],
-    canonical: "clove",
-    singular: "clove",
-    plural: "cloves",
-    fractional: false,
-    whole: true
-  },
-  {
-    aliases: ["handfuls", "handful"],
-    canonical: "handful",
-    singular: "handful",
-    plural: "handfuls",
-    fractional: false,
-    whole: true
-  },
-  {
-    aliases: ["sticks", "stick"],
-    canonical: "stick",
-    singular: "stick",
-    plural: "sticks",
-    fractional: true,
-    whole: false
-  },
-  {
-    aliases: ["pinches", "pinch"],
-    canonical: "pinch",
-    singular: "pinch",
-    plural: "pinches",
-    fractional: false,
-    whole: true
-  },
-  {
-    aliases: ["dashes", "dash"],
-    canonical: "dash",
-    singular: "dash",
-    plural: "dashes",
-    fractional: true,
-    whole: false
-  },
-  {
-    aliases: ["bunches", "bunch"],
-    canonical: "bunch",
-    singular: "bunch",
-    plural: "bunches",
-    fractional: true,
-    whole: false
-  },
-  {
-    aliases: ["slices", "slice"],
-    canonical: "slice",
-    singular: "slice",
-    plural: "slices",
-    fractional: false,
-    whole: true
-  },
-  {
-    aliases: ["packages", "package", "pkgs.", "pkgs", "pkg.", "pkg"],
-    canonical: "package",
-    singular: "package",
-    plural: "packages",
-    fractional: false,
-    whole: true
-  },
-  {
-    aliases: ["g"],
-    canonical: "g",
-    singular: "g",
-    plural: "g",
-    compact: "g",
-    fractional: false,
-    whole: false
-  },
-  {
-    aliases: ["kg"],
-    canonical: "kg",
-    singular: "kg",
-    plural: "kg",
-    compact: "kg",
-    fractional: false,
-    whole: false
-  },
-  {
-    aliases: ["ml"],
-    canonical: "ml",
-    singular: "ml",
-    plural: "ml",
-    compact: "ml",
-    fractional: false,
-    whole: false
-  },
-  {
-    aliases: ["l"],
-    canonical: "l",
-    singular: "l",
-    plural: "l",
-    compact: "l",
-    fractional: false,
-    whole: false
-  },
-  {
-    aliases: ["oz"],
-    canonical: "oz",
-    singular: "oz",
-    plural: "oz",
-    compact: "oz",
-    fractional: false,
-    whole: false
-  },
-  {
-    aliases: ["lb"],
-    canonical: "lb",
-    singular: "lb",
-    plural: "lb",
-    compact: "lb",
-    fractional: false,
-    whole: false
-  }
-];
-
-const unitAliasLookup = new Map(
-  unitDefinitions.flatMap((definition) =>
-    definition.aliases.map((alias) => [alias.toLowerCase(), definition] as const)
-  )
-);
+const MIN_SCALE_FACTOR = 0.05;
+const MAX_SCALE_FACTOR = 50;
 
 const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-/**
- * Alias matchers, compiled once at module load. `parseUnit` runs on every
- * ingredient line on every scale change, so building ~60 regexes per call was
- * measurable. Order mirrors the definition order above: first match wins.
- */
-const unitMatchers: ReadonlyArray<{ definition: UnitDefinition; pattern: RegExp }> =
-  unitDefinitions.flatMap((definition) => [
-    ...definition.aliases.map((alias) => ({
-      definition,
-      pattern: new RegExp(`^${escapeRegExp(alias)}(?=\\s|$|,|\\])`, "i")
-    })),
-    ...(definition.caseSensitiveAliases ?? []).map((alias) => ({
-      definition,
-      pattern: new RegExp(`^${escapeRegExp(alias)}(?=\\s|$|,|\\])`)
-    }))
-  ]);
+const NUMBER_OR_WORD = `(?:${NUMBER_PHRASE_PATTERN}|${WORD_NUMBER_PATTERN})`;
+const RANGE_SEPARATOR = String.raw`\s*(?:-|–|—|\bto\b|\bor\b)\s*`;
 
-const leadingQuantityPattern = new RegExp(
-  String.raw`^\s*(${NUMBER_PHRASE_PATTERN})(?:\s*(?:-|–|—|\bto\b)\s*(${NUMBER_PHRASE_PATTERN}))?(?=\s|$)`,
+/**
+ * A leading amount: a number phrase and an optional range ("2-3", "1 to 2", "2 or 3"). The
+ * lookahead accepts a letter so a glued unit ("200g") can be checked by the caller.
+ */
+const LEADING_QUANTITY_PATTERN = new RegExp(
+  String.raw`^\s*(${NUMBER_OR_WORD})(?:${RANGE_SEPARATOR}(${NUMBER_OR_WORD}))?(?=\s|$|[A-Za-z([])`,
   "i"
 );
+/** First one or two words of a unit ("tbsp.", "fl oz", "fluid ounces"). */
+const UNIT_TOKEN_PATTERN = /^([A-Za-z]+)(\.)?(?:(\s+)([A-Za-z]+)(\.)?)?/;
+/** What may follow a unit: whitespace, punctuation that closes or separates, or the end. */
+const UNIT_BOUNDARY_PATTERN = /^(?:$|[\s,;:)\]([/*])/;
+const LEADING_OF_PATTERN = /^\s*of\b\s*/i;
+const LEADING_GROUP_PATTERN = /^([([])([^()[\]]*)([)\]])\s*/;
+const MULTIPLIER_PATTERN = /^[x×]\s*(?=[\d.])/i;
+/** "15-ounce" → "15 ounce", length-preserving so the original spelling can be sliced back out. */
+const NUMBER_HYPHEN_UNIT_PATTERN = /(\d)-(?=[A-Za-z])/g;
+const RANGE_CONTINUATION_PATTERN = new RegExp(
+  `^${RANGE_SEPARATOR}(?=[\\d.${VULGAR_FRACTION_CHARACTERS}])`,
+  "i"
+);
+const EMBEDDED_UNIT_SOURCE = MEASUREMENT_UNIT_ALIASES.map(escapeRegExp).join("|");
+/**
+ * A volume or mass amount inside free text: "¼ cup", "(50g)", "1 1/2 to 2 teaspoons". The
+ * lookbehind keeps it from starting mid-token and the lookahead from ending inside a word, so
+ * "15-ounce" (an adjective) and "2 cupcakes" never match.
+ */
+const EMBEDDED_AMOUNT_PATTERN = new RegExp(
+  String.raw`(?<![\w./-])(${NUMBER_PHRASE_PATTERN})(?:\s*(?:-|–|—|\bto\b)\s*(${NUMBER_PHRASE_PATTERN}))?(\s?)(${EMBEDDED_UNIT_SOURCE})(\.?)(?![A-Za-z0-9-])`,
+  "gi"
+);
+/** Words that make an embedded amount describe a package or a piece rather than an amount. */
+const DESCRIPTOR_BEFORE_AMOUNT_PATTERN = /\b(?:a|an|per|each|every|into)\s+$/i;
 
 const unconfident = (text: string): ParsedIngredientQuantity => ({
   qty: null,
@@ -341,10 +124,18 @@ const unconfident = (text: string): ParsedIngredientQuantity => ({
   confident: false
 });
 
+const clampFactor = (factor: number): number =>
+  Number.isFinite(factor) && factor > 0
+    ? Math.min(MAX_SCALE_FACTOR, Math.max(MIN_SCALE_FACTOR, factor))
+    : 1;
+
+const toRange = (first: number, second: number | null): QuantityAmount =>
+  second == null ? first : { min: Math.min(first, second), max: Math.max(first, second) };
+
 const parseQuantityValue = (
   text: string
-): { value: Exclude<ParsedQuantityValue, null>; rest: string } | null => {
-  const match = leadingQuantityPattern.exec(text);
+): { value: QuantityAmount; rest: string; glued: boolean } | null => {
+  const match = LEADING_QUANTITY_PATTERN.exec(text);
 
   if (!match) {
     return null;
@@ -357,29 +148,61 @@ const parseQuantityValue = (
     return null;
   }
 
-  const value =
-    second == null ? first : { min: Math.min(first, second), max: Math.max(first, second) };
+  const rest = text.slice(match[0].length);
+
   return {
-    value,
-    rest: text.slice(match[0].length).trim()
+    value: toRange(first, second),
+    rest: rest.trim(),
+    glued: rest.length > 0 && rest.trimStart().length === rest.length && rest[0] !== "("
   };
 };
 
+const lookupUnitToken = (token: string): UnitDefinition | undefined =>
+  UNIT_CASE_SENSITIVE_LOOKUP.get(token) ?? UNIT_ALIAS_LOOKUP.get(token.toLowerCase());
+
+/**
+ * Reads a unit at the start of `text` with two map lookups (two-word aliases such as "fl oz"
+ * first, then one word). Every pattern it uses is compiled at module load: this runs for every
+ * ingredient line on every scale change.
+ */
 const parseUnit = (text: string): { definition: UnitDefinition; rest: string } | null => {
   const trimmed = text.trimStart();
+  const match = UNIT_TOKEN_PATTERN.exec(trimmed);
 
-  for (const matcher of unitMatchers) {
-    const match = matcher.pattern.exec(trimmed);
+  if (!match) {
+    return null;
+  }
 
-    if (match) {
-      return {
-        definition: matcher.definition,
-        rest: trimmed
-          .slice(match[0].length)
-          .replace(/^\s+of\b/i, "")
-          .trim()
-      };
+  const [, firstWord = "", firstDot = "", gap = "", secondWord = "", secondDot = ""] = match;
+  const candidates: Array<{ definition: UnitDefinition | undefined; length: number }> = [];
+
+  if (secondWord) {
+    candidates.push({
+      definition: UNIT_ALIAS_LOOKUP.get(`${firstWord} ${secondWord}`.toLowerCase()),
+      length: firstWord.length + firstDot.length + gap.length + secondWord.length + secondDot.length
+    });
+  }
+
+  candidates.push({
+    definition: lookupUnitToken(firstWord),
+    length: firstWord.length + firstDot.length
+  });
+
+  for (const candidate of candidates) {
+    if (!candidate.definition) {
+      continue;
     }
+
+    const after = trimmed.slice(candidate.length);
+
+    if (!UNIT_BOUNDARY_PATTERN.test(after)) {
+      continue;
+    }
+
+    return {
+      definition: candidate.definition,
+      rest: after.replace(LEADING_OF_PATTERN, "").trim()
+    };
   }
 
   return null;
@@ -387,272 +210,367 @@ const parseUnit = (text: string): { definition: UnitDefinition; rest: string } |
 
 const parseAltQuantity = (
   text: string
-): { qty: ParsedQuantityValue; unit: string | null; rest: string } => {
-  const match = /^\[([^\]]+)\]\s*/.exec(text.trimStart());
+): { qty: QuantityAmount; unit: string; style: "paren" | "bracket"; rest: string } | null => {
+  const group = LEADING_GROUP_PATTERN.exec(text);
 
-  if (!match) {
-    return { qty: null, unit: null, rest: text.trim() };
-  }
-
-  const parsedAlt = parseQuantityValue(match[1] ?? "");
-  if (!parsedAlt) {
-    return { qty: null, unit: null, rest: text.trim() };
-  }
-
-  const unit = parseUnit(parsedAlt.rest);
-  if (!unit) {
-    return { qty: null, unit: null, rest: text.trim() };
-  }
-
-  return {
-    qty: parsedAlt.value,
-    unit: unit.definition.canonical,
-    rest: text.trimStart().slice(match[0].length).trim()
-  };
-};
-
-const scaleValue = (
-  value: Exclude<ParsedQuantityValue, null>,
-  factor: number
-): Exclude<ParsedQuantityValue, null> =>
-  typeof value === "number"
-    ? value * factor
-    : {
-        min: value.min * factor,
-        max: value.max * factor
-      };
-
-const formatDecimal = (value: number): string => {
-  if (!Number.isFinite(value)) {
-    return "0";
-  }
-
-  const rounded = Math.round(value);
-
-  if (Math.abs(value - rounded) < 0.001 && (rounded !== 0 || value === 0)) {
-    return String(rounded);
-  }
-
-  if (Math.abs(value) >= 10) {
-    return String(Math.round(value));
-  }
-
-  if (Math.abs(value) >= 1) {
-    return String(Math.round(value * 10) / 10);
-  }
-
-  // Small amounts keep two decimals so a scaled-down pinch stays honest
-  // ("0.06 tsp") instead of rounding away to "0" or "0.1".
-  const twoPlaces = Number(value.toFixed(2));
-  return twoPlaces === 0 ? String(Number(value.toPrecision(1))) : String(twoPlaces);
-};
-
-/**
- * Renders a value using the fraction nearest to it, or a decimal when no
- * printable fraction is close enough. Quantizing against an explicit candidate
- * set (rather than rounding to eighths) is what lets thirds and sixths survive.
- */
-const tryVulgarFraction = (value: number): string | null => {
-  if (!Number.isFinite(value) || value < 0) {
+  if (!group || (group[1] === "(" && group[3] !== ")") || (group[1] === "[" && group[3] !== "]")) {
     return null;
   }
 
-  const rounded = Math.round(value);
+  const amount = parseAmount(group[2] ?? "");
 
-  if (Math.abs(value - rounded) < 0.001) {
-    return String(rounded);
+  if (!amount?.unit || amount.rest.length > 0) {
+    return null;
   }
 
-  const whole = Math.floor(value);
-  const fraction = value - whole;
-  const tolerance = value * fractionRelativeTolerance;
+  return {
+    qty: amount.value,
+    unit: amount.unit.canonical,
+    style: group[1] === "(" ? "paren" : "bracket",
+    rest: text.slice(group[0].length).replace(LEADING_OF_PATTERN, "").trim()
+  };
+};
 
-  let bestDistance = fraction;
-  let bestText = String(whole);
+/**
+ * Parses "<amount> <unit>" with an optional unit on each end of a range ("113g to 152g",
+ * "1 cup to 1 1/4 cups"). A number glued to text must be glued to a unit that allows it.
+ */
+const parseAmount = (
+  text: string
+): { value: QuantityAmount; unit: UnitDefinition | null; rest: string } | null => {
+  const quantity = parseQuantityValue(text);
 
-  const distanceToNextWhole = 1 - fraction;
-  if (distanceToNextWhole < bestDistance) {
-    bestDistance = distanceToNextWhole;
-    bestText = String(whole + 1);
+  if (!quantity) {
+    return null;
   }
 
-  for (const candidate of fractionCandidates) {
-    const distance = Math.abs(fraction - candidate.value);
+  const unit = parseUnit(quantity.rest);
 
-    if (distance < bestDistance) {
-      bestDistance = distance;
-      bestText = whole > 0 ? `${whole} ${candidate.label}` : candidate.label;
+  if (quantity.glued && !unit?.definition.attachable) {
+    return null;
+  }
+
+  if (!unit) {
+    return { value: quantity.value, unit: null, rest: quantity.rest };
+  }
+
+  if (typeof quantity.value === "number") {
+    const continuation = RANGE_CONTINUATION_PATTERN.exec(unit.rest);
+    const upper = continuation ? parseQuantityValue(unit.rest.slice(continuation[0].length)) : null;
+    const upperUnit = upper ? parseUnit(upper.rest) : null;
+
+    if (
+      upper &&
+      typeof upper.value === "number" &&
+      upperUnit?.definition === unit.definition &&
+      (!upper.glued || upperUnit.definition.attachable)
+    ) {
+      return {
+        value: toRange(quantity.value, upper.value),
+        unit: unit.definition,
+        rest: upperUnit.rest
+      };
     }
   }
 
-  return bestDistance <= tolerance ? bestText : null;
+  return { value: quantity.value, unit: unit.definition, rest: unit.rest };
 };
 
-const formatVulgarFraction = (value: number): string =>
-  tryVulgarFraction(value) ?? formatDecimal(value);
+const isMeasurement = (definition: UnitDefinition | null | undefined): boolean =>
+  definition != null && definition.kind !== "count";
 
-const isRange = (
-  value: Exclude<ParsedQuantityValue, null>
-): value is { min: number; max: number } => typeof value !== "number";
+/** Reads a package size such as "15-ounce", "14.5 oz" or "400g"; the whole text must be used. */
+const parseSizeText = (text: string): { qty: QuantityAmount; unit: string } | null => {
+  const amount = parseAmount(text.replace(NUMBER_HYPHEN_UNIT_PATTERN, "$1 "));
 
-const formatMeasuredQuantity = (
-  value: Exclude<ParsedQuantityValue, null>,
-  unit: string | null
-): string => {
-  const definition = unit ? unitAliasLookup.get(unit.toLowerCase()) : undefined;
-  const formatter = definition?.fractional ? formatVulgarFraction : formatDecimal;
-
-  if (!isRange(value)) {
-    return formatter(value);
-  }
-
-  // A range reads as a single measurement, so both ends share one notation.
-  // Formatting them independently let one end fall back to a decimal while the
-  // other kept a fraction ("0.08–⅙ tsp"); when either end has no close
-  // fraction, both fall back. Ends that render alike collapse to one value so
-  // a narrowed range does not print as "⅛–⅛".
-  const fractionMin = definition?.fractional ? tryVulgarFraction(value.min) : null;
-  const fractionMax = definition?.fractional ? tryVulgarFraction(value.max) : null;
-  const useFractions = fractionMin != null && fractionMax != null;
-  const minText = useFractions ? fractionMin : formatDecimal(value.min);
-  const maxText = useFractions ? fractionMax : formatDecimal(value.max);
-
-  return minText === maxText ? minText : `${minText}–${maxText}`;
+  return amount && isMeasurement(amount.unit) && amount.rest.length === 0 && amount.unit
+    ? { qty: amount.value, unit: amount.unit.canonical }
+    : null;
 };
 
-const formatWholeQuantity = (value: Exclude<ParsedQuantityValue, null>): string => {
-  const min = isRange(value) ? value.min : value;
-  const max = isRange(value) ? value.max : value;
+/** A package size written right after the count: "(15-ounce)", "15-oz", "28 oz", "x 400g". */
+const parseLeadingPackageSize = (
+  rest: string
+): { packageSize: IngredientPackageSize; rest: string } | null => {
+  const group = LEADING_GROUP_PATTERN.exec(rest);
 
-  if (Number.isInteger(min) && Number.isInteger(max)) {
-    return min === max ? String(min) : `${min}–${max}`;
+  if (group) {
+    const size = parseSizeText(group[2]?.trim() ?? "");
+
+    return size
+      ? {
+          packageSize: {
+            text: group[2]?.trim() ?? "",
+            ...size,
+            style: group[1] === "(" ? "paren" : "bracket",
+            afterUnit: false
+          },
+          rest: rest.slice(group[0].length).trim()
+        }
+      : null;
   }
 
-  if (max < 1) {
-    // Rounding up to 1 here would leave a halved line looking unscaled, so
-    // report the real amount instead ("½ can").
-    return min === max
-      ? formatVulgarFraction(max)
-      : `${formatVulgarFraction(min)}–${formatVulgarFraction(max)}`;
+  const multiplier = MULTIPLIER_PATTERN.exec(rest);
+  const candidate = multiplier ? rest.slice(multiplier[0].length) : rest;
+  const amount = parseAmount(candidate.replace(NUMBER_HYPHEN_UNIT_PATTERN, "$1 "));
+
+  // Keep the size exactly as written ("14.5-oz"): the hyphen normalization preserves length, so
+  // the unparsed remainder is a suffix of the original text.
+  if (!amount?.unit || !isMeasurement(amount.unit) || !candidate.endsWith(amount.rest)) {
+    return null;
   }
 
-  const roundedMin = Math.max(1, Math.floor(min));
-  const roundedMax = Math.max(1, Math.ceil(max));
-  return roundedMin === roundedMax ? String(roundedMin) : `${roundedMin}–${roundedMax}`;
+  const rawText = candidate.slice(0, candidate.length - amount.rest.length).trim();
+
+  if (rawText.length === 0) {
+    return null;
+  }
+
+  return {
+    packageSize: {
+      text: rawText,
+      qty: amount.value,
+      unit: amount.unit.canonical,
+      style: multiplier ? "times" : "bare",
+      afterUnit: false
+    },
+    rest: amount.rest
+  };
 };
+
+const trimItem = (text: string): string => text.replace(LEADING_OF_PATTERN, "").trim();
 
 /**
- * Reads back the number that was actually rendered, so pluralization agrees
- * with the text on screen (1.05 cups renders as "1", so it reads "1 cup").
- */
-const displayedValue = (
-  quantityText: string,
-  fallback: Exclude<ParsedQuantityValue, null>
-): number => {
-  const lastSegment = quantityText.split(/[–—]/).pop() ?? quantityText;
-  const parsed = parseNumberPhrase(lastSegment.trim());
-
-  if (parsed != null) {
-    return parsed;
-  }
-
-  return isRange(fallback) ? fallback.max : fallback;
-};
-
-const formatUnit = (unit: string, displayValue: number): string => {
-  const definition = unitAliasLookup.get(unit.toLowerCase());
-
-  if (!definition) {
-    return unit;
-  }
-
-  if (definition.compact) {
-    return definition.compact;
-  }
-
-  return displayValue <= 1 ? definition.singular : definition.plural;
-};
-
-const shouldUseWholeRange = (parsed: ParsedIngredientQuantity): boolean => {
-  if (parsed.unit == null) {
-    return true;
-  }
-
-  const definition = unitAliasLookup.get(parsed.unit.toLowerCase());
-  return definition?.whole ?? false;
-};
-
-const maxOf = (value: Exclude<ParsedQuantityValue, null>): number =>
-  isRange(value) ? value.max : value;
-
-/**
- * Parses a leading ingredient quantity, optional unit, optional bracketed
- * alternate quantity, and the remaining item text.
+ * Parses a leading ingredient quantity, optional package size, optional unit, optional
+ * alternate quantity in brackets or parentheses, and the remaining item text.
  *
- * Lines without a clear leading quantity return the original line as `item`
- * with `confident:false`, which lets scaling callers skip them safely. A line
- * that is nothing but an amount ("2 cups") still parses confidently as long as
- * it carries a unit, so it scales with the rest of the recipe. A zero amount is
- * treated as unconfident: there is nothing meaningful to scale.
+ * Lines without a clear leading quantity return the original line as `item` with
+ * `confident:false`, which lets scaling callers skip them safely. A line that is nothing but an
+ * amount ("2 cups") still parses confidently as long as it carries a unit, so it scales with the
+ * rest of the recipe. A zero amount is treated as unconfident: there is nothing meaningful to
+ * scale.
  */
 export const parseIngredientQuantity = (text: string): ParsedIngredientQuantity => {
-  const parsedQuantity = parseQuantityValue(text);
+  const source = normalizeFractionSlashes(text);
+  const quantity = parseQuantityValue(source);
 
-  if (!parsedQuantity) {
+  if (!quantity || maxOfValue(quantity.value) <= 0) {
     return unconfident(text);
   }
 
-  if (maxOf(parsedQuantity.value) <= 0) {
-    return unconfident(text);
+  let rest = quantity.rest;
+  let packageSize: IngredientPackageSize | undefined;
+  let unit: UnitDefinition | null = null;
+  let value = quantity.value;
+
+  if (quantity.glued) {
+    const amount = parseAmount(source);
+
+    if (!amount?.unit) {
+      return unconfident(text);
+    }
+
+    value = amount.value;
+    unit = amount.unit;
+    rest = amount.rest;
+  } else {
+    const leadingSize = parseLeadingPackageSize(rest);
+
+    if (leadingSize) {
+      packageSize = leadingSize.packageSize;
+      rest = leadingSize.rest;
+    }
+
+    const amount = packageSize ? null : parseAmount(source);
+    const parsedUnit = amount ? null : parseUnit(rest);
+
+    if (amount?.unit) {
+      value = amount.value;
+      unit = amount.unit;
+      rest = amount.rest;
+    } else if (parsedUnit) {
+      unit = parsedUnit.definition;
+      rest = parsedUnit.rest;
+    }
   }
 
-  const unit = parseUnit(parsedQuantity.rest);
-  const alt = parseAltQuantity(unit?.rest ?? parsedQuantity.rest);
-  const item = alt.rest.trim();
+  let altQty: ParsedQuantityValue = null;
+  let altUnit: string | null = null;
+  let altStyle: "paren" | "bracket" | undefined;
+
+  if (unit?.container && !packageSize) {
+    const group = LEADING_GROUP_PATTERN.exec(rest);
+    const size = group ? parseSizeText(group[2]?.trim() ?? "") : null;
+
+    if (group && size) {
+      packageSize = {
+        text: group[2]?.trim() ?? "",
+        ...size,
+        style: group[1] === "(" ? "paren" : "bracket",
+        afterUnit: true
+      };
+      rest = trimItem(rest.slice(group[0].length));
+    }
+  } else if (unit || !packageSize) {
+    const alt = parseAltQuantity(rest);
+
+    // A parenthetical after a bare count ("2 (about 1 lb) chicken breasts") is a size note, not
+    // an alternate for the count; only measured lines get parenthetical alternates.
+    if (alt && (unit != null || alt.style === "bracket")) {
+      altQty = alt.qty;
+      altUnit = alt.unit;
+      altStyle = alt.style;
+      rest = alt.rest;
+    }
+  }
+
+  const item = rest.trim();
 
   if (!item && !unit) {
     return unconfident(text);
   }
 
   return {
-    qty: parsedQuantity.value,
-    unit: unit?.definition.canonical ?? null,
-    altQty: alt.qty,
-    altUnit: alt.unit,
+    qty: value,
+    unit: unit?.canonical ?? null,
+    altQty,
+    altUnit,
     item,
-    confident: true
+    confident: true,
+    ...(altStyle === "paren" ? { altStyle } : {}),
+    ...(packageSize ? { packageSize } : {})
   };
+};
+
+const renderPackageSize = (packageSize: IngredientPackageSize): string => {
+  switch (packageSize.style) {
+    case "paren":
+      return `(${packageSize.text})`;
+    case "bracket":
+      return `[${packageSize.text}]`;
+    case "times":
+      return `x ${packageSize.text}`;
+    case "bare":
+      return packageSize.text;
+  }
+};
+
+/**
+ * Rewrites every volume or mass amount inside free text. Amounts that describe a package or a
+ * piece ("a 1 lb box", "per 8 oz serving") are left alone.
+ */
+export const transformEmbeddedAmounts = (
+  text: string,
+  transform: (value: QuantityAmount, unit: UnitDefinition) => string | null
+): string =>
+  text.replace(
+    EMBEDDED_AMOUNT_PATTERN,
+    (
+      match: string,
+      firstText: string,
+      secondText: string | undefined,
+      _space: string,
+      unitText: string,
+      _dot: string,
+      offset: number,
+      source: string
+    ) => {
+      if (DESCRIPTOR_BEFORE_AMOUNT_PATTERN.test(source.slice(Math.max(0, offset - 8), offset))) {
+        return match;
+      }
+
+      const definition = getUnitDefinition(unitText);
+      const first = parseNumberPhrase(firstText);
+      const second = secondText ? parseNumberPhrase(secondText) : null;
+
+      if (!definition || first == null || (secondText && second == null) || first <= 0) {
+        return match;
+      }
+
+      return transform(toRange(first, second), definition) ?? match;
+    }
+  );
+
+/** Text for an amount of a unit, with the unit label agreeing with the rendered number. */
+export const formatAmountWithUnit = (value: QuantityAmount, unit: string): string => {
+  const quantityText = formatMeasuredQuantity(value, unit);
+  return `${quantityText} ${formatUnitLabel(unit, displayedValue(quantityText, value))}`;
+};
+
+/**
+ * Renders a parsed ingredient line, optionally multiplied by `factor`.
+ *
+ * Cup and spoon measurements use vulgar fractions; whole foods use rounded ranges so scaling
+ * never prints 1.33 eggs. The package size stays as written, the alternate amount keeps its
+ * brackets or parentheses, the head noun of a unitless line agrees with the new count
+ * ("1 large egg" → "2 large eggs") and volume/mass amounts inside the item text scale too
+ * ("…or ¼ cup (50g) oil"). Unconfident lines come back verbatim.
+ */
+export const formatParsedIngredient = (
+  parsed: ParsedIngredientQuantity,
+  options: FormatParsedIngredientOptions = {}
+): string => {
+  if (!parsed.confident || parsed.qty == null) {
+    return parsed.item;
+  }
+
+  const factor = options.factor ?? 1;
+  const definition = getUnitDefinition(parsed.unit);
+  const scaledQty = scaleValue(parsed.qty, factor);
+  const quantityText =
+    parsed.unit == null || definition?.whole
+      ? formatWholeQuantity(scaledQty)
+      : formatMeasuredQuantity(scaledQty, parsed.unit);
+  const shownValue = displayedValue(quantityText, scaledQty);
+  const parts = [quantityText];
+
+  if (parsed.packageSize && !parsed.packageSize.afterUnit) {
+    parts.push(renderPackageSize(parsed.packageSize));
+  }
+
+  if (parsed.unit) {
+    parts.push(formatUnitLabel(parsed.unit, shownValue));
+  }
+
+  if (parsed.packageSize?.afterUnit) {
+    parts.push(renderPackageSize(parsed.packageSize));
+  }
+
+  if (parsed.altQty != null && parsed.altUnit) {
+    const altText = formatAmountWithUnit(scaleValue(parsed.altQty, factor), parsed.altUnit);
+    parts.push(parsed.altStyle === "paren" ? `(${altText})` : `[${altText}]`);
+  }
+
+  let item = parsed.item;
+
+  if (item && parsed.unit == null) {
+    item = inflectIngredientPhrase(item, maxOfValue(parsed.qty), shownValue);
+  }
+
+  // Amounts in a packaged line's notes describe the package ("1 package yeast (2 1/4 tsp)"),
+  // so they never scale or convert.
+  const rewritesEmbedded = item.length > 0 && !definition?.container;
+
+  if (rewritesEmbedded && options.transformEmbeddedAmount) {
+    item = transformEmbeddedAmounts(item, options.transformEmbeddedAmount);
+  } else if (rewritesEmbedded && factor !== 1) {
+    item = transformEmbeddedAmounts(item, (value, unit) =>
+      formatAmountWithUnit(scaleValue(value, factor), unit.canonical)
+    );
+  }
+
+  if (item) {
+    parts.push(item);
+  }
+
+  return parts.join(" ").trim();
 };
 
 /**
  * Renders a scaled ingredient line from a parsed quantity.
  *
- * Cup and spoon measurements use vulgar fractions; whole foods use rounded
- * ranges when scaling would otherwise create absurd output such as 1.33 eggs.
- * Factors are clamped to a usable range, and a nonsensical factor falls back to
- * 1 so the line keeps its amount rather than losing it.
+ * Factors are clamped to a usable range, and a nonsensical factor falls back to 1 so the line
+ * keeps its amount rather than losing it. See `formatParsedIngredient` for the rendering rules.
  */
-export const scaleQuantity = (parsed: ParsedIngredientQuantity, factor: number): string => {
-  if (!parsed.confident || parsed.qty == null) {
-    return parsed.item;
-  }
-
-  const safeFactor =
-    Number.isFinite(factor) && factor > 0
-      ? Math.min(maxScaleFactor, Math.max(minScaleFactor, factor))
-      : 1;
-
-  const scaledQty = scaleValue(parsed.qty, safeFactor);
-  const quantityText = shouldUseWholeRange(parsed)
-    ? formatWholeQuantity(scaledQty)
-    : formatMeasuredQuantity(scaledQty, parsed.unit);
-  const unitText = parsed.unit
-    ? ` ${formatUnit(parsed.unit, displayedValue(quantityText, scaledQty))}`
-    : "";
-  const altText =
-    parsed.altQty != null && parsed.altUnit
-      ? ` [${formatMeasuredQuantity(scaleValue(parsed.altQty, safeFactor), parsed.altUnit)} ${parsed.altUnit}]`
-      : "";
-
-  return `${quantityText}${unitText}${altText} ${parsed.item}`.trim();
-};
+export const scaleQuantity = (parsed: ParsedIngredientQuantity, factor: number): string =>
+  formatParsedIngredient(parsed, { factor: clampFactor(factor) });

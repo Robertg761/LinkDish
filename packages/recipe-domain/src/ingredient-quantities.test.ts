@@ -264,7 +264,21 @@ describe("scale round-trip", () => {
     "1 dash bitters",
     "1 bunch parsley",
     "2 cups",
-    "1 1/3 cups flour"
+    "1 1/3 cups flour",
+    "1-1/2 cups flour",
+    "1½ cups milk",
+    "1⁄2 cup sugar",
+    ".5 cup oil",
+    "200g pasta",
+    "3 cups (360g) flour",
+    "1/2 to 2/3 cup (113g to 152g) hot water",
+    "1 (15-ounce) can chickpeas",
+    "2 (14 oz) cans",
+    "2 x 400g tins chopped tomatoes",
+    "2 large eggs, beaten",
+    "1 red bell pepper, thinly sliced",
+    "4 tablespoons (57g) melted butter or 1/4 cup (50g) vegetable oil",
+    "one onion"
   ];
   const roundTripFactors = [0.05, 0.25, 0.5, 0.665, 1, 1.05, 1.4, 1.5, 2, 3, 50, 1e21, 1e-9];
 
