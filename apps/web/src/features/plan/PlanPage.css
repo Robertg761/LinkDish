@@ -145,6 +145,7 @@
 }
 
 .plan-quick-chip-plus {
+  display: none;
   flex-shrink: 0;
   color: var(--color-primary);
 }
@@ -532,6 +533,10 @@ a.plan-entry-title:hover {
 
   .plan-quick-chip-title {
     -webkit-line-clamp: 1;
+  }
+
+  .plan-quick-chip-plus {
+    display: block;
   }
 
   .plan-entry-servings-icon {
