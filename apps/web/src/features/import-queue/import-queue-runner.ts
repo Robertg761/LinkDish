@@ -120,7 +120,12 @@ const extract = (
   item.url
     ? apiClient.extractRecipe({ attempt, correlationId, url: item.url }, { signal })
     : apiClient.extractRecipeFromText(
-        { attempt: "fallback", correlationId, text: item.text ?? "" },
+        {
+          attempt: "fallback",
+          correlationId,
+          text: item.text ?? "",
+          ...(item.sourceUrl ? { sourceUrl: item.sourceUrl } : {})
+        },
         { signal }
       );
 
@@ -213,6 +218,7 @@ async function savePendingImport(
   const { owner, signal, tier } = context;
   const cookbook = await readCookbook();
   const id = await generateDeterministicId(pending.sourceUrl, pending.recipe.title);
+  // Only a link is matched page by page: two texts from one page can be two recipes.
   const existing =
     cookbook.find((recipe) => recipe.id === id) ??
     (item.url ? findSavedDuplicate(item.url, cookbook) : undefined);
@@ -263,7 +269,9 @@ export async function processImportQueueItem(
   }
 
   // 1. Already saved? Nothing to import, nothing spent. (An unreadable cookbook throws: importing
-  // now could spend one on a recipe we have.)
+  // now could spend one on a recipe we have.) Pasted text is imported as it is online, even with
+  // the page it came from (that page can hold more than one recipe): saving it finds the same
+  // recipe from that page by its id.
   if (item.url) {
     const existing = findSavedDuplicate(item.url, await readCookbook());
 
@@ -392,7 +400,8 @@ export async function processImportQueueItem(
           warnings: response.extraction.warnings
         },
         recipe: response.recipe,
-        sourceUrl: item.url ?? response.recipe.sourceUrl
+        // As the importer saves it: the link, or the page pasted text came from.
+        sourceUrl: item.url ?? item.sourceUrl ?? response.recipe.sourceUrl
       };
       return await keepImportedRecipe(item, imported, context);
     }

@@ -19,7 +19,7 @@ import {
 } from "../../storage/linkdish-db";
 import { fakeIdb } from "../../storage/testing/fake-idb";
 import { readWebBillingUsage } from "../billing/web-billing";
-import { deleteSavedRecipe } from "../library/saved-recipe-store";
+import { deleteSavedRecipe, generateDeterministicId } from "../library/saved-recipe-store";
 
 import { runImportQueue } from "./import-queue-runner";
 
@@ -47,7 +47,8 @@ const apiMocks = vi.hoisted(() => {
     ExtractorApiError,
     createSharedRecipe: vi.fn(),
     extractRecipe: vi.fn<(request: ExtractRecipeRequest) => Promise<unknown>>(),
-    extractRecipeFromText: vi.fn<(request: { text: string }) => Promise<unknown>>(),
+    extractRecipeFromText:
+      vi.fn<(request: { text: string; sourceUrl?: string }) => Promise<unknown>>(),
     getHousehold: vi.fn()
   };
 });
@@ -839,6 +840,124 @@ describe("import queue runner", () => {
       text: "Soup: 1 onion, 2 cups stock. Simmer 20 minutes."
     });
     expect((await getImportQueue())[0]?.status).toBe("done");
+  });
+
+  describe("queued text with the link it came from", () => {
+    const link = "https://example.com/noodles";
+    const caption = `Sesame noodles, from ${link}\n200 g noodles\nToss and serve.`;
+    /** The API names the recipe's source after the link it's sent, or makes one up without it. */
+    const fromTheLinkGiven =
+      (title: string) =>
+      (request: { sourceUrl?: string }): Promise<unknown> =>
+        Promise.resolve(
+          success(title, request.sourceUrl ?? "https://linkdish.app/text-imports/abc")
+        );
+    const savedFrom = (sourceUrl: string) =>
+      fakeIdb
+        .records<WebSavedRecipe>(SAVED_RECIPES_STORE_NAME)
+        .filter((recipe) => recipe.sourceUrl === sourceUrl);
+
+    it("sends the link with the text and keeps it as the recipe's source, as the importer does", async () => {
+      await enqueueImport({ sourceUrl: link, text: caption });
+      apiMocks.extractRecipeFromText.mockResolvedValue(
+        success("Sesame noodles", "https://linkdish.app/text-imports/abc")
+      );
+
+      await expect(runImportQueue(context())).resolves.toEqual({ paused: null, processed: 1 });
+
+      expect(apiMocks.extractRecipe).not.toHaveBeenCalled();
+      expect(apiMocks.extractRecipeFromText.mock.calls[0]?.[0]).toMatchObject({
+        attempt: "fallback",
+        sourceUrl: link,
+        text: caption
+      });
+      const [kept] = savedFrom(link);
+      expect(kept).toMatchObject({
+        recipe: { title: "Sesame noodles" },
+        sourceHost: "example.com"
+      });
+      expect(kept?.id).toBe(await generateDeterministicId(link, "Sesame noodles"));
+      expect((await getImportQueue())[0]).toMatchObject({ recipeId: kept?.id, status: "done" });
+      expect(v2Events("import_succeeded")[0]?.[0].properties).toMatchObject({
+        attempt: "fallback",
+        source_type: "text"
+      });
+    });
+
+    it("lets a later import of that page find the recipe without spending one", async () => {
+      await enqueueImport({ sourceUrl: link, text: caption });
+      apiMocks.extractRecipeFromText.mockImplementation(fromTheLinkGiven("Sesame noodles"));
+      await runImportQueue(context());
+      const [kept] = savedFrom(link);
+
+      await enqueueImport({ url: "https://www.example.com/noodles/?utm_source=ig" });
+      await runImportQueue(context());
+
+      expect(apiMocks.extractRecipe).not.toHaveBeenCalled();
+      expect((await getImportQueue()).map((item) => item.recipeId)).toEqual([kept?.id, kept?.id]);
+    });
+
+    it("finishes with the same recipe from that page when it's saved already", async () => {
+      const id = await generateDeterministicId(link, "Sesame noodles");
+      fakeIdb.seed(SAVED_RECIPES_STORE_NAME, [
+        { ...saved(id, link), recipe: recipeFor("Sesame noodles", link) }
+      ]);
+      await enqueueImport({ sourceUrl: link, text: caption });
+      apiMocks.extractRecipeFromText.mockImplementation(fromTheLinkGiven("Sesame noodles"));
+
+      await expect(runImportQueue(context())).resolves.toEqual({ paused: null, processed: 1 });
+
+      expect((await getImportQueue())[0]).toMatchObject({ recipeId: id, status: "done" });
+      expect(fakeIdb.records(SAVED_RECIPES_STORE_NAME)).toHaveLength(1);
+      expect(v2Events("recipe_saved")).toHaveLength(0);
+    });
+
+    it("imports two different texts from the same link as two recipes", async () => {
+      await enqueueImport({ sourceUrl: link, text: caption });
+      await enqueueImport({ sourceUrl: link, text: `Chili oil noodles, from ${link}\n...` });
+      apiMocks.extractRecipeFromText
+        .mockImplementationOnce(fromTheLinkGiven("Sesame noodles"))
+        .mockImplementationOnce(fromTheLinkGiven("Chili oil noodles"));
+
+      await expect(runImportQueue(context())).resolves.toEqual({ paused: null, processed: 2 });
+
+      expect(apiMocks.extractRecipeFromText).toHaveBeenCalledTimes(2);
+      expect(
+        savedFrom(link)
+          .map((recipe) => recipe.recipe.title)
+          .sort()
+      ).toEqual(["Chili oil noodles", "Sesame noodles"]);
+    });
+
+    it("keeps the link with a recipe that waits for room, and saves it from there", async () => {
+      fakeIdb.seed(
+        SAVED_RECIPES_STORE_NAME,
+        Array.from({ length: 14 }, (_, index) => saved(`r${index}`, `https://x.com/${index}`))
+      );
+      await enqueueImport({ sourceUrl: link, text: caption });
+      apiMocks.extractRecipeFromText.mockImplementationOnce(() => {
+        // Another tab takes the last free slot while this import runs.
+        fakeIdb.seed(SAVED_RECIPES_STORE_NAME, [saved("r14", "https://x.com/14")]);
+        return Promise.resolve(success("Sesame noodles", "https://linkdish.app/text-imports/abc"));
+      });
+      const signedIn = context({ owner: "tab-a", tier: "free" });
+
+      await expect(runImportQueue(signedIn)).resolves.toEqual({
+        paused: "save_limit",
+        processed: 0
+      });
+      expect((await getImportQueue())[0]).toMatchObject({
+        pendingSave: { sourceUrl: link },
+        sourceUrl: link,
+        status: "queued"
+      });
+
+      await deleteSavedRecipe("r0");
+      await expect(runImportQueue(signedIn)).resolves.toEqual({ paused: null, processed: 1 });
+
+      expect(apiMocks.extractRecipeFromText).toHaveBeenCalledOnce();
+      expect(savedFrom(link).map((recipe) => recipe.recipe.title)).toEqual(["Sesame noodles"]);
+    });
   });
 
   it("recovers imports left 'processing' by a closed tab", async () => {

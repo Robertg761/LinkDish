@@ -95,6 +95,59 @@ describe("import-queue-store", () => {
     expect(await getImportQueue()).toHaveLength(2);
   });
 
+  describe("pasted text with the link it came from", () => {
+    const link = "https://example.com/noodles";
+    const caption = `Sesame noodles, from ${link}\n200 g noodles\nToss and serve.`;
+
+    it("keeps the link beside the text, without making it a link import", async () => {
+      const item = await enqueueImport({ source: "in_app", sourceUrl: ` ${link} `, text: caption });
+
+      expect(item).toMatchObject({ sourceUrl: link, status: "queued", text: caption });
+      expect(item).not.toHaveProperty("url");
+      expect(fakeIdb.record(IMPORT_QUEUE_STORE_NAME, item.id)).toMatchObject({ sourceUrl: link });
+    });
+
+    it("keeps the link through a claim, a failure, Retry and stale recovery", async () => {
+      const item = await enqueueImport({ sourceUrl: link, text: caption });
+      const start = Date.parse("2026-09-28T10:00:00.000Z");
+
+      expect(await claimNextQueuedImport("tab-a", start)).toMatchObject({ sourceUrl: link });
+      expect(await recoverStaleImports(start + STALE_PROCESSING_MS + 1)).toBe(1);
+      await claimNextQueuedImport("tab-b");
+      expect(await markImportFailed(item.id, "nope", "tab-b")).toMatchObject({ sourceUrl: link });
+      expect(await retryImport(item.id)).toMatchObject({ sourceUrl: link, status: "queued" });
+    });
+
+    it("never takes a text's place for another text or for its link", async () => {
+      const first = await enqueueImport({ sourceUrl: link, text: caption });
+      const second = await enqueueImport({ sourceUrl: link, text: "Chili oil noodles\n..." });
+      const again = await enqueueImport({ sourceUrl: link, text: caption });
+      const page = await enqueueImport({ url: link });
+
+      // Each paste is its own import (as it is online); the page itself is a link import.
+      expect(new Set([first.id, second.id, again.id, page.id]).size).toBe(4);
+      expect(page).not.toHaveProperty("sourceUrl");
+      expect(page).not.toHaveProperty("text");
+      // Adding the link again finds the link import, not a text that mentions it.
+      expect((await enqueueImport({ url: link })).id).toBe(page.id);
+      expect(fakeIdb.records(IMPORT_QUEUE_STORE_NAME)).toHaveLength(4);
+    });
+
+    it("queues the text without a link it couldn't import from", async () => {
+      const item = await enqueueImport({ sourceUrl: "javascript:alert(1)", text: caption });
+
+      expect(item).toMatchObject({ status: "queued", text: caption });
+      expect(item).not.toHaveProperty("sourceUrl");
+      // Only for text: a link alone is a link import, and a link import is its own source.
+      await expect(enqueueImport({ sourceUrl: link })).rejects.toBeInstanceOf(
+        ImportQueueValidationError
+      );
+      expect(
+        await enqueueImport({ sourceUrl: "https://other.com/x", url: link })
+      ).not.toHaveProperty("sourceUrl");
+    });
+  });
+
   it("queues a link once when two tabs add it at the same moment", async () => {
     // The share sheet in one tab and a paste in another (no navigator.locks to keep them apart).
     const [first, second] = await Promise.all([

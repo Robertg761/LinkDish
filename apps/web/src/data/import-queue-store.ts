@@ -26,6 +26,12 @@ export interface ImportQueueItem {
   id: string;
   url?: string | undefined;
   text?: string | undefined;
+  /**
+   * With `text` only: the page the text came from (the one link in a pasted caption). It goes with
+   * the text to the importer and becomes the recipe's source, as it does for text imported online.
+   * Unlike `url`, it never makes the item a link import, and never merges it with one.
+   */
+  sourceUrl?: string | undefined;
   status: ImportQueueStatus;
   error?: string | undefined;
   /** The saved recipe produced by a `done` import. */
@@ -69,6 +75,8 @@ export type ImportQueueSource = "in_app" | "share_sheet";
 export interface ImportQueueInput {
   url?: string | undefined;
   text?: string | undefined;
+  /** Where `text` came from (see {@link ImportQueueItem.sourceUrl}); ignored without text. */
+  sourceUrl?: string | undefined;
   source?: ImportQueueSource | undefined;
 }
 
@@ -110,6 +118,26 @@ const normalizeUrl = (url: string | undefined): string | undefined => {
     }
 
     throw new ImportQueueValidationError("That doesn't look like a recipe link.");
+  }
+};
+
+/**
+ * A pasted text's source link, as the importer sends it (trimmed, otherwise as given, so the
+ * recipe gets the same id it would have online). Only a web link; anything else is left off
+ * rather than keeping the text out of the queue.
+ */
+const toSourceUrl = (sourceUrl: string | undefined): string | undefined => {
+  const trimmed = sourceUrl?.trim();
+
+  if (!trimmed) {
+    return undefined;
+  }
+
+  try {
+    const { protocol } = new URL(trimmed);
+    return protocol === "http:" || protocol === "https:" ? trimmed : undefined;
+  } catch {
+    return undefined;
   }
 };
 
@@ -278,9 +306,13 @@ const toEntry = (input: ImportQueueInput): ImportQueueInput => {
     throw new ImportQueueValidationError("Add a recipe link or some recipe text.");
   }
 
+  // A link import is its own source; only pasted text keeps where it came from.
+  const sourceUrl = url ? undefined : toSourceUrl(input.sourceUrl);
+
   return {
     ...(url ? { url } : {}),
     ...(text ? { text } : {}),
+    ...(sourceUrl ? { sourceUrl } : {}),
     ...(input.source ? { source: input.source } : {})
   };
 };
@@ -289,7 +321,8 @@ const toEntry = (input: ImportQueueInput): ImportQueueInput => {
  * Adds links and/or text to the queue, all or nothing (one invalid entry adds none). Re-adding a
  * link that is still waiting (or failed) returns the existing item — a failed one goes back in the
  * queue. The duplicate lookup and the writes are one readwrite transaction, so two tabs adding the
- * same link at once still queue it once (and a batch never queues a link twice).
+ * same link at once still queue it once (and a batch never queues a link twice). Pasted text is
+ * always a new item, whichever page it came from: online, each paste is its own import too.
  * Returns one item per input, in order.
  */
 export async function enqueueImports(
