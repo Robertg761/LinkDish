@@ -1,9 +1,12 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import React from "react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { AccountPage } from "./AccountPage";
+import { ExtractorApiError } from "../../api/errors";
+import { ToastProvider } from "../../components/Toast";
+
+import { AccountPage, getPostSignInDestination } from "./AccountPage";
 
 const authMocks = vi.hoisted(() => ({
   clerkEnabled: true,
@@ -16,7 +19,7 @@ const authMocks = vi.hoisted(() => ({
   requestLoginCode: vi.fn(),
   user: null as {
     avatarEmoji?: string | null;
-    billingPlan?: string;
+    billingPlan?: "free" | "plus" | "family";
     displayName?: string | null;
     email: string;
     id: string;
@@ -24,10 +27,27 @@ const authMocks = vi.hoisted(() => ({
   verifyLoginCode: vi.fn()
 }));
 
+const apiMocks = vi.hoisted(() => ({
+  updateAccountProfile: vi.fn()
+}));
+
 vi.mock("../../api/client", () => ({
   apiClient: {
-    updateAccountProfile: vi.fn()
+    updateAccountProfile: apiMocks.updateAccountProfile
   }
+}));
+
+const libraryMocks = vi.hoisted(() => ({
+  recipes: [] as Array<{ id: string; isStarter?: boolean }>
+}));
+
+vi.mock("../../data/library-store", () => ({
+  useSavedRecipes: () => ({
+    error: null,
+    recipes: libraryMocks.recipes,
+    retry: vi.fn(),
+    status: "ready"
+  })
 }));
 
 vi.mock("../../auth/AuthProvider", () => ({
@@ -49,27 +69,60 @@ vi.mock("../../auth/AuthProvider", () => ({
   })
 }));
 
-describe("AccountPage auth options", () => {
-  beforeEach(() => {
-    authMocks.clerkEnabled = true;
-    authMocks.clerkReady = true;
-    authMocks.deleteAccount.mockReset();
-    authMocks.hasClerkPublishableKey = true;
-    authMocks.loginWithGoogle.mockReset();
-    authMocks.logout.mockReset();
-    authMocks.refreshUser.mockReset();
-    authMocks.requestLoginCode.mockReset();
-    authMocks.user = null;
-    authMocks.verifyLoginCode.mockReset();
+const LocationProbe = () => {
+  const location = useLocation();
+  return <p data-testid="location">{`${location.pathname}${location.search}`}</p>;
+};
+
+const renderAccount = (entry = "/account") =>
+  render(
+    <ToastProvider>
+      <MemoryRouter initialEntries={[entry]}>
+        <Routes>
+          <Route path="/account" element={<AccountPage />} />
+          <Route path="*" element={<LocationProbe />} />
+        </Routes>
+      </MemoryRouter>
+    </ToastProvider>
+  );
+
+const resetAuth = () => {
+  authMocks.clerkEnabled = true;
+  authMocks.clerkReady = true;
+  authMocks.deleteAccount.mockReset();
+  authMocks.hasClerkPublishableKey = true;
+  authMocks.loginWithGoogle.mockReset();
+  authMocks.logout.mockReset();
+  authMocks.logout.mockResolvedValue(undefined);
+  authMocks.refreshUser.mockReset();
+  authMocks.requestLoginCode.mockReset();
+  authMocks.user = null;
+  authMocks.verifyLoginCode.mockReset();
+};
+
+describe("post sign-in destinations", () => {
+  it("keeps invite and upgrade intent, including the billing period", () => {
+    expect(getPostSignInDestination(new URLSearchParams("invite=Ab Cd"))).toBe(
+      "/household?invite=Ab%20Cd"
+    );
+    expect(getPostSignInDestination(new URLSearchParams("upgrade=family"))).toBe(
+      "/pricing?upgrade=family"
+    );
+    expect(getPostSignInDestination(new URLSearchParams("upgrade=plus&period=monthly"))).toBe(
+      "/pricing?upgrade=plus&period=monthly"
+    );
+    expect(getPostSignInDestination(new URLSearchParams("upgrade=gold"))).toBeNull();
+    expect(getPostSignInDestination(new URLSearchParams(""))).toBeNull();
   });
+});
+
+describe("AccountPage sign-in", () => {
+  beforeEach(resetAuth);
 
   it("shows and starts Google sign-in when Clerk is configured for the web build", () => {
-    render(
-      <MemoryRouter>
-        <AccountPage />
-      </MemoryRouter>
-    );
+    renderAccount();
 
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Sign in to LinkDish");
     const googleButton = screen.getByRole("button", { name: /continue with google/i });
 
     expect(googleButton).toBeEnabled();
@@ -80,96 +133,175 @@ describe("AccountPage auth options", () => {
   it("keeps the Google option visible with a clear unavailable state when the web build lacks the Clerk key", () => {
     authMocks.hasClerkPublishableKey = false;
 
-    render(
-      <MemoryRouter>
-        <AccountPage />
-      </MemoryRouter>
-    );
+    renderAccount();
 
-    const googleButton = screen.getByRole("button", { name: /continue with google/i });
-
-    expect(googleButton).toBeDisabled();
+    expect(screen.getByRole("button", { name: /continue with google/i })).toBeDisabled();
     expect(screen.getByText(/google sign-in is temporarily unavailable/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /email sign-in code/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /sign-in code/i })).toBeEnabled();
   });
 
   it("keeps email sign-in usable while Clerk is still initializing", () => {
     authMocks.clerkReady = false;
 
-    render(
-      <MemoryRouter>
-        <AccountPage />
-      </MemoryRouter>
-    );
+    renderAccount();
 
     expect(screen.getByRole("button", { name: /continue with google/i })).toBeDisabled();
-    expect(screen.getByText(/google sign-in is temporarily unavailable/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /email sign-in code/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /sign-in code/i })).toBeEnabled();
   });
 
   it("hides Google sign-in when the API has Clerk disabled", () => {
     authMocks.clerkEnabled = false;
 
-    render(
-      <MemoryRouter>
-        <AccountPage />
-      </MemoryRouter>
-    );
+    renderAccount();
 
     expect(screen.queryByRole("button", { name: /continue with google/i })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /email sign-in code/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /sign-in code/i })).toBeEnabled();
   });
 
-  it("passes upgrade intent through Google sign-in", () => {
-    render(
-      <MemoryRouter initialEntries={["/account?upgrade=family"]}>
-        <AccountPage />
-      </MemoryRouter>
-    );
+  it("passes the chosen plan through Google sign-in and explains why", () => {
+    renderAccount("/account?upgrade=family");
 
+    expect(screen.getByText(/Sign in to continue to Family/u)).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: /continue with google/i }));
 
-    expect(authMocks.loginWithGoogle).toHaveBeenCalledWith("/pricing");
+    expect(authMocks.loginWithGoogle).toHaveBeenCalledWith("/pricing?upgrade=family");
   });
 
-  it("gives the sign-in fields accessible names", () => {
-    render(
-      <MemoryRouter>
-        <AccountPage />
-      </MemoryRouter>
+  it("sends signed-in people on to the plan they picked", async () => {
+    authMocks.user = { billingPlan: "free", email: "cook@example.com", id: "user_1" };
+
+    renderAccount("/account?upgrade=plus&period=monthly");
+
+    expect(await screen.findByTestId("location")).toHaveTextContent(
+      "/pricing?upgrade=plus&period=monthly"
     );
-
-    expect(screen.getByRole("textbox", { name: /email address/i })).toBeInTheDocument();
   });
 
-  it("gives the verification code input an accessible name", async () => {
+  it("walks through the email code with plain-language errors", async () => {
     authMocks.requestLoginCode.mockResolvedValue(undefined);
-
-    render(
-      <MemoryRouter>
-        <AccountPage />
-      </MemoryRouter>
+    authMocks.verifyLoginCode.mockRejectedValue(
+      new ExtractorApiError("Extractor API request failed.", 401, { message: "bad code" })
     );
 
-    fireEvent.change(screen.getByRole("textbox", { name: /email address/i }), {
-      target: { value: "cook@example.com" }
-    });
-    fireEvent.click(screen.getByRole("button", { name: /email sign-in code/i }));
+    renderAccount();
 
-    expect(
-      await screen.findByRole("textbox", { name: /6-digit verification code/i })
-    ).toBeInTheDocument();
+    const email = screen.getByRole("textbox", { name: /email address/i });
+    fireEvent.change(email, { target: { value: "not-an-email" } });
+    fireEvent.click(screen.getByRole("button", { name: /sign-in code/i }));
+    expect(await screen.findByText(/Enter your email address/u)).toBeVisible();
+    expect(authMocks.requestLoginCode).not.toHaveBeenCalled();
+
+    fireEvent.change(email, { target: { value: "cook@example.com" } });
+    fireEvent.click(screen.getByRole("button", { name: /sign-in code/i }));
+
+    const codeField = await screen.findByRole("textbox", { name: /6-digit code/i });
+    expect(screen.getByText("cook@example.com")).toBeVisible();
+    fireEvent.change(codeField, { target: { value: "123456" } });
+    fireEvent.click(screen.getByRole("button", { name: "Verify and sign in" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("That code didn't work.");
+    expect(authMocks.verifyLoginCode).toHaveBeenCalledWith("cook@example.com", "123456");
+    expect(screen.queryByText("Extractor API request failed.")).not.toBeInTheDocument();
+  });
+});
+
+describe("AccountPage signed in", () => {
+  beforeEach(() => {
+    resetAuth();
+    authMocks.user = {
+      avatarEmoji: null,
+      billingPlan: "free",
+      displayName: "Sam Rivera",
+      email: "Cook@Example.com",
+      id: "user_1"
+    };
+    libraryMocks.recipes = [
+      { id: "starter-1", isStarter: true },
+      { id: "recipe-1" },
+      { id: "recipe-2" }
+    ];
+    apiMocks.updateAccountProfile.mockReset();
+    apiMocks.updateAccountProfile.mockResolvedValue({ user: authMocks.user });
+  });
+
+  it("shows the profile, plan usage and quick links", () => {
+    renderAccount();
+
+    expect(screen.getByRole("heading", { level: 1, name: "Sam Rivera" })).toBeVisible();
+    expect(screen.getByText("SR")).toBeVisible();
+    expect(screen.getByRole("heading", { name: /LinkDish Free/u })).toBeVisible();
+    expect(screen.getByRole("progressbar", { name: "Saved recipes" })).toHaveAttribute(
+      "aria-valuenow",
+      "2"
+    );
+    expect(screen.getByText("2 of 15")).toBeVisible();
+    expect(screen.getByRole("link", { name: /Upgrade to Plus/u })).toHaveAttribute(
+      "href",
+      "/pricing?upgrade=plus"
+    );
+
+    const links = within(screen.getByRole("navigation", { name: "Account links" }));
+    for (const label of [
+      "Settings",
+      "Household",
+      "Shopping list",
+      "Install app",
+      "Support",
+      "Privacy"
+    ]) {
+      expect(links.getByRole("link", { name: new RegExp(label, "u") })).toBeVisible();
+    }
+  });
+
+  it("points Family accounts at their household", () => {
+    authMocks.user = { billingPlan: "family", email: "cook@example.com", id: "user_1" };
+
+    renderAccount();
+
+    expect(screen.getByRole("heading", { name: /LinkDish Family/u })).toBeVisible();
+    expect(screen.getByRole("link", { name: "Manage household" })).toHaveAttribute(
+      "href",
+      "/household"
+    );
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+  });
+
+  it("edits the profile in a sheet", async () => {
+    renderAccount();
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit profile" }));
+    const sheet = screen.getByRole("dialog", { name: "Edit profile" });
+    const name = within(sheet).getByRole("textbox", { name: /display name/i });
+    expect(name).toHaveValue("Sam Rivera");
+
+    fireEvent.change(name, { target: { value: "Sam R." } });
+    fireEvent.click(within(sheet).getByRole("button", { name: "Use 🍜" }));
+    fireEvent.click(within(sheet).getByRole("button", { name: "Save profile" }));
+
+    await waitFor(() => {
+      expect(apiMocks.updateAccountProfile).toHaveBeenCalledWith({
+        avatarEmoji: "🍜",
+        displayName: "Sam R."
+      });
+    });
+    expect(authMocks.refreshUser).toHaveBeenCalled();
+    expect(await screen.findByText("Profile saved")).toBeVisible();
+  });
+
+  it("signs out", async () => {
+    renderAccount();
+
+    const signOut = screen.getByRole("button", { name: "Sign out" });
+    fireEvent.click(signOut);
+    expect(authMocks.logout).toHaveBeenCalled();
+    await waitFor(() => expect(signOut).not.toHaveAttribute("aria-busy"));
   });
 });
 
 describe("AccountPage account deletion", () => {
   beforeEach(() => {
-    authMocks.clerkEnabled = true;
-    authMocks.clerkReady = true;
-    authMocks.deleteAccount.mockReset();
+    resetAuth();
     authMocks.deleteAccount.mockResolvedValue(undefined);
-    authMocks.hasClerkPublishableKey = true;
-    authMocks.refreshUser.mockReset();
     authMocks.user = {
       avatarEmoji: null,
       billingPlan: "free",
@@ -180,14 +312,20 @@ describe("AccountPage account deletion", () => {
   });
 
   const openDeleteForm = () => {
-    render(
-      <MemoryRouter>
-        <AccountPage />
-      </MemoryRouter>
-    );
+    renderAccount();
 
     fireEvent.click(screen.getByRole("button", { name: /delete account/i }));
   };
+
+  it("explains the consequences before anything is deleted", () => {
+    openDeleteForm();
+
+    const section = screen.getByRole("region", { name: "Delete your account?" });
+    expect(section).toHaveTextContent("Recipes saved in this browser stay on this device.");
+    expect(section).toHaveTextContent("doesn't cancel a subscription");
+    expect(screen.getByRole("button", { name: /delete account/i })).toBeDisabled();
+    expect(authMocks.deleteAccount).not.toHaveBeenCalled();
+  });
 
   it("accepts the confirmation email in any casing", async () => {
     openDeleteForm();
@@ -224,10 +362,11 @@ describe("AccountPage account deletion", () => {
     expect(authMocks.deleteAccount).not.toHaveBeenCalled();
   });
 
-  it("gives the profile and delete fields accessible names", () => {
+  it("gives the delete field an accessible name and can be backed out of", () => {
     openDeleteForm();
 
-    expect(screen.getByRole("textbox", { name: /display name/i })).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: /confirm your email/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Keep my account" }));
+    expect(screen.queryByRole("textbox", { name: /confirm your email/i })).not.toBeInTheDocument();
   });
 });

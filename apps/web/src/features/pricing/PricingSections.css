@@ -1,0 +1,357 @@
+/* Billing period toggle ---------------------------------------------------- */
+.billing-period-toggle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 10px 12px;
+}
+
+.billing-period-toggle .segmented-option {
+  min-width: 108px;
+}
+
+.badge.billing-period-savings {
+  --badge-fg: var(--color-ink);
+}
+
+.billing-period-savings {
+  min-height: 26px;
+  padding: 4px 10px;
+  font-size: 0.75rem;
+}
+
+/* Section scaffolding ----------------------------------------------------- */
+.pricing-section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 12px;
+}
+
+.pricing-section-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pricing-section-title {
+  font-size: var(--text-title);
+  letter-spacing: var(--text-title-letter-spacing);
+  line-height: var(--text-title-line-height);
+}
+
+.pricing-section-lede {
+  color: var(--color-ink-muted);
+  font-size: var(--text-small);
+}
+
+/* Comparison table -------------------------------------------------------- */
+.plan-compare-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-card);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-xs);
+}
+
+.plan-compare {
+  width: 100%;
+  min-width: 340px;
+  border-collapse: collapse;
+  font-size: var(--text-small);
+}
+
+.plan-compare th,
+.plan-compare td {
+  padding: 13px 10px;
+  border-bottom: 1px solid var(--color-border-subtle);
+  text-align: center;
+  vertical-align: middle;
+}
+
+.plan-compare tbody tr:last-child th,
+.plan-compare tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.plan-compare thead th {
+  padding-top: 16px;
+  padding-bottom: 12px;
+  color: var(--color-ink);
+  font-family: var(--font-family-serif);
+  font-size: 1.0625rem;
+  font-weight: 700;
+}
+
+.plan-compare .plan-compare-feature {
+  width: 40%;
+  padding-left: 18px;
+  text-align: left;
+}
+
+.plan-compare-corner {
+  width: 40%;
+}
+
+.plan-compare-label {
+  display: block;
+  color: var(--color-ink);
+  font-weight: 650;
+}
+
+.plan-compare-hint {
+  display: block;
+  margin-top: 2px;
+  color: var(--color-ink-muted);
+  font-size: var(--text-caption);
+  font-weight: 400;
+  line-height: var(--text-caption-line-height);
+}
+
+.plan-compare .is-featured {
+  background: color-mix(in srgb, var(--color-primary-soft) 55%, transparent);
+}
+
+.plan-compare thead .is-featured {
+  color: var(--color-on-primary-soft);
+}
+
+.plan-compare-plan.is-current::after {
+  content: "You";
+  display: block;
+  margin-top: 2px;
+  color: var(--color-ink-muted);
+  font-family: var(--font-family-sans);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.plan-compare-yes {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-pill);
+  background: var(--color-primary-soft);
+  color: var(--color-on-primary-soft);
+}
+
+.plan-compare-no {
+  display: inline-grid;
+  place-items: center;
+  color: var(--color-ink-subtle);
+}
+
+.plan-compare-text {
+  color: var(--color-ink);
+  font-weight: 650;
+}
+
+@media (max-width: 520px) {
+  .plan-compare th,
+  .plan-compare td {
+    padding: 12px 6px;
+  }
+
+  .plan-compare .plan-compare-feature {
+    padding-left: 14px;
+  }
+
+  .plan-compare-text {
+    font-size: var(--text-caption);
+  }
+
+  .plan-compare-hint {
+    display: none;
+  }
+}
+
+/* Trust row ---------------------------------------------------------------- */
+.pricing-trust {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  list-style: none;
+}
+
+@media (min-width: 720px) {
+  .pricing-trust {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px;
+  }
+}
+
+.pricing-trust-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: var(--radius-md);
+  background: var(--color-surface-subtle);
+}
+
+.pricing-trust-icon {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  background: var(--color-surface);
+  color: var(--color-primary);
+  box-shadow: var(--shadow-xs);
+}
+
+.pricing-trust-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-size: var(--text-small);
+}
+
+.pricing-trust-copy strong {
+  color: var(--color-ink);
+}
+
+.pricing-trust-copy span {
+  color: var(--color-ink-muted);
+  font-size: var(--text-caption);
+}
+
+/* FAQ ---------------------------------------------------------------------- */
+.pricing-faq {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-card);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-xs);
+}
+
+.pricing-faq-item + .pricing-faq-item {
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.pricing-faq-item summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 56px;
+  padding: 14px 18px;
+  color: var(--color-ink);
+  font-weight: 650;
+  list-style: none;
+  cursor: pointer;
+}
+
+.pricing-faq-item summary::-webkit-details-marker {
+  display: none;
+}
+
+.pricing-faq-item summary:hover {
+  color: var(--color-primary);
+}
+
+.pricing-faq-item summary:focus-visible {
+  border-radius: var(--radius-card);
+  outline-offset: -2px;
+}
+
+.pricing-faq-chevron {
+  flex-shrink: 0;
+  color: var(--color-ink-subtle);
+  transition: transform var(--transition-fast);
+}
+
+.pricing-faq-item[open] .pricing-faq-chevron {
+  transform: rotate(180deg);
+}
+
+.pricing-faq-answer {
+  max-width: 68ch;
+  padding: 0 18px 18px;
+  color: var(--color-ink-muted);
+  font-size: var(--text-small);
+  line-height: 1.6;
+}
+
+.pricing-faq-answer a,
+.pricing-support-line a {
+  font-weight: 650;
+}
+
+.pricing-support-line {
+  color: var(--color-ink-muted);
+  font-size: var(--text-small);
+  text-align: center;
+}
+
+/* Founding offer ------------------------------------------------------------ */
+.founding-offer-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px 28px;
+  padding: 22px 24px;
+  border: 1px solid color-mix(in srgb, var(--color-butter) 60%, transparent);
+  border-radius: var(--radius-card);
+  background:
+    radial-gradient(
+      420px 180px at 0% 0%,
+      color-mix(in srgb, var(--color-butter) 26%, transparent),
+      transparent 70%
+    ),
+    var(--color-surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.founding-offer-copy {
+  display: flex;
+  flex: 1 1 280px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.founding-offer-title {
+  font-size: var(--text-title);
+  letter-spacing: var(--text-title-letter-spacing);
+}
+
+.founding-offer-lede {
+  color: var(--color-ink-muted);
+  font-size: var(--text-small);
+}
+
+.founding-offer-buy {
+  display: flex;
+  flex: 0 1 280px;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.founding-offer-price {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.founding-offer-price-amount {
+  color: var(--color-ink);
+  font-family: var(--font-family-serif);
+  font-size: 2.25rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
+
+.founding-offer-price-note {
+  color: var(--color-ink-muted);
+  font-size: var(--text-small);
+  font-weight: 600;
+}

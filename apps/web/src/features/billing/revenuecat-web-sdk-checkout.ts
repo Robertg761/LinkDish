@@ -27,6 +27,16 @@ let purchasesModulePromise: Promise<RevenueCatPurchasesModule> | null = null;
 export const isRevenueCatWebSdkCheckoutConfigured = (): boolean =>
   Boolean(revenueCatWebPublicApiKey);
 
+/** purchases-js `ErrorCode.UserCancelledError`; kept as a number so this check loads no SDK code. */
+const USER_CANCELLED_ERROR_CODE = 1;
+
+/** True when the person closed the in-page checkout themselves; not an error worth showing. */
+export const isCheckoutCancelledError = (error: unknown): boolean =>
+  typeof error === "object" &&
+  error !== null &&
+  "errorCode" in error &&
+  (error as { errorCode?: unknown }).errorCode === USER_CANCELLED_ERROR_CODE;
+
 const loadPurchasesModule = (): Promise<RevenueCatPurchasesModule> => {
   purchasesModulePromise ??= import("@revenuecat/purchases-js");
   return purchasesModulePromise;
@@ -69,7 +79,7 @@ const getCheckoutPackage = async (
   );
 
   if (!checkoutPackage) {
-    throw new Error("This RevenueCat checkout option is not available right now.");
+    throw new Error("This checkout option is not available right now.");
   }
 
   return checkoutPackage;
@@ -100,7 +110,7 @@ const getFoundingCheckoutPackage = async (purchases: PurchasesInstance): Promise
   );
 
   if (!checkoutPackage) {
-    throw new Error("This RevenueCat checkout option is not available right now.");
+    throw new Error("This checkout option is not available right now.");
   }
 
   return checkoutPackage;

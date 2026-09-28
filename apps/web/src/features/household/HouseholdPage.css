@@ -1,158 +1,527 @@
 .household-page {
-  margin: 32px auto;
-}
-
-.household-header {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  margin-bottom: 20px;
+  gap: 20px;
+  padding-bottom: calc(48px + var(--app-bottom-inset));
 }
 
-.household-header h1,
-.household-empty-card h1 {
-  font-family: var(--font-family-serif);
-  font-size: 34px;
-  font-weight: 500;
-  line-height: 40px;
-  margin: 0;
+.household-page > .page-header {
+  margin-bottom: 4px;
 }
 
-.household-header p,
-.household-empty-card p,
-.household-card p {
-  color: var(--color-muted);
-  font-family: var(--font-family-sans);
-  line-height: 22px;
-  margin: 0;
-}
-
-.household-grid {
-  display: grid;
-  gap: 16px;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-}
-
-.household-card,
-.household-empty-card {
+.household-error {
   display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.household-card h2,
-.household-card h3 {
-  font-family: var(--font-family-serif);
-  font-weight: 500;
-  margin: 0;
-}
-
-.household-card-header {
   align-items: flex-start;
-  display: flex;
-  gap: 12px;
-  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--color-danger) 24%, transparent);
+  border-radius: var(--radius-md);
+  background: var(--color-danger-soft);
+  color: var(--color-on-danger-soft);
+  font-size: var(--text-small);
 }
 
-.household-member-list,
-.household-pending-list {
+.household-error .icon {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+/* Cards ------------------------------------------------------------------ */
+.household-card {
+  gap: 16px;
+}
+
+.household-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.household-card-heading {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 4px;
 }
 
-.household-member-row,
-.household-pending-row,
-.household-invite-share {
-  align-items: center;
-  background: var(--color-surface-subtle);
-  border-radius: var(--radius-card);
+.household-card-heading h2 {
+  font-size: var(--text-title-sm);
+  line-height: var(--text-title-sm-line-height);
+}
+
+.household-card-heading p {
+  color: var(--color-ink-muted);
+  font-size: var(--text-small);
+}
+
+/* Seats -------------------------------------------------------------------- */
+.household-seats {
   display: flex;
+  flex-shrink: 0;
+  gap: 5px;
+}
+
+.household-seat {
+  width: 12px;
+  height: 12px;
+  border: 1.5px dashed var(--color-border-strong);
+  border-radius: var(--radius-pill);
+}
+
+.household-seat.is-used {
+  border: 0;
+  background: var(--color-primary);
+}
+
+.household-seat.is-invited {
+  border-style: solid;
+  border-color: var(--color-primary);
+  background: var(--color-primary-soft);
+}
+
+.household-seat.is-cooling {
+  border-style: solid;
+  border-color: var(--color-butter);
+  background: var(--color-butter-soft);
+}
+
+/* Members ----------------------------------------------------------------- */
+.household-members {
+  display: flex;
+  flex-direction: column;
+  list-style: none;
+}
+
+.household-member {
+  display: flex;
+  align-items: center;
   gap: 12px;
-  padding: 12px;
+  min-height: 68px;
+  padding: 12px 20px;
+}
+
+.household-member + .household-member {
+  border-top: 1px solid var(--color-border-subtle);
 }
 
 .household-avatar {
-  align-items: center;
-  background: var(--color-accent-soft);
-  border-radius: 999px;
-  color: var(--color-accent);
-  display: flex;
-  flex: 0 0 auto;
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: var(--radius-pill);
+  font-size: 0.875rem;
   font-weight: 800;
-  height: 44px;
-  justify-content: center;
-  width: 44px;
+  letter-spacing: 0.02em;
+}
+
+.household-avatar.has-emoji {
+  font-size: 1.375rem;
+  letter-spacing: 0;
+}
+
+.household-avatar-lg {
+  width: 64px;
+  height: 64px;
+  font-size: 1.25rem;
+}
+
+.household-avatar-lg.has-emoji {
+  font-size: 2rem;
+}
+
+.household-tint-0 {
+  background: var(--color-tomato-soft);
+  color: var(--color-on-tomato-soft);
+}
+
+.household-tint-1 {
+  background: var(--color-butter-soft);
+  color: var(--color-ink);
+}
+
+.household-tint-2 {
+  background: var(--color-primary-soft);
+  color: var(--color-on-primary-soft);
 }
 
 .household-member-copy {
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 3px;
+  gap: 2px;
   min-width: 0;
 }
 
-.household-member-copy strong,
-.household-pending-row span:first-child,
-.household-invite-share strong {
-  color: var(--color-text);
+.household-member-name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-ink);
+  font-weight: 650;
+}
+
+/* Soft butter badges use --color-on-butter, which is too dark on the dark theme. */
+.badge.household-owner-badge {
+  --badge-fg: var(--color-ink);
+}
+
+.household-member-name-text {
   overflow: hidden;
+  max-width: 100%;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.household-member-copy span,
-.household-pending-row span,
-.household-invite-share span {
-  color: var(--color-muted);
-  font-size: 13px;
+.household-member-email {
+  overflow: hidden;
+  color: var(--color-ink-muted);
+  font-size: var(--text-caption);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.household-form {
-  align-items: flex-start;
+/* Invites ------------------------------------------------------------------ */
+.household-invite-form {
   display: flex;
-  gap: 10px;
+  flex-direction: column;
+  gap: 12px;
 }
 
-.household-form .field-container {
-  flex: 1;
+@media (min-width: 640px) {
+  .household-invite-form {
+    flex-direction: row;
+    align-items: flex-start;
+  }
+
+  .household-invite-form .field-container {
+    flex: 1;
+  }
+
+  .household-invite-form > .btn {
+    margin-top: 26px;
+  }
+}
+
+.household-invite-created {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 22%, transparent);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-primary-soft) 55%, transparent);
+}
+
+.household-invite-created-title {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--color-ink);
+  font-size: var(--text-small);
+}
+
+.household-invite-created-title .icon {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: var(--color-success);
 }
 
 .household-invite-share {
-  justify-content: space-between;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
-.household-invite-share div {
+.household-invite-details {
+  display: grid;
+  gap: 10px;
+}
+
+.household-invite-details dt {
+  color: var(--color-ink-muted);
+  font-size: var(--text-label);
+  font-weight: 750;
+  letter-spacing: var(--text-label-letter-spacing);
+  text-transform: uppercase;
+}
+
+.household-invite-details dd {
+  margin-top: 2px;
+}
+
+.household-invite-link,
+.household-invite-code {
+  display: block;
+  overflow-wrap: anywhere;
+  padding: 8px 10px;
+  border-radius: var(--radius-xs);
+  background: var(--color-surface);
+  color: var(--color-ink);
+  font-family: var(--font-family-mono);
+  font-size: var(--text-caption);
+  user-select: all;
+}
+
+.household-invite-link {
+  color: var(--color-primary);
+}
+
+.household-invite-buttons {
   display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.household-pending-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 4px;
+}
+
+.household-pending-section h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-ink);
+  font-family: var(--font-family-sans);
+  font-size: var(--text-small);
+  font-weight: 750;
+}
+
+.household-pending-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  list-style: none;
+}
+
+.household-pending {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: var(--color-surface-subtle);
+}
+
+.household-pending-icon {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-pill);
+  background: var(--color-surface);
+  color: var(--color-ink-muted);
+}
+
+.household-pending-copy {
+  display: flex;
+  flex: 1 1 160px;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.household-pending-email {
+  overflow: hidden;
+  color: var(--color-ink);
+  font-size: var(--text-small);
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.household-pending-meta {
+  color: var(--color-ink-muted);
+  font-size: var(--text-caption);
+}
+
+.household-pending-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+/* Join ---------------------------------------------------------------------- */
+.household-join {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+@media (min-width: 640px) {
+  .household-join {
+    flex-direction: row;
+    align-items: flex-start;
+  }
+
+  .household-join .field-container {
+    flex: 1;
+  }
+
+  .household-join > .btn {
+    margin-top: 26px;
+  }
+}
+
+.household-invite-arrival {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  border-color: color-mix(in srgb, var(--color-butter) 60%, transparent);
+  background:
+    radial-gradient(
+      360px 160px at 0% 0%,
+      color-mix(in srgb, var(--color-butter) 26%, transparent),
+      transparent 70%
+    ),
+    var(--color-surface-raised);
+}
+
+.household-invite-arrival-icon {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 16px;
+  background: var(--color-butter);
+  color: var(--color-on-butter);
+}
+
+.household-invite-arrival-copy {
+  display: flex;
+  flex: 1 1 240px;
   flex-direction: column;
   gap: 4px;
 }
 
-.household-invite-share code {
-  color: var(--color-accent);
-  font-family: var(--font-family-mono, monospace);
-  font-size: 14px;
-  word-break: break-all;
+.household-invite-arrival-copy h2 {
+  font-size: var(--text-title-sm);
 }
 
-.household-loading {
-  color: var(--color-muted);
-  font-family: var(--font-family-sans);
+.household-invite-arrival-copy p {
+  color: var(--color-ink-muted);
+  font-size: var(--text-small);
 }
 
-.household-footer-actions {
+/* Paused, shortcuts, leave --------------------------------------------------- */
+.household-paused {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 12px;
+  background: var(--color-warning-soft);
+  color: var(--color-warning);
+}
+
+.household-paused > div {
   display: flex;
-  justify-content: flex-end;
-  margin-top: 16px;
+  flex: 1 1 220px;
+  flex-direction: column;
+  gap: 2px;
 }
 
-@media (max-width: 720px) {
-  .household-form,
-  .household-member-row,
-  .household-pending-row,
-  .household-invite-share {
-    align-items: stretch;
-    flex-direction: column;
+.household-paused h2 {
+  color: var(--color-ink);
+  font-size: var(--text-body);
+}
+
+.household-paused p {
+  color: var(--color-ink-muted);
+  font-size: var(--text-small);
+}
+
+.household-shortcuts {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+}
+
+@media (min-width: 640px) {
+  .household-shortcuts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+}
+
+.household-shortcut {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 72px;
+  padding: 14px 16px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-card);
+  background: var(--color-surface);
+  color: var(--color-ink);
+  box-shadow: var(--shadow-xs);
+  transition:
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+.household-shortcut:hover {
+  border-color: var(--color-border-strong);
+  box-shadow: var(--shadow-sm);
+  text-decoration: none;
+}
+
+.household-shortcut-icon {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: var(--color-primary-soft);
+  color: var(--color-on-primary-soft);
+}
+
+.household-shortcut-copy {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  font-size: var(--text-small);
+}
+
+.household-shortcut-copy span {
+  color: var(--color-ink-muted);
+  font-size: var(--text-caption);
+}
+
+.household-shortcut-chevron {
+  flex-shrink: 0;
+  color: var(--color-ink-subtle);
+}
+
+.household-leave {
+  display: flex;
+  justify-content: center;
+  padding-top: 8px;
+}
+
+.household-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-card);
+  background: var(--color-surface);
+}
+
+.household-skeleton-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }

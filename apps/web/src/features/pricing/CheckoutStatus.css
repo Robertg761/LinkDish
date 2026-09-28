@@ -1,0 +1,129 @@
+.checkout-status {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 18px 52px 18px 18px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-card);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+  animation: checkout-status-in var(--duration-slow) var(--ease-out) both;
+}
+
+.checkout-status-celebrate {
+  border-color: color-mix(in srgb, var(--color-butter) 65%, transparent);
+  background:
+    radial-gradient(
+      380px 160px at 0% 0%,
+      color-mix(in srgb, var(--color-butter) 30%, transparent),
+      transparent 72%
+    ),
+    radial-gradient(
+      320px 140px at 100% 100%,
+      color-mix(in srgb, var(--color-tomato) 12%, transparent),
+      transparent 70%
+    ),
+    var(--color-surface);
+}
+
+.checkout-status-danger {
+  border-color: color-mix(in srgb, var(--color-danger) 30%, transparent);
+  background: var(--color-danger-soft);
+}
+
+.checkout-status-icon {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 16px;
+  background: var(--color-primary-soft);
+  color: var(--color-on-primary-soft);
+}
+
+.checkout-status-celebrate .checkout-status-icon {
+  background: var(--color-butter);
+  color: var(--color-on-butter);
+}
+
+.checkout-status-danger .checkout-status-icon {
+  background: var(--color-surface);
+  color: var(--color-danger);
+}
+
+.checkout-status-icon.is-spinning .icon {
+  animation: spin 1.1s linear infinite;
+}
+
+.checkout-status-copy {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.checkout-status-title {
+  font-size: var(--text-title-sm);
+  line-height: var(--text-title-sm-line-height);
+}
+
+.checkout-status-celebrate .checkout-status-title {
+  font-size: var(--text-title);
+}
+
+.checkout-status-body {
+  color: var(--color-ink-muted);
+  font-size: var(--text-small);
+  line-height: 1.55;
+}
+
+.checkout-status-danger .checkout-status-body {
+  color: var(--color-on-danger-soft);
+}
+
+.checkout-status-body a {
+  color: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.checkout-status-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.checkout-status-dismiss {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+}
+
+@keyframes checkout-status-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 480px) {
+  /* Stacked, the dismiss button shares the icon's row, so the copy can use the full width. */
+  .checkout-status {
+    flex-direction: column;
+    padding-right: 18px;
+  }
+
+  .checkout-status-actions .btn {
+    flex: 1 1 100%;
+  }
+}

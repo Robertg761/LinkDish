@@ -1,16 +1,23 @@
 import React from "react";
 
+import { PageHeader } from "./PageHeader";
+
 import "./PrivacyPage.css";
 
+// The policy text below is legal copy: restyle freely, but keep the words exactly as they are.
 export const PrivacyPage: React.FC = () => {
   return (
     <div className="privacy-page container page-enter">
-      <article className="privacy-card">
-        <h1 className="privacy-title">Privacy Policy</h1>
-        <p className="privacy-updated">Last updated: July 10, 2026</p>
+      <PageHeader
+        className="privacy-header"
+        eyebrow="Privacy"
+        subtitle={<span className="privacy-updated">Last updated: July 10, 2026</span>}
+        title="Privacy Policy"
+      />
 
+      <article className="privacy-card">
         <div className="privacy-content">
-          <p>
+          <p className="privacy-intro">
             Welcome to LinkDish. We respect your privacy and are committed to protecting the
             information you share with us.
           </p>
@@ -45,8 +52,8 @@ export const PrivacyPage: React.FC = () => {
             <h2>Your choices</h2>
             <p>
               You can delete your LinkDish account from Account, remove local recipes, and stop
-              submitting links or images at any time. Account deletion does not cancel a store or web
-              subscription. See the full policy at{" "}
+              submitting links or images at any time. Account deletion does not cancel a store or
+              web subscription. See the full policy at{" "}
               <a href="https://linkdish.ca/privacy/">linkdish.ca/privacy</a> or contact{" "}
               <a href="mailto:support@linkdish.ca">support@linkdish.ca</a>.
             </p>
