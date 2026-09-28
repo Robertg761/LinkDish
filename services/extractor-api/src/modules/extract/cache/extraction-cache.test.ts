@@ -63,15 +63,29 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+/** Escapes every RegExp syntax character (backslash included) so `value` matches literally. */
+const escapeRegExp = (value: string): string => value.replace(/[\\^$.*+?()[\]{}|]/gu, "\\$&");
+
 describe("extraction result cache", () => {
   it("versions keys and shares one entry across tracking-parameter variants", () => {
     const key = getExtractionCacheKey("https://example.com/pasta/?utm_medium=email#top");
 
     expect(key).toMatch(
-      new RegExp(`^linkdish:extract-cache:v1:${EXTRACTOR_CACHE_VERSION.replace(/\./g, "\\.")}:`)
+      new RegExp(
+        `^linkdish:extract-cache:v1:${escapeRegExp(EXTRACTOR_CACHE_VERSION)}:[0-9a-f]{64}$`
+      )
     );
     expect(key).toBe(getExtractionCacheKey("https://EXAMPLE.com/pasta"));
     expect(key).not.toBe(getExtractionCacheKey("https://example.com/pasta?page=2"));
+  });
+
+  it("escapes every RegExp character of the version, backslashes included", () => {
+    const version = String.raw`2026\.09.28+rc(1)[a]{2}|^$*?`;
+    const pattern = new RegExp(`^${escapeRegExp(version)}$`);
+
+    expect(pattern.test(version)).toBe(true);
+    expect(pattern.test(String.raw`2026\x09.28+rc(1)[a]{2}|^$*?`)).toBe(false);
+    expect(pattern.test("2026.09.28+rc(1)[a]{2}|^$*?")).toBe(false);
   });
 
   it("stores validated successes and reads them back for another URL variant", async () => {
