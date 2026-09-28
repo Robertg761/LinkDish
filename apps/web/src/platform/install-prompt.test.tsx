@@ -2,6 +2,12 @@ import { act, fireEvent, render, renderHook, screen } from "@testing-library/rea
 import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import {
+  HAS_SAVED_RECIPE_STORAGE_KEY,
+  INSTALL_PROMPT_DISMISSED_STORAGE_KEY,
+  markRecipeSaved,
+  resetInstallEligibilityForTests
+} from "../features/install/install-eligibility";
 import { InstallPrompt } from "../features/install/InstallPrompt";
 
 import {
@@ -65,9 +71,19 @@ describe("install prompt store", () => {
   });
 });
 
+const installTitle = "Add LinkDish to your home screen";
+
+/** What another tab's write looks like to this one. */
+const storageEventFromAnotherTab = (key: string | null, newValue: string | null) => {
+  act(() => {
+    window.dispatchEvent(new StorageEvent("storage", { key, newValue }));
+  });
+};
+
 describe("InstallPrompt card", () => {
   beforeEach(() => {
     localStorage.clear();
+    resetInstallEligibilityForTests();
     captureInstallPrompt();
     resetInstallPromptForTests();
   });
@@ -107,5 +123,46 @@ describe("InstallPrompt card", () => {
     fireEvent.click(screen.getByRole("button", { name: "Dismiss install tip" }));
     expect(screen.queryByText("Add LinkDish to your home screen")).not.toBeInTheDocument();
     expect(localStorage.getItem("linkdish:web:install-prompt-dismissed")).toBe("true");
+  });
+
+  it("appears after the first save while it is already on screen", () => {
+    fireBeforeInstallPrompt();
+    render(<InstallPrompt />);
+    expect(screen.queryByText(installTitle)).not.toBeInTheDocument();
+
+    act(() => {
+      markRecipeSaved();
+    });
+
+    expect(screen.getByText(installTitle)).toBeInTheDocument();
+    expect(localStorage.getItem(HAS_SAVED_RECIPE_STORAGE_KEY)).toBe("true");
+  });
+
+  it("follows a first save and a dismissal made in another tab", () => {
+    fireBeforeInstallPrompt();
+    render(<InstallPrompt />);
+
+    localStorage.setItem(HAS_SAVED_RECIPE_STORAGE_KEY, "true");
+    storageEventFromAnotherTab(HAS_SAVED_RECIPE_STORAGE_KEY, "true");
+    expect(screen.getByText(installTitle)).toBeInTheDocument();
+
+    localStorage.setItem(INSTALL_PROMPT_DISMISSED_STORAGE_KEY, "true");
+    storageEventFromAnotherTab(INSTALL_PROMPT_DISMISSED_STORAGE_KEY, "true");
+    expect(screen.queryByText(installTitle)).not.toBeInTheDocument();
+  });
+
+  it("stays dismissed for this visit when storage refuses the write", () => {
+    localStorage.setItem(HAS_SAVED_RECIPE_STORAGE_KEY, "true");
+    fireBeforeInstallPrompt();
+    render(<InstallPrompt />);
+    const setItem = vi.spyOn(window.localStorage, "setItem").mockImplementation(() => {
+      throw new DOMException("QuotaExceededError");
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss install tip" }));
+    setItem.mockRestore();
+
+    expect(screen.queryByText(installTitle)).not.toBeInTheDocument();
+    expect(localStorage.getItem(INSTALL_PROMPT_DISMISSED_STORAGE_KEY)).toBeNull();
   });
 });

@@ -33,6 +33,7 @@ import {
   IMPORT_ANALYTICS_ROUTE
 } from "../extract/import-shared";
 import { getImportSourceType } from "../extract/use-save-import";
+import { markRecipeSaved } from "../install/install-eligibility";
 import {
   assertCanAddSavedRecipe,
   generateDeterministicId,
@@ -282,6 +283,7 @@ export async function processImportQueueItem(
           properties: { source_type: getImportSourceType(input), surface: "import_result" },
           routeOrScreen: IMPORT_ANALYTICS_ROUTE
         });
+        markRecipeSaved();
 
         if (isAuthenticated) {
           void syncRecipeToHousehold(saved.recipe).catch(() => undefined);

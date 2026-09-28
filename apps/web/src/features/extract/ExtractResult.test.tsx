@@ -6,10 +6,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetDataChangeFeedForTests, setDataChannelFactoryForTests } from "../../data/change-feed";
 import { resetCookSessionStoreForTests } from "../../data/cook-session-store";
 import { resetLibraryStoreForTests } from "../../data/library-store";
+import { offerAppInstall } from "../../platform/testing/install-offer";
 import { resetPreferencesForTests } from "../../preferences/preferences-store";
 import { getLinkDishWebDb, resetLinkDishWebDbForTests } from "../../storage/linkdish-db";
 import { fakeIdb } from "../../storage/testing/fake-idb";
 import { flushCookSessionWrites } from "../cook-mode/cook-session-writer";
+import { resetInstallEligibilityForTests } from "../install/install-eligibility";
+import { InstallPrompt } from "../install/InstallPrompt";
 import { saveRecipe, syncRecipeToHousehold } from "../library/saved-recipe-store";
 import { resetShoppingSyncForTests } from "../shopping/shopping-sync";
 
@@ -149,6 +152,7 @@ describe("ExtractResult", () => {
     resetCookSessionStoreForTests();
     resetPreferencesForTests();
     resetShoppingSyncForTests();
+    resetInstallEligibilityForTests();
     setDataChannelFactoryForTests(() => null);
     await getLinkDishWebDb();
     authMocks.user = { billingPlan: "plus", email: "cook@example.com", id: "user_1" };
@@ -262,6 +266,35 @@ describe("ExtractResult", () => {
     expect(await screen.findByText("You saved this one before")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Replace it" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Open my copy" })).toBeInTheDocument();
+  });
+
+  it("lets an install tip that is already on screen offer itself after the first save", async () => {
+    offerAppInstall();
+    vi.mocked(saveRecipe).mockResolvedValue({ recipe: savedRecipe(), success: true });
+    render(
+      <MemoryRouter initialEntries={["/import"]}>
+        <InstallPrompt />
+        <ExtractResult
+          extraction={{
+            fetchMode: "http",
+            provenance: ["jsonld"],
+            strategy: "recipe-schema",
+            warnings: []
+          }}
+          onDiscard={vi.fn()}
+          onReset={vi.fn()}
+          onSaved={vi.fn()}
+          recipe={recipe}
+          sourceUrl="https://example.com/rice"
+        />
+      </MemoryRouter>
+    );
+    expect(screen.queryByText("Add LinkDish to your home screen")).not.toBeInTheDocument();
+
+    fireEvent.click(saveButton());
+
+    expect(await screen.findByText("Saved to your cookbook")).toBeInTheDocument();
+    expect(screen.getByText("Add LinkDish to your home screen")).toBeInTheDocument();
   });
 
   it("reports a successful save even when localStorage refuses writes", async () => {

@@ -6,26 +6,27 @@ import { Button } from "../../components/Button";
 import { Icon } from "../../components/Icon";
 import { IconButton } from "../../components/IconButton";
 import { useInstallPrompt } from "../../platform/install-prompt";
-import { safeGetItem, safeSetItem } from "../../platform/safe-storage";
+
+import {
+  dismissInstallPrompt,
+  useHasSavedRecipe,
+  useInstallPromptDismissed
+} from "./install-eligibility";
 
 import "./InstallPrompt.css";
-
-const HAS_EXTRACTED_STORAGE_KEY = "linkdish:web:has-extracted-recipe";
-const DISMISSED_STORAGE_KEY = "linkdish:web:install-prompt-dismissed";
 
 /**
  * A gentle install nudge shown on the import screen once someone has saved a recipe. Uses the
  * install event captured at boot (platform/install-prompt), so it works even though this card
- * mounts long after the browser offered the install.
+ * mounts long after the browser offered the install, and follows the first save as it happens
+ * (the card stays mounted beside the import queue).
  */
 export const InstallPrompt: React.FC = () => {
   const { canInstall, isInstalled, platform, promptInstall } = useInstallPrompt();
-  const [isDismissed, setIsDismissed] = useState(
-    () => safeGetItem(DISMISSED_STORAGE_KEY) === "true"
-  );
+  const isDismissed = useInstallPromptDismissed();
   const [hasPrompted, setHasPrompted] = useState(false);
-  // Only show install education after the user has successfully extracted at least one recipe.
-  const [hasExtracted] = useState(() => safeGetItem(HAS_EXTRACTED_STORAGE_KEY) === "true");
+  // Only show install education after the user has saved at least one recipe.
+  const hasSavedRecipe = useHasSavedRecipe();
   const isIosDevice = platform === "ios";
 
   const handleInstallClick = async () => {
@@ -38,13 +39,8 @@ export const InstallPrompt: React.FC = () => {
     await promptInstall();
   };
 
-  const handleDismiss = () => {
-    safeSetItem(DISMISSED_STORAGE_KEY, "true");
-    setIsDismissed(true);
-  };
-
   const showPrompt =
-    !isInstalled && hasExtracted && !isDismissed && !hasPrompted && (isIosDevice || canInstall);
+    !isInstalled && hasSavedRecipe && !isDismissed && !hasPrompted && (isIosDevice || canInstall);
 
   if (!showPrompt) {
     return null;
@@ -90,7 +86,7 @@ export const InstallPrompt: React.FC = () => {
         aria-label="Dismiss install tip"
         className="install-prompt-close"
         icon="x"
-        onClick={handleDismiss}
+        onClick={dismissInstallPrompt}
         size="sm"
       />
     </section>

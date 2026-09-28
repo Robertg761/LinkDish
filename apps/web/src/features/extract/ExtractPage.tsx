@@ -22,6 +22,7 @@ import { lazyWithRetry } from "../../platform/lazy";
 import { OptionalChunkBoundary } from "../../platform/OptionalChunkBoundary";
 import { ImportQueuePanel } from "../import-queue/ImportQueuePanel";
 import { useImportQueueRunner } from "../import-queue/use-import-queue-runner";
+import { markRecipeSaved } from "../install/install-eligibility";
 import { InstallPrompt } from "../install/InstallPrompt";
 import { saveRecipe } from "../library/saved-recipe-store";
 import { useUpgradeSheet } from "../upgrade/UpgradeSheet";
@@ -346,6 +347,7 @@ export const ExtractPage: React.FC = () => {
             properties: { source_type: getImportSourceType(input), surface: "import_result" },
             routeOrScreen: IMPORT_ANALYTICS_ROUTE
           });
+          markRecipeSaved();
         }
 
         showToast({

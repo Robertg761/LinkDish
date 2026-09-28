@@ -11,6 +11,7 @@ import {
   resetImportQueueStoreForTests
 } from "../../data/import-queue-store";
 import { resetLibraryStoreForTests } from "../../data/library-store";
+import { offerAppInstall } from "../../platform/testing/install-offer";
 import {
   getLinkDishWebDb,
   IMPORT_QUEUE_STORE_NAME,
@@ -18,6 +19,7 @@ import {
   SAVED_RECIPES_STORE_NAME
 } from "../../storage/linkdish-db";
 import { fakeIdb } from "../../storage/testing/fake-idb";
+import { resetInstallEligibilityForTests } from "../install/install-eligibility";
 
 import { ExtractPage } from "./ExtractPage";
 
@@ -263,6 +265,7 @@ describe("ExtractPage", () => {
     fakeIdb.reset();
     localStorage.clear();
     sessionStorage.clear();
+    resetInstallEligibilityForTests();
     resetLinkDishWebDbForTests();
     resetDataChangeFeedForTests();
     resetLibraryStoreForTests();
@@ -552,6 +555,18 @@ describe("ExtractPage", () => {
     });
 
     await waitFor(() => expect(apiMocks.extractRecipe).toHaveBeenCalledOnce());
+  });
+
+  it("offers the install tip beside the queue once it saves the first recipe", async () => {
+    offerAppInstall();
+    apiMocks.extractRecipe.mockResolvedValue(success());
+    await enqueueImport({ source: "share_sheet", url: "https://example.com/rice" });
+    renderPage();
+    expect(screen.queryByText("Add LinkDish to your home screen")).not.toBeInTheDocument();
+
+    await waitFor(() => expect(fakeIdb.records(SAVED_RECIPES_STORE_NAME)).toHaveLength(1));
+
+    expect(await screen.findByText("Add LinkDish to your home screen")).toBeVisible();
   });
 
   it("imports a link from an in-app link while the importer is already open", async () => {
