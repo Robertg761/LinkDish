@@ -3,8 +3,8 @@
  * cookies", "16, 1 loaf", "36, 36 cookies", "4 quarts, 10-14 serving(s)"); this module reads a
  * count out of it for scaling by servings and renders a clean label for the recipe header.
  */
+import { formatQuantity } from "./number-format.js";
 import { NUMBER_PHRASE_PATTERN, parseNumberPhrase, WORD_NUMBER_PATTERN } from "./number-phrases.js";
-import { formatQuantity } from "./quantity-format.js";
 
 export type ParsedServings = {
   /** Smallest count ("4" in "4-6 servings"). */

@@ -108,9 +108,15 @@ const preloadLandingRoute = (routeModule: string): Plugin => ({
 /** Shared building blocks of the pages: components, stores, storage and helpers. */
 const APP_SHARED_PATTERN =
   /\/apps\/web\/src\/(?:components|data|storage|api|platform|preferences)\/|\/apps\/web\/src\/features\/library\/saved-recipe-(?:store|types)\.ts$|\/node_modules\/idb\//u;
-/** The small, zod-free recipe-domain formatters the Cookbook and recipe pages share. */
+/** The small, zod-free recipe-domain formatters the Cookbook uses (and the recipe pages share). */
 const DOMAIN_CORE_PATTERN =
-  /\/packages\/recipe-domain\/src\/(?:durations|urls|servings|quantity-format|number-phrases|inflection|units|format-internal)\.ts$/u;
+  /\/packages\/recipe-domain\/src\/(?:durations|urls|servings|number-format|number-phrases)\.ts$/u;
+/**
+ * The unit tables and noun inflection behind ingredient amounts: the recipe pages, cook mode and
+ * the lists need them, the Cookbook doesn't, so they are grouped apart from `domain-core`.
+ */
+const DOMAIN_FORMAT_PATTERN =
+  /\/packages\/recipe-domain\/src\/(?:quantity-format|inflection|units|format-internal)\.ts$/u;
 
 /**
  * Without this, every shared component or store a page imports becomes its own tiny chunk (and
@@ -158,7 +164,11 @@ const createManualChunks = (bootModules: readonly string[]): Rollup.GetManualChu
       return landingGraph?.has(id) ? "app-core" : "app-shared";
     }
 
-    return DOMAIN_CORE_PATTERN.test(path) ? "domain-core" : undefined;
+    if (DOMAIN_CORE_PATTERN.test(path)) {
+      return "domain-core";
+    }
+
+    return DOMAIN_FORMAT_PATTERN.test(path) ? "domain-format" : undefined;
   };
 
   return (id, meta) => {
