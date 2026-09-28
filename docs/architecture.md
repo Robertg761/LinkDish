@@ -36,6 +36,17 @@
   Clerk session hint exists or sign-in starts. `pnpm --filter @linkdish/web
 size` checks the budgets after a build (entry ≤ 115 KB gzip, landing JS ≤
   150 KB, landing CSS ≤ 24 KB).
+- **HTTP caching** (`apps/web/vercel.json`, written as `routes` because only
+  the `handle: hit` phase can tell a real file from a rewrite or a 404: headers
+  set before the filesystem check stick to whatever response follows). Hashed
+  `/assets/*-<hash>.js|css` and `/workbox-<hash>.js` get a one-year
+  `immutable` cache, but only in the `hit` phase, so only files that exist.
+  `/assets/`, `/fonts/`, `/icons/` and `/workbox-` are excluded from the SPA
+  fallback: a chunk from another deployment is a plain 404, never `index.html`
+  cached for a year under the chunk's URL. The self-hosted fonts keep stable
+  names and are cached for a week. Everything else (the app shell and every
+  deep link that falls back to it, `sw.js`, the manifest) is `no-cache`.
+  `api/vercel-config.test.ts` models Vercel's routing phases and checks this.
 - **Local data.** IndexedDB `linkdish-web` v4 (`storage/linkdish-db.ts`)
   holds `savedRecipes`, `recipeSourceImages` (scan images, kept out of list
   reads), `shoppingItems`, `collections`, `mealPlan`, `importQueue` and
