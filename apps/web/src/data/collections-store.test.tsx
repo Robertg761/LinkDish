@@ -1,11 +1,20 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { getSavedRecipeById, putSavedRecipe } from "../features/library/saved-recipe-store";
-import { resetLinkDishWebDbForTests } from "../storage/linkdish-db";
+import {
+  deleteSavedRecipe,
+  getSavedRecipeById,
+  putSavedRecipe,
+  restoreSavedRecipe
+} from "../features/library/saved-recipe-store";
+import { resetLinkDishWebDbForTests, SAVED_RECIPES_STORE_NAME } from "../storage/linkdish-db";
 import { fakeIdb } from "../storage/testing/fake-idb";
 
-import { resetDataChangeFeedForTests, setDataChannelFactoryForTests } from "./change-feed";
+import {
+  resetDataChangeFeedForTests,
+  setDataChannelFactoryForTests,
+  subscribeDataChanges
+} from "./change-feed";
 import {
   CollectionValidationError,
   createCollection,
@@ -18,6 +27,7 @@ import {
   useCollections
 } from "./collections-store";
 
+import type { DataChange } from "./change-feed";
 import type { WebSavedRecipe } from "../features/library/saved-recipe-types";
 
 vi.mock("idb", async () => (await import("../storage/testing/fake-idb")).fakeIdbModule);
@@ -113,6 +123,72 @@ describe("collections-store", () => {
     expect(await getCollections()).toEqual([]);
     expect((await getSavedRecipeById("miso"))?.collectionIds).toEqual(["other"]);
     expect(await getSavedRecipeById("stew")).not.toHaveProperty("collectionIds");
+  });
+
+  it("reports the deleted collection and its recipes once both are saved", async () => {
+    const soups = await createCollection({ name: "Soups" });
+    await putSavedRecipe(recipe("miso", [soups.id, "other"]));
+    await putSavedRecipe(recipe("stew", [soups.id]));
+    await putSavedRecipe(recipe("salad"));
+    const changes: unknown[] = [];
+    const listener = (change: DataChange) =>
+      changes.push({
+        deletedIds: change.deletedIds,
+        // Whether the recipes are already out of the collection when the change is reported.
+        recipesSaved: !fakeIdb.record<WebSavedRecipe>(SAVED_RECIPES_STORE_NAME, "stew")
+          ?.collectionIds,
+        upserted: change.upserted?.map((entry) => (entry as WebSavedRecipe).id).sort()
+      });
+    subscribeDataChanges("collections", listener);
+    subscribeDataChanges("savedRecipes", listener);
+
+    await deleteCollection(soups.id);
+
+    expect(changes).toEqual([
+      { deletedIds: [soups.id], recipesSaved: true, upserted: undefined },
+      { deletedIds: undefined, recipesSaved: true, upserted: ["miso", "stew"] }
+    ]);
+  });
+
+  it("deletes nothing when a recipe can't be updated (a full device)", async () => {
+    const soups = await createCollection({ name: "Soups" });
+    await putSavedRecipe(recipe("miso", [soups.id, "other"]));
+    await putSavedRecipe(recipe("stew", [soups.id]));
+    const changes: unknown[] = [];
+    subscribeDataChanges("collections", (change) => changes.push(change));
+    subscribeDataChanges("savedRecipes", (change) => changes.push(change));
+    fakeIdb.failNextPut(
+      SAVED_RECIPES_STORE_NAME,
+      new DOMException("The quota has been exceeded.", "QuotaExceededError")
+    );
+
+    await expect(deleteCollection(soups.id)).rejects.toMatchObject({
+      name: "QuotaExceededError"
+    });
+
+    // Still whole: the collection and every recipe's membership, so deleting again works.
+    expect((await getCollections()).map((collection) => collection.id)).toEqual([soups.id]);
+    expect((await getSavedRecipeById("miso"))?.collectionIds).toEqual([soups.id, "other"]);
+    expect((await getSavedRecipeById("stew"))?.collectionIds).toEqual([soups.id]);
+    expect(changes).toEqual([]);
+
+    await deleteCollection(soups.id);
+    expect(await getCollections()).toEqual([]);
+    expect((await getSavedRecipeById("miso"))?.collectionIds).toEqual(["other"]);
+  });
+
+  it("never files a recipe back in a collection deleted before its Undo", async () => {
+    const soups = await createCollection({ name: "Soups" });
+    const quick = await createCollection({ name: "Quick" });
+    await putSavedRecipe(recipe("miso", [soups.id, quick.id]));
+    const snapshot = await getSavedRecipeById("miso");
+    await deleteSavedRecipe("miso");
+
+    // The collection goes while the recipe is deleted, so its delete can't take the recipe out.
+    await deleteCollection(soups.id);
+    await restoreSavedRecipe(snapshot!);
+
+    expect((await getSavedRecipeById("miso"))?.collectionIds).toEqual([quick.id]);
   });
 
   it("serves a live list through useCollections", async () => {

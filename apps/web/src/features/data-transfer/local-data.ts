@@ -2,6 +2,7 @@
  * Light reads for the Settings page: counts and the size of stored scans. All reads go through
  * the shared LinkDish database connection.
  */
+import { runLinkDishTransaction } from "../../storage/idb-transaction";
 import {
   COLLECTIONS_STORE_NAME,
   getLinkDishWebDb,
@@ -66,13 +67,18 @@ export interface LocalDataCounts {
   mealPlanEntries: number;
 }
 
+/** Counts from one moment (one readonly transaction), so an import landing meanwhile is all in. */
 export const readLocalDataCounts = async (): Promise<LocalDataCounts> => {
-  const db = await getLinkDishWebDb();
-  const [keys, collections, mealPlanEntries] = await Promise.all([
-    db.getAllKeys(SAVED_RECIPES_STORE_NAME),
-    db.count(COLLECTIONS_STORE_NAME),
-    db.count(MEAL_PLAN_STORE_NAME)
-  ]);
+  const [keys, collections, mealPlanEntries] = await runLinkDishTransaction(
+    [SAVED_RECIPES_STORE_NAME, COLLECTIONS_STORE_NAME, MEAL_PLAN_STORE_NAME],
+    "readonly",
+    (tx) =>
+      Promise.all([
+        tx.objectStore(SAVED_RECIPES_STORE_NAME).getAllKeys(),
+        tx.objectStore(COLLECTIONS_STORE_NAME).count(),
+        tx.objectStore(MEAL_PLAN_STORE_NAME).count()
+      ])
+  );
   const starters = keys.filter(
     (key) => typeof key === "string" && key.startsWith("starter-")
   ).length;

@@ -1,9 +1,14 @@
 import { useCallback, useMemo } from "react";
 
 import { trackWebEvent } from "../analytics/client";
-import { removeCollectionFromAllRecipes } from "../features/library/saved-recipe-store";
+import { removeCollectionFromRecipes } from "../features/library/saved-recipe-store";
+import { runLinkDishTransaction } from "../storage/idb-transaction";
 import { updateStoredRecord } from "../storage/idb-update";
-import { COLLECTIONS_STORE_NAME, getLinkDishWebDb } from "../storage/linkdish-db";
+import {
+  COLLECTIONS_STORE_NAME,
+  getLinkDishWebDb,
+  SAVED_RECIPES_STORE_NAME
+} from "../storage/linkdish-db";
 
 import { emitDataChange } from "./change-feed";
 import { createResourceStore, toViewStatus, upsertById, useResource } from "./resource-store";
@@ -227,12 +232,32 @@ export async function reorderCollections(orderedIds: readonly string[]): Promise
   }
 }
 
-/** Deletes a collection and removes it from every recipe (the recipes themselves stay). */
+/**
+ * Deletes a collection and takes it out of every recipe (the recipes themselves stay), in one
+ * readwrite transaction over both stores: all of it is saved or, when a write fails (a full
+ * device), none of it, and the collection is still there to delete again. Adding a recipe to a
+ * collection checks that it exists in its own transaction over the collections store, so another
+ * tab's add lands before this (and is taken out here) or after (and is refused). Both changes are
+ * reported once the transaction has committed.
+ */
 export async function deleteCollection(id: string): Promise<void> {
-  const db = await getLinkDishWebDb();
-  await db.delete(COLLECTIONS_STORE_NAME, id);
+  const updatedRecipes = await runLinkDishTransaction(
+    [COLLECTIONS_STORE_NAME, SAVED_RECIPES_STORE_NAME],
+    "readwrite",
+    async (tx) => {
+      const [updated] = await Promise.all([
+        removeCollectionFromRecipes(tx.objectStore(SAVED_RECIPES_STORE_NAME), id),
+        tx.objectStore(COLLECTIONS_STORE_NAME).delete(id)
+      ]);
+      return updated;
+    }
+  );
+
   emitDataChange({ deletedIds: [id], topic: "collections" });
-  await removeCollectionFromAllRecipes(id);
+
+  if (updatedRecipes.length) {
+    emitDataChange({ topic: "savedRecipes", upserted: updatedRecipes });
+  }
 }
 
 /** Recipes that belong to a collection, in the order given. */

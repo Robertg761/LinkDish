@@ -6,8 +6,10 @@
  *
  * It models object stores with key paths and indexes, multi-store transactions with `done`
  * (readwrite ones over the same stores run one at a time, so a read-then-write in one is atomic
- * across "tabs" sharing the fake), the upgrade callback (including its versionchange transaction), and `abort()` rolling the whole
- * upgrade back — enough to test migrations without fake-indexeddb.
+ * across "tabs" sharing the fake; a failed request or `abort()` undoes every write the transaction
+ * made, in every store, and rejects `done`), the upgrade callback (including its versionchange
+ * transaction), and `abort()` rolling the whole upgrade back — enough to test migrations without
+ * fake-indexeddb.
  */
 
 interface FakeStoreDefinition {
@@ -25,6 +27,7 @@ interface FakeIdbState {
   afterGetAll: Map<string, () => Promise<void> | void>;
   blockedOnce: boolean;
   callbacks: FakeOpenCallbacks | null;
+  failGets: Map<string, Error>;
   failPuts: Map<string, Error>;
   definitions: Map<string, FakeStoreDefinition>;
   failNextOpen: Error | null;
@@ -33,14 +36,15 @@ interface FakeIdbState {
   oldVersion: number;
   openCalls: FakeOpenCall[];
   records: Map<string, Map<string, unknown>>;
-  /** Readwrite transactions not yet committed, oldest first. */
-  writers: Array<{ done: Promise<void>; stores: readonly string[] }>;
+  /** Readwrite transactions not yet committed or aborted, oldest first. */
+  writers: Array<{ settled: Promise<void>; stores: readonly string[] }>;
 }
 
 const state: FakeIdbState = {
   afterGetAll: new Map(),
   blockedOnce: false,
   callbacks: null,
+  failGets: new Map(),
   failPuts: new Map(),
   definitions: new Map(),
   failNextOpen: null,
@@ -106,7 +110,13 @@ const afterGetAllOn =
     return records;
   };
 
-const createStoreApi = (name: string, request: RunRequest) => {
+/**
+ * Runs inside a request that changes store `name`, just before the change, so a transaction can
+ * note what the store held and put it back if it aborts.
+ */
+type BeforeWrite = (name: string) => void;
+
+const createStoreApi = (name: string, request: RunRequest, beforeWrite?: BeforeWrite) => {
   const indexApi = (indexName: string) => ({
     count: (key: unknown) =>
       request(() => {
@@ -132,13 +142,31 @@ const createStoreApi = (name: string, request: RunRequest) => {
   });
 
   return {
-    clear: () => request(() => requireStore(name).records.clear()),
+    clear: () =>
+      request(() => {
+        const { records } = requireStore(name);
+        beforeWrite?.(name);
+        records.clear();
+      }),
     count: () => request(() => requireStore(name).records.size),
     delete: (key: string) =>
       request(() => {
-        requireStore(name).records.delete(String(key));
+        const { records } = requireStore(name);
+        beforeWrite?.(name);
+        records.delete(String(key));
       }),
-    get: (key: string) => request(() => clone(requireStore(name).records.get(String(key)))),
+    get: (key: string) =>
+      request(() => {
+        const { records } = requireStore(name);
+        const failure = state.failGets.get(name);
+
+        if (failure) {
+          state.failGets.delete(name);
+          throw failure;
+        }
+
+        return clone(records.get(String(key)));
+      }),
     getAll: () =>
       request(
         () => Array.from(requireStore(name).records.values()).map(clone),
@@ -161,6 +189,7 @@ const createStoreApi = (name: string, request: RunRequest) => {
           throw new DOMException("Missing key path value", "DataError");
         }
 
+        beforeWrite?.(name);
         records.set(String(key), clone(value));
         return key;
       })
@@ -178,26 +207,68 @@ const COMMIT_TURNS = 20;
 /**
  * An explicit transaction. Readwrite transactions whose stores overlap run one at a time, in the
  * order they were created (as in IndexedDB), so a read-then-write inside one is atomic. Requests
- * made after it committed fail with `TransactionInactiveError`. `done` resolves on commit.
+ * made after it finished fail with `TransactionInactiveError`. `done` resolves on commit.
+ *
+ * As in IndexedDB through `idb` (which never cancels the abort a failed request causes), a request
+ * that fails aborts the transaction, and so does `abort()`: every write it made, in every store,
+ * is undone, requests still queued in it fail with `AbortError`, and `done` rejects.
  */
 const createTransaction = (names: string[], mode: string | undefined) => {
   const readwrite = mode === "readwrite";
   const earlier = readwrite
     ? state.writers.filter((writer) => writer.stores.some((name) => names.includes(name)))
     : [];
-  const ready = Promise.all(earlier.map((writer) => writer.done)).then(() => undefined);
+  const ready = Promise.all(earlier.map((writer) => writer.settled)).then(() => undefined);
   let commit: () => void = () => undefined;
-  const done = new Promise<void>((resolve) => {
+  let fail: (error: unknown) => void = () => undefined;
+  const done = new Promise<void>((resolve, reject) => {
     commit = resolve;
+    fail = reject;
   });
-  const writer = { done, stores: names };
+  // Code that stops at a failed request never awaits `done`; that is no unhandled rejection.
+  done.catch(() => undefined);
+  let settle: () => void = () => undefined;
+  const writer = {
+    settled: new Promise<void>((resolve) => {
+      settle = resolve;
+    }),
+    stores: names
+  };
+  /** What each store held before this transaction first changed it. */
+  const before = new Map<string, Map<string, unknown>>();
   let pending = 0;
   let activity = 0;
   let finished = false;
+  let aborted = false;
 
   if (readwrite) {
     state.writers.push(writer);
   }
+
+  const finish = () => {
+    finished = true;
+    state.writers = state.writers.filter((entry) => entry !== writer);
+    settle();
+  };
+
+  const noteBeforeWrite = (name: string) => {
+    if (!before.has(name)) {
+      before.set(name, new Map(requireStore(name).records));
+    }
+  };
+
+  const abortWith = (error: unknown) => {
+    aborted = true;
+
+    for (const [name, records] of before) {
+      const current = state.records.get(name);
+      current?.clear();
+      records.forEach((value, key) => current?.set(key, value));
+    }
+
+    finish();
+    fail(error);
+  };
 
   const commitWhenIdle = async () => {
     const seen = activity;
@@ -207,16 +278,9 @@ const createTransaction = (names: string[], mode: string | undefined) => {
     }
 
     if (!finished && pending === 0 && activity === seen) {
-      finished = true;
-      state.writers = state.writers.filter((entry) => entry !== writer);
+      finish();
       commit();
     }
-  };
-
-  const settle = () => {
-    pending -= 1;
-    activity += 1;
-    void commitWhenIdle();
   };
 
   const request = <T>(run: () => T, after?: AfterRequest<T>): Promise<T> => {
@@ -228,15 +292,43 @@ const createTransaction = (names: string[], mode: string | undefined) => {
 
     pending += 1;
     activity += 1;
-    const result = ready.then(() => withAfter(tick(run), after));
-    void result.then(settle, settle);
+    const runUnlessAborted = () => {
+      if (aborted) {
+        throw new DOMException("The transaction was aborted.", "AbortError");
+      }
+
+      return run();
+    };
+    const result = ready.then(() => withAfter(tick(runUnlessAborted), after));
+    void result.then(
+      () => {
+        pending -= 1;
+        activity += 1;
+        void commitWhenIdle();
+      },
+      (error: unknown) => {
+        pending -= 1;
+        activity += 1;
+
+        if (!finished) {
+          abortWith(error);
+        }
+      }
+    );
     return result;
   };
 
   void ready.then(commitWhenIdle);
-  const storeApi = (name: string) => createStoreApi(name, request);
+  const storeApi = (name: string) => createStoreApi(name, request, noteBeforeWrite);
 
   return {
+    abort: () => {
+      if (finished) {
+        throw new DOMException("The transaction has finished.", "InvalidStateError");
+      }
+
+      abortWith(new DOMException("The transaction was aborted.", "AbortError"));
+    },
     done,
     objectStore: (name: string) => {
       if (!names.includes(name)) {
@@ -435,6 +527,7 @@ export const fakeIdb = {
     state.openHold = null;
     state.blockedOnce = false;
     state.callbacks = null;
+    state.failGets = new Map();
     state.failPuts = new Map();
     state.writers = [];
     state.afterGetAll = new Map();
@@ -501,6 +594,15 @@ export const fakeIdb = {
    */
   afterNextGetAll(storeName: string, callback: () => Promise<void> | void): void {
     state.afterGetAll.set(storeName, callback);
+  },
+
+  /**
+   * The next `get` from `storeName` (in any transaction) fails with `error`, e.g. a value the
+   * browser can no longer read back (Chrome's `NotReadableError` for a large value whose file is
+   * gone). As through `idb`, the failed request aborts the transaction it was made in.
+   */
+  failNextGet(storeName: string, error: Error): void {
+    state.failGets.set(storeName, error);
   },
 
   /** The next `put` into `storeName` (in any transaction) throws `error`. */

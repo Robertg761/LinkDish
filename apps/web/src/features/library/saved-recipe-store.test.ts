@@ -27,7 +27,7 @@ import {
   logRecipeCooked,
   markRecipeOpened,
   normalizeRecipeTags,
-  removeCollectionFromAllRecipes,
+  removeCollectionFromRecipes,
   restoreSavedRecipe,
   saveSharedRecipeCopy,
   SavedRecipeLimitError,
@@ -548,6 +548,125 @@ describe("saved-recipe-store v4 behaviour", () => {
     expect(fakeIdb.record("cookSessions", saved.id)).toBeUndefined();
   });
 
+  it("hands back the recipe and scans it deleted, read in the deleting transaction, for Undo", async () => {
+    const saved = await saveScanned();
+    await setRecipeFavorite(saved.id, true);
+
+    const removed = await deleteSavedRecipe(saved.id);
+
+    expect(removed).toMatchObject({
+      favorite: true,
+      id: saved.id,
+      sourceImages: [scan(1), scan(2)]
+    });
+    expect(await deleteSavedRecipe(saved.id)).toBeUndefined();
+
+    await restoreSavedRecipe(removed!);
+    expect(await getSavedRecipeById(saved.id)).toMatchObject({
+      favorite: true,
+      sourceImages: [scan(1), scan(2)]
+    });
+  });
+
+  it("still deletes a recipe whose scans can't be read back, with nothing for Undo", async () => {
+    const saved = await saveScanned();
+    fakeIdb.seed("cookSessions", [{ recipeId: saved.id, stepIndex: 2 }]);
+    const changes: unknown[] = [];
+    subscribeDataChanges("savedRecipes", (change) => changes.push(change));
+    // Chrome: the file behind a large stored value is gone ("Failed to read large IndexedDB value").
+    fakeIdb.failNextGet(
+      RECIPE_SOURCE_IMAGES_STORE_NAME,
+      new DOMException("Failed to read large IndexedDB value", "NotReadableError")
+    );
+
+    expect(await deleteSavedRecipe(saved.id)).toBeUndefined();
+
+    expect(fakeIdb.record(SAVED_RECIPES_STORE_NAME, saved.id)).toBeUndefined();
+    expect(fakeIdb.record(RECIPE_SOURCE_IMAGES_STORE_NAME, saved.id)).toBeUndefined();
+    expect(fakeIdb.record("cookSessions", saved.id)).toBeUndefined();
+    expect(changes).toEqual([{ deletedIds: [saved.id], topic: "savedRecipes" }]);
+  });
+
+  it("deletes without reading the recipe or its scans when no Undo copy is wanted", async () => {
+    const saved = await saveScanned();
+    const readFailure = new DOMException(
+      "Failed to read large IndexedDB value",
+      "NotReadableError"
+    );
+    fakeIdb.failNextGet(RECIPE_SOURCE_IMAGES_STORE_NAME, readFailure);
+
+    expect(await deleteSavedRecipe(saved.id, { snapshot: false })).toBeUndefined();
+
+    expect(fakeIdb.record(SAVED_RECIPES_STORE_NAME, saved.id)).toBeUndefined();
+    expect(fakeIdb.record(RECIPE_SOURCE_IMAGES_STORE_NAME, saved.id)).toBeUndefined();
+    // The scans were never read: the failure armed for the next read is still waiting.
+    await expect(getSavedRecipeSourceImages(saved.id)).rejects.toBe(readFailure);
+  });
+
+  it("reports a failed delete instead of retrying it without the Undo copy", async () => {
+    const saved = await saveScanned();
+    const db = await getDb();
+    const transaction = db.transaction.bind(db);
+    // The recipe and its scans read fine; deleting its cook session fails.
+    vi.spyOn(db, "transaction").mockImplementationOnce(((
+      ...args: Parameters<typeof transaction>
+    ) => {
+      const tx = transaction(...args);
+      const objectStore = tx.objectStore.bind(tx);
+      return Object.assign(tx, {
+        objectStore: (name: string) =>
+          name === "cookSessions"
+            ? {
+                ...objectStore(name),
+                delete: () => Promise.reject(new DOMException("disk gone", "UnknownError"))
+              }
+            : objectStore(name)
+      });
+    }) as typeof db.transaction);
+
+    await expect(deleteSavedRecipe(saved.id)).rejects.toMatchObject({ name: "UnknownError" });
+
+    expect(fakeIdb.record(SAVED_RECIPES_STORE_NAME, saved.id)).toBeDefined();
+    expect(fakeIdb.record(RECIPE_SOURCE_IMAGES_STORE_NAME, saved.id)).toBeDefined();
+  });
+
+  it("saves neither a recipe nor its scans when the scans don't fit", async () => {
+    fakeIdb.failNextPut(
+      RECIPE_SOURCE_IMAGES_STORE_NAME,
+      new DOMException("The quota has been exceeded.", "QuotaExceededError")
+    );
+    const changes: unknown[] = [];
+    subscribeDataChanges("savedRecipes", (change) => changes.push(change));
+
+    await expect(
+      saveRecipe({ ...createSaveInput(1), sourceImages: [scan(1)] }, true)
+    ).rejects.toMatchObject({ name: "QuotaExceededError" });
+
+    expect(fakeIdb.records(SAVED_RECIPES_STORE_NAME)).toEqual([]);
+    expect(fakeIdb.records(RECIPE_SOURCE_IMAGES_STORE_NAME)).toEqual([]);
+    expect(changes).toEqual([]);
+  });
+
+  it("makes no copy, and no scans for one, when the copy's scans don't fit", async () => {
+    const saved = await saveScanned();
+    const changes: unknown[] = [];
+    subscribeDataChanges("savedRecipes", (change) => changes.push(change));
+    fakeIdb.failNextPut(
+      RECIPE_SOURCE_IMAGES_STORE_NAME,
+      new DOMException("The quota has been exceeded.", "QuotaExceededError")
+    );
+
+    await expect(duplicateSavedRecipe(saved.id, { isPremiumUser: true })).rejects.toMatchObject({
+      name: "QuotaExceededError"
+    });
+
+    expect(
+      fakeIdb.records(SAVED_RECIPES_STORE_NAME).map((recipe) => (recipe as { id: string }).id)
+    ).toEqual([saved.id]);
+    expect(fakeIdb.records(RECIPE_SOURCE_IMAGES_STORE_NAME)).toHaveLength(1);
+    expect(changes).toEqual([]);
+  });
+
   it("treats an older app's copy of a starter as the personal recipe the limit counts", async () => {
     // Before the redesign, "Duplicate" on a starter kept isStarter under a fresh id.
     const legacyCopy = {
@@ -873,14 +992,22 @@ describe("saved-recipe-store v4 behaviour", () => {
     ]);
   });
 
-  it("removes a deleted collection from every recipe", async () => {
+  it("takes a collection out of every recipe filed in it, in the caller's transaction", async () => {
     const { recipe: a } = await saveRecipe(createSaveInput(1), true);
     const { recipe: b } = await saveRecipe(createSaveInput(2), true);
+    await saveRecipe(createSaveInput(3), true);
     await setRecipeCollections(a!.id, ["weeknight", "soups"]);
     await setRecipeCollections(b!.id, ["weeknight"]);
+    const db = await getDb();
+    const tx = db.transaction(SAVED_RECIPES_STORE_NAME, "readwrite");
 
-    expect(await removeCollectionFromAllRecipes("weeknight")).toBe(2);
+    const updated = await removeCollectionFromRecipes(
+      tx.objectStore(SAVED_RECIPES_STORE_NAME),
+      "weeknight"
+    );
+    await tx.done;
 
+    expect(updated.map((recipe) => recipe.id).sort()).toEqual([a!.id, b!.id].sort());
     expect((await getSavedRecipeById(a!.id))?.collectionIds).toEqual(["soups"]);
     expect(await getSavedRecipeById(b!.id)).not.toHaveProperty("collectionIds");
   });

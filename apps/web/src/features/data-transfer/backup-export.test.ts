@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetDataChangeFeedForTests, setDataChannelFactoryForTests } from "../../data/change-feed";
 import { createCollection, getCollections } from "../../data/collections-store";
 import { addMealPlanEntry, getMealPlanEntries } from "../../data/meal-plan-store";
-import { resetLinkDishWebDbForTests } from "../../storage/linkdish-db";
+import { resetLinkDishWebDbForTests, SAVED_RECIPES_STORE_NAME } from "../../storage/linkdish-db";
 import { fakeIdb } from "../../storage/testing/fake-idb";
 import {
   getSavedRecipeById,
@@ -380,6 +380,26 @@ describe("backups", () => {
     expect(file[WEB_BACKUP_EXTRAS_KEY].sourceImages?.c).toEqual([scanOf("c"), scanOf("C")]);
     expect(validateBackup(file).ok).toBe(true);
     expect(summary.bytes).toBe(downloads[0]!.blob.size);
+  });
+
+  it("backs up the scans of a recipe whose scans haven't moved to their own store yet", async () => {
+    const downloads = captureDownloads();
+    // Opens the database; this recipe then looks like one saved before scans had their own store.
+    await putSavedRecipe(
+      saved("moved", { sourceImages: [{ dataUrl: TINY_JPEG, mimeType: "image/jpeg" }] })
+    );
+    fakeIdb.seed(SAVED_RECIPES_STORE_NAME, [
+      saved("legacy", { sourceImages: [{ dataUrl: `${TINY_JPEG}0`, mimeType: "image/jpeg" }] })
+    ]);
+
+    const summary = await downloadBackup({ includeImages: true });
+
+    const file = JSON.parse(await blobText(downloads[0]!.blob)) as WebLinkDishBackup;
+    expect(summary.imageCount).toBe(2);
+    expect(file[WEB_BACKUP_EXTRAS_KEY].sourceImages).toEqual({
+      legacy: [{ dataUrl: `${TINY_JPEG}0`, mimeType: "image/jpeg" }],
+      moved: [{ dataUrl: TINY_JPEG, mimeType: "image/jpeg" }]
+    });
   });
 
   it("downloads the Markdown cookbook", async () => {

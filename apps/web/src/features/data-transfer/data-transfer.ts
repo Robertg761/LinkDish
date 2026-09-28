@@ -7,8 +7,6 @@
  * recipe-domain importers. For the tiny URL helpers use `./synthetic-url` directly.
  */
 import { trackWebEvent } from "../../analytics/client";
-import { getCollections } from "../../data/collections-store";
-import { getMealPlanEntries } from "../../data/meal-plan-store";
 import { getSavedRecipes } from "../library/saved-recipe-store";
 
 import {
@@ -21,7 +19,7 @@ import {
 } from "./backup-export";
 import { DataTransferError } from "./errors";
 import { selectExportRecipes } from "./export-selection";
-import { loadExportSnapshot, loadSourceImages } from "./export-snapshot";
+import { loadExportSnapshot } from "./export-snapshot";
 import { analyzeImport, buildImportPlan } from "./import-plan";
 import { parseImportFile, readFileBytes } from "./import-sources";
 import { commitImport } from "./import-writer";
@@ -60,10 +58,10 @@ export async function downloadBackup(options: {
   now?: Date | undefined;
 }): Promise<ExportSummary> {
   const now = options.now ?? new Date();
-  const snapshot = await loadExportSnapshot();
-  const sourceImages = options.includeImages
-    ? await loadSourceImages(selectExportRecipes(snapshot.recipes))
-    : undefined;
+  // One transaction: the recipes, their scans, collections and meal plan of one moment.
+  const { sourceImages, ...snapshot } = await loadExportSnapshot({
+    includeImages: options.includeImages
+  });
   const built = buildBackup(snapshot, {
     exportedAt: now.toISOString(),
     includeImages: options.includeImages,
@@ -132,25 +130,20 @@ export async function prepareImport(
 ): Promise<PreparedImport> {
   const bytes = await readFileBytes(file);
   const parsed = await parseImportFile({ name: file.name, bytes }, options);
-  let existing;
-  let existingCollections;
-  let existingMealPlan;
+  let cookbook;
 
   try {
-    [existing, existingCollections, existingMealPlan] = await Promise.all([
-      getSavedRecipes(),
-      getCollections(),
-      getMealPlanEntries()
-    ]);
+    // One moment's cookbook for the preview; the import itself re-reads what it needs as it writes.
+    cookbook = await loadExportSnapshot();
   } catch {
     throw new DataTransferError("storage_unavailable");
   }
 
   return {
-    analysis: await analyzeImport(parsed, existing),
-    existingRecipeIds: new Set(existing.map((recipe) => recipe.id)),
-    existingCollections,
-    existingMealPlan
+    analysis: await analyzeImport(parsed, cookbook.recipes),
+    existingRecipeIds: new Set(cookbook.recipes.map((recipe) => recipe.id)),
+    existingCollections: cookbook.collections,
+    existingMealPlan: cookbook.mealPlan
   };
 }
 
