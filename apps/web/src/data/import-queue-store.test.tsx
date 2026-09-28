@@ -126,7 +126,7 @@ describe("import-queue-store", () => {
     });
   });
 
-  it("keeps a renewed claim, recovers a lapsed one, and ignores its old tab afterwards", async () => {
+  it("keeps a renewed claim, recovers a lapsed one, and ignores its old tab once another claims it", async () => {
     const item = await enqueueImport({ url: "https://example.com/pie" });
     const start = Date.parse("2026-09-28T10:00:00.000Z");
     await claimNextQueuedImport("tab-a", start);
@@ -139,14 +139,13 @@ describe("import-queue-store", () => {
     // tab-a went away: once its last renewal lapses, the item waits again for any tab.
     expect(await recoverStaleImports(start + 4 * 60_000 + STALE_PROCESSING_MS + 1)).toBe(1);
     const recovered = fakeIdb.record(IMPORT_QUEUE_STORE_NAME, item.id);
-    expect(recovered).toMatchObject({ status: "queued" });
-    expect(recovered).not.toHaveProperty("claimedBy");
+    expect(recovered).toMatchObject({ claimedBy: "tab-a", status: "queued" });
     expect(recovered).not.toHaveProperty("claimedAt");
 
-    // Should tab-a wake up, it no longer writes over the item.
+    // tab-b takes it; should tab-a wake up now, it no longer writes over the item.
+    expect((await claimNextQueuedImport("tab-b"))?.id).toBe(item.id);
     expect(await markImportDone(item.id, { recipeId: "late" }, "tab-a")).toBeUndefined();
     expect(await renewImportClaim(item.id, "tab-a")).toBeUndefined();
-    expect((await claimNextQueuedImport("tab-b"))?.id).toBe(item.id);
     expect(await markImportFailed(item.id, "late", "tab-a")).toBeUndefined();
     expect(await markImportProcessing(item.id, "tab-b")).toMatchObject({
       attempts: 1,
@@ -157,6 +156,48 @@ describe("import-queue-store", () => {
       recipeId: "recipe-1",
       status: "done"
     });
+    expect(fakeIdb.record(IMPORT_QUEUE_STORE_NAME, item.id)).not.toHaveProperty("claimedBy");
+    expect(await renewImportClaim(item.id, "tab-b")).toBeUndefined();
+  });
+
+  it("lets a suspended tab take back and finish its lapsed item while no other tab has it", async () => {
+    const item = await enqueueImport({ url: "https://example.com/pie" });
+    const start = Date.parse("2026-09-28T10:00:00.000Z");
+    await claimNextQueuedImport("tab-a", start);
+    expect(await recoverStaleImports(start + STALE_PROCESSING_MS + 1)).toBe(1);
+
+    // tab-a resumes: its next renewal holds the item again, so no other tab can claim it.
+    const resumed = start + STALE_PROCESSING_MS + 60_000;
+    expect(await renewImportClaim(item.id, "tab-a", resumed)).toMatchObject({
+      claimedAt: new Date(resumed).toISOString(),
+      claimedBy: "tab-a",
+      status: "processing"
+    });
+    expect(await claimNextQueuedImport("tab-b", resumed)).toBeUndefined();
+    expect(await markImportDone(item.id, { recipeId: "recipe-1" }, "tab-a")).toMatchObject({
+      recipeId: "recipe-1",
+      status: "done"
+    });
+
+    // Or, before any renewal: its result is still recorded rather than imported again.
+    const text = await enqueueImport({ text: "Soup: 1 onion." });
+    await claimNextQueuedImport("tab-a", start);
+    expect(await recoverStaleImports(start + STALE_PROCESSING_MS + 1)).toBe(1);
+    expect(await markImportFailed(text.id, "Nothing there.", "tab-a")).toMatchObject({
+      error: "Nothing there.",
+      status: "failed"
+    });
+    expect(fakeIdb.record(IMPORT_QUEUE_STORE_NAME, text.id)).not.toHaveProperty("claimedBy");
+  });
+
+  it("ignores a late renewal from a tab that already let its item go", async () => {
+    const item = await enqueueImport({ url: "https://example.com/pie" });
+    await claimNextQueuedImport("tab-a");
+
+    // A pause or stop puts the item back; a renewal still in flight must not grab it again.
+    expect(await retryImport(item.id, "tab-a")).toMatchObject({ status: "queued" });
+    expect(await renewImportClaim(item.id, "tab-a")).toBeUndefined();
+    expect(fakeIdb.record(IMPORT_QUEUE_STORE_NAME, item.id)).toMatchObject({ status: "queued" });
     expect(fakeIdb.record(IMPORT_QUEUE_STORE_NAME, item.id)).not.toHaveProperty("claimedBy");
   });
 

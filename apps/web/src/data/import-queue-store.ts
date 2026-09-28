@@ -10,7 +10,8 @@ import { createResourceStore, toViewStatus, upsertById, useResource } from "./re
  * A worker (the import page) claims the oldest `queued` item — one transaction marks it
  * `processing` for that tab, so two tabs never take the same item — then marks it `done` or
  * `failed`. The worker renews its claim while it works; an item whose claim has lapsed (tab
- * closed mid-import) can be put back in the queue.
+ * closed mid-import) can be put back in the queue. Until another tab claims it, the tab that
+ * lapsed (suspended rather than closed) may still take it back and finish it.
  */
 
 export type ImportQueueStatus = "queued" | "processing" | "failed" | "done";
@@ -26,7 +27,10 @@ export interface ImportQueueItem {
   /** Where the link came from (analytics): the share sheet or typed/pasted in the app. */
   source?: ImportQueueSource | undefined;
   attempts: number;
-  /** The tab working on a `processing` item (see {@link claimNextQueuedImport}). */
+  /**
+   * The tab working on a `processing` item (see {@link claimNextQueuedImport}). On a `queued`
+   * item: the tab whose claim lapsed, which may still finish it until another tab claims it.
+   */
   claimedBy?: string | undefined;
   /** When that tab last claimed or renewed the item. */
   claimedAt?: string | undefined;
@@ -96,8 +100,23 @@ const withoutClaim = (item: ImportQueueItem): ImportQueueItem => {
   return next;
 };
 
+/**
+ * Whether `owner` may still write to the item: it holds the claim, or its claim lapsed and the item
+ * went back in the queue but no other tab has claimed it since (so its result still counts).
+ */
 const isClaimedBy = (item: ImportQueueItem, owner: string): boolean =>
-  item.status === "processing" && item.claimedBy === owner;
+  (item.status === "processing" || item.status === "queued") && item.claimedBy === owner;
+
+/** The item held by `owner` from `now`: a renewed claim, or a lapsed one taken back. */
+const heldBy = (item: ImportQueueItem, owner: string | undefined, now = Date.now()) =>
+  owner === undefined
+    ? item
+    : {
+        ...item,
+        claimedAt: new Date(now).toISOString(),
+        claimedBy: owner,
+        status: "processing" as const
+      };
 
 /** A `processing` item nobody has renewed lately (items from before claims: their last write). */
 const isClaimStale = (item: ImportQueueItem, now: number): boolean =>
@@ -169,7 +188,7 @@ const readItem = async (store: ImportQueueReader, id: string): Promise<ImportQue
 
 /**
  * Changes one item. With `owner`, only while that tab still holds the item's claim: a worker
- * never writes over an item that was taken back (or removed) while it worked.
+ * never writes over an item another tab claimed (or that was finished or removed) while it worked.
  */
 const patchItem = async (
   id: string,
@@ -227,11 +246,8 @@ export async function enqueueImport(input: ImportQueueInput): Promise<ImportQueu
 export const markImportProcessing = (id: string, owner?: string) =>
   patchItem(
     id,
-    (item) => ({
-      ...withoutError(item),
-      attempts: item.attempts + 1,
-      status: "processing"
-    }),
+    (item) =>
+      heldBy({ ...withoutError(item), attempts: item.attempts + 1, status: "processing" }, owner),
     owner
   );
 
@@ -284,9 +300,12 @@ export async function claimNextQueuedImport(
   return claimed;
 }
 
-/** Keeps `owner`'s claim on an item it is still working on. Undefined once the claim is gone. */
+/**
+ * Keeps `owner`'s claim on an item it is still working on (taking it back if the claim lapsed and
+ * nobody else has claimed it). Undefined once another tab has it, or it is finished or removed.
+ */
 export const renewImportClaim = (id: string, owner: string, now: number = Date.now()) =>
-  patchItem(id, (item) => ({ ...item, claimedAt: new Date(now).toISOString() }), owner);
+  patchItem(id, (item) => heldBy(item, owner, now), owner);
 
 export async function removeImportQueueItem(id: string): Promise<void> {
   const db = await getLinkDishWebDb();
@@ -318,7 +337,8 @@ export async function getNextQueuedImport(): Promise<ImportQueueItem | undefined
 /**
  * Puts `processing` items whose claim has lapsed (their tab closed or crashed mid-import) back in
  * the queue. Each claim is checked inside the same transaction that re-queues it, so an item whose
- * tab is still renewing its claim is never taken away.
+ * tab is still renewing its claim is never taken away. The item keeps `claimedBy`: should that tab
+ * only have been suspended, it can still finish the item until another tab claims it.
  */
 export async function recoverStaleImports(now: number = Date.now()): Promise<number> {
   const recovered = await updateInTransaction(
@@ -326,7 +346,11 @@ export async function recoverStaleImports(now: number = Date.now()): Promise<num
     (items) =>
       items
         .filter((item) => isClaimStale(item, now))
-        .map((item) => ({ ...withoutClaim(withoutError(item)), status: "queued" }))
+        .map((item) => {
+          const next: ImportQueueItem = { ...withoutError(item), status: "queued" };
+          delete next.claimedAt;
+          return next;
+        })
   );
   return recovered.length;
 }

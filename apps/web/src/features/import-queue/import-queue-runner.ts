@@ -72,7 +72,7 @@ export type QueueItemOutcome =
   | { status: "failed"; message: string }
   | { status: "paused"; reason: QueuePauseReason }
   | { status: "stopped" }
-  /** The item was taken back (its claim lapsed) or removed while this tab worked on it. */
+  /** Another tab claimed the item (this tab's claim lapsed), or it was removed, meanwhile. */
   | { status: "skipped" };
 
 type ImportProperties = V2AnalyticsImportProperties & { source: "in_app" | "share_sheet" };
