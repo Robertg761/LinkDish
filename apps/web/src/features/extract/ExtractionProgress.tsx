@@ -99,14 +99,17 @@ export const ExtractionProgress: React.FC<ExtractionProgressProps> = ({
 
       <h1 aria-live="polite" className="extraction-progress-title" id="extraction-progress-title">
         {active?.label ?? "Getting your recipe"}
-        <span
-          aria-hidden="true"
-          className={`extraction-progress-dots${reducedMotion ? " is-static" : ""}`}
-        >
-          <span>.</span>
-          <span>.</span>
-          <span>.</span>
-        </span>
+        {reducedMotion ? (
+          <span aria-hidden="true" className="extraction-progress-dots is-static">
+            …
+          </span>
+        ) : (
+          <span aria-hidden="true" className="extraction-progress-dots">
+            <span>.</span>
+            <span>.</span>
+            <span>.</span>
+          </span>
+        )}
       </h1>
       <p className="extraction-progress-detail">
         {auto && attempt === "fallback"
@@ -124,7 +127,8 @@ export const ExtractionProgress: React.FC<ExtractionProgressProps> = ({
                 {state === "done" ? <Icon name="check" size={14} strokeWidth={3} /> : null}
               </span>
               <span className="extraction-progress-stage-label">
-                {item.label}
+                <span aria-hidden="true">{item.step}</span>
+                <span className="sr-only">{item.label}</span>
                 <span className="sr-only">
                   {state === "done" ? " (done)" : state === "active" ? " (in progress)" : ""}
                 </span>

@@ -28,11 +28,13 @@ const authMocks = vi.hoisted(() => ({
 }));
 
 const apiMocks = vi.hoisted(() => ({
+  getBillingUsage: vi.fn(),
   updateAccountProfile: vi.fn()
 }));
 
 vi.mock("../../api/client", () => ({
   apiClient: {
+    getBillingUsage: apiMocks.getBillingUsage,
     updateAccountProfile: apiMocks.updateAccountProfile
   }
 }));
@@ -98,6 +100,8 @@ const resetAuth = () => {
   authMocks.requestLoginCode.mockReset();
   authMocks.user = null;
   authMocks.verifyLoginCode.mockReset();
+  apiMocks.getBillingUsage.mockReset();
+  apiMocks.getBillingUsage.mockResolvedValue({ billingEnabled: false });
 };
 
 describe("post sign-in destinations", () => {
@@ -244,16 +248,68 @@ describe("AccountPage signed in", () => {
     for (const label of [
       "Settings",
       "Household",
-      "Shopping list",
+      "Your data",
       "Install app",
       "Support",
       "Privacy"
     ]) {
       expect(links.getByRole("link", { name: new RegExp(label, "u") })).toBeVisible();
     }
+    // Shopping is a tab already; the grid doesn't repeat it.
+    expect(links.queryByRole("link", { name: /Shopping list/u })).not.toBeInTheDocument();
   });
 
-  it("points Family accounts at their household", () => {
+  it("shows the true count past the free limit, with starters explained", () => {
+    libraryMocks.recipes = [
+      ...Array.from({ length: 17 }, (_, index) => ({ id: `recipe-${index}` })),
+      ...Array.from({ length: 3 }, (_, index) => ({ id: `starter-${index}`, isStarter: true }))
+    ];
+
+    renderAccount();
+
+    expect(screen.getByText("17 of 15")).toBeVisible();
+    expect(screen.getByRole("progressbar", { name: "Saved recipes" })).toHaveAttribute(
+      "aria-valuetext",
+      "17 of 15 used"
+    );
+    expect(
+      screen.getByText(
+        "2 over the free limit. They all stay; new saves need Plus. 3 starter recipes don't count."
+      )
+    ).toBeVisible();
+  });
+
+  it("gives paid plans the same usage meter, for this month's imports", async () => {
+    authMocks.user = { billingPlan: "plus", email: "cook@example.com", id: "user_1" };
+    apiMocks.getBillingUsage.mockResolvedValue({
+      billingEnabled: true,
+      quota: {
+        limit: 100,
+        meteringMode: "paid_monthly",
+        monthlyLimit: 100,
+        remaining: 96,
+        remainingThisMonth: 96,
+        resetsAt: "2026-10-01T12:00:00.000Z"
+      }
+    });
+
+    renderAccount();
+
+    // The meter holds its place while the usage loads, so the plan card doesn't jump.
+    expect(screen.getByRole("progressbar", { name: "Imports used this month" })).toHaveAttribute(
+      "aria-valuetext",
+      "Loading"
+    );
+    expect(await screen.findByText("4 of 100")).toBeVisible();
+    expect(screen.getByRole("progressbar", { name: "Imports used this month" })).toHaveAttribute(
+      "aria-valuenow",
+      "4"
+    );
+    expect(screen.getByText(/^Resets /u)).toBeVisible();
+    expect(screen.queryByRole("progressbar", { name: "Saved recipes" })).not.toBeInTheDocument();
+  });
+
+  it("points Family accounts at their household", async () => {
     authMocks.user = { billingPlan: "family", email: "cook@example.com", id: "user_1" };
 
     renderAccount();
@@ -263,7 +319,10 @@ describe("AccountPage signed in", () => {
       "href",
       "/household"
     );
-    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+    // Billing is off in this test, so the placeholder meter goes once usage has answered.
+    await waitFor(() => {
+      expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+    });
   });
 
   it("edits the profile in a sheet", async () => {

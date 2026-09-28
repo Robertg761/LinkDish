@@ -56,7 +56,11 @@ const renderPlan = (path = "/plan") =>
     </MemoryRouter>
   );
 
-const dayList = () => screen.getByRole("list", { name: /week|Week of/ });
+const dayList = () => screen.getByRole("list", { busy: false, name: /week|Week of/ });
+
+/** The board replaces its skeleton once the plan and the cookbook have loaded. */
+const boardReady = () =>
+  waitFor(() => expect(screen.queryByRole("list", { busy: true })).not.toBeInTheDocument());
 const dayItem = (key: string) =>
   within(dayList())
     .getAllByRole("listitem")
@@ -89,6 +93,7 @@ describe("PlanPage", () => {
 
   it("shows the editorial header and a seven-day week starting on the preferred day", async () => {
     renderPlan();
+    await boardReady();
 
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("This week");
     const days = within(screen.getByRole("list", { name: "This week" })).getAllByRole("listitem");
@@ -109,8 +114,26 @@ describe("PlanPage", () => {
     expect(firstDay).toHaveTextContent(getDayLabel(getWeekStartDateKey(today, 0)).weekday);
   });
 
+  it("shows a skeleton board, not empty days, until the week has loaded", async () => {
+    await seedPlannerData({
+      entries: [makePlanEntry({ date: mondayStart, recipeId: "pasta", title: "Weeknight Pasta" })],
+      recipes: [pasta]
+    });
+    renderPlan();
+
+    // First paint: day headers with placeholders, no "Plan a meal" copy to be replaced.
+    const skeleton = screen.getByRole("list", { busy: true });
+    expect(within(skeleton).getAllByRole("listitem")).toHaveLength(7);
+    expect(screen.queryByText("Plan a meal")).not.toBeInTheDocument();
+    expect(screen.queryByText("Nothing planned")).not.toBeInTheDocument();
+
+    await boardReady();
+    expect(within(dayItem(mondayStart)).getByText("Weeknight Pasta")).toBeInTheDocument();
+  });
+
   it("moves between weeks and back to this one", async () => {
     renderPlan();
+    await boardReady();
 
     fireEvent.click(screen.getByRole("button", { name: "Next week" }));
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Next week");
@@ -127,6 +150,7 @@ describe("PlanPage", () => {
   it("plans a recipe from the cookbook with servings", async () => {
     await seedPlannerData({ recipes: [pasta, soup] });
     renderPlan();
+    await boardReady();
 
     fireEvent.click(
       screen.getByRole("button", { name: `Add a meal to ${getDayLabel(today).long}` })
@@ -154,6 +178,7 @@ describe("PlanPage", () => {
   it("adds a quick note such as leftovers", async () => {
     await seedPlannerData({ recipes: [pasta] });
     renderPlan();
+    await boardReady();
 
     fireEvent.click(
       screen.getByRole("button", { name: `Add a meal to ${getDayLabel(today).long}` })
@@ -173,6 +198,7 @@ describe("PlanPage", () => {
     });
     const friday = addDaysToDateKey(mondayStart, 4);
     renderPlan();
+    await boardReady();
 
     fireEvent.click(await screen.findByRole("button", { name: "Options for Weeknight Pasta" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: "Move to…" }));
@@ -207,6 +233,7 @@ describe("PlanPage", () => {
     await seedPlannerData({ recipes: [pasta, soup] });
     const nextWeek = addDaysToDateKey(mondayStart, 7);
     renderPlan(`/plan?week=${nextWeek}`);
+    await boardReady();
 
     const quickStart = await screen.findByRole("region", { name: "Your week is wide open" });
     fireEvent.click(within(quickStart).getByRole("button", { name: /Weeknight Pasta/ }));
@@ -253,6 +280,7 @@ describe("PlanPage", () => {
       recipes: [pasta, soup]
     });
     renderPlan();
+    await boardReady();
 
     fireEvent.click(await screen.findByRole("button", { name: "Add to shopping list" }));
     const sheet = await screen.findByRole("dialog", { name: "Shop for the week" });

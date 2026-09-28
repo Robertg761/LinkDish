@@ -337,6 +337,17 @@
   font-size: var(--text-small);
 }
 
+.account-plan-meter-note {
+  color: var(--color-ink-muted);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line-height);
+}
+
+/* Two meters (saved recipes and imports) sit together as one usage block. */
+.account-plan-meter + .account-plan-meter {
+  margin-top: -8px;
+}
+
 .account-plan-features {
   display: grid;
   gap: 8px;

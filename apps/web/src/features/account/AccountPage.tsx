@@ -17,8 +17,12 @@ import { Skeleton } from "../../components/Skeleton";
 import { useToast } from "../../components/Toast";
 import { useSavedRecipes } from "../../data/library-store";
 import { useDocumentTitle } from "../../lib/use-document-title";
+import { useMediaQuery } from "../../lib/use-media-query";
 import { getWebBillingTier, webBillingPlans, type WebBillingTier } from "../billing/web-billing";
+import { useImportUsageState } from "../extract/use-import-usage";
 import { getInitials } from "../household/use-household-summary";
+import { describeFreeQuota } from "../library/components/free-quota";
+import { countCookbook } from "../library/components/library-model";
 import { isPaidPlan, planContent } from "../pricing/plans-content";
 
 import type { IconName } from "../../components/Icon";
@@ -28,22 +32,25 @@ import "./AccountPage.css";
 
 const PROFILE_EMOJI_OPTIONS = ["🍳", "🥘", "🥗", "🍜", "🍕", "🥐", "🌶️", "🍰", "🍔", "🍣", "🍪"];
 
-const QUICK_LINKS: ReadonlyArray<{
+interface QuickLink {
   to: string;
   label: string;
   description: string;
   icon: IconName;
-}> = [
+}
+
+/** Places that aren't already a tab: Shopping lives in the tab bar, so it isn't repeated here. */
+const buildQuickLinks = (touch: boolean): QuickLink[] => [
   { description: "Theme, units, cooking", icon: "settings", label: "Settings", to: "/settings" },
   { description: "Share with family", icon: "users", label: "Household", to: "/household" },
   {
-    description: "Groceries and staples",
-    icon: "shopping-basket",
-    label: "Shopping list",
-    to: "/shopping"
+    description: "Back up or bring recipes over",
+    icon: "download",
+    label: "Your data",
+    to: "/settings#your-data"
   },
   {
-    description: "Home screen and bookmarklet",
+    description: touch ? "Add to your home screen" : "Home screen and bookmarklet",
     icon: "smartphone-download",
     label: "Install app",
     to: "/install"
@@ -54,7 +61,7 @@ const QUICK_LINKS: ReadonlyArray<{
 
 const SIGN_IN_BENEFITS: ReadonlyArray<{ icon: IconName; title: string; body: string }> = [
   {
-    body: "Plus and Family follow your account, on the web and in the Android app.",
+    body: "Plus and Family follow your account, on the web and in the LinkDish apps.",
     icon: "crown",
     title: "Keep your plan"
   },
@@ -91,22 +98,26 @@ export const getPostSignInDestination = (params: URLSearchParams): string | null
 const getDisplayName = (user: AccountUser): string =>
   user.displayName?.trim() || user.email.split("@")[0] || user.email;
 
-const QuickLinks: React.FC = () => (
-  <nav aria-label="Account links" className="account-links">
-    {QUICK_LINKS.map((link) => (
-      <Link className="account-link" key={link.to} to={link.to}>
-        <span className="account-link-icon">
-          <Icon name={link.icon} size={20} />
-        </span>
-        <span className="account-link-copy">
-          <span className="account-link-label">{link.label}</span>
-          <span className="account-link-description">{link.description}</span>
-        </span>
-        <Icon className="account-link-chevron" name="chevron-right" size={18} />
-      </Link>
-    ))}
-  </nav>
-);
+const QuickLinks: React.FC = () => {
+  const touch = useMediaQuery("(pointer: coarse)");
+
+  return (
+    <nav aria-label="Account links" className="account-links">
+      {buildQuickLinks(touch).map((link) => (
+        <Link className="account-link" key={link.to} to={link.to}>
+          <span className="account-link-icon">
+            <Icon name={link.icon} size={20} />
+          </span>
+          <span className="account-link-copy">
+            <span className="account-link-label">{link.label}</span>
+            <span className="account-link-description">{link.description}</span>
+          </span>
+          <Icon className="account-link-chevron" name="chevron-right" size={18} />
+        </Link>
+      ))}
+    </nav>
+  );
+};
 
 type LoginStep = "email" | "sending" | "code" | "verifying";
 
@@ -479,13 +490,58 @@ const ProfileSheet: React.FC<{ user: AccountUser; open: boolean; onClose: () => 
   );
 };
 
+interface UsageMeterProps {
+  label: string;
+  /** Null while the count is still loading: the meter holds its place with an empty bar. */
+  used: number | null;
+  limit: number;
+  tone: "primary" | "butter" | "tomato";
+  note?: string | null | undefined;
+}
+
+/** One meter shape for every plan: what's used, filling toward the limit, coloured by urgency. */
+const UsageMeter: React.FC<UsageMeterProps> = ({ label, used, limit, tone, note }) => (
+  <div aria-busy={used === null ? true : undefined} className="account-plan-meter">
+    <div className="account-plan-meter-row">
+      <span>{label}</span>
+      {used === null ? (
+        <Skeleton height={16} width={48} />
+      ) : (
+        <strong className="num">
+          {used} of {limit}
+        </strong>
+      )}
+    </div>
+    <ProgressBar
+      label={label}
+      max={limit}
+      tone={tone}
+      value={used ?? 0}
+      valueText={used === null ? "Loading" : `${used} of ${limit} used`}
+    />
+    {note ? <p className="account-plan-meter-note">{note}</p> : null}
+  </div>
+);
+
+const usageTone = (used: number, limit: number): UsageMeterProps["tone"] =>
+  limit > 0 && used >= limit ? "tomato" : limit > 0 && used / limit >= 0.75 ? "butter" : "primary";
+
+const formatResetDate = (value: string | null): string | null => {
+  const time = value ? Date.parse(value) : Number.NaN;
+  return Number.isFinite(time)
+    ? new Date(time).toLocaleDateString(undefined, { day: "numeric", month: "short" })
+    : null;
+};
+
 const PlanCardSection: React.FC<{ tier: WebBillingTier }> = ({ tier }) => {
   const { recipes, status } = useSavedRecipes();
-  const savedCount = useMemo(
-    () => recipes.filter((recipe) => !recipe.isStarter && !recipe.id.startsWith("starter-")).length,
-    [recipes]
-  );
+  const counts = useMemo(() => countCookbook(recipes), [recipes]);
   const limit = webBillingPlans.free.limits.savedRecipes;
+  const quota = typeof limit === "number" ? describeFreeQuota(counts, limit) : null;
+  const { pending: importsPending, usage: importUsage } = useImportUsageState(null, 0);
+  const planImports = webBillingPlans[tier].limits.monthlyImports;
+  const importsUsed = importUsage ? Math.max(0, importUsage.limit - importUsage.remaining) : 0;
+  const resetsOn = formatResetDate(importUsage?.resetsAt ?? null);
   const copy = planContent[tier];
 
   return (
@@ -505,22 +561,47 @@ const PlanCardSection: React.FC<{ tier: WebBillingTier }> = ({ tier }) => {
         </div>
       </div>
 
-      {tier === "free" && typeof limit === "number" && status === "ready" ? (
-        <div className="account-plan-meter">
-          <div className="account-plan-meter-row">
-            <span>Saved recipes</span>
-            <strong className="num">
-              {Math.min(savedCount, limit)} of {limit}
-            </strong>
-          </div>
-          <ProgressBar
-            label="Saved recipes"
-            max={limit}
-            tone={savedCount >= limit ? "tomato" : "primary"}
-            value={savedCount}
-            valueText={`${savedCount} of ${limit} saved`}
-          />
-        </div>
+      {/* The meters hold their place while the counts load, so the card never jumps. */}
+      {tier === "free" && quota && status === "loading" ? (
+        <UsageMeter label="Saved recipes" limit={quota.limit} tone="primary" used={null} />
+      ) : null}
+
+      {tier === "free" && quota && status === "ready" ? (
+        <UsageMeter
+          label="Saved recipes"
+          limit={quota.limit}
+          note={[
+            quota.state === "over"
+              ? `${quota.statusText}. They all stay; new saves need Plus.`
+              : quota.state === "roomy"
+                ? null
+                : `${quota.statusText}.`,
+            quota.starterNote
+          ]
+            .filter(Boolean)
+            .join(" ")}
+          tone={quota.tone}
+          used={quota.saved}
+        />
+      ) : null}
+
+      {importsPending && planImports > 0 ? (
+        <UsageMeter
+          label={tier === "free" ? "Free imports used" : "Imports used this month"}
+          limit={planImports}
+          tone="primary"
+          used={null}
+        />
+      ) : null}
+
+      {importUsage && importUsage.limit > 0 ? (
+        <UsageMeter
+          label={importUsage.monthly ? "Imports used this month" : "Free imports used"}
+          limit={importUsage.limit}
+          note={importUsage.monthly && resetsOn ? `Resets ${resetsOn}.` : null}
+          tone={usageTone(importsUsed, importUsage.limit)}
+          used={importsUsed}
+        />
       ) : null}
 
       <ul className="account-plan-features">

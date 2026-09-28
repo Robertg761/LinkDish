@@ -162,11 +162,11 @@ export const planComparisonRows: ReadonlyArray<PlanComparisonRow> = [
   {
     label: "Recipe imports",
     hint: "From recipe sites, videos and photos",
-    values: { family: "250 a month", free: "3 to start", plus: "100 a month" }
+    values: { family: "250/mo", free: "3 total", plus: "100/mo" }
   },
   {
     label: "Saved recipes",
-    values: { family: "Unlimited", free: "Up to 15", plus: "Unlimited" }
+    values: { family: "Unlimited", free: "15", plus: "Unlimited" }
   },
   {
     label: "Cook mode with timers",

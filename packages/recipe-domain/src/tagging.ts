@@ -118,6 +118,8 @@ const COURSE_RULES: ReadonlyArray<{ course: RecipeCourse; pattern: RegExp }> = [
       "cupcakes?",
       "cheesecakes?",
       "cookies?",
+      "shortbread",
+      "biscotti",
       "brownies?",
       "blondies?",
       "(?<!pot |shepherd'?s |cottage |meat |chicken |pork )pies?",
@@ -143,7 +145,10 @@ const COURSE_RULES: ReadonlyArray<{ course: RecipeCourse; pattern: RegExp }> = [
       "cannoli",
       "baklava",
       "desserts?",
-      "sweets?"
+      // "Sweets" or "sweet treats", not the adjective: "Sweet Potato Curry" and "Sweet and Sour
+      // Pork" are dinners.
+      "sweets",
+      "sweet treats?"
     ])
   },
   {

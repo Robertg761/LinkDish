@@ -76,9 +76,11 @@
   font-size: var(--text-body);
 }
 
+/* Phones: one column, one-line titles with the time underneath, so two recipes that start
+   alike ("Grandma Rose's…") still read differently. */
 .plan-quick-chips {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 8px;
   margin: 0;
   padding: 0;
@@ -133,19 +135,30 @@
   font-size: 1.125rem;
 }
 
-.plan-quick-chip-title {
-  display: -webkit-box;
+.plan-quick-chip-copy {
+  display: flex;
   flex: 1;
+  flex-direction: column;
+  gap: 1px;
   min-width: 0;
+}
+
+.plan-quick-chip-title {
   overflow: hidden;
   font-size: var(--text-small);
   line-height: 1.25;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plan-quick-chip-meta {
+  color: var(--color-ink-muted);
+  font-size: var(--text-caption);
+  font-weight: 600;
+  line-height: 1.25;
 }
 
 .plan-quick-chip-plus {
-  display: none;
   flex-shrink: 0;
   color: var(--color-primary);
 }
@@ -211,11 +224,13 @@
   min-width: 0;
 }
 
+/* A fixed date column, so "Plan a meal" starts at the same x on every row. */
 .plan-day-heading {
   display: flex;
+  flex: 0 0 88px;
   align-items: baseline;
   gap: 8px;
-  min-width: 64px;
+  min-width: 88px;
   margin: 0;
 }
 
@@ -245,17 +260,32 @@
   color: var(--color-ink-subtle);
 }
 
+/* Today: the ringed day, marked with a small tomato dot beside the date. */
 .plan-day-today {
+  flex-shrink: 0;
   align-self: center;
-  padding: 3px 9px;
-  font-family: var(--font-family-sans);
+  width: 8px;
+  height: 8px;
   border-radius: var(--radius-pill);
-  background: var(--color-primary);
-  color: var(--color-on-primary);
-  font-size: var(--text-caption);
-  font-weight: 800;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  background: var(--color-tomato);
+}
+
+/* ------------------------------ Loading --------------------------------- */
+.plan-day.is-skeleton {
+  flex-direction: row;
+  align-items: center;
+  padding-block: 8px;
+  box-shadow: none;
+}
+
+.plan-day.is-skeleton .plan-day-header {
+  display: contents;
+}
+
+.plan-day-placeholder {
+  flex: 1;
+  height: 44px;
+  border-radius: 14px;
 }
 
 .plan-day-add {
@@ -459,12 +489,22 @@ a.plan-entry-title:hover {
   }
 
   .plan-day,
-  .plan-day.is-empty {
+  .plan-day.is-empty,
+  .plan-day.is-skeleton {
     flex-direction: column;
     align-items: stretch;
     gap: 10px;
     min-height: 440px;
     padding: 12px 10px 10px;
+  }
+
+  .plan-day.is-skeleton .plan-day-header {
+    display: flex;
+  }
+
+  .plan-day-placeholder {
+    flex: 0 0 auto;
+    height: 120px;
   }
 
   .plan-day.is-empty .plan-day-header {
@@ -484,6 +524,7 @@ a.plan-entry-title:hover {
   }
 
   .plan-day-heading {
+    flex: 1 1 auto;
     flex-direction: column;
     align-items: flex-start;
     gap: 4px;
@@ -509,8 +550,9 @@ a.plan-entry-title:hover {
   }
 
   .plan-day-today {
-    padding: 1px 6px;
-    font-size: 0.625rem;
+    grid-column: 2;
+    grid-row: 1;
+    justify-self: start;
   }
 
   .plan-quick-chips {
@@ -531,12 +573,8 @@ a.plan-entry-title:hover {
     border-radius: var(--radius-pill);
   }
 
-  .plan-quick-chip-title {
-    -webkit-line-clamp: 1;
-  }
-
-  .plan-quick-chip-plus {
-    display: block;
+  .plan-quick-chip-meta {
+    display: none;
   }
 
   .plan-entry-servings-icon {
@@ -579,10 +617,11 @@ a.plan-entry-title:hover {
     background: var(--color-surface);
   }
 
+  /* A shorter photo leaves room for four lines of title (with the full title on hover). */
   .plan-entry-media {
     width: 100%;
     height: auto;
-    aspect-ratio: 4 / 3;
+    aspect-ratio: 16 / 9;
     border-radius: 0;
   }
 
@@ -598,7 +637,7 @@ a.plan-entry-title:hover {
 
   .plan-entry-title {
     font-size: var(--text-small);
-    -webkit-line-clamp: 3;
+    -webkit-line-clamp: 4;
   }
 
   .plan-entry-servings {
@@ -639,5 +678,12 @@ a.plan-entry-title:hover {
   .plan-day,
   .plan-day.is-empty {
     padding: 14px 12px 12px;
+  }
+}
+
+/* Very wide screens: let the week breathe instead of stopping at ~1160px. */
+@media (min-width: 1600px) {
+  .plan-page {
+    max-width: min(1520px, 100%);
   }
 }

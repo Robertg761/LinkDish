@@ -296,19 +296,38 @@
   list-style: none;
 }
 
+/* Icon, email and actions share one row when there is room. On phones (and when the invite also
+   has share buttons) the actions drop under the email, so the address is never cut or broken. */
 .household-pending {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-areas: "icon copy actions";
+  grid-template-columns: 32px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 10px 12px;
+  gap: 4px 12px;
   padding: 10px 12px;
   border-radius: var(--radius-md);
   background: var(--color-surface-subtle);
 }
 
+@media (max-width: 639px) {
+  .household-pending {
+    grid-template-areas:
+      "icon copy"
+      ". actions";
+    grid-template-columns: 32px minmax(0, 1fr);
+  }
+}
+
+.household-pending.has-share {
+  grid-template-areas:
+    "icon copy"
+    ". actions";
+  grid-template-columns: 32px minmax(0, 1fr);
+}
+
 .household-pending-icon {
   display: grid;
-  flex-shrink: 0;
+  grid-area: icon;
   place-items: center;
   width: 32px;
   height: 32px;
@@ -319,17 +338,19 @@
 
 .household-pending-copy {
   display: flex;
-  flex: 1 1 160px;
+  grid-area: copy;
   flex-direction: column;
   min-width: 0;
 }
 
 .household-pending-email {
-  overflow: hidden;
   color: var(--color-ink);
   font-size: var(--text-small);
   font-weight: 650;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
+}
+
+.household-pending-sent {
   white-space: nowrap;
 }
 
@@ -340,8 +361,15 @@
 
 .household-pending-actions {
   display: flex;
+  grid-area: actions;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 6px;
-  margin-left: auto;
+}
+
+.household-member-remove.btn {
+  flex-shrink: 0;
+  color: var(--color-ink-muted);
 }
 
 /* Join ---------------------------------------------------------------------- */

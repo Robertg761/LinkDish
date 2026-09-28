@@ -19,6 +19,7 @@ import { AisleIcon } from "./AisleIcon";
 import {
   ADDED_BY_YOU_GROUP_ID,
   buildShoppingShareText,
+  formatItemAmount,
   groupItemsByAisle,
   groupItemsByRecipe,
   isStapleItem,
@@ -70,6 +71,34 @@ const VIEW_OPTIONS = [
 /** Undo window after a delete, so a quick Undo never round-trips the household. */
 const DELETE_SYNC_DELAY_MS = 7_000;
 const CHECK_LINGER_MS = 650;
+
+/**
+ * Before a row leaves the list (into the cart, or removed), where keyboard focus should go: the
+ * next item's checkbox, else the previous one, else the cart toggle. Null when focus isn't in the
+ * row, so nothing is moved for pointer users.
+ */
+const findFocusAfterLeaving = (itemId: string): HTMLElement | null => {
+  const active = document.activeElement;
+  const row = active instanceof HTMLElement ? active.closest<HTMLElement>("[data-item-id]") : null;
+
+  if (!row || row.dataset.itemId !== itemId) {
+    return null;
+  }
+
+  const checks = Array.from(
+    document.querySelectorAll<HTMLElement>(".shopping-groups [data-item-id] .shopping-row-check")
+  );
+  const position = checks.findIndex((check) => row.contains(check));
+  const differentItem = (check: HTMLElement) =>
+    check.closest<HTMLElement>("[data-item-id]")?.dataset.itemId !== itemId;
+
+  return (
+    checks.slice(position + 1).find(differentItem) ??
+    checks.slice(0, Math.max(0, position)).reverse().find(differentItem) ??
+    document.querySelector<HTMLElement>(".shopping-cart-toggle") ??
+    document.querySelector<HTMLElement>(".shopping-add-input")
+  );
+};
 const ENTER_ANIMATION_MS = 900;
 
 const prefersReducedMotion = (): boolean =>
@@ -140,6 +169,8 @@ export const ShoppingListPage: React.FC = () => {
   const [checking, setChecking] = useState<ReadonlySet<string>>(() => new Set());
   const [entering, setEntering] = useState<ReadonlySet<string>>(() => new Set());
   const [historyVersion, setHistoryVersion] = useState(0);
+  /** Polite announcements for moves screen readers can't see ("Lemons moved to the cart"). */
+  const [announcement, setAnnouncement] = useState("");
   const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
   const checkingRef = useRef(checking);
   checkingRef.current = checking;
@@ -280,6 +311,14 @@ export const ShoppingListPage: React.FC = () => {
         setChecking((current) => new Set([...current, item.id]));
         later(
           () => {
+            // Keep keyboard and screen reader users in place: focus moves to the next item
+            // before this row leaves for the (collapsed) cart.
+            if (checkingRef.current.has(item.id)) {
+              findFocusAfterLeaving(item.id)?.focus();
+              const amount = formatItemAmount(item);
+              setAnnouncement(`${amount ? `${amount} ` : ""}${item.text} moved to the cart`);
+            }
+
             setChecking((current) => {
               if (!current.has(item.id)) {
                 return current;
@@ -373,6 +412,7 @@ export const ShoppingListPage: React.FC = () => {
 
   const handleRemove = useCallback(
     (item: WebShoppingItem) => {
+      findFocusAfterLeaving(item.id)?.focus();
       void removeItems([item.id], () => `Removed ${item.text}`);
     },
     [removeItems]
@@ -515,20 +555,21 @@ export const ShoppingListPage: React.FC = () => {
     }
   ];
 
+  // Empty: the card below says so; the header doesn't repeat it.
   const subtitle = isEmpty
-    ? "Nothing on it yet."
+    ? "For this week's cooking."
     : status === "loading" && items.length === 0
       ? " "
       : toBuyCount === 0
         ? `All done · ${plural(cartItems.length, "item", "items")} in the cart`
         : `${toBuyCount} to buy${cartItems.length > 0 ? ` · ${cartItems.length} in the cart` : ""}`;
 
-  const renderRows = (list: readonly WebShoppingItem[], hideRecipe?: string) =>
+  const renderRows = (list: readonly WebShoppingItem[], groupRecipe?: string) =>
     list.map((item) => (
       <ShoppingItemRow
         checking={checking.has(item.id)}
         entering={entering.has(item.id)}
-        hideRecipe={hideRecipe}
+        groupRecipe={groupRecipe}
         item={item}
         key={item.id}
         onEdit={handleEdit}
@@ -699,6 +740,10 @@ export const ShoppingListPage: React.FC = () => {
           ) : null}
         </>
       ) : null}
+
+      <p aria-live="polite" className="sr-only" role="status">
+        {announcement}
+      </p>
 
       <ShoppingItemSheet
         item={editing}

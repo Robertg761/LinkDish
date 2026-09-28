@@ -147,15 +147,12 @@ export const StorageCard: React.FC<StorageCardProps> = ({ counts, isFamily }) =>
       <div className="settings-data-stats">
         <StatTile icon="book-open" label="Recipes" value={counts?.recipes ?? null} />
         <StatTile icon="folder" label="Collections" value={counts?.collections ?? null} />
-        <StatTile
-          icon="calendar-days"
-          label="Planned meals"
-          value={counts?.mealPlanEntries ?? null}
-        />
+        <StatTile icon="calendar-days" label="Meals" value={counts?.mealPlanEntries ?? null} />
       </div>
       {counts && counts.starters > 0 ? (
         <p className="settings-data-footnote">
-          Plus {plural(counts.starters, "starter recipe")} LinkDish added to get you going.
+          Plus {plural(counts.starters, "starter recipe")} LinkDish added to get you going. They
+          don&apos;t count toward the free limit.
         </p>
       ) : null}
 

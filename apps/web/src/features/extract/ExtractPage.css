@@ -9,25 +9,6 @@
   padding: 20px var(--page-gutter) 32px;
 }
 
-.extract-offline {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 16px;
-  padding: 12px 14px;
-  border-radius: var(--radius-sm);
-  background: var(--color-surface-subtle);
-  color: var(--color-ink-muted);
-  font-size: var(--text-small);
-  font-weight: 600;
-  line-height: var(--text-small-line-height);
-}
-
-.extract-offline svg {
-  flex-shrink: 0;
-  color: var(--color-tomato);
-}
-
 .extract-layout {
   display: flex;
   flex-direction: column;
@@ -348,6 +329,79 @@
   font-weight: 650;
 }
 
+.import-link-hint strong {
+  color: var(--color-ink);
+  font-weight: 750;
+}
+
+/* Several links: the field keeps one link per line (no mid-word wrapping), and the parsed links
+   are listed below as removable rows. */
+.import-link-box.is-multiline .import-link-input {
+  white-space: pre;
+  word-break: normal;
+  overflow-wrap: normal;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.import-link-batch {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.import-link-batch-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  list-style: none;
+}
+
+.import-link-batch-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 4px 4px 4px 14px;
+}
+
+.import-link-batch-row + .import-link-batch-row {
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.import-link-batch-icon {
+  flex-shrink: 0;
+  color: var(--color-ink-subtle);
+}
+
+.import-link-batch-text {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  font-size: var(--text-small);
+  white-space: nowrap;
+}
+
+.import-link-batch-host {
+  flex-shrink: 0;
+  color: var(--color-ink);
+  font-weight: 650;
+}
+
+.import-link-batch-path {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-ink-subtle);
+  text-overflow: ellipsis;
+}
+
 .import-link-error {
   color: var(--color-danger);
   font-weight: 650;
@@ -441,17 +495,11 @@
   background: var(--color-surface-subtle);
 }
 
+/* Helper text, not a control. */
 .import-text-tip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--color-ink-muted);
+  color: var(--color-ink-subtle);
   font-size: var(--text-caption);
-  font-weight: 650;
-}
-
-.import-text-tip svg {
-  color: var(--color-butter);
+  font-weight: 500;
 }
 
 .import-text-counter {
@@ -717,32 +765,24 @@
 .import-sources-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 5px;
+  gap: 6px 16px;
   list-style: none;
 }
 
+/* Plain words with a small icon: nothing here is tappable, so nothing looks like a button. */
 .import-sources-item {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  min-height: 32px;
-  padding: 0 10px 0 4px;
-  border: 1px solid var(--color-border-subtle);
-  border-radius: var(--radius-pill);
-  background: var(--color-surface);
-  color: var(--color-ink);
-  font-size: var(--text-caption);
-  font-weight: 650;
+  gap: 6px;
+  color: var(--color-ink-muted);
+  font-size: var(--text-small);
+  font-weight: 600;
 }
 
 .import-sources-icon {
   display: grid;
   place-items: center;
-  width: 22px;
-  height: 22px;
-  border-radius: var(--radius-pill);
-  background: var(--color-surface-tint);
-  color: var(--color-primary);
+  color: var(--color-ink-subtle);
 }
 
 .import-sources-icon .icon {
@@ -1085,13 +1125,41 @@
   }
 }
 
-.extraction-progress-stage.is-done,
+/* One word per stage, on one line: done is quiet with a check, the current one is ink and bold,
+   what's next is subtle. */
+.extraction-progress-stage.is-done {
+  color: var(--color-ink-muted);
+  font-weight: 600;
+}
+
 .extraction-progress-stage.is-active {
   color: var(--color-ink);
+  font-weight: 800;
+}
+
+.extraction-progress-stage-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  white-space: nowrap;
 }
 
 .extraction-progress-stage-mark {
   display: none;
+}
+
+.extraction-progress-stage.is-done .extraction-progress-stage-mark {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  display: inline-flex;
+  color: var(--color-primary);
+}
+
+/* Nudged (not padded) past the check, so finishing a stage never shifts the layout. */
+.extraction-progress-stage.is-done .extraction-progress-stage-label {
+  transform: translateX(18px);
 }
 
 .extraction-progress-preview {
@@ -1350,6 +1418,14 @@
 
   .extract-focused {
     max-width: 680px;
+  }
+}
+
+/* A roomier rail on wide screens, so queued titles aren't cut to a few words. */
+@media (min-width: 1280px) {
+  .extract-layout {
+    grid-template-columns: minmax(0, 1.6fr) minmax(340px, 1fr);
+    gap: 48px;
   }
 }
 

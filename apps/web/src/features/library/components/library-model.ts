@@ -32,13 +32,18 @@ export const LIBRARY_SORT_STORAGE_KEY = "linkdish:web:cookbook-sort:v1";
 export const LIBRARY_SORT_DIRECTION_STORAGE_KEY = "linkdish:web:cookbook-sort-direction:v1";
 export const LIBRARY_VIEW_STORAGE_KEY = "linkdish:web:cookbook-view:v1";
 
-export const LIBRARY_SORT_OPTIONS: ReadonlyArray<{ value: LibrarySort; label: string }> = [
-  { value: "recent", label: "Recently added" },
-  { value: "recentlyCooked", label: "Recently cooked" },
-  { value: "az", label: "A–Z" },
-  { value: "mostCooked", label: "Most cooked" },
-  { value: "quickest", label: "Quickest" },
-  { value: "topRated", label: "Top rated" }
+export const LIBRARY_SORT_OPTIONS: ReadonlyArray<{
+  value: LibrarySort;
+  label: string;
+  /** For the phone toolbar, where the full label doesn't fit beside the view toggle. */
+  shortLabel: string;
+}> = [
+  { value: "recent", label: "Recently added", shortLabel: "Newest" },
+  { value: "recentlyCooked", label: "Recently cooked", shortLabel: "Last cooked" },
+  { value: "az", label: "A–Z", shortLabel: "A–Z" },
+  { value: "mostCooked", label: "Most cooked", shortLabel: "Most cooked" },
+  { value: "quickest", label: "Quickest", shortLabel: "Quickest" },
+  { value: "topRated", label: "Top rated", shortLabel: "Top rated" }
 ];
 
 /** Family recipes carry no personal cooking history or ratings. */
@@ -75,6 +80,9 @@ export const storeView = (view: LibraryView): void => {
 export const getSortLabel = (sort: LibrarySort): string =>
   LIBRARY_SORT_OPTIONS.find((option) => option.value === sort)?.label ?? "Recently added";
 
+export const getShortSortLabel = (sort: LibrarySort): string =>
+  LIBRARY_SORT_OPTIONS.find((option) => option.value === sort)?.shortLabel ?? "Newest";
+
 /* ------------------------------------------------------------------------------------------------
  * Derived, render-ready data per recipe
  * ---------------------------------------------------------------------------------------------- */
@@ -87,6 +95,8 @@ export interface RecipeFacts {
   totalMinutes: number | null;
   /** "35 min", or null. */
   totalLabel: string | null;
+  /** Card-sized total: "35 min", "1h 20m", "3h" (fits a narrow grid card), or null. */
+  totalShort: string | null;
   /** "Serves 4", "12 cookies" (side yields dropped so it fits a card), or null. */
   servingsLabel: string | null;
   /** The count alone for people served ("4–6"), or the item label ("12 cookies"), or null. */
@@ -114,6 +124,50 @@ export const formatCompactServings = (servings: string | null | undefined): stri
   return parsed.yield ? label.replace(` · ${parsed.yield}`, "") : label;
 };
 
+/** Card-sized minutes: "45 min" under an hour, then "1h 20m", "3h", "1d 2h". */
+export const formatCompactDuration = (minutes: number | null | undefined): string | null => {
+  if (minutes == null || !Number.isFinite(minutes) || minutes <= 0) {
+    return null;
+  }
+
+  const rounded = Math.round(minutes);
+
+  if (rounded < 60) {
+    return `${rounded} min`;
+  }
+
+  const days = Math.floor(rounded / (24 * 60));
+  const hours = Math.floor((rounded % (24 * 60)) / 60);
+  const mins = rounded % 60;
+
+  return days > 0
+    ? `${days}d${hours > 0 ? ` ${hours}h` : ""}`
+    : `${hours}h${mins > 0 ? ` ${mins}m` : ""}`;
+};
+
+/**
+ * The count a card can show beside its icon: "4–6" for people, "36 cookies", "9 pancakes"
+ * (a multi-word yield keeps its last word, so "9 small pancakes" fits a narrow card).
+ */
+const formatShortServings = (servings: string | null | undefined): string | null => {
+  const parsed = parseServings(servings);
+
+  if (!parsed) {
+    return formatCompactServings(servings);
+  }
+
+  const label = formatCompactServings(servings);
+
+  if (parsed.kind === "servings" || !parsed.noun || !label) {
+    return label?.startsWith(SERVES_PREFIX) ? label.slice(SERVES_PREFIX.length) : label;
+  }
+
+  const words = parsed.noun.split(/\s+/u);
+  return words.length > 1
+    ? label.replace(parsed.noun, words[words.length - 1] ?? parsed.noun)
+    : label;
+};
+
 /** Times, servings and source for a recipe, cached per recipe object (metadata edits reuse it). */
 export const getRecipeFacts = (recipe: Recipe): RecipeFacts => {
   const cached = factsCache.get(recipe);
@@ -128,13 +182,11 @@ export const getRecipeFacts = (recipe: Recipe): RecipeFacts => {
   const facts: RecipeFacts = {
     servingsArePeople,
     servingsLabel,
-    servingsShort:
-      servingsLabel && servingsArePeople
-        ? servingsLabel.slice(SERVES_PREFIX.length)
-        : servingsLabel,
+    servingsShort: formatShortServings(recipe.servings),
     sourceLabel: recipeSourceLabel(recipe.sourceUrl),
     totalLabel: times.labels.total,
-    totalMinutes: times.total && times.total > 0 ? times.total : null
+    totalMinutes: times.total && times.total > 0 ? times.total : null,
+    totalShort: formatCompactDuration(times.total)
   };
 
   factsCache.set(recipe, facts);
@@ -160,6 +212,14 @@ export const isStarterRecipe = (recipe: Pick<WebSavedRecipe, "id" | "isStarter">
 export const countQuotaRecipes = (recipes: readonly WebSavedRecipe[]): number =>
   recipes.filter((recipe) => !recipe.id.startsWith(STARTER_ID_PREFIX)).length;
 
+/** The cook's own recipes and LinkDish's starters, counted the way the free limit counts them. */
+export const countCookbook = (
+  recipes: readonly WebSavedRecipe[]
+): { saved: number; starters: number } => {
+  const saved = countQuotaRecipes(recipes);
+  return { saved, starters: recipes.length - saved };
+};
+
 export const isQuickRecipe = (recipe: Recipe): boolean => {
   const total = getRecipeFacts(recipe).totalMinutes;
   return total != null && total <= QUICK_MAX_MINUTES;
@@ -183,8 +243,21 @@ const timeOf = (value: string | null | undefined): number => {
   return Number.isFinite(time) ? time : 0;
 };
 
+/*
+ * One collator for every A–Z comparison: `localeCompare` with an options object resolves a new
+ * collator on each call (about 20x slower over a 2,000-recipe sort). Same order.
+ */
+const TITLE_COLLATOR = new Intl.Collator(undefined, { sensitivity: "base" });
+
 const compareTitles = (left: string, right: string): number =>
-  normalizeText(left).localeCompare(normalizeText(right), undefined, { sensitivity: "base" });
+  TITLE_COLLATOR.compare(normalizeText(left), normalizeText(right));
+
+/** Sorts by a precomputed title key (decorate, sort, undecorate), so each title is read once. */
+const sortByTitle = <T>(records: readonly T[], titleOf: (record: T) => string): T[] =>
+  records
+    .map((record) => ({ key: normalizeText(titleOf(record)), record }))
+    .sort((left, right) => TITLE_COLLATOR.compare(left.key, right.key))
+    .map((entry) => entry.record);
 
 const byRecentlyAdded = (left: WebSavedRecipe, right: WebSavedRecipe): number =>
   timeOf(right.createdAt) - timeOf(left.createdAt) ||
@@ -216,7 +289,10 @@ export const sortPersonalRecipes = (
   sort: LibrarySort,
   direction: LibrarySortDirection = "forward"
 ): WebSavedRecipe[] => {
-  const sorted = [...recipes].sort(PERSONAL_COMPARATORS[sort]);
+  const sorted =
+    sort === "az"
+      ? sortByTitle(recipes, (recipe) => recipe.recipe.title)
+      : [...recipes].sort(PERSONAL_COMPARATORS[sort]);
   return direction === "reverse" ? sorted.reverse() : sorted;
 };
 
@@ -225,11 +301,12 @@ export const sortSharedRecipes = (
   sort: LibrarySort,
   direction: LibrarySortDirection = "forward"
 ): SharedRecipe[] => {
-  const sorted = [...recipes].sort((left, right) => {
-    if (sort === "az") {
-      return compareTitles(left.recipe.title, right.recipe.title);
-    }
+  if (sort === "az") {
+    const sorted = sortByTitle(recipes, (recipe) => recipe.recipe.title);
+    return direction === "reverse" ? sorted.reverse() : sorted;
+  }
 
+  const sorted = [...recipes].sort((left, right) => {
     if (sort === "quickest") {
       return (
         unknownLast(getRecipeFacts(left.recipe).totalMinutes) -

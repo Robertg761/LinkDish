@@ -9,6 +9,39 @@
   margin: 8px auto 0;
 }
 
+/* Phones: a tighter, left-aligned hero like the other pages, so the first plan's button shows
+   without scrolling past half a screen of headline. */
+@media (max-width: 599px) {
+  .pricing-page {
+    gap: 20px;
+  }
+
+  .pricing-header.page-header-center {
+    align-items: flex-start;
+    margin-top: 0;
+    text-align: left;
+  }
+
+  .pricing-header.page-header-lg .page-header-title {
+    font-size: clamp(2.25rem, 1.6rem + 3vw, 2.75rem);
+  }
+
+  .pricing-header .page-header-subtitle {
+    margin-inline: 0;
+    font-size: var(--text-body);
+  }
+
+  .pricing-period,
+  .pricing-period .billing-period-toggle {
+    justify-content: flex-start;
+  }
+}
+
+.pricing-compare-toggle {
+  display: flex;
+  justify-content: center;
+}
+
 .pricing-header .page-header-subtitle {
   max-width: 50ch;
   margin-inline: auto;

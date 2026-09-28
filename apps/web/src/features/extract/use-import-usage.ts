@@ -52,18 +52,27 @@ export const formatImportUsage = (usage: ImportUsage): string => {
     : `${usage.remaining} of ${usage.limit} free imports left`;
 };
 
-export function useImportUsage(
+export interface ImportUsageState {
+  usage: ImportUsage | null;
+  /** True while the answer is still coming (auth or GET /billing/usage), so a screen can hold
+   * the meter's place instead of letting it pop in. */
+  pending: boolean;
+}
+
+export function useImportUsageState(
   latestQuota: QuotaStatus | null,
   /** Bumped after each import so the on-device counter is read again. */
   version: number
-): ImportUsage | null {
+): ImportUsageState {
   const { credentialsKey, isAuthenticated, loading } = useAuth();
   const [serverQuota, setServerQuota] = useState<QuotaStatus | null>(null);
+  const [settled, setSettled] = useState(false);
 
   // Keyed on the credentials (which include the account): it waits for a cached Clerk user's
   // session instead of asking anonymously, and asks again once Clerk signs in.
   useEffect(() => {
     setServerQuota(null);
+    setSettled(false);
 
     if (credentialsKey === null || !isAuthenticated) {
       return;
@@ -74,28 +83,47 @@ export function useImportUsage(
       (response) => {
         if (!controller.signal.aborted) {
           setServerQuota(response.billingEnabled ? response.quota : null);
+          setSettled(true);
         }
       },
-      () => undefined
+      () => {
+        if (!controller.signal.aborted) {
+          setSettled(true);
+        }
+      }
     );
 
     return () => controller.abort();
   }, [credentialsKey, isAuthenticated]);
 
   if (loading) {
-    return null;
+    return { pending: true, usage: null };
   }
 
   if (!isAuthenticated) {
     // The version dependency re-reads the on-device counter after each import.
     void version;
     return {
-      limit: webBillingPlans.free.limits.monthlyImports,
-      monthly: false,
-      remaining: getRemainingImports("free"),
-      resetsAt: null
+      pending: false,
+      usage: {
+        limit: webBillingPlans.free.limits.monthlyImports,
+        monthly: false,
+        remaining: getRemainingImports("free"),
+        resetsAt: null
+      }
     };
   }
 
-  return toImportUsage(latestQuota ?? serverQuota);
+  return {
+    pending: !latestQuota && !settled,
+    usage: toImportUsage(latestQuota ?? serverQuota)
+  };
+}
+
+export function useImportUsage(
+  latestQuota: QuotaStatus | null,
+  /** Bumped after each import so the on-device counter is read again. */
+  version: number
+): ImportUsage | null {
+  return useImportUsageState(latestQuota, version).usage;
 }

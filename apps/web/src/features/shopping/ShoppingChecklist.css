@@ -170,29 +170,47 @@
 
 .shopping-checklist-meta {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: 4px 10px;
+  min-width: 0;
 }
 
-.shopping-checklist-tag {
+/* Quiet markers (not badges), then the source on one line. */
+.shopping-checklist-mark {
   display: inline-flex;
+  flex-shrink: 0;
   align-items: center;
-  gap: 4px;
-  padding: 2px 8px;
-  border-radius: var(--radius-pill);
-  background: var(--color-surface-tint);
-  color: var(--color-ink-muted);
+  gap: 3px;
+  color: var(--color-ink-subtle);
   font-size: var(--text-caption);
-  font-weight: 700;
+  font-weight: 650;
+  white-space: nowrap;
 }
 
-.shopping-checklist-tag.is-on-list {
-  background: var(--color-butter-soft);
-  color: var(--color-on-butter-soft);
+.shopping-checklist-onlist {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--color-ink-muted);
+  font-size: var(--text-small);
+  line-height: var(--text-small-line-height);
+}
+
+.shopping-checklist-onlist svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--color-primary);
+}
+
+.shopping-checklist-onlist strong {
+  color: var(--color-ink);
 }
 
 .shopping-checklist-detail {
+  min-width: 0;
+  overflow: hidden;
   color: var(--color-ink-subtle);
   font-size: var(--text-caption);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

@@ -6,7 +6,12 @@ import { EmptyState } from "../../../components/EmptyState";
 import { IconButton } from "../../../components/IconButton";
 import { Menu } from "../../../components/Menu";
 
-import { buildImportPath, getSortLabel, LIBRARY_SORT_OPTIONS } from "./library-model";
+import {
+  buildImportPath,
+  getShortSortLabel,
+  getSortLabel,
+  LIBRARY_SORT_OPTIONS
+} from "./library-model";
 
 import type { LibrarySort, LibrarySortDirection, LibraryView } from "./library-model";
 import type { MenuEntry } from "../../../components/Menu";
@@ -80,6 +85,9 @@ export const LibraryToolbar: React.FC<LibraryToolbarProps> = ({
                 variant="secondary"
               >
                 <span className="library-sort-label">{sortLabel}</span>
+                <span aria-hidden="true" className="library-sort-label-short">
+                  {getShortSortLabel(sort)}
+                </span>
               </Button>
             )}
           />

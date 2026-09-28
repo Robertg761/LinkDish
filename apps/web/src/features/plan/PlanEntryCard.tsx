@@ -108,11 +108,13 @@ const PlanEntryCardComponent: React.FC<PlanEntryCardProps> = ({
       <div className="plan-entry-body">
         <span className="plan-entry-slot">{SLOT_LABELS[entry.slot]}</span>
         {recipe ? (
-          <Link className="plan-entry-title" to={`/recipes/${recipe.id}`}>
+          <Link className="plan-entry-title" title={title} to={`/recipes/${recipe.id}`}>
             {title}
           </Link>
         ) : (
-          <span className="plan-entry-title">{title}</span>
+          <span className="plan-entry-title" title={title}>
+            {title}
+          </span>
         )}
         {isRecipe ? (
           <div className="plan-entry-servings">

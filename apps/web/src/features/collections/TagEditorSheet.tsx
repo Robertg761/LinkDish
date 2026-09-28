@@ -17,6 +17,7 @@ export interface TagEditorSheetProps {
 }
 
 const MAX_SUGGESTIONS = 10;
+const MAX_OWN_TAGS = 8;
 const TAG_SEPARATOR_PATTERN = /[,\n]/u;
 
 /** Every tag used across the cookbook, most used first (first spelling wins). */
@@ -41,6 +42,32 @@ const collectCookbookTags = (tagLists: ReadonlyArray<readonly string[] | undefin
     .map((entry) => entry.label);
 };
 
+const TagChoices: React.FC<{
+  title: string;
+  label: string;
+  tags: readonly string[];
+  onAdd: (tag: string) => void;
+}> = ({ title, label, tags, onAdd }) => (
+  <div className="tag-editor-suggestions">
+    <h3 className="collection-sheet-subtitle">{title}</h3>
+    <ul aria-label={label} className="tag-editor-suggestion-list">
+      {tags.map((tag) => (
+        <li key={tag}>
+          <button
+            aria-label={`Add tag ${tag}`}
+            className="tag-suggestion"
+            onClick={() => onAdd(tag)}
+            type="button"
+          >
+            <Icon name="plus" size={14} strokeWidth={2.4} />
+            {tag}
+          </button>
+        </li>
+      ))}
+    </ul>
+  </div>
+);
+
 /**
  * Tags for one recipe as removable chips, with an input (Enter or comma adds) and suggestions
  * from the recipe itself (course, cuisine, method, diet, quick) and the cook's existing tags.
@@ -56,32 +83,49 @@ export const TagEditorSheet: React.FC<TagEditorSheetProps> = ({ open, onClose, r
   const tags = useMemo(() => recipe?.tags ?? [], [recipe?.tags]);
   const tagKeys = useMemo(() => new Set(tags.map((tag) => tag.toLowerCase())), [tags]);
 
-  const suggestions = useMemo(() => {
+  /*
+   * Two honest lists: tags read from this recipe ("Suggested for this recipe"), then the cook's
+   * other tags ("Your tags"), the ones this recipe's title or ingredients mention first. A curry
+   * is no longer offered "Dessert" under a heading that claims it fits.
+   */
+  const { ownTags, suggestions } = useMemo(() => {
     if (!recipe) {
-      return [];
+      return { ownTags: [], suggestions: [] };
     }
 
     const existing = collectCookbookTags(recipes.map((entry) => entry.tags));
     const existingByKey = new Map(existing.map((tag) => [tag.toLowerCase(), tag]));
+    const seen = new Set(tagKeys);
+    const fresh = (tag: string) => {
+      const key = tag.toLowerCase();
+
+      if (seen.has(key)) {
+        return false;
+      }
+
+      seen.add(key);
+      return true;
+    };
     // Prefer the cook's own spelling of a tag; otherwise capitalize the suggestion.
-    const inferred = inferRecipeTags(recipe.recipe).tags.map(
-      (tag) =>
-        existingByKey.get(tag.toLowerCase()) ?? `${tag.charAt(0).toUpperCase()}${tag.slice(1)}`
-    );
-    const seen = new Set<string>();
-
-    return [...inferred, ...existing]
-      .filter((tag) => {
-        const key = tag.toLowerCase();
-
-        if (tagKeys.has(key) || seen.has(key)) {
-          return false;
-        }
-
-        seen.add(key);
-        return true;
-      })
+    const inferred = inferRecipeTags(recipe.recipe)
+      .tags.map(
+        (tag) =>
+          existingByKey.get(tag.toLowerCase()) ?? `${tag.charAt(0).toUpperCase()}${tag.slice(1)}`
+      )
+      .filter(fresh)
       .slice(0, MAX_SUGGESTIONS);
+    const text = [recipe.recipe.title, ...recipe.recipe.ingredients.map((entry) => entry.text)]
+      .join(" ")
+      .toLowerCase();
+    const mentioned = (tag: string) => (text.includes(tag.toLowerCase()) ? 0 : 1);
+    const own = existing
+      .map((tag, rank) => ({ rank, tag }))
+      .sort((left, right) => mentioned(left.tag) - mentioned(right.tag) || left.rank - right.rank)
+      .map((entry) => entry.tag)
+      .filter(fresh)
+      .slice(0, MAX_OWN_TAGS);
+
+    return { ownTags: own, suggestions: inferred };
   }, [recipe, recipes, tagKeys]);
 
   const saveTags = async (next: readonly string[]) => {
@@ -186,24 +230,15 @@ export const TagEditorSheet: React.FC<TagEditorSheetProps> = ({ open, onClose, r
       </div>
 
       {suggestions.length > 0 ? (
-        <div className="tag-editor-suggestions">
-          <h3 className="collection-sheet-subtitle">Suggestions</h3>
-          <ul aria-label="Suggested tags" className="tag-editor-suggestion-list">
-            {suggestions.map((tag) => (
-              <li key={tag}>
-                <button
-                  aria-label={`Add tag ${tag}`}
-                  className="tag-suggestion"
-                  onClick={() => addTags(tag)}
-                  type="button"
-                >
-                  <Icon name="plus" size={14} strokeWidth={2.4} />
-                  {tag}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
+        <TagChoices
+          label="Suggested tags"
+          onAdd={addTags}
+          tags={suggestions}
+          title="Suggested for this recipe"
+        />
+      ) : null}
+      {ownTags.length > 0 ? (
+        <TagChoices label="Your tags" onAdd={addTags} tags={ownTags} title="Your tags" />
       ) : null}
       <p className="collection-sheet-hint">
         Tags show up as filters in your Cookbook and help search find this recipe.

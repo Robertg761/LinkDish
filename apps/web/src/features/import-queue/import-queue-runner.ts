@@ -47,7 +47,9 @@ import type { V2AnalyticsImportProperties } from "@linkdish/utils";
  * Works through the import queue one item at a time: the duplicate check (no quota spent),
  * the save limit and the signed-out allowance first, then primary extraction, AI help where it
  * runs by itself (social captions, paid plans), and an automatic save. Failures stay in the
- * queue with a plain reason; running out of room or imports pauses the queue instead.
+ * queue with a plain reason; running out of room or imports pauses the queue instead. The runner
+ * never opens UI itself: a pause shows up quietly in the queue panel, and the upgrade sheet opens
+ * only when the cook taps it there.
  */
 
 export type QueuePauseReason = "save_limit" | "import_limit" | "offline";
@@ -56,7 +58,6 @@ export interface QueueRunnerContext {
   isAuthenticated: boolean;
   tier: WebBillingTier;
   signal: AbortSignal;
-  requestUpgrade: (trigger: "save_limit" | "import_limit") => void;
 }
 
 export type QueueItemOutcome =
@@ -123,7 +124,6 @@ export async function processImportQueueItem(
     await assertCanAddSavedRecipe({ isPremiumUser: isPaid(tier) });
   } catch (error) {
     if (error instanceof SavedRecipeLimitError) {
-      context.requestUpgrade("save_limit");
       return { reason: "save_limit", status: "paused" };
     }
   }
@@ -136,7 +136,6 @@ export async function processImportQueueItem(
     (!canStartWebImport(tier).allowed ||
       (needsStrong && !canStartWebStrongExtraction(tier).allowed))
   ) {
-    context.requestUpgrade("import_limit");
     return { reason: "import_limit", status: "paused" };
   }
 
@@ -238,7 +237,6 @@ export async function processImportQueueItem(
 
       if (saved.error === "limit_exceeded") {
         await markImportFailed(item.id, "Your cookbook is full. Make room, then try again.");
-        context.requestUpgrade("save_limit");
         return { reason: "save_limit", status: "paused" };
       }
 
@@ -281,7 +279,6 @@ export async function processImportQueueItem(
       });
       // Not the link's fault: it waits in the queue for more imports.
       await retryImport(item.id);
-      context.requestUpgrade("import_limit");
       return { reason: "import_limit", status: "paused" };
     }
 

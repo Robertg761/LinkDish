@@ -48,18 +48,17 @@ const Glyph: React.FC<{ name: ExtraGlyph }> = ({ name }) => (
   </svg>
 );
 
+/* Where links can come from (text and photos have their own tabs right above). */
 const SOURCES: ReadonlyArray<{ label: string; icon: IconName | ExtraGlyph }> = [
-  { icon: "globe", label: "Websites" },
+  { icon: "globe", label: "Recipe sites" },
   { icon: "video", label: "YouTube & Shorts" },
   { icon: "note", label: "TikTok" },
-  { icon: "pin", label: "Pinterest" },
-  { icon: "camera", label: "Photos" },
-  { icon: "file-text", label: "Pasted text" }
+  { icon: "pin", label: "Pinterest" }
 ];
 
 const isExtraGlyph = (name: string): name is ExtraGlyph => name in EXTRA_GLYPHS;
 
-/** "Works with": the places recipes can come from. */
+/** "Works with": plain words and small icons, not pills, since nothing here is tappable. */
 export const SupportedSources: React.FC = () => (
   <section aria-labelledby="import-sources-title" className="import-sources">
     <h2 className="import-sources-title" id="import-sources-title">

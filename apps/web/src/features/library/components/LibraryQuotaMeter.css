@@ -17,6 +17,8 @@
 }
 
 .library-quota-title {
+  grid-area: title;
+  min-width: 0;
   color: var(--color-ink);
   font-family: var(--font-family-serif);
   font-size: 1.0625rem;
@@ -26,9 +28,11 @@
 }
 
 .library-quota-text {
+  grid-area: text;
+  min-width: 0;
   color: var(--color-ink-muted);
   font-size: var(--text-small);
-  line-height: 1.35;
+  line-height: 1.4;
 }
 
 .library-quota-text .num {
@@ -37,16 +41,29 @@
 }
 
 .library-quota-bar {
+  grid-area: bar;
   max-width: 280px;
   margin-top: 2px;
 }
 
 .library-quota-action.btn {
   flex-shrink: 0;
+  grid-area: action;
 }
 
-.library-quota.is-nearly-full {
-  padding: 14px 14px 14px 14px;
+/* ------------------------- Nearly full / full prompt ------------------------ */
+/* One grid: icon, title and status beside the button; the bar spans the copy column. Phones
+   stack it so the title never squeezes and the bar runs the full width of the card. */
+.library-quota.is-prompt {
+  display: grid;
+  grid-template-areas:
+    "icon title action"
+    "icon text action"
+    "icon bar action";
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 14px;
+  padding: 14px 16px 16px 14px;
   border-color: color-mix(in srgb, var(--color-butter) 45%, transparent);
   background:
     radial-gradient(
@@ -57,14 +74,19 @@
     var(--color-butter-soft);
 }
 
-.library-quota.is-nearly-full .library-quota-text {
+.library-quota.is-prompt .library-quota-text {
   color: var(--color-on-butter-soft);
+}
+
+.library-quota.is-prompt .library-quota-bar {
+  max-width: 360px;
+  margin-top: 6px;
 }
 
 .library-quota-icon {
   display: grid;
-  flex-shrink: 0;
-  align-self: flex-start;
+  grid-area: icon;
+  align-self: start;
   place-items: center;
   width: 36px;
   height: 36px;
@@ -73,9 +95,25 @@
   color: var(--color-on-butter);
 }
 
-@media (max-width: 479px) {
-  .library-quota.is-nearly-full .library-quota-action.btn {
+@media (max-width: 559px) {
+  .library-quota.is-prompt {
+    grid-template-areas:
+      "icon title action"
+      "text text text"
+      "bar bar bar";
+    row-gap: 8px;
+  }
+
+  .library-quota.is-prompt .library-quota-title {
     align-self: center;
+  }
+
+  .library-quota.is-prompt .library-quota-bar {
+    max-width: none;
+    margin-top: 0;
+  }
+
+  .library-quota.is-prompt .library-quota-action.btn {
     padding-inline: 14px;
   }
 }

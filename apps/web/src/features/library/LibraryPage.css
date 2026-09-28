@@ -6,9 +6,11 @@
 }
 
 .library-content {
+  --library-gap: 20px;
+
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: var(--library-gap);
   min-width: 0;
 }
 
@@ -40,19 +42,38 @@
 }
 
 /* ------------------------------ Search bar ------------------------------ */
-/* Sticks to the top while scrolling, so search is always a thumb away. */
+/* Sticks to the top while scrolling, so search is always a thumb away. It is opaque (a fade let
+   card titles show through, sliced), and gains a hairline and shadow once it is stuck. */
+.library-search-sentinel {
+  height: 0;
+  margin-bottom: calc(-1 * var(--library-gap));
+}
+
 .library-search-bar {
   position: sticky;
   top: var(--app-sticky-top, 0px);
   z-index: var(--z-sticky);
   margin: -8px calc(-1 * var(--page-gutter)) -4px;
   padding: calc(8px + env(safe-area-inset-top, 0px)) var(--page-gutter) 8px;
-  background: linear-gradient(
-    to bottom,
-    var(--color-bg) 0,
-    var(--color-bg) 78%,
-    color-mix(in srgb, var(--color-bg) 0%, transparent) 100%
-  );
+  border-bottom: 1px solid transparent;
+  background: transparent;
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+/* Opaque once stuck, painted with the page's own (viewport-fixed) backdrop so it matches it. */
+.library-search-bar.is-stuck {
+  border-bottom-color: var(--color-border-subtle);
+  background:
+    radial-gradient(1100px 520px at 50% -8%, var(--color-canvas) 0%, var(--color-bg) 58%) fixed,
+    var(--color-bg);
+  box-shadow: var(--shadow-xs);
+}
+
+.library-search-bar .search-field-input {
+  text-overflow: ellipsis;
 }
 
 @media (min-width: 1024px) {
@@ -75,13 +96,30 @@
 }
 
 /* ------------------------------ Card meta ------------------------------- */
-/* Inline (not flex) so a long yield ellipsizes by character instead of vanishing. */
-.library-meta-item {
-  margin-right: 10px;
+/* Meta items never break mid-word: they sit on one line, and an item that does not fit (a long
+   yield or source on a narrow card) wraps onto a second line that is clipped away, instead of
+   ellipsizing into "9 small …" or "3 hr 25 min…". */
+.library-page .recipe-card-meta:has(.library-meta-item),
+.library-welcome .recipe-card-meta:has(.library-meta-item) {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 10px;
+  height: calc(var(--text-caption-line-height) * 1em);
+  overflow: hidden;
 }
 
-.library-meta-item:last-child {
-  margin-right: 0;
+.library-meta-item {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.library-page .recipe-card-meta:has(.library-meta-sep) {
+  column-gap: 6px;
+}
+
+.library-meta-sep {
+  margin-right: 6px;
+  color: var(--color-ink-subtle);
 }
 
 .library-meta-icon {
@@ -161,20 +199,36 @@
   font-size: var(--text-small);
 }
 
-/* Phones: the sort button keeps its icon; the current sort is in its accessible name. */
+.library-sort-label-short {
+  display: none;
+}
+
+/* Phones: the current sort stays visible, in a short form ("Newest"), without the leading icon. */
 @media (max-width: 559px) {
+  .library-toolbar {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+
+  .library-toolbar-tools {
+    margin-left: auto;
+  }
+
   .library-sort-label {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
+    display: none;
+  }
+
+  .library-sort-label-short {
+    display: inline;
   }
 
   .library-sort-button.btn {
-    padding-inline: 10px 8px;
+    padding-inline: 12px 8px;
     gap: 2px;
+  }
+
+  .library-sort-button.btn .btn-icon:not(.btn-icon-trailing) {
+    display: none;
   }
 }
 
@@ -507,4 +561,12 @@
 
 .library-page .recipe-card-list .recipe-image.is-fallback .recipe-image-monogram {
   font-size: 1.75rem;
+}
+
+/* ------------------------- Family, not set up yet ------------------------ */
+.library-family-locked {
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-card);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-xs);
 }

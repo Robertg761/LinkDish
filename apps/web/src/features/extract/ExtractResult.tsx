@@ -134,13 +134,8 @@ export const ExtractResult: React.FC<ExtractResultProps> = ({
   const isSaved = saving.status === "saved";
   const isBusy = saving.status === "saving";
   const isTextImport = sourceUrl.includes(TEXT_IMPORT_URL_FRAGMENT);
-  const source = useMemo(
-    () =>
-      isTextImport
-        ? { href: null, kind: "unknown" as const, label: "From your text", shareUrl: null }
-        : getRecipeSourceInfo(sourceUrl),
-    [isTextImport, sourceUrl]
-  );
+  // The same source line (and icon) the recipe page will show once it's saved.
+  const source = useMemo(() => getRecipeSourceInfo(sourceUrl), [sourceUrl]);
   const scaling = useRecipeScaling(recipe);
   // The cookbook id is known before saving, so ticks and timers carry over once it's saved.
   const sessionKey = saving.recipeId ?? `import:${sourceUrl}`;
@@ -288,11 +283,8 @@ export const ExtractResult: React.FC<ExtractResultProps> = ({
     )
   ) : undefined;
 
-  const eyebrow = isSaved ? (
-    <Chip icon="check" size="sm" variant="accent">
-      In your cookbook
-    </Chip>
-  ) : (
+  // Once saved, the "Saved to your cookbook" card says it; no second chip repeating it.
+  const eyebrow = isSaved ? undefined : (
     <Chip icon="sparkles" size="sm" variant="butter">
       Just imported
     </Chip>
@@ -351,7 +343,7 @@ export const ExtractResult: React.FC<ExtractResultProps> = ({
             </p>
           </div>
           <div className="extract-result-banner-actions">
-            <Button icon="book-open" onClick={openRecipe} size="sm" variant="secondary">
+            <Button icon="book-open" onClick={openRecipe} size="sm">
               Open recipe
             </Button>
             <Button icon="plus" onClick={onReset} size="sm" variant="ghost">
@@ -369,17 +361,21 @@ export const ExtractResult: React.FC<ExtractResultProps> = ({
         recipe.image?.url ? " has-hero-image" : ""
       }`}
     >
-      <div className="extract-result-toolbar">
-        <Button
-          className="extract-result-back"
-          icon="arrow-left"
-          onClick={requestImportAnother}
-          size="sm"
-          variant="ghost"
-        >
-          Import another
-        </Button>
-      </div>
+      {/* Before saving this is the way back (it asks first); once saved, the card offers
+          "Import another", so it isn't shown twice. */}
+      {isSaved ? null : (
+        <div className="extract-result-toolbar">
+          <Button
+            className="extract-result-back"
+            icon="arrow-left"
+            onClick={requestImportAnother}
+            size="sm"
+            variant="ghost"
+          >
+            Import another
+          </Button>
+        </div>
+      )}
 
       <RecipeView
         banner={banner}

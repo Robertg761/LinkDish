@@ -1,4 +1,3 @@
-import { createRecipeSearchIndex, recipeSearchFields } from "@linkdish/recipe-domain";
 import React, { useMemo, useState } from "react";
 
 import { Button, ButtonLink } from "../../components/Button";
@@ -10,6 +9,8 @@ import { SegmentedControl } from "../../components/SegmentedControl";
 import { Sheet } from "../../components/Sheet";
 import { Skeleton } from "../../components/Skeleton";
 import { Stepper } from "../../components/Stepper";
+import { useRovingRadioGroup } from "../../lib/use-roving-radio";
+import { createSavedRecipeSearch } from "../library/components/saved-recipe-search";
 
 import {
   defaultServingsFor,
@@ -65,20 +66,16 @@ export const RecipePickerSheet: React.FC<RecipePickerSheetProps> = ({
   const [customNote, setCustomNote] = useState("");
   const day = getDayLabel(date);
 
-  const ranked = useMemo(() => rankRecipesForPlanning(recipes), [recipes]);
-  const index = useMemo(
-    () =>
-      createRecipeSearchIndex(ranked, (record) =>
-        recipeSearchFields(record.recipe, { notes: record.notes, tags: record.tags })
-      ),
-    [ranked]
-  );
+  // What suits the chosen meal comes first (no cookies offered for breakfast).
+  const ranked = useMemo(() => rankRecipesForPlanning(recipes, slot), [recipes, slot]);
+  // The search index is built on the first typed query and shared across opens.
+  const search = useMemo(() => createSavedRecipeSearch(recipes), [recipes]);
   const results = useMemo(
     () =>
       query.trim()
-        ? index.search(query, { limit: MAX_RESULTS }).map((result) => result.record)
+        ? search(query, MAX_RESULTS).map((match) => match.recipe)
         : ranked.slice(0, MAX_RESULTS),
-    [index, query, ranked]
+    [query, ranked, search]
   );
   const selected = selectedId ? recipes.find((recipe) => recipe.id === selectedId) : undefined;
 
@@ -86,6 +83,15 @@ export const RecipePickerSheet: React.FC<RecipePickerSheetProps> = ({
     setSelectedId(recipe.id);
     setServings(defaultServingsFor(recipe) ?? 4);
   };
+  const resultIds = useMemo(() => results.map((recipe) => recipe.id), [results]);
+  // One Tab stop for the list; arrow keys move through it, so the footer is a Tab away.
+  const recipeRadio = useRovingRadioGroup(resultIds, selectedId, (id) => {
+    const recipe = results.find((entry) => entry.id === id);
+
+    if (recipe) {
+      select(recipe);
+    }
+  });
 
   const addSelected = () => {
     if (selected) {
@@ -124,7 +130,12 @@ export const RecipePickerSheet: React.FC<RecipePickerSheetProps> = ({
           ) : (
             <span className="plan-picker-hint">Pick a recipe or a note</span>
           )}
-          <Button disabled={!selected} icon="calendar-plus" onClick={addSelected}>
+          <Button
+            className="plan-picker-add"
+            disabled={!selected}
+            icon="calendar-plus"
+            onClick={addSelected}
+          >
             Add to {day.weekday}
           </Button>
         </div>
@@ -227,7 +238,7 @@ export const RecipePickerSheet: React.FC<RecipePickerSheetProps> = ({
             <p className="plan-picker-none">Nothing matches “{query.trim()}”.</p>
           ) : (
             <ul aria-label="Recipes" className="plan-picker-list" role="radiogroup">
-              {results.map((recipe) => {
+              {results.map((recipe, index) => {
                 const isSelected = recipe.id === selectedId;
                 const meta = describeRecipeForPicker(recipe);
 
@@ -242,6 +253,7 @@ export const RecipePickerSheet: React.FC<RecipePickerSheetProps> = ({
                       }
                       role="radio"
                       type="button"
+                      {...recipeRadio(index)}
                     >
                       <RecipeImage
                         aspectRatio="1"
@@ -255,9 +267,11 @@ export const RecipePickerSheet: React.FC<RecipePickerSheetProps> = ({
                         <span className="plan-picker-title">{recipe.recipe.title}</span>
                         {meta || recipe.favorite ? (
                           <span className="plan-picker-meta">
+                            {/* A quiet heart, not the word "Favorite" on every row. */}
                             {recipe.favorite ? (
-                              <span className="plan-picker-favorite">
-                                <Icon name="heart-filled" size={12} /> Favorite
+                              <span className="plan-picker-favorite" title="Favorite">
+                                <Icon name="heart-filled" size={12} />
+                                <span className="sr-only">Favorite</span>
                               </span>
                             ) : null}
                             {meta ? <span>{meta}</span> : null}

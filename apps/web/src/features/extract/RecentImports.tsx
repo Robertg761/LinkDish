@@ -34,10 +34,9 @@ const relativeDay = (iso: string, now: number): string => {
   return new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short" });
 };
 
+/** The same words the recipe page uses ("From pasted text", "From your photos", the site). */
 const sourceLabelFor = (recipe: WebSavedRecipe): string =>
-  recipe.sourceUrl.includes("linkdish.app/text-imports/")
-    ? "From your text"
-    : getRecipeSourceInfo(recipe.sourceUrl, { sourceHost: recipe.sourceHost }).label;
+  getRecipeSourceInfo(recipe.sourceUrl, { sourceHost: recipe.sourceHost }).label;
 
 /** Samples for a brand-new cookbook: loaded on demand, like the Cookbook's welcome shelf. */
 const SampleRecipes: React.FC = () => {

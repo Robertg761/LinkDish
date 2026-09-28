@@ -128,3 +128,8 @@
     padding: 0;
   }
 }
+
+/* The pitch sits after the method, then the attribution line. */
+.featured-banner + .featured-footer {
+  margin-top: 16px;
+}

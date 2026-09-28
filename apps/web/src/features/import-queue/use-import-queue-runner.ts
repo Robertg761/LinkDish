@@ -4,7 +4,6 @@ import { useAuth } from "../../auth/AuthProvider";
 import { recoverStaleImports, useImportQueue } from "../../data/import-queue-store";
 import { addNetworkListeners, isOnline } from "../../platform/detect-network";
 import { getWebBillingTier } from "../billing/web-billing";
-import { useUpgradeSheet } from "../upgrade/UpgradeSheet";
 
 import type { QueuePauseReason } from "./import-queue-runner";
 
@@ -46,14 +45,11 @@ export function useImportQueueRunner(enabled = true): ImportQueueRunnerState {
   // Imports run only once requests carry the account (not while a cached Clerk user's session is
   // still loading), so they are neither billed as anonymous nor paused for the wrong limit.
   const { credentialsReady, isAuthenticated, user } = useAuth();
-  const { requestUpgradeSheet } = useUpgradeSheet();
   const queue = useImportQueue();
   const [online, setOnline] = useState(isOnline);
   const [running, setRunning] = useState(false);
   const [paused, setPaused] = useState<QueuePauseReason | null>(null);
   const controllerRef = useRef<AbortController | null>(null);
-  const upgradeRef = useRef(requestUpgradeSheet);
-  upgradeRef.current = requestUpgradeSheet;
   const tier = getWebBillingTier(user);
   const queuedKey = useMemo(
     () =>
@@ -110,7 +106,6 @@ export function useImportQueueRunner(enabled = true): ImportQueueRunnerState {
       const { runImportQueue } = await import("./import-queue-runner");
       const result = await runImportQueue({
         isAuthenticated,
-        requestUpgrade: (trigger) => upgradeRef.current(trigger),
         signal: controller.signal,
         tier
       });

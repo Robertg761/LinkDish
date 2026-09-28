@@ -189,10 +189,17 @@ describe("collections sheets", () => {
     const labels = within(suggestions)
       .getAllByRole("button")
       .map((button) => button.textContent);
-    expect(labels).toContain("Weeknight");
     expect(labels).toContain("Quick");
-    // "salad" was inferred and already used by the cook: their spelling wins, once.
-    expect(labels.filter((label) => label?.toLowerCase() === "salad")).toEqual(["salad"]);
+    // The cook's other tags are offered under their own honest heading, not as suggestions...
+    expect(labels).not.toContain("Weeknight");
+    expect(labels.some((label) => label?.toLowerCase() === "salad")).toBe(false);
+    // ...with the ones this recipe mentions first ("Greek Salad" → their "salad", once).
+    const cookTags = screen.getByRole("list", { name: "Your tags" });
+    expect(
+      within(cookTags)
+        .getAllByRole("button")
+        .map((button) => button.textContent)
+    ).toEqual(["salad", "Weeknight"]);
 
     fireEvent.click(within(suggestions).getByRole("button", { name: "Add tag Quick" }));
     await waitFor(() => expect(stored("salad")?.tags).toEqual(["Quick"]));

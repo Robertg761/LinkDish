@@ -2,7 +2,7 @@ import React, { useId, useMemo, useRef, useState } from "react";
 
 import { Icon } from "../../components/Icon";
 
-import { getShoppingSuggestions } from "./shopping-format";
+import { getShoppingSuggestions, hasShoppingHistory } from "./shopping-format";
 import { splitShoppingLines } from "./shopping-list-store";
 
 export type ShoppingAddMethod = "quick_add" | "paste" | "suggestion";
@@ -106,7 +106,7 @@ export const ShoppingAddBar: React.FC<ShoppingAddBarProps> = ({
       {showSuggestions ? (
         <div className={`shopping-add-suggestions${value.trim() ? " is-typing" : ""}`}>
           <span className="shopping-add-suggestions-label">
-            {value.trim() ? "Suggestions" : "Buy again"}
+            {value.trim() ? "Suggestions" : hasShoppingHistory() ? "Buy again" : "Quick add"}
           </span>
           <ul aria-label="Quick add" className="shopping-add-chips">
             {suggestions.map((suggestion) => (

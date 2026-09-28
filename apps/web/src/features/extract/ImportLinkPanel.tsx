@@ -19,6 +19,8 @@ interface ImportLinkPanelProps {
   /** Changing this number moves focus to the field (e.g. after "Try another link"). */
   focusRequest?: number | undefined;
   disabled?: boolean | undefined;
+  /** Offline, links wait in the import queue: the button says so. */
+  offline?: boolean | undefined;
   onImport: (url: string) => void;
   /** Several links at once: they go to the import queue. */
   onImportMany: (urls: string[]) => void;
@@ -37,6 +39,17 @@ const ERRORS = {
 } as const;
 
 type ErrorKey = keyof typeof ERRORS;
+
+/** "/recipe/crispy-rice" for a batch row (the host is shown on its own). */
+const linkPath = (url: string): string => {
+  try {
+    const parsed = new URL(url);
+    const path = `${parsed.pathname}${parsed.search}`.replace(/\/$/u, "");
+    return path === "/" ? "" : path;
+  } catch {
+    return "";
+  }
+};
 
 const shortLink = (url: string): string => {
   const host = getImportHost(url) ?? url;
@@ -61,6 +74,7 @@ export const ImportLinkPanel: React.FC<ImportLinkPanelProps> = ({
   autoFocus = false,
   focusRequest,
   disabled = false,
+  offline = false,
   onImport,
   onImportMany,
   onPasteText
@@ -91,9 +105,13 @@ export const ImportLinkPanel: React.FC<ImportLinkPanelProps> = ({
     }
   }, [focusRequest]);
 
-  // The field grows with a pasted list of links and shrinks back for a single one.
+  // The field grows with a pasted list of links and shrinks back for a single one. Each link keeps
+  // its own line (no mid-word wrapping); after a paste the field shows where the links start.
+  const previousLengthRef = useRef(value.length);
   useEffect(() => {
     const element = inputRef.current;
+    const pasted = value.length - previousLengthRef.current > 1;
+    previousLengthRef.current = value.length;
 
     if (!element) {
       return;
@@ -103,6 +121,10 @@ export const ImportLinkPanel: React.FC<ImportLinkPanelProps> = ({
 
     if (multiline) {
       element.style.height = `${Math.min(element.scrollHeight, 220)}px`;
+
+      if (pasted) {
+        element.scrollLeft = 0;
+      }
     }
   }, [multiline, value]);
 
@@ -296,17 +318,51 @@ export const ImportLinkPanel: React.FC<ImportLinkPanelProps> = ({
         type="submit"
         variant="accent"
       >
-        {isBatch ? `Import ${links.length} recipes` : "Get the recipe"}
+        {offline
+          ? isBatch
+            ? `Queue ${links.length} recipes for later`
+            : "Save for when you’re online"
+          : isBatch
+            ? `Import ${links.length} recipes`
+            : "Get the recipe"}
       </Button>
 
       {error ? null : isBatch ? (
-        <p className="import-link-hint is-batch" id={hintId}>
-          <Icon name="list-checks" size={16} />
-          <span>
-            {links.length} links from{" "}
-            {[...new Set(links.map((link) => getImportHost(link) ?? link))].join(", ")}. We’ll
-            import them one by one and save each to your cookbook.
-          </span>
+        <div className="import-link-batch" id={hintId}>
+          <p className="import-link-hint">
+            <span>
+              <strong className="num">{links.length} links</strong>, imported one by one and saved
+              to your cookbook.
+            </span>
+          </p>
+          <ul aria-label="Links to import" className="import-link-batch-list">
+            {links.map((link) => {
+              const host = getImportHost(link) ?? link;
+              const path = linkPath(link);
+
+              return (
+                <li className="import-link-batch-row" key={link}>
+                  <Icon className="import-link-batch-icon" name="globe" size={16} />
+                  <span className="import-link-batch-text">
+                    <span className="import-link-batch-host">{host}</span>
+                    {path ? <span className="import-link-batch-path">{path}</span> : null}
+                  </span>
+                  <IconButton
+                    aria-label={`Remove ${host}${path}`}
+                    icon="x"
+                    onClick={() => {
+                      setValue(links.filter((entry) => entry !== link).join("\n"));
+                    }}
+                    size="sm"
+                  />
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ) : offline ? (
+        <p className="import-link-hint" id={hintId}>
+          You’re offline, so links wait in your import queue and import when you’re back.
         </p>
       ) : (
         <p className="import-link-hint" id={hintId}>

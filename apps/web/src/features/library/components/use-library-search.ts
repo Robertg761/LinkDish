@@ -1,9 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type * as SearchEngineModule from "./library-search-engine";
-import type { RecipeSearchFields, RecipeSearchIndex } from "@linkdish/recipe-domain";
+import type { Recipe, RecipeSearchFields, RecipeSearchIndex } from "@linkdish/recipe-domain";
 
 export type SearchEngine = typeof SearchEngineModule;
+/** What building an index needs (the engine chunk, or the same functions imported directly). */
+export type SearchIndexBuilder = Pick<
+  SearchEngine,
+  "createRecipeSearchIndex" | "recipeSearchFields"
+>;
 
 let engine: SearchEngine | null = null;
 let enginePromise: Promise<SearchEngine> | null = null;
@@ -74,11 +79,105 @@ export function useSearchEngine(needed: boolean): SearchEngine | null {
 
 export interface RecipeSearchIndexOptions<T> {
   getId: (record: T) => string;
-  getFields: (engine: SearchEngine, record: T) => RecipeSearchFields;
-  /** Values that change whenever the searchable text of a record changes (compared by identity). */
+  getFields: (engine: SearchIndexBuilder, record: T) => RecipeSearchFields;
+  /**
+   * Values that change whenever the searchable text of a record changes. Use strings built from
+   * the text (see {@link recipeSearchKey}), not objects: a favorite or a cook log entry comes back
+   * from IndexedDB as a new object with the same text, and must not rebuild the index.
+   */
   getSignature: (record: T) => readonly unknown[];
   /** Changes when something outside the records feeds the index (e.g. collection names). */
   extraKey?: string | undefined;
+  /**
+   * Keeps the index at module scope under this name, so it survives remounts (Back from a recipe)
+   * and is shared by every screen that asks with the same name and fields.
+   */
+  cacheKey?: string | undefined;
+}
+
+interface CachedIndex {
+  signature: unknown[];
+  index: RecipeSearchIndex<string>;
+}
+
+const sharedIndexes = new Map<string, CachedIndex>();
+
+/** Test seam: forget the shared indexes. */
+export const resetSearchIndexCacheForTests = (): void => {
+  sharedIndexes.clear();
+};
+
+const recipeKeys = new WeakMap<Recipe, string>();
+const SEPARATOR = "\u0001";
+
+/**
+ * The searchable text of a recipe as one string, cached per recipe object. Equal text gives an
+ * equal key, so an unchanged recipe re-read from storage keeps the index.
+ */
+export const recipeSearchKey = (recipe: Recipe): string => {
+  const cached = recipeKeys.get(recipe);
+
+  if (cached !== undefined) {
+    return cached;
+  }
+
+  const key = [
+    recipe.title,
+    recipe.sourceUrl,
+    recipe.siteName ?? "",
+    recipe.author ?? "",
+    recipe.cuisine ?? "",
+    recipe.category ?? "",
+    ...(recipe.keywords ?? []),
+    ...recipe.ingredients.map((ingredient) => ingredient.text),
+    ...recipe.steps.map((step) => step.text)
+  ].join(SEPARATOR);
+  recipeKeys.set(recipe, key);
+  return key;
+};
+
+const sameSignature = (left: readonly unknown[], right: readonly unknown[]): boolean =>
+  left.length === right.length && left.every((value, position) => value === right[position]);
+
+/**
+ * A search index over `records`, rebuilt only when the signature (ids plus searchable text)
+ * changes. With `cacheKey` the index is kept at module scope for every caller using that name.
+ */
+export function getRecipeSearchIndex<T>(
+  searchEngine: SearchIndexBuilder,
+  records: readonly T[],
+  byId: ReadonlyMap<string, T>,
+  { getId, getFields, getSignature, extraKey = "", cacheKey }: RecipeSearchIndexOptions<T>,
+  localCache?: { current: CachedIndex | null }
+): RecipeSearchIndex<string> {
+  const signature: unknown[] = [extraKey];
+
+  for (const record of records) {
+    signature.push(getId(record), ...getSignature(record));
+  }
+
+  const cached = cacheKey ? sharedIndexes.get(cacheKey) : localCache?.current;
+
+  if (cached && sameSignature(cached.signature, signature)) {
+    return cached.index;
+  }
+
+  const index = searchEngine.createRecipeSearchIndex(
+    records.map((record) => getId(record)),
+    (id) => {
+      const record = byId.get(id);
+      return record ? getFields(searchEngine, record) : {};
+    }
+  );
+  const entry = { index, signature };
+
+  if (cacheKey) {
+    sharedIndexes.set(cacheKey, entry);
+  } else if (localCache) {
+    localCache.current = entry;
+  }
+
+  return index;
 }
 
 export interface LibrarySearch<T> {
@@ -91,53 +190,39 @@ export interface LibrarySearch<T> {
  * A ranked search index over a list, rebuilt only when searchable content changes.
  *
  * The index stores ids, not records, so metadata edits that do not touch searchable text
- * (a favorite, a cook log entry) reuse it while results still resolve to the latest record.
+ * (a favorite, a cook log entry) reuse it while results still resolve to the latest record. The
+ * signature is built from text, not object identity, so a record re-read from storage with the
+ * same text reuses it too; with `cacheKey` it also survives the page remounting.
  */
 export function useRecipeSearchIndex<T>(
   searchEngine: SearchEngine | null,
   records: readonly T[],
-  { getId, getFields, getSignature, extraKey = "" }: RecipeSearchIndexOptions<T>
+  options: RecipeSearchIndexOptions<T>
 ): LibrarySearch<T> {
-  const cacheRef = useRef<{ signature: unknown[]; index: RecipeSearchIndex<string> } | null>(null);
+  const cacheRef = useRef<CachedIndex | null>(null);
+  const { cacheKey, extraKey, getFields, getId, getSignature } = options;
 
   const byId = useMemo(
     () => new Map(records.map((record) => [getId(record), record])),
     [getId, records]
   );
 
-  const index = useMemo(() => {
-    if (!searchEngine) {
-      return null;
-    }
+  const index = useMemo(
+    () =>
+      searchEngine
+        ? getRecipeSearchIndex(
+            searchEngine,
+            records,
+            byId,
+            { cacheKey, extraKey, getFields, getId, getSignature },
+            cacheRef
+          )
+        : null,
+    [byId, cacheKey, extraKey, getFields, getId, getSignature, records, searchEngine]
+  );
 
-    const signature: unknown[] = [extraKey];
-
-    for (const record of records) {
-      signature.push(getId(record), ...getSignature(record));
-    }
-
-    const cached = cacheRef.current;
-
-    if (
-      cached &&
-      cached.signature.length === signature.length &&
-      cached.signature.every((value, position) => value === signature[position])
-    ) {
-      return cached.index;
-    }
-
-    const next = searchEngine.createRecipeSearchIndex(
-      records.map((record) => getId(record)),
-      (id) => {
-        const record = byId.get(id);
-        return record ? getFields(searchEngine, record) : {};
-      }
-    );
-    cacheRef.current = { index: next, signature };
-    return next;
-  }, [byId, extraKey, getFields, getId, getSignature, records, searchEngine]);
-
-  return { byId, index };
+  // One stable object per (byId, index): consumers memoize on it.
+  return useMemo(() => ({ byId, index }), [byId, index]);
 }
 
 /**

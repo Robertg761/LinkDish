@@ -77,11 +77,31 @@ const preload = (component: { preload: () => Promise<unknown> }) => {
 
 type ComposerMode = "link" | "text" | "photos";
 
+/* Short labels, so the control fits a 360px phone without cutting "Paste t…". */
 const MODE_OPTIONS: ReadonlyArray<SegmentedOption<ComposerMode>> = [
   { icon: "link", label: "Link", value: "link" },
-  { icon: "file-text", label: "Paste text", value: "text" },
+  { icon: "file-text", label: "Text", value: "text" },
   { icon: "camera", label: "Photos", value: "photos" }
 ];
+
+/** The lockup follows the mode: the promise of each way in, in the site's voice. */
+const HERO_COPY: Record<ComposerMode, { title: string; accent: string; lede: string }> = {
+  link: {
+    accent: "Get cooking.",
+    lede: "From any recipe site, a video or a caption. LinkDish keeps just the recipe.",
+    title: "Paste a link."
+  },
+  photos: {
+    accent: "We'll type it up.",
+    lede: "A cookbook page, a magazine clipping or a handwritten card. LinkDish reads the photo and keeps the recipe.",
+    title: "Snap the page."
+  },
+  text: {
+    accent: "We'll tidy it up.",
+    lede: "From a caption, an email or your notes. LinkDish sorts out the ingredients and the steps.",
+    title: "Paste the recipe."
+  }
+};
 
 interface ShareParams {
   present: boolean;
@@ -154,7 +174,10 @@ export const ExtractPage: React.FC = () => {
   const savedRef = useRef(false);
   const phaseRef = useRef<ImportPhase>(phase);
   phaseRef.current = phase;
-  const autoStartedRef = useRef(false);
+  /** The navigation (location.key) whose ?url= / ?text= / ?tab= was already acted on. */
+  const handledShareKeyRef = useRef<string | null>(null);
+  const sessionRef = useRef(session);
+  sessionRef.current = session;
 
   useDocumentTitle(phase.status === "success" ? null : "Add a recipe");
 
@@ -186,27 +209,47 @@ export const ExtractPage: React.FC = () => {
     []
   );
 
-  // Share target (and links into the importer): start once, then clear the address bar so a
-  // reload never spends another import.
+  // Share target, links into the importer and in-app links (the command palette, onboarding):
+  // act on ?url= / ?text= / ?tab= whenever a navigation brings them, also when the importer is
+  // already open, then clear the address bar so a reload never spends another import.
   useEffect(() => {
-    if (autoStartedRef.current || !initialShare.present) {
+    const share = readShareParams(new URLSearchParams(location.search));
+
+    if ((!share.present && !share.tab) || handledShareKeyRef.current === location.key) {
       return;
     }
 
     const timer = window.setTimeout(() => {
-      autoStartedRef.current = true;
+      handledShareKeyRef.current = location.key;
       void navigate({ pathname: "/import", search: "" }, { replace: true });
 
-      if (initialShare.url) {
+      if (share.url) {
         // A fresh page load is the OS share sheet (or a bookmarklet); in-app links carry a key.
         const source = location.key === "default" ? "share_sheet" : "in_app";
-        void session.startUrl(initialShare.url, { source });
+        void sessionRef.current.startUrl(share.url, { source });
+        return;
+      }
+
+      if (phaseRef.current.status !== "idle") {
+        // Back to the composer (an unsaved result stays in the session draft).
+        sessionRef.current.reset();
+        setRestoredDraft(false);
+      }
+
+      if (share.text) {
+        setText(share.text);
+      }
+
+      const nextMode = share.tab ?? (share.text ? "text" : null);
+
+      if (nextMode) {
+        setMode(nextMode);
+        setFocusRequest((request) => request + 1);
       }
     }, 0);
 
     return () => window.clearTimeout(timer);
-    // Runs once, for the URL the page was opened with.
-  }, [initialShare, location.key, navigate, session.startUrl]);
+  }, [location.key, location.search, navigate]);
 
   // An unsaved import from earlier in this session comes back instead of being lost.
   useEffect(() => {
@@ -519,7 +562,12 @@ export const ExtractPage: React.FC = () => {
 
   if (phase.status === "problem") {
     return focused(
-      <ImportProblemCard onAction={handleAction} onStartOver={startOver} problem={phase.problem} />
+      <ImportProblemCard
+        onAction={handleAction}
+        onStartOver={startOver}
+        problem={phase.problem}
+        url={phase.request?.kind === "url" ? phase.request.url : null}
+      />
     );
   }
 
@@ -543,15 +591,12 @@ export const ExtractPage: React.FC = () => {
     );
   }
 
+  const hero = HERO_COPY[mode];
+
+  // Offline, the app-wide banner already says so; the importer only changes its button to say
+  // what will happen ("Save for when you're online").
   return (
     <div className="extract-page page-enter">
-      {offline ? (
-        <p className="extract-offline" role="status">
-          <Icon name="wifi-off" size={18} />
-          You’re offline. Links you add will wait in your import queue.
-        </p>
-      ) : null}
-
       <div className="extract-layout">
         <div className="extract-main">
           <header className="extract-hero">
@@ -560,12 +605,9 @@ export const ExtractPage: React.FC = () => {
               {usage ? <ImportUsageChip usage={usage} /> : null}
             </div>
             <h1 className="extract-title">
-              Paste a link. <em className="extract-title-accent">Get cooking.</em>
+              {hero.title} <em className="extract-title-accent">{hero.accent}</em>
             </h1>
-            <p className="extract-lede">
-              From any recipe site, a video, a caption or a photo of the page. LinkDish keeps just
-              the recipe.
-            </p>
+            <p className="extract-lede">{hero.lede}</p>
           </header>
 
           <div className="extract-composer">
@@ -581,6 +623,7 @@ export const ExtractPage: React.FC = () => {
               <ImportLinkPanel
                 autoFocus={isDesktop && !initialShare.present && mode === "link"}
                 focusRequest={mode === "link" ? focusRequest : undefined}
+                offline={offline}
                 onImport={(url) => void session.startUrl(url)}
                 onImportMany={(urls) => void importMany(urls)}
                 onPasteText={(pasted) => {
@@ -588,7 +631,7 @@ export const ExtractPage: React.FC = () => {
                   switchMode("text");
                   showToast({
                     icon: "file-text",
-                    message: "No link on your clipboard, so we put the text in Paste text."
+                    message: "No link on your clipboard, so we put your text in Text."
                   });
                 }}
               />
@@ -621,7 +664,7 @@ export const ExtractPage: React.FC = () => {
           {/* Phones: the queue sits right under the field it was filled from. */}
           {isDesktop ? null : <ImportQueuePanel onOpenItem={openQueueItem} runner={runner} />}
 
-          <SupportedSources />
+          {mode === "link" ? <SupportedSources /> : null}
         </div>
 
         <aside aria-label="Your imports" className="extract-aside">

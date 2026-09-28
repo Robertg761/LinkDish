@@ -21,6 +21,7 @@ import {
   recipeIngredientsToShoppingInputs,
   resetShoppingListStoreForTests,
   restoreShoppingItems,
+  setShoppingChannelFactoryForTests,
   roundUpCountForShopping,
   setShoppingItemChecked,
   splitShoppingLines,
@@ -355,6 +356,36 @@ describe("shopping-list-store", () => {
     const items = await live();
     expect(items.map((item) => item.id).sort()).toEqual(["kept", "new"]);
     expect(items.every((item) => item.sync.status === "synced")).toBe(true);
+  });
+
+  it("writes, re-renders and broadcasts nothing when the household list is unchanged", async () => {
+    const postMessage = vi.fn();
+    setShoppingChannelFactoryForTests(() => ({ close: vi.fn(), onmessage: null, postMessage }));
+    await putShoppingItems([
+      makeItem({ id: "a", sync: { status: "dirty" }, text: "butter" }),
+      makeItem({ id: "b", sync: { status: "dirty" }, text: "jam" })
+    ]);
+    let server: UpsertShoppingItemsRequest["items"] = [];
+    apiMocks.upsertShoppingItems.mockImplementation((input: UpsertShoppingItemsRequest) => {
+      server = input.items;
+      return Promise.resolve({ ignored: [], items: input.items });
+    });
+    apiMocks.getShoppingList.mockImplementation(() => Promise.resolve({ items: server }));
+    await syncShoppingItems({ canSync: true });
+    await loadShoppingList();
+
+    const db = await getLinkDishWebDb();
+    const put = vi.spyOn(db, "put");
+    const snapshot = getShoppingListSnapshot();
+    postMessage.mockClear();
+
+    // The 30-second poll: nothing to push, and the server returns exactly what we have.
+    await syncShoppingItems({ canSync: true });
+
+    expect(put).not.toHaveBeenCalled();
+    expect(postMessage).not.toHaveBeenCalled();
+    expect(getShoppingListSnapshot()).toBe(snapshot);
+    setShoppingChannelFactoryForTests(null);
   });
 
   it("keeps a reactive in-memory copy that follows writes", async () => {

@@ -132,7 +132,6 @@ const saved = (id: string, sourceUrl: string): WebSavedRecipe => ({
 
 const context = (overrides: Partial<QueueRunnerContext> = {}): QueueRunnerContext => ({
   isAuthenticated: true,
-  requestUpgrade: vi.fn(),
   signal: new AbortController().signal,
   tier: "plus",
   ...overrides
@@ -235,7 +234,6 @@ describe("import queue runner", () => {
   });
 
   it("pauses at the plan limit and keeps the link waiting", async () => {
-    const requestUpgrade = vi.fn();
     await enqueueImport({ url: "https://a.com/soup" });
     await enqueueImport({ url: "https://b.com/stew" });
     apiMocks.extractRecipe.mockResolvedValue({
@@ -252,13 +250,13 @@ describe("import queue runner", () => {
       userMessage: "Used up."
     });
 
-    await expect(runImportQueue(context({ requestUpgrade, tier: "free" }))).resolves.toEqual({
+    // The pause is all it reports: the panel shows it, and nothing pops up on its own.
+    await expect(runImportQueue(context({ tier: "free" }))).resolves.toEqual({
       paused: "import_limit",
       processed: 0
     });
 
     expect(apiMocks.extractRecipe).toHaveBeenCalledOnce();
-    expect(requestUpgrade).toHaveBeenCalledWith("import_limit");
     expect(await statuses()).toEqual([
       ["https://a.com/soup", "queued"],
       ["https://b.com/stew", "queued"]
@@ -266,7 +264,6 @@ describe("import queue runner", () => {
   });
 
   it("does not mistake the AI provider's capacity for the plan limit", async () => {
-    const requestUpgrade = vi.fn();
     await enqueueImport({ url: "https://www.tiktok.com/@cook/video/1" });
     apiMocks.extractRecipe.mockResolvedValue({
       reason: "quota_exceeded",
@@ -274,28 +271,25 @@ describe("import queue runner", () => {
       userMessage: "Extra recipe help is temporarily unavailable."
     });
 
-    await expect(runImportQueue(context({ requestUpgrade }))).resolves.toEqual({
+    await expect(runImportQueue(context())).resolves.toEqual({
       paused: null,
       processed: 1
     });
-    expect(requestUpgrade).not.toHaveBeenCalled();
     expect((await getImportQueue())[0]?.status).toBe("failed");
   });
 
   it("stops before spending an import when the free cookbook is full", async () => {
-    const requestUpgrade = vi.fn();
     fakeIdb.seed(
       SAVED_RECIPES_STORE_NAME,
       Array.from({ length: 15 }, (_, index) => saved(`r${index}`, `https://x.com/${index}`))
     );
     await enqueueImport({ url: "https://a.com/soup" });
 
-    await expect(runImportQueue(context({ requestUpgrade, tier: "free" }))).resolves.toEqual({
+    await expect(runImportQueue(context({ tier: "free" }))).resolves.toEqual({
       paused: "save_limit",
       processed: 0
     });
     expect(apiMocks.extractRecipe).not.toHaveBeenCalled();
-    expect(requestUpgrade).toHaveBeenCalledWith("save_limit");
     expect((await getImportQueue())[0]?.status).toBe("queued");
   });
 

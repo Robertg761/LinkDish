@@ -146,6 +146,40 @@
   font-weight: 650;
 }
 
+/* Phones: the table fits the screen (no sideways scroll), so its plan names can stay pinned
+   under the top bar while the rows scroll by. */
+@media (max-width: 1023px) {
+  .plan-compare-wrap {
+    overflow: visible;
+  }
+
+  .plan-compare {
+    min-width: 0;
+  }
+
+  .plan-compare thead th,
+  .plan-compare-corner {
+    position: sticky;
+    top: calc(var(--app-sticky-top, 0px) + var(--topbar-height));
+    z-index: 1;
+    background: var(--color-surface);
+    box-shadow: inset 0 -1px 0 var(--color-border-subtle);
+  }
+
+  .plan-compare thead th:first-child,
+  .plan-compare thead td:first-child {
+    border-top-left-radius: var(--radius-card);
+  }
+
+  .plan-compare thead th:last-child {
+    border-top-right-radius: var(--radius-card);
+  }
+
+  .plan-compare thead .is-featured {
+    background: color-mix(in srgb, var(--color-primary-soft) 55%, var(--color-surface));
+  }
+}
+
 @media (max-width: 520px) {
   .plan-compare th,
   .plan-compare td {

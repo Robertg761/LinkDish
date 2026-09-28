@@ -50,7 +50,7 @@ export interface AddRecipeToShoppingSheetProps {
 }
 
 const UNIT_OPTIONS = [
-  { label: "As written", value: "original" },
+  { label: "Original", value: "original" },
   { label: "US", value: "us" },
   { label: "Metric", value: "metric" }
 ] as const;
@@ -325,7 +325,7 @@ export const AddRecipeToShoppingSheet: React.FC<AddRecipeToShoppingSheetProps> =
           onSelectNone={() => setSelected(new Set())}
           onToggle={toggle}
           selected={selected}
-          stapleCount={stapleIds.length}
+          stapleNames={rows.filter((row) => row.staple).map((row) => row.input.text)}
         />
       )}
     </Sheet>

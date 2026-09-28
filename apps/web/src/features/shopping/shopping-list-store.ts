@@ -12,6 +12,7 @@ import {
 import { useEffect, useSyncExternalStore } from "react";
 
 import { apiClient } from "../../api/client";
+import { isDeepEqual } from "../../data/reconcile";
 import { getLinkDishWebDb, SHOPPING_ITEMS_STORE_NAME } from "../../storage/linkdish-db";
 
 import type {
@@ -1014,7 +1015,7 @@ export async function applyRemoteShoppingItems(
       continue;
     }
 
-    writes.push({
+    const record: WebShoppingItem = {
       ...remoteItem,
       ...keepLocalAttribution(remoteItem, localItem),
       createdAt: localItem?.createdAt ?? remoteItem.updatedAt,
@@ -1022,7 +1023,12 @@ export async function applyRemoteShoppingItems(
         lastSyncedAt: remoteItem.updatedAt,
         status: "synced"
       }
-    });
+    };
+
+    // The 30-second household poll mostly returns what we already have: skip identical items.
+    if (!localItem || !isDeepEqual(localItem, record)) {
+      writes.push(record);
+    }
   }
 
   if (options.prune) {
@@ -1035,6 +1041,11 @@ export async function applyRemoteShoppingItems(
         deletedIds.push(localItem.id);
       }
     }
+  }
+
+  // Nothing changed: no IndexedDB writes, no re-render, and no reload in other tabs.
+  if (writes.length === 0 && deletedIds.length === 0) {
+    return;
   }
 
   await writeShoppingRecords(writes, deletedIds);

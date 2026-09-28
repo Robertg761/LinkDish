@@ -11,12 +11,13 @@
   overflow-x: auto;
   overscroll-behavior-x: contain;
   scrollbar-width: none;
-  /* Fade the scrolled-off edge so the row reads as scrollable. */
+  /* Fade the scrolled-off edges (a wide fade on the right, where the row continues) so a chip
+     cut by the screen edge reads as "more this way" rather than as a clipped label. */
   mask-image: linear-gradient(
     to right,
     transparent 0,
-    var(--color-ink) var(--page-gutter),
-    var(--color-ink) calc(100% - var(--page-gutter) - 12px),
+    #000 var(--page-gutter),
+    #000 calc(100% - var(--page-gutter) - 40px),
     transparent 100%
   );
 }
@@ -72,8 +73,14 @@
   color: var(--color-on-tomato-soft);
 }
 
-.library-filters-clear:hover {
-  border-color: color-mix(in srgb, var(--color-tomato) 35%, transparent);
+.library-filters-clear .num {
+  font-weight: 700;
+}
+
+@media (hover: hover) {
+  .library-filters-clear:hover {
+    border-color: color-mix(in srgb, var(--color-tomato) 35%, transparent);
+  }
 }
 
 .library-filters-manage {
@@ -82,8 +89,10 @@
   color: var(--color-ink-muted);
 }
 
-.library-filters-manage:hover {
-  border-style: solid;
-  background: var(--color-surface);
-  color: var(--color-ink);
+@media (hover: hover) {
+  .library-filters-manage:hover {
+    border-style: solid;
+    background: var(--color-surface);
+    color: var(--color-ink);
+  }
 }

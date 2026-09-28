@@ -1,5 +1,7 @@
 import React from "react";
 
+import { useRovingRadioGroup } from "../../lib/use-roving-radio";
+
 import { COLLECTION_EMOJI_CHOICES } from "./collection-helpers";
 
 interface EmojiChoicesProps {
@@ -8,16 +10,20 @@ interface EmojiChoicesProps {
   onChange: (emoji: string | undefined) => void;
 }
 
-/** A row of emoji quick picks (a radio group); picking the chosen one again clears it. */
+/**
+ * A row of emoji quick picks (a radio group with one Tab stop and arrow keys); picking the chosen
+ * one again clears it.
+ */
 export const EmojiChoices: React.FC<EmojiChoicesProps> = ({ label, value, onChange }) => {
   const choices: readonly string[] =
     value && !(COLLECTION_EMOJI_CHOICES as readonly string[]).includes(value)
       ? [value, ...COLLECTION_EMOJI_CHOICES]
       : COLLECTION_EMOJI_CHOICES;
+  const radio = useRovingRadioGroup(choices, value, onChange);
 
   return (
     <div aria-label={label} className="emoji-choices" role="radiogroup">
-      {choices.map((emoji) => {
+      {choices.map((emoji, index) => {
         const selected = emoji === value;
 
         return (
@@ -29,6 +35,7 @@ export const EmojiChoices: React.FC<EmojiChoicesProps> = ({ label, value, onChan
             onClick={() => onChange(selected ? undefined : emoji)}
             role="radio"
             type="button"
+            {...radio(index)}
           >
             {emoji}
           </button>

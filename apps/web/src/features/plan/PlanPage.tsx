@@ -1,3 +1,4 @@
+import { getRecipeTimes } from "@linkdish/recipe-domain";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
@@ -32,8 +33,8 @@ import {
   getDayLabel,
   getWeekDates,
   getWeekTitle,
+  pickDinnerSuggestions,
   PLAN_ENTRY_DRAG_TYPE,
-  rankRecipesForPlanning,
   relativeDayName,
   SLOT_LABELS,
   suggestSlot,
@@ -50,6 +51,11 @@ import "./PlanPage.css";
 type EntrySource = "picker" | "note" | "quick_start" | "duplicate";
 
 const QUICK_START_LIMIT = 8;
+const QUICK_START_LIMIT_PHONE = 5;
+
+/** "35 min" under a quick-start title (null when the recipe has no time). */
+const describeQuickChip = (recipe: WebSavedRecipe): string | null =>
+  getRecipeTimes(recipe.recipe).labels.total;
 
 /**
  * /plan — the week at a glance. Phones get a vertical list of days, desktop a seven-column board
@@ -346,9 +352,10 @@ export const PlanPage: React.FC = () => {
   );
   const quickStartRecipes = useMemo(
     () =>
-      rankRecipesForPlanning(library.recipes)
-        .filter((recipe) => !plannedRecipeIds.has(recipe.id))
-        .slice(0, isBoard ? QUICK_START_LIMIT : 6),
+      pickDinnerSuggestions(
+        library.recipes.filter((recipe) => !plannedRecipeIds.has(recipe.id)),
+        isBoard ? QUICK_START_LIMIT : QUICK_START_LIMIT_PHONE
+      ),
     [isBoard, library.recipes, plannedRecipeIds]
   );
   const firstPlannableDay = weekStart === currentWeekStart ? todayKey : weekStart;
@@ -356,8 +363,17 @@ export const PlanPage: React.FC = () => {
     () => findOpenDinnerDates(dates, plan.entries, firstPlannableDay),
     [dates, firstPlannableDay, plan.entries]
   );
+  // Everything that depends on the plan and the cookbook appears in one render (the board, the
+  // quick start panel, the shopping button), so nothing jumps when they load: until then the
+  // board is a skeleton with no empty-state copy.
+  const ready = plan.status !== "loading" && library.status !== "loading";
+  // Decided in the same render the week loads (an effect would insert it a frame later, pushing
+  // the board down); the latch keeps it while that week fills up.
+  const quickStartOffered =
+    quickStartWeek === weekStart || (plan.status === "ready" && plan.entries.length === 0);
   const showQuickStart =
-    quickStartWeek === weekStart &&
+    ready &&
+    quickStartOffered &&
     openDinners.length > 0 &&
     library.status === "ready" &&
     weekStart >= currentWeekStart;
@@ -433,7 +449,7 @@ export const PlanPage: React.FC = () => {
             Try again
           </Button>
         ) : null}
-        {recipeEntryCount > 0 ? (
+        {ready && recipeEntryCount > 0 ? (
           <Button
             className="plan-shop-button"
             icon="shopping-basket"
@@ -450,18 +466,24 @@ export const PlanPage: React.FC = () => {
           className={`plan-quick-start${plannedDinnerCount > 0 ? " has-done" : ""}`}
         >
           <div className="plan-quick-start-copy">
-            <p className="plan-quick-start-eyebrow">
-              <Icon name="sparkles" size={14} /> Plan dinner in 2 minutes
-            </p>
+            {quickStartRecipes.length > 0 ? (
+              <p className="plan-quick-start-eyebrow">
+                <Icon name="sparkles" size={14} /> Plan dinner in 2 minutes
+              </p>
+            ) : null}
             <h2 className="plan-quick-start-title" id="plan-quick-start-title">
-              {plannedDinnerCount === 0 ? "Your week is wide open" : "Nice. Keep going?"}
+              {quickStartRecipes.length === 0
+                ? "Add your first recipe"
+                : plannedDinnerCount === 0
+                  ? "Your week is wide open"
+                  : "Nice. Keep going?"}
             </h2>
             <p className="plan-quick-start-body">
               {quickStartRecipes.length > 0
                 ? `Tap a recipe and it lands on the next free night${
                     openDinners[0] ? ` (${relativeDayName(openDinners[0], todayKey)})` : ""
                   }.`
-                : "Save a few recipes you love and planning becomes a tap."}
+                : "Save a few recipes you love and planning the week becomes a tap."}
             </p>
           </div>
           {quickStartRecipes.length > 0 ? (
@@ -481,7 +503,12 @@ export const PlanPage: React.FC = () => {
                       title={recipe.recipe.title}
                       widths={[96]}
                     />
-                    <span className="plan-quick-chip-title">{recipe.recipe.title}</span>
+                    <span className="plan-quick-chip-copy">
+                      <span className="plan-quick-chip-title">{recipe.recipe.title}</span>
+                      <span className="plan-quick-chip-meta num">
+                        {describeQuickChip(recipe) ?? "\u00a0"}
+                      </span>
+                    </span>
                     <Icon className="plan-quick-chip-plus" name="plus" size={16} />
                   </button>
                 </li>
@@ -491,9 +518,6 @@ export const PlanPage: React.FC = () => {
             <div className="plan-quick-actions">
               <ButtonLink icon="plus" to="/import">
                 Add a recipe
-              </ButtonLink>
-              <ButtonLink icon="book-open" to="/" variant="secondary">
-                Browse your Cookbook
               </ButtonLink>
             </div>
           )}
@@ -510,99 +534,130 @@ export const PlanPage: React.FC = () => {
         </section>
       ) : null}
 
-      <ol aria-label={`${title} ${accent}`} className="plan-days">
-        {dates.map((date) => {
-          const day = getDayLabel(date);
-          const entries = plan.days.find((bucket) => bucket.date === date)?.entries ?? [];
-          const isToday = date === todayKey;
-          const isPast = date < todayKey;
+      {ready ? null : (
+        <ol aria-busy="true" aria-label={`${title} ${accent}`} className="plan-days is-loading">
+          {dates.map((date) => {
+            const day = getDayLabel(date);
 
-          return (
-            <li
-              className={[
-                "plan-day",
-                isToday ? "is-today" : "",
-                isPast ? "is-past" : "",
-                entries.length === 0 ? "is-empty" : "",
-                dropDate === date ? "is-drop-target" : ""
-              ]
-                .filter(Boolean)
-                .join(" ")}
-              key={date}
-              onDragLeave={
-                isBoard
-                  ? (event) => {
-                      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-                        setDropDate((current) => (current === date ? null : current));
-                      }
-                    }
-                  : undefined
-              }
-              onDragOver={
-                isBoard
-                  ? (event) => {
-                      if (event.dataTransfer.types.includes(PLAN_ENTRY_DRAG_TYPE)) {
-                        event.preventDefault();
-                        event.dataTransfer.dropEffect = "move";
-                        setDropDate(date);
-                      }
-                    }
-                  : undefined
-              }
-              onDrop={isBoard ? (event) => handleDrop(event, date) : undefined}
-            >
-              <div className="plan-day-header">
-                <h2 className="plan-day-heading">
-                  <span aria-hidden="true" className="plan-day-name">
-                    {day.weekday}
-                  </span>
-                  <span aria-hidden="true" className="plan-day-date num">
-                    {day.dayOfMonth}
-                  </span>
-                  {isToday ? <span className="plan-day-today">Today</span> : null}
-                  <span className="sr-only">{day.long}</span>
-                </h2>
-                <IconButton
-                  aria-label={`Add a meal to ${day.long}`}
-                  className="plan-day-add"
-                  icon="plus"
-                  onClick={() => setPicker({ date, slot: suggestSlot(entries) })}
-                  size="sm"
-                  variant={isToday ? "filled" : "tonal"}
-                />
-              </div>
-              {entries.length > 0 ? (
-                <ul className="plan-day-entries">
-                  {entries.map((entry) => {
-                    const recipe = entry.recipeId ? recipesById.get(entry.recipeId) : undefined;
+            return (
+              <li
+                className={`plan-day is-skeleton${date === todayKey ? " is-today" : ""}`}
+                key={date}
+              >
+                <div className="plan-day-header">
+                  <p aria-hidden="true" className="plan-day-heading">
+                    <span className="plan-day-name">{day.weekday}</span>
+                    <span className="plan-day-date num">{day.dayOfMonth}</span>
+                  </p>
+                </div>
+                <span aria-hidden="true" className="skeleton plan-day-placeholder" />
+              </li>
+            );
+          })}
+        </ol>
+      )}
 
-                    return (
-                      <PlanEntryCard
-                        draggable={isBoard}
-                        entry={entry}
-                        fallbackServings={defaultServingsFor(recipe)}
-                        key={entry.id}
-                        onAction={handleEntryAction}
-                        onServingsChange={handleServingsChange}
-                        recipe={recipe}
-                      />
-                    );
-                  })}
-                </ul>
-              ) : (
-                <button
-                  className="plan-day-empty"
-                  onClick={() => setPicker({ date, slot: "dinner" })}
-                  type="button"
-                >
-                  <Icon className="plan-day-empty-icon" name="plus" size={16} />
-                  <span>{isPast ? "Nothing planned" : "Plan a meal"}</span>
-                </button>
-              )}
-            </li>
-          );
-        })}
-      </ol>
+      {/* A separate list from the skeleton, so the real board arrives as new content (no shift). */}
+      {ready ? (
+        <ol aria-label={`${title} ${accent}`} className="plan-days">
+          {dates.map((date) => {
+            const day = getDayLabel(date);
+            const entries = plan.days.find((bucket) => bucket.date === date)?.entries ?? [];
+            const isToday = date === todayKey;
+            const isPast = date < todayKey;
+
+            return (
+              <li
+                className={[
+                  "plan-day",
+                  isToday ? "is-today" : "",
+                  isPast ? "is-past" : "",
+                  entries.length === 0 ? "is-empty" : "",
+                  dropDate === date ? "is-drop-target" : ""
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
+                key={date}
+                onDragLeave={
+                  isBoard
+                    ? (event) => {
+                        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                          setDropDate((current) => (current === date ? null : current));
+                        }
+                      }
+                    : undefined
+                }
+                onDragOver={
+                  isBoard
+                    ? (event) => {
+                        if (event.dataTransfer.types.includes(PLAN_ENTRY_DRAG_TYPE)) {
+                          event.preventDefault();
+                          event.dataTransfer.dropEffect = "move";
+                          setDropDate(date);
+                        }
+                      }
+                    : undefined
+                }
+                onDrop={isBoard ? (event) => handleDrop(event, date) : undefined}
+              >
+                <div className="plan-day-header">
+                  <h2 className="plan-day-heading">
+                    <span aria-hidden="true" className="plan-day-name">
+                      {day.weekday}
+                    </span>
+                    <span aria-hidden="true" className="plan-day-date num">
+                      {day.dayOfMonth}
+                    </span>
+                    {/* Today is the ringed day; a dot (not a pill that collided with +). */}
+                    {isToday ? (
+                      <span className="plan-day-today" title="Today">
+                        <span className="sr-only">Today</span>
+                      </span>
+                    ) : null}
+                    <span className="sr-only">{day.long}</span>
+                  </h2>
+                  <IconButton
+                    aria-label={`Add a meal to ${day.long}`}
+                    className="plan-day-add"
+                    icon="plus"
+                    onClick={() => setPicker({ date, slot: suggestSlot(entries) })}
+                    size="sm"
+                    variant={isToday ? "filled" : "tonal"}
+                  />
+                </div>
+                {entries.length > 0 ? (
+                  <ul className="plan-day-entries">
+                    {entries.map((entry) => {
+                      const recipe = entry.recipeId ? recipesById.get(entry.recipeId) : undefined;
+
+                      return (
+                        <PlanEntryCard
+                          draggable={isBoard}
+                          entry={entry}
+                          fallbackServings={defaultServingsFor(recipe)}
+                          key={entry.id}
+                          onAction={handleEntryAction}
+                          onServingsChange={handleServingsChange}
+                          recipe={recipe}
+                        />
+                      );
+                    })}
+                  </ul>
+                ) : (
+                  <button
+                    className="plan-day-empty"
+                    onClick={() => setPicker({ date, slot: "dinner" })}
+                    type="button"
+                  >
+                    <Icon className="plan-day-empty-icon" name="plus" size={16} />
+                    <span>{isPast ? "Nothing planned" : "Plan a meal"}</span>
+                  </button>
+                )}
+              </li>
+            );
+          })}
+        </ol>
+      ) : null}
 
       {picker ? (
         <RecipePickerSheet

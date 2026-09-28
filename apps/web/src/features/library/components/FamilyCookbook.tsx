@@ -20,12 +20,12 @@ import {
   LibraryToolbar
 } from "./LibraryResultsParts";
 import { SharedRecipeTile } from "./SharedRecipeTile";
-import { searchRecords, useRecipeSearchIndex } from "./use-library-search";
+import { recipeSearchKey, searchRecords, useRecipeSearchIndex } from "./use-library-search";
 
 import type { TextHighlighter } from "./HighlightedText";
 import type { LibrarySort, LibrarySortDirection, LibraryView } from "./library-model";
 import type { SharedRecipeAction } from "./SharedRecipeTile";
-import type { SearchEngine } from "./use-library-search";
+import type { SearchEngine, SearchIndexBuilder } from "./use-library-search";
 import type { SharedRecipesState } from "./use-shared-recipes";
 import type { SharedRecipe } from "@linkdish/api-contracts";
 import type { RecipeSearchFields } from "@linkdish/recipe-domain";
@@ -34,11 +34,11 @@ const PRIORITY_CARD_COUNT = 6;
 
 const getId = (recipe: SharedRecipe) => recipe.id;
 const getSignature = (recipe: SharedRecipe): readonly unknown[] => [
-  recipe.recipe,
+  recipeSearchKey(recipe.recipe),
   recipe.notes,
   recipe.ownerDisplayName
 ];
-const getFields = (engine: SearchEngine, recipe: SharedRecipe): RecipeSearchFields => {
+const getFields = (engine: SearchIndexBuilder, recipe: SharedRecipe): RecipeSearchFields => {
   const fields = engine.recipeSearchFields(recipe.recipe, { notes: recipe.notes });
   const source = [fields.source, getSharedRecipeOwnerLabel(recipe)]
     .flat()
@@ -91,7 +91,12 @@ export const FamilyCookbook: React.FC<FamilyCookbookProps> = ({
   const [pendingUnshare, setPendingUnshare] = useState<SharedRecipe | null>(null);
   const [removing, setRemoving] = useState(false);
   const effectiveSort = FAMILY_SORTS.has(sort) ? sort : "recent";
-  const search = useRecipeSearchIndex(engine, shared.recipes, { getFields, getId, getSignature });
+  const search = useRecipeSearchIndex(engine, shared.recipes, {
+    cacheKey: "family",
+    getFields,
+    getId,
+    getSignature
+  });
 
   const visible = useMemo(
     () =>

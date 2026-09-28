@@ -8,6 +8,8 @@ import type { ImportKind } from "./import-outcome";
 
 export interface ExtractionStage {
   label: string;
+  /** One word for the progress track under the headline ("Fetching", "Reading", "Tidying"). */
+  step: string;
   /** A little kitchen flavour under the stage label. */
   detail: string;
   /** When this stage starts, in milliseconds after the import began. */
@@ -17,10 +19,16 @@ export interface ExtractionStage {
 /** After this long an import is slower than usual and we say so (with a way out). */
 export const SLOW_IMPORT_MS = 12_000;
 
-const stage = (label: string, detail: string, startsAtMs: number): ExtractionStage => ({
+const stage = (
+  label: string,
+  step: string,
+  detail: string,
+  startsAtMs: number
+): ExtractionStage => ({
   detail,
   label,
-  startsAtMs
+  startsAtMs,
+  step
 });
 
 export const getExtractionStages = (
@@ -29,32 +37,32 @@ export const getExtractionStages = (
 ): readonly ExtractionStage[] => {
   if (kind === "images") {
     return [
-      stage("Sending your photos", "Warming up the oven…", 0),
-      stage("Reading the recipe", "Squinting at the handwriting…", 2_500),
-      stage("Tidying up", "Plating your recipe…", 11_000)
+      stage("Sending your photos", "Sending", "Warming up the oven…", 0),
+      stage("Reading the recipe", "Reading", "Squinting at the handwriting…", 2_500),
+      stage("Tidying up", "Tidying", "Plating your recipe…", 11_000)
     ];
   }
 
   if (kind === "text") {
     return [
-      stage("Reading your text", "Skimming for the good stuff…", 0),
-      stage("Finding the recipe", "Sorting ingredients from steps…", 2_000),
-      stage("Tidying up", "Plating your recipe…", 9_000)
+      stage("Reading your text", "Reading", "Skimming for the good stuff…", 0),
+      stage("Finding the recipe", "Sorting", "Sorting ingredients from steps…", 2_000),
+      stage("Tidying up", "Tidying", "Plating your recipe…", 9_000)
     ];
   }
 
   if (attempt === "fallback") {
     return [
-      stage("Taking a closer look", "Rolling up our sleeves…", 0),
-      stage("Reading it with AI help", "Chopping it down to the good stuff…", 2_500),
-      stage("Tidying up", "Plating your recipe…", 12_000)
+      stage("Taking a closer look", "Looking", "Rolling up our sleeves…", 0),
+      stage("Reading it with AI help", "Reading", "Chopping it down to the good stuff…", 2_500),
+      stage("Tidying up", "Tidying", "Plating your recipe…", 12_000)
     ];
   }
 
   return [
-    stage("Fetching the page", "Skimming off the ads…", 0),
-    stage("Reading the recipe", "Chopping it down to the good stuff…", 2_200),
-    stage("Tidying up", "Tasting for seasoning…", 5_500)
+    stage("Fetching the page", "Fetching", "Skimming off the ads…", 0),
+    stage("Reading the recipe", "Reading", "Chopping it down to the good stuff…", 2_200),
+    stage("Tidying up", "Tidying", "Tasting for seasoning…", 5_500)
   ];
 };
 

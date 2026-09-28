@@ -7,8 +7,8 @@ import { RecipeCard } from "../../../components/RecipeCard";
 import { getSharedRecipeOwnerLabel } from "../saved-recipe-store";
 
 import { HighlightedText } from "./HighlightedText";
-import { formatRecipeMeta, normalizeText } from "./library-model";
-import { CompactRecipeMeta } from "./RecipeMeta";
+import { normalizeText } from "./library-model";
+import { CompactRecipeMeta, RecipeMetaLine } from "./RecipeMeta";
 
 import type { TextHighlighter } from "./HighlightedText";
 import type { LibraryView } from "./library-model";
@@ -94,7 +94,7 @@ const SharedRecipeTileComponent: React.FC<SharedRecipeTileProps> = ({
       }
       meta={
         view === "list" ? (
-          formatRecipeMeta(recipe.recipe, { includeSource: true })
+          <RecipeMetaLine recipe={recipe.recipe} />
         ) : (
           <CompactRecipeMeta recipe={recipe.recipe} />
         )
