@@ -20,6 +20,7 @@ import { useAccount } from "../account/AccountContext";
 import {
   addShoppingItemsToList,
   applyRemoteShoppingItems,
+  belongsToOtherHousehold,
   clearCheckedShoppingItemsInList,
   deleteShoppingItemInList,
   getSyncableDirtyItems,
@@ -27,6 +28,7 @@ import {
   markShoppingItemsSyncFailed,
   readShoppingItems,
   serializeShoppingItems,
+  setAsideShoppingItems,
   setShoppingItemCheckedInList,
   sortShoppingItems,
   toApiShoppingItem,
@@ -83,6 +85,62 @@ const getShoppingErrorMessage = (error: unknown): string => {
 const isHouseholdAccessError = (error: unknown): boolean =>
   error instanceof ExtractorApiError && (error.statusCode === 403 || error.statusCode === 404);
 
+const OTHER_HOUSEHOLD_ITEM_PATTERN = /item belongs to another household/iu;
+
+/**
+ * The API refuses a whole batch (403) when any item in it is stored in another household. Other
+ * refusals (not in a household, signed out) are about the account, not an item.
+ */
+const isOtherHouseholdItemError = (error: unknown): boolean => {
+  if (!(error instanceof ExtractorApiError) || error.statusCode !== 403) {
+    return false;
+  }
+
+  const { message } = (error.details ?? {}) as { message?: unknown };
+  return [error.serverMessage, message].some(
+    (text) => typeof text === "string" && OTHER_HOUSEHOLD_ITEM_PATTERN.test(text)
+  );
+};
+
+/**
+ * Sends `items` with `send`. A batch refused because it holds another household's item is halved
+ * until that item is found, so one foreign item can't block the rest of the list (or the pull
+ * after it). Returns each accepted batch's result and the refused ids; any other failure throws.
+ */
+const sendIsolatingOtherHouseholdItems = async <Item extends { id: string }, Result>(
+  items: readonly Item[],
+  send: (batch: Item[]) => Promise<Result>
+): Promise<{ refusedIds: Set<string>; results: Result[] }> => {
+  const refusedIds = new Set<string>();
+  const results: Result[] = [];
+  const sendBatch = async (batch: Item[]): Promise<void> => {
+    try {
+      results.push(await send(batch));
+    } catch (error) {
+      const [only] = batch;
+
+      if (!isOtherHouseholdItemError(error) || !only) {
+        throw error;
+      }
+
+      if (batch.length === 1) {
+        refusedIds.add(only.id);
+        return;
+      }
+
+      const middle = Math.ceil(batch.length / 2);
+      await sendBatch(batch.slice(0, middle));
+      await sendBatch(batch.slice(middle));
+    }
+  };
+
+  if (items.length > 0) {
+    await sendBatch([...items]);
+  }
+
+  return { refusedIds, results };
+};
+
 interface SyncLoopState {
   loop: Promise<void> | null;
   pending: boolean;
@@ -114,6 +172,7 @@ export const ShoppingListProvider = ({ children }: PropsWithChildren) => {
     canSyncShoppingList,
     client,
     hasLoadedShoppingItems,
+    householdId: activeHouseholdId ?? undefined,
     isSignedIn,
     userId: user?.id
   });
@@ -121,6 +180,7 @@ export const ShoppingListProvider = ({ children }: PropsWithChildren) => {
     canSyncShoppingList,
     client,
     hasLoadedShoppingItems,
+    householdId: activeHouseholdId ?? undefined,
     isSignedIn,
     userId: user?.id
   };
@@ -205,7 +265,12 @@ export const ShoppingListProvider = ({ children }: PropsWithChildren) => {
     writer.schedule(shoppingItems);
   }, [hasLoadedShoppingItems, hasUnreadableStoredItems, shoppingItems, writer]);
 
-  /** One pass: push dirty items (and tombstones), then pull when asked or when needed. */
+  /**
+   * One pass: push dirty items (and tombstones), then pull when asked or when needed. Changes
+   * are only sent to the household they belong to: another household's (someone else signed in
+   * on this device, or the account moved) are set aside on this device instead, and so are items
+   * the API refuses as another household's.
+   */
   const runSyncPass = useCallback(
     async (pull: boolean): Promise<void> => {
       const { client: apiClient, isSignedIn: signedIn, userId } = latestRef.current;
@@ -243,7 +308,18 @@ export const ShoppingListProvider = ({ children }: PropsWithChildren) => {
         return;
       }
 
-      const syncableDirtyItems = getSyncableDirtyItems(shoppingItemsRef.current);
+      const pendingItems = getSyncableDirtyItems(shoppingItemsRef.current);
+      const otherHouseholdIds = new Set(
+        pendingItems
+          .filter((item) => belongsToOtherHousehold(item, householdId))
+          .map((item) => item.id)
+      );
+
+      if (otherHouseholdIds.size > 0) {
+        commitShoppingItems((current) => setAsideShoppingItems(current, otherHouseholdIds));
+      }
+
+      const syncableDirtyItems = pendingItems.filter((item) => !otherHouseholdIds.has(item.id));
       const dirtyUpserts = syncableDirtyItems.filter((item) => !item.isDeleted);
       const dirtyDeletes = syncableDirtyItems.filter((item) => item.isDeleted);
 
@@ -255,39 +331,44 @@ export const ShoppingListProvider = ({ children }: PropsWithChildren) => {
       const failedIds = new Set(syncableDirtyItems.map((item) => item.id));
 
       try {
-        let remoteItems: ShoppingItem[] | null = null;
-        let deletedItemIds: string[] = [];
-
-        if (dirtyUpserts.length > 0) {
-          const upserted = await apiClient.upsertShoppingItems({
-            items: dirtyUpserts.map(toApiShoppingItem)
-          });
-          remoteItems = upserted.items;
-        }
-
-        if (dirtyDeletes.length > 0) {
-          const deleted = await apiClient.deleteShoppingItems({
-            items: dirtyDeletes.map((item) => ({
+        const upserts = await sendIsolatingOtherHouseholdItems(dirtyUpserts, (batch) =>
+          apiClient.upsertShoppingItems({ items: batch.map(toApiShoppingItem) })
+        );
+        const deletes = await sendIsolatingOtherHouseholdItems(dirtyDeletes, (batch) =>
+          apiClient.deleteShoppingItems({
+            items: batch.map((item) => ({
               id: item.id,
               updatedAt: item.updatedAt
             }))
-          });
-          deletedItemIds = deleted.deletedItemIds;
-        }
+          })
+        );
+        // Every upsert answers with the whole household list, so the last one is the newest.
+        let remoteItems: ShoppingItem[] | null =
+          upserts.results[upserts.results.length - 1]?.items ?? null;
 
         if (pull && remoteItems == null) {
           remoteItems = (await apiClient.getShoppingList()).items;
         }
 
         const syncedAt = new Date().toISOString();
-        const deletedIds = new Set(deletedItemIds);
+        const deletedIds = new Set(deletes.results.flatMap((result) => result.deletedItemIds));
+        const refusedIds = new Set([...upserts.refusedIds, ...deletes.refusedIds]);
         const remoteAfterDeletes = remoteItems?.filter((item) => !deletedIds.has(item.id)) ?? null;
 
         commitShoppingItems((current) => {
-          const withoutDeleted = current.filter((item) => !deletedIds.has(item.id));
-          const marked = markShoppingItemsSynced(withoutDeleted, pushedVersions, syncedAt);
+          const withoutDeleted = setAsideShoppingItems(current, refusedIds).filter(
+            (item) => !deletedIds.has(item.id)
+          );
+          const marked = markShoppingItemsSynced(
+            withoutDeleted,
+            pushedVersions,
+            syncedAt,
+            householdId
+          );
           return sortShoppingItems(
-            remoteAfterDeletes ? applyRemoteShoppingItems(marked, remoteAfterDeletes) : marked
+            remoteAfterDeletes
+              ? applyRemoteShoppingItems(marked, remoteAfterDeletes, householdId)
+              : marked
           );
         });
         setShoppingError(null);
@@ -428,9 +509,11 @@ export const ShoppingListProvider = ({ children }: PropsWithChildren) => {
         return;
       }
 
-      const { canSyncShoppingList: canSync, userId } = latestRef.current;
+      const { canSyncShoppingList: canSync, householdId, userId } = latestRef.current;
       applyMutation((current) =>
-        sortShoppingItems(addShoppingItemsToList(current, filteredInputs, { canSync, userId }))
+        sortShoppingItems(
+          addShoppingItemsToList(current, filteredInputs, { canSync, householdId, userId })
+        )
       );
 
       trackMobileEvent({
@@ -447,9 +530,9 @@ export const ShoppingListProvider = ({ children }: PropsWithChildren) => {
 
   const setItemChecked = useCallback(
     (id: string, checked: boolean) => {
-      const { canSyncShoppingList: canSync, userId } = latestRef.current;
+      const { canSyncShoppingList: canSync, householdId, userId } = latestRef.current;
       applyMutation((current) =>
-        setShoppingItemCheckedInList(current, id, checked, { canSync, userId })
+        setShoppingItemCheckedInList(current, id, checked, { canSync, householdId, userId })
       );
 
       if (checked) {
@@ -467,15 +550,19 @@ export const ShoppingListProvider = ({ children }: PropsWithChildren) => {
 
   const deleteItem = useCallback(
     (id: string) => {
-      const { canSyncShoppingList: canSync, userId } = latestRef.current;
-      applyMutation((current) => deleteShoppingItemInList(current, id, { canSync, userId }));
+      const { canSyncShoppingList: canSync, householdId, userId } = latestRef.current;
+      applyMutation((current) =>
+        deleteShoppingItemInList(current, id, { canSync, householdId, userId })
+      );
     },
     [applyMutation]
   );
 
   const clearCheckedItems = useCallback(() => {
-    const { canSyncShoppingList: canSync, userId } = latestRef.current;
-    applyMutation((current) => clearCheckedShoppingItemsInList(current, { canSync, userId }));
+    const { canSyncShoppingList: canSync, householdId, userId } = latestRef.current;
+    applyMutation((current) =>
+      clearCheckedShoppingItemsInList(current, { canSync, householdId, userId })
+    );
   }, [applyMutation]);
 
   const visibleShoppingItems = useMemo(

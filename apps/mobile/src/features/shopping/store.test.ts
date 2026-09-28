@@ -4,7 +4,9 @@ import { describe, expect, it } from "vitest";
 import {
   addShoppingItemsToList,
   applyRemoteShoppingItems,
+  belongsToOtherHousehold,
   clearCheckedShoppingItemsInList,
+  deleteShoppingItemInList,
   getSyncableDirtyItems,
   groupShoppingItemsByAisle,
   markShoppingItemsSynced,
@@ -13,6 +15,7 @@ import {
   readShoppingItems,
   recipeIngredientsToShoppingInputs,
   serializeShoppingItems,
+  setAsideShoppingItems,
   setShoppingItemCheckedInList,
   shoppingTextFromQuantity,
   toApiShoppingItem,
@@ -348,6 +351,102 @@ describe("shopping store helpers", () => {
       sync: { status: "dirty" },
       updatedAt: "2026-07-04T12:04:00.000Z"
     });
+  });
+
+  it("records the household an item belongs to without sending it", () => {
+    const [eggs] = addShoppingItemsToList([], [{ text: "2 eggs" }], {
+      canSync: true,
+      householdId: "household_1",
+      now,
+      userId: "user_1"
+    });
+    expect(eggs?.sync).toEqual({ householdId: "household_1", status: "dirty" });
+    expect(toApiShoppingItem(eggs!)).not.toHaveProperty("sync");
+    expect(JSON.stringify(toApiShoppingItem(eggs!))).not.toContain("household_1");
+
+    // Signed out, or signed in to another household: still household_1's item.
+    const [checkedSignedOut] = setShoppingItemCheckedInList([eggs!], eggs!.id, true, {
+      canSync: false
+    });
+    expect(checkedSignedOut?.sync).toEqual({ householdId: "household_1", status: "local_only" });
+    const [checkedElsewhere] = setShoppingItemCheckedInList([eggs!], eggs!.id, true, {
+      canSync: true,
+      householdId: "household_2"
+    });
+    expect(checkedElsewhere?.sync).toEqual({ householdId: "household_1", status: "dirty" });
+    const [mergedElsewhere] = addShoppingItemsToList([eggs!], [{ text: "1 egg" }], {
+      canSync: true,
+      householdId: "household_2"
+    });
+    expect(mergedElsewhere).toMatchObject({
+      id: eggs!.id,
+      qty: 3,
+      sync: { householdId: "household_1", status: "dirty" }
+    });
+    const [deletedElsewhere] = deleteShoppingItemInList([eggs!], eggs!.id, {
+      canSync: true,
+      householdId: "household_2"
+    });
+    expect(deletedElsewhere?.sync).toEqual({ householdId: "household_1", status: "dirty" });
+    expect(belongsToOtherHousehold(checkedElsewhere!, "household_2")).toBe(true);
+    expect(belongsToOtherHousehold(checkedElsewhere!, "household_1")).toBe(false);
+
+    // Items without a household (stored before it was recorded, or added signed out) join the
+    // household the list syncs with; synced copies record the household they came from.
+    const legacy = buildItem({ id: "legacy", sync: { status: "synced" } });
+    expect(belongsToOtherHousehold(legacy, "household_2")).toBe(false);
+    expect(
+      setShoppingItemCheckedInList([legacy], "legacy", true, {
+        canSync: true,
+        householdId: "household_2"
+      })[0]?.sync
+    ).toEqual({ householdId: "household_2", status: "dirty" });
+    expect(
+      applyRemoteShoppingItems([], [toApiShoppingItem(legacy)], "household_2")[0]?.sync
+    ).toEqual({ householdId: "household_2", lastSyncedAt: now, status: "synced" });
+    expect(
+      markShoppingItemsSynced([legacy], new Map([["legacy", now]]), now, "household_2")[0]?.sync
+    ).toEqual({ householdId: "household_2", lastSyncedAt: now, status: "synced" });
+  });
+
+  it("sets another household's unsent changes aside as new local-only items", () => {
+    const items = [
+      buildItem({ id: "edited", sync: { householdId: "household_1", status: "sync_failed" } }),
+      buildItem({
+        deletedAt: now,
+        id: "deleted",
+        isDeleted: true,
+        sync: { householdId: "household_1", status: "dirty" }
+      }),
+      buildItem({ id: "mine", sync: { householdId: "household_2", status: "dirty" } })
+    ];
+
+    const setAside = setAsideShoppingItems(items, new Set(["edited", "deleted"]), now);
+
+    expect(setAside).toHaveLength(2);
+    expect(setAside[0]).toEqual({
+      ...items[0],
+      id: setAside[0]?.id,
+      sync: { status: "local_only" }
+    });
+    expect(setAside[0]?.id).not.toBe("edited");
+    expect(setAside[1]).toBe(items[2]);
+    expect(getSyncableDirtyItems(setAside).map((item) => item.id)).toEqual(["mine"]);
+    expect(setAsideShoppingItems(items, new Set())).toBe(items);
+  });
+
+  it("reads the recorded household back, and older stored items without one", () => {
+    const stored = [
+      buildItem({ id: "a", sync: { householdId: "household_1", status: "synced" } }),
+      buildItem({ id: "b", sync: { status: "dirty" } }),
+      { ...buildItem({ id: "c" }), sync: { householdId: 42, status: "dirty" } }
+    ];
+
+    expect(parseShoppingItems(JSON.stringify(stored)).map((item) => item.sync)).toEqual([
+      { householdId: "household_1", status: "synced" },
+      { status: "dirty" },
+      { status: "dirty" }
+    ]);
   });
 
   it("builds add-from-recipe inputs with the active scale factor", () => {
