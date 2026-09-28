@@ -41,14 +41,18 @@
     transform var(--transition-fast);
 }
 
-.btn:hover {
-  text-decoration: none;
+@media (hover: hover) {
+  .btn:hover {
+    text-decoration: none;
+  }
 }
 
-.btn:hover:not(:disabled) {
-  border-color: var(--btn-border-hover);
-  background: var(--btn-bg-hover);
-  color: var(--btn-fg-hover);
+@media (hover: hover) {
+  .btn:hover:not(:disabled) {
+    border-color: var(--btn-border-hover);
+    background: var(--btn-bg-hover);
+    color: var(--btn-fg-hover);
+  }
 }
 
 .btn:active:not(:disabled) {
@@ -115,8 +119,10 @@
   --btn-shadow: var(--shadow-primary);
 }
 
-.btn-primary:hover:not(:disabled) {
-  transform: translateY(-1px);
+@media (hover: hover) {
+  .btn-primary:hover:not(:disabled) {
+    transform: translateY(-1px);
+  }
 }
 
 .btn-primary:active:not(:disabled) {
@@ -131,8 +137,10 @@
   --btn-shadow: var(--shadow-tomato);
 }
 
-.btn-accent:hover:not(:disabled) {
-  transform: translateY(-1px);
+@media (hover: hover) {
+  .btn-accent:hover:not(:disabled) {
+    transform: translateY(-1px);
+  }
 }
 
 .btn-secondary {

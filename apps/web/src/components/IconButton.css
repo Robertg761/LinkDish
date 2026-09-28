@@ -33,9 +33,11 @@
   content: "";
 }
 
-.icon-btn:hover:not(:disabled) {
-  background: var(--icon-btn-bg-hover);
-  color: var(--icon-btn-fg-hover);
+@media (hover: hover) {
+  .icon-btn:hover:not(:disabled) {
+    background: var(--icon-btn-bg-hover);
+    color: var(--icon-btn-fg-hover);
+  }
 }
 
 .icon-btn:active:not(:disabled) {
