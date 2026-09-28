@@ -800,7 +800,7 @@
   list-style: none;
 }
 
-/* Recipe sections share the .recipe-card name; keep these rows as plain list rows. */
+/* Keep recent-import cards as plain list rows. */
 .import-recent .recipe-card-list,
 .import-outcome-recipe .recipe-card-list {
   padding: 8px;

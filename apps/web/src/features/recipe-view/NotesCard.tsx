@@ -61,7 +61,7 @@ export const NotesCard: React.FC<NotesCardProps> = ({ notes, onSave }) => {
   return (
     <section
       aria-labelledby={headingId}
-      className={`recipe-card notes-card${trimmed ? "" : " print-hide"}`}
+      className={`recipe-panel notes-card${trimmed ? "" : " print-hide"}`}
     >
       <div className="notes-card-header">
         <h2 className="recipe-section-title" id={headingId}>

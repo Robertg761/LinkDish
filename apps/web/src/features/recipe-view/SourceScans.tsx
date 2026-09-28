@@ -20,7 +20,7 @@ export const SourceScans: React.FC<{ images: readonly ExtractRecipeImage[] | und
   const openImage = openIndex == null ? undefined : images[openIndex];
 
   return (
-    <section aria-labelledby="recipe-source-scans" className="recipe-card source-scans print-hide">
+    <section aria-labelledby="recipe-source-scans" className="recipe-panel source-scans print-hide">
       <h2 className="recipe-section-title" id="recipe-source-scans">
         <Icon name="images" size={18} /> Your photos
       </h2>

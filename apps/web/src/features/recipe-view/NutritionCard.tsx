@@ -19,7 +19,7 @@ export const NutritionCard: React.FC<{ nutrition: Recipe["nutrition"] }> = ({ nu
   const calories = entries.find((entry) => entry.key === "calories");
 
   return (
-    <details className="recipe-card nutrition-card">
+    <details className="recipe-panel nutrition-card">
       <summary className="nutrition-card-summary">
         <span className="recipe-section-title">
           <Icon name="leaf" size={18} /> Nutrition

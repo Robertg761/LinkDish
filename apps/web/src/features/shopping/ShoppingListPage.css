@@ -81,7 +81,7 @@
 /* ------------------------------ Add bar -------------------------------- */
 .shopping-toolbar {
   position: sticky;
-  top: 0;
+  top: var(--app-sticky-top, 0px);
   z-index: var(--z-sticky);
   margin: 0 calc(-1 * var(--page-gutter));
   padding: calc(8px + env(safe-area-inset-top, 0px)) var(--page-gutter) 14px;

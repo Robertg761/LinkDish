@@ -4,6 +4,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { getLegacySessionToken, setLegacySessionToken } from "./auth-storage";
 import { AuthProvider } from "./AuthProvider";
+import {
+  publishClerkState,
+  registerClerkControls,
+  requestClerk,
+  resetClerkBridgeForTests
+} from "./clerk-bridge";
 
 const apiClientMocks = vi.hoisted(() => ({
   getAuthConfig: vi.fn(),
@@ -19,29 +25,21 @@ vi.mock("../api/client", () => ({
   registerAuthTokenProvider: apiClientMocks.registerAuthTokenProvider
 }));
 
-const clerkMocks = vi.hoisted(() => ({
-  auth: {
-    getToken: vi.fn(),
-    isLoaded: true,
-    isSignedIn: true,
-    signOut: vi.fn()
-  },
-  signIn: {
-    isLoaded: true,
-    signIn: {
-      authenticateWithRedirect: vi.fn()
-    }
-  }
-}));
+// The Clerk bridge chunk is never rendered here; these tests drive the bridge store directly.
+vi.mock("@clerk/clerk-react", () => {
+  throw new Error("AuthProvider must not import @clerk/clerk-react");
+});
 
-vi.mock("@clerk/clerk-react", () => ({
-  useAuth: () => clerkMocks.auth,
-  useSignIn: () => clerkMocks.signIn
-}));
+const clerkControls = {
+  authenticateWithRedirect: vi.fn(),
+  getToken: vi.fn<() => Promise<string | null>>(),
+  signOut: vi.fn()
+};
 
 describe("AuthProvider Clerk token bridge", () => {
   beforeEach(() => {
     localStorage.clear();
+    resetClerkBridgeForTests();
     vi.stubEnv("VITE_CLERK_PUBLISHABLE_KEY", "pk_test");
     apiClientMocks.getAuthConfig.mockReset();
     apiClientMocks.getAuthConfig.mockResolvedValue({
@@ -54,19 +52,22 @@ describe("AuthProvider Clerk token bridge", () => {
       authenticated: false
     });
     apiClientMocks.registerAuthTokenProvider.mockReset();
-    clerkMocks.auth.getToken.mockReset();
-    clerkMocks.auth.getToken.mockResolvedValue(null);
-    clerkMocks.auth.isSignedIn = true;
-    clerkMocks.auth.signOut.mockReset();
+    clerkControls.getToken.mockReset();
+    clerkControls.getToken.mockResolvedValue(null);
+    clerkControls.signOut.mockReset();
   });
 
   afterEach(() => {
     vi.unstubAllEnvs();
     localStorage.clear();
+    resetClerkBridgeForTests();
   });
 
   it("does not use a stale legacy email-code token when Clerk is signed in", async () => {
     setLegacySessionToken("legacy_account_a_token");
+    requestClerk("session_hint");
+    registerClerkControls(clerkControls);
+    publishClerkState({ isLoaded: true, isSignedIn: true, signInReady: true });
 
     render(
       <AuthProvider>
@@ -83,6 +84,51 @@ describe("AuthProvider Clerk token bridge", () => {
       | undefined;
 
     await expect(tokenProvider?.()).resolves.toBeNull();
+    expect(clerkControls.getToken).toHaveBeenCalled();
     expect(getLegacySessionToken()).toBeNull();
+  });
+
+  it("sends the Clerk token once the bridge reports a signed-in session", async () => {
+    clerkControls.getToken.mockResolvedValue("clerk_jwt");
+    requestClerk("session_hint");
+    registerClerkControls(clerkControls);
+    publishClerkState({ isLoaded: true, isSignedIn: true, signInReady: true });
+
+    render(
+      <AuthProvider>
+        <div>auth child</div>
+      </AuthProvider>
+    );
+
+    await waitFor(() => {
+      expect(apiClientMocks.registerAuthTokenProvider).toHaveBeenCalled();
+    });
+
+    const tokenProvider = apiClientMocks.registerAuthTokenProvider.mock.calls.at(-1)?.[0] as
+      | (() => Promise<string | null>)
+      | undefined;
+
+    await expect(tokenProvider?.()).resolves.toBe("clerk_jwt");
+  });
+
+  it("falls back to the legacy token while Clerk is not mounted", async () => {
+    setLegacySessionToken("legacy_token");
+
+    render(
+      <AuthProvider>
+        <div>auth child</div>
+      </AuthProvider>
+    );
+
+    await waitFor(() => {
+      expect(apiClientMocks.registerAuthTokenProvider).toHaveBeenCalled();
+    });
+
+    const tokenProvider = apiClientMocks.registerAuthTokenProvider.mock.calls.at(-1)?.[0] as
+      | (() => Promise<string | null>)
+      | undefined;
+
+    await expect(tokenProvider?.()).resolves.toBe("legacy_token");
+    expect(clerkControls.getToken).not.toHaveBeenCalled();
   });
 });

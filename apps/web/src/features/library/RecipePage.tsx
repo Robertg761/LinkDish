@@ -411,6 +411,18 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
     setSearchParams(next, { replace: true });
   }, [canEdit, searchParams, setSearchParams]);
 
+  // The command palette's "Start cooking" links here with ?cook=1.
+  useEffect(() => {
+    if (searchParams.get("cook") !== "1") {
+      return;
+    }
+
+    setCookOpen(true);
+    const next = new URLSearchParams(searchParams);
+    next.delete("cook");
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
+
   /* ----------------------------------- actions ----------------------------------- */
 
   const openShoppingSheet = useCallback(async () => {

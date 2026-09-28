@@ -4,16 +4,20 @@ import React, {
   useContext,
   useEffect,
   useLayoutEffect,
+  useRef,
   useState
 } from "react";
 import { createPortal } from "react-dom";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
+import { preloadCommandPalette } from "../features/command-palette/CommandCenter";
 import { FirstRunOnboardingSheet } from "../features/onboarding/FirstRunOnboardingSheet";
 import { requestCommandPalette } from "../lib/command-palette-events";
 import { SAVE_FEEDBACK_EVENT } from "../lib/delight-events";
+import { paletteShortcutLabel, RAIL_SHORTCUTS } from "../lib/shortcuts";
 import { RAIL_MEDIA_QUERY, useMediaQuery } from "../lib/use-media-query";
 import { lazyWithRetry } from "../platform/lazy";
+import { useOnlineStatus } from "../platform/online-status";
 import { OptionalChunkBoundary } from "../platform/OptionalChunkBoundary";
 
 import { getAppRouteMeta } from "./app-route-meta";
@@ -66,12 +70,60 @@ const prefersReducedMotion = () => {
   }
 };
 
-const isMacLike = () => {
-  try {
-    return /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent);
-  } catch {
-    return false;
-  }
+/** How long "Back online" stays up after the connection returns. */
+const BACK_ONLINE_MS = 3000;
+
+/** Key caps shown on hover/focus of a rail destination ("G then C"). */
+const RailShortcutHint: React.FC<{ keys: readonly string[] }> = ({ keys }) => (
+  <span className="app-nav-shortcut" aria-hidden="true">
+    {keys.map((key) => (
+      <kbd key={key}>{key}</kbd>
+    ))}
+  </span>
+);
+
+/**
+ * A slim bar while the browser is offline ("your recipes still work": the cookbook lives on the
+ * device), then a brief "Back online".
+ */
+const OfflineBanner: React.FC = () => {
+  const online = useOnlineStatus();
+  const [showBackOnline, setShowBackOnline] = useState(false);
+  const wasOfflineRef = useRef(!online);
+
+  useEffect(() => {
+    if (!online) {
+      wasOfflineRef.current = true;
+      setShowBackOnline(false);
+      return;
+    }
+
+    if (!wasOfflineRef.current) {
+      return;
+    }
+
+    wasOfflineRef.current = false;
+    setShowBackOnline(true);
+    const timer = window.setTimeout(() => setShowBackOnline(false), BACK_ONLINE_MS);
+    return () => window.clearTimeout(timer);
+  }, [online]);
+
+  const visible = !online || showBackOnline;
+
+  return (
+    <div
+      className={`app-offline-banner${visible ? " is-visible" : ""}${online ? " is-online" : ""}`}
+      data-testid="offline-banner"
+      role="status"
+    >
+      {visible ? (
+        <p className="app-offline-banner-text">
+          <Icon name={online ? "check-circle" : "wifi-off"} size={16} strokeWidth={2.2} />
+          {online ? "Back online" : "You're offline — your recipes still work"}
+        </p>
+      ) : null}
+    </div>
+  );
 };
 
 // Kitchen timers float above the tab bar on every page; the dock loads after first paint.
@@ -99,7 +151,10 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
   const location = useLocation();
   const routeMeta = getAppRouteMeta(location.pathname);
   const showTopBar = !routeMeta.isDestination;
-  const shortcutLabel = isMacLike() ? "⌘K" : "Ctrl K";
+  const shortcutLabel = paletteShortcutLabel();
+  // The page a visit lands on appears as-is; entrance animations are for in-app navigation.
+  const initialKeyRef = useRef(location.key);
+  const isInitialView = location.key === initialKeyRef.current;
   // Phones get a bottom tab bar with a raised center Add button; from 1024px the same
   // nav becomes a side rail with Add as its primary button.
   const isRail = useMediaQuery(RAIL_MEDIA_QUERY);
@@ -193,6 +248,7 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
       <li className={`app-nav-item app-nav-item-${item.section}`} key={item.section}>
         <Link
           aria-current={active ? "page" : undefined}
+          aria-keyshortcuts={isRail ? RAIL_SHORTCUTS[item.to]?.aria : undefined}
           aria-label={item.ariaLabel}
           className={[
             "app-nav-link",
@@ -209,6 +265,9 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
             <Icon name={item.icon} size={isAdd ? 26 : 22} strokeWidth={isAdd ? 2.4 : 2} />
           </span>
           <span className="app-nav-label">{item.label}</span>
+          {isRail && RAIL_SHORTCUTS[item.to] ? (
+            <RailShortcutHint keys={RAIL_SHORTCUTS[item.to]?.keys ?? []} />
+          ) : null}
         </Link>
       </li>
     );
@@ -243,8 +302,10 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
               {addItem ? (
                 <Link
                   aria-current={routeMeta.section === "add" ? "page" : undefined}
+                  aria-keyshortcuts="N"
                   aria-label={addItem.ariaLabel}
                   className={`app-nav-add-button${routeMeta.section === "add" ? " is-active" : ""}`}
+                  title="Add recipe (N)"
                   to={addItem.to}
                 >
                   <Icon name="plus" size={20} strokeWidth={2.4} />
@@ -253,8 +314,11 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
               ) : null}
 
               <button
+                aria-keyshortcuts={shortcutLabel.startsWith("⌘") ? "Meta+K" : "Control+K"}
                 className="app-nav-search"
                 onClick={() => requestCommandPalette({ source: "rail_search" })}
+                onFocus={preloadCommandPalette}
+                onPointerEnter={preloadCommandPalette}
                 type="button"
               >
                 <Icon name="search" size={18} />
@@ -292,6 +356,8 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
       )}
 
       <div className="app-main-column">
+        <OfflineBanner />
+
         {showTopBar ? (
           <header className={`app-topbar${topBarScrolled ? " is-scrolled" : ""}`}>
             <button
@@ -303,12 +369,31 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
               <Icon name="chevron-left" size={24} />
             </button>
             <p className="app-topbar-title">{routeMeta.title}</p>
-            <div className="app-topbar-actions" ref={setTopBarActionsTarget} />
+            <div className="app-topbar-actions">
+              <div className="app-topbar-page-actions" ref={setTopBarActionsTarget} />
+              {!isRail ? (
+                <button
+                  aria-label="Search recipes and commands"
+                  className="app-topbar-icon app-topbar-search"
+                  onClick={() => requestCommandPalette({ source: "topbar_search" })}
+                  onFocus={preloadCommandPalette}
+                  onPointerDown={preloadCommandPalette}
+                  type="button"
+                >
+                  <Icon name="search" size={21} />
+                </button>
+              ) : null}
+            </div>
           </header>
         ) : null}
 
         <TopBarActionsContext.Provider value={showTopBar ? topBarActionsTarget : null}>
-          <main className="app-shell-content" id="main-content" tabIndex={-1}>
+          <main
+            className="app-shell-content"
+            data-initial-view={isInitialView ? "" : undefined}
+            id="main-content"
+            tabIndex={-1}
+          >
             {children}
           </main>
         </TopBarActionsContext.Provider>

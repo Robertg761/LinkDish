@@ -4,8 +4,8 @@
   gap: 28px;
 }
 
-/* Shared chrome for recipe sections */
-.recipe-card {
+/* Shared chrome for recipe sections (not the RecipeCard component, which owns .recipe-card) */
+.recipe-panel {
   padding: 18px;
   border: 1px solid var(--color-border-subtle);
   border-radius: var(--radius-card);
@@ -133,7 +133,7 @@
 
   .recipe-view-ingredients {
     position: sticky;
-    top: calc(var(--topbar-height) + 16px);
+    top: calc(var(--app-sticky-top, 0px) + var(--topbar-height) + 16px);
   }
 
   .recipe-view-ingredients-card {
@@ -199,7 +199,7 @@
     gap: 14px;
   }
 
-  .recipe-card {
+  .recipe-panel {
     padding: 0;
     border: 0;
     background: none;

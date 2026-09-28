@@ -300,7 +300,6 @@
     --color-butter: #e9bd5a;
     --color-butter-soft: #3a3020;
     --color-on-butter: #2a200a;
-  --color-on-butter-soft: #f2d387;
     --color-on-butter-soft: #f2d387;
 
     --color-success: #8fd0a8;
@@ -383,6 +382,7 @@
   --color-butter: #e9bd5a;
   --color-butter-soft: #3a3020;
   --color-on-butter: #2a200a;
+  --color-on-butter-soft: #f2d387;
 
   --color-success: #8fd0a8;
   --color-success-soft: #22352a;

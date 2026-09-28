@@ -2,14 +2,207 @@ import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
 
+import type { HtmlTagDescriptor, Plugin, Rollup } from "vite";
+
+type ManualChunkMeta = Parameters<Rollup.GetManualChunk>[1];
+type OutputChunk = Rollup.OutputChunk;
+
 /** Brand canvas (#fbf7f0): splash background and browser chrome for the installed app. */
 const BRAND_CANVAS = "#f4efe7";
+
+/**
+ * The entry chunk holds only the app shell; every page is its own chunk. Most visits start on
+ * the Cookbook (/), so its chunk, the chunks it imports and its stylesheet are preloaded from
+ * index.html and download alongside the entry instead of after it. (main.tsx also imports the
+ * landing route's chunk before React renders, for every route.)
+ */
+const preloadLandingRoute = (routeModule: string): Plugin => ({
+  name: "linkdish:preload-landing-route",
+  apply: "build",
+  transformIndexHtml: {
+    order: "post",
+    handler(_html, context) {
+      const bundle: Rollup.OutputBundle | undefined = context.bundle;
+      const entry = context.chunk;
+
+      if (!bundle || !entry) {
+        return [];
+      }
+
+      const chunks = new Map(
+        Object.values(bundle)
+          .filter((output): output is OutputChunk => output.type === "chunk")
+          .map((chunk) => [chunk.fileName, chunk])
+      );
+      // The chunk that holds the route module (Vite's import-analysis leaves it without a facade).
+      const route = [...chunks.values()].find((chunk) =>
+        chunk.moduleIds.some((id) => id.replaceAll("\\", "/").endsWith(routeModule))
+      );
+
+      if (!route) {
+        throw new Error(`preloadLandingRoute: no chunk contains ${routeModule}`);
+      }
+
+      // Everything the entry already loads (statically) needs no extra hint.
+      const loadedWithEntry = new Set<string>();
+      const markEntryGraph = (fileName: string) => {
+        if (loadedWithEntry.has(fileName)) {
+          return;
+        }
+
+        loadedWithEntry.add(fileName);
+        chunks.get(fileName)?.imports.forEach(markEntryGraph);
+      };
+      markEntryGraph(entry.fileName);
+
+      const scripts: string[] = [];
+      const styles = new Set<string>();
+      const seen = new Set<string>();
+      const visit = (fileName: string) => {
+        const chunk = chunks.get(fileName);
+
+        if (!chunk || seen.has(fileName) || loadedWithEntry.has(fileName)) {
+          return;
+        }
+
+        seen.add(fileName);
+        scripts.push(fileName);
+        chunk.viteMetadata?.importedCss.forEach((css) => styles.add(css));
+        chunk.imports.forEach(visit);
+      };
+      visit(route.fileName);
+
+      const tags: HtmlTagDescriptor[] = [
+        ...scripts.map(
+          (fileName): HtmlTagDescriptor => ({
+            attrs: {
+              crossorigin: "",
+              fetchpriority: "low",
+              href: `/${fileName}`,
+              rel: "modulepreload"
+            },
+            injectTo: "head",
+            tag: "link"
+          })
+        ),
+        ...[...styles].map(
+          (fileName): HtmlTagDescriptor => ({
+            attrs: {
+              as: "style",
+              crossorigin: "",
+              fetchpriority: "low",
+              href: `/${fileName}`,
+              rel: "preload"
+            },
+            injectTo: "head",
+            tag: "link"
+          })
+        )
+      ];
+
+      return tags;
+    }
+  }
+});
+
+/** Shared building blocks of the pages: components, stores, storage and helpers. */
+const APP_SHARED_PATTERN =
+  /\/apps\/web\/src\/(?:components|data|storage|api|platform|preferences)\/|\/apps\/web\/src\/features\/library\/saved-recipe-(?:store|types)\.ts$|\/node_modules\/idb\//u;
+/** The small, zod-free recipe-domain formatters the Cookbook and recipe pages share. */
+const DOMAIN_CORE_PATTERN =
+  /\/packages\/recipe-domain\/src\/(?:durations|urls|servings|quantity-format|number-phrases|inflection|units|format-internal)\.ts$/u;
+
+/**
+ * Without this, every shared component or store a page imports becomes its own tiny chunk (and
+ * stylesheet): the Cookbook alone needed 20 scripts and 10 stylesheets. Shared page code is
+ * grouped instead: what the landing page (the Cookbook) and the boot-time lazy UI use goes in
+ * `app-core`, the rest of the shared building blocks in `app-shared`, and the small domain
+ * formatters in `domain-core`. Modules the entry loads stay in the entry, and modules only ever
+ * imported lazily (pages, sheets) keep their own chunks.
+ */
+const createManualChunks = (bootModules: readonly string[]): Rollup.GetManualChunk => {
+  let entryGraph: Set<string> | null = null;
+  let landingGraph: Set<string> | null = null;
+
+  const collectStaticGraph = (meta: ManualChunkMeta, roots: string[]): Set<string> => {
+    const graph = new Set<string>();
+    const visit = (id: string) => {
+      if (graph.has(id)) {
+        return;
+      }
+
+      graph.add(id);
+      meta.getModuleInfo(id)?.importedIds.forEach(visit);
+    };
+
+    roots.forEach(visit);
+    return graph;
+  };
+
+  const sharedChunkFor = (id: string, meta: ManualChunkMeta): string | undefined => {
+    const path = id.replaceAll("\\", "/");
+    const info = meta.getModuleInfo(id);
+
+    // Entry code stays in the entry; modules only ever imported lazily keep their own chunks.
+    if (entryGraph?.has(id) || !info || info.importers.length === 0) {
+      return undefined;
+    }
+
+    if (path.endsWith(".css")) {
+      // A stylesheet follows its component, so a page's own CSS never lands in a shared chunk.
+      const owners = new Set(info.importers.map((importer) => sharedChunkFor(importer, meta)));
+      return owners.size === 1 ? [...owners][0] : undefined;
+    }
+
+    if (APP_SHARED_PATTERN.test(path)) {
+      return landingGraph?.has(id) ? "app-core" : "app-shared";
+    }
+
+    return DOMAIN_CORE_PATTERN.test(path) ? "domain-core" : undefined;
+  };
+
+  return (id, meta) => {
+    if (!entryGraph || !landingGraph) {
+      const moduleIds = [...meta.getModuleIds()];
+      entryGraph = collectStaticGraph(
+        meta,
+        moduleIds.filter((moduleId) => meta.getModuleInfo(moduleId)?.isEntry)
+      );
+      landingGraph = collectStaticGraph(
+        meta,
+        moduleIds.filter((moduleId) =>
+          bootModules.some((bootModule) => moduleId.replaceAll("\\", "/").endsWith(bootModule))
+        )
+      );
+    }
+
+    // Named explicitly: Rollup moves a manual chunk's dependencies into it unless they belong to
+    // another manual chunk, which would otherwise drag shell code (React, the router) along.
+    if (entryGraph.has(id)) {
+      return "index";
+    }
+
+    return sharedChunkFor(id, meta);
+  };
+};
+
+/** The page most visits start on; see preloadLandingRoute and app/routes.ts. */
+const LANDING_ROUTE_MODULE = "/src/features/library/LibraryPage.tsx";
+/** Lazy UI the shell loads on every visit (the kitchen timer dock), grouped with the landing page. */
+const BOOT_LAZY_MODULES = ["/src/features/cook-mode/TimerDock.tsx"];
 
 export default defineConfig({
   test: {
     environment: "jsdom",
     setupFiles: "./src/test/setup.ts",
     globals: true
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: createManualChunks([LANDING_ROUTE_MODULE, ...BOOT_LAZY_MODULES])
+      }
+    }
   },
   server: {
     host: true,
@@ -23,8 +216,13 @@ export default defineConfig({
   },
   plugins: [
     react(),
+    preloadLandingRoute(LANDING_ROUTE_MODULE),
     VitePWA({
-      registerType: "autoUpdate",
+      // A new version waits until the reader says "Reload" (or navigates after ignoring the
+      // prompt), instead of swapping code under an open page. The app registers the worker
+      // itself (platform/app-update.ts via virtual:pwa-register) once the page is idle.
+      registerType: "prompt",
+      injectRegister: false,
       // The plugin generates /manifest.webmanifest (there is no hand-written copy in public/).
       manifest: {
         name: "LinkDish",

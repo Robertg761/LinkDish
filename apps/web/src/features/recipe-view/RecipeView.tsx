@@ -154,7 +154,7 @@ export const RecipeView: React.FC<RecipeViewProps> = ({
 
       <div className="recipe-view-body">
         <section aria-labelledby={ingredientsHeadingId} className="recipe-view-ingredients">
-          <div className="recipe-card recipe-view-ingredients-card">
+          <div className="recipe-panel recipe-view-ingredients-card">
             <div className="recipe-section-header">
               <h2 className="recipe-section-title" id={ingredientsHeadingId}>
                 Ingredients
@@ -208,7 +208,7 @@ export const RecipeView: React.FC<RecipeViewProps> = ({
           <SourceScans images={sourceImages} />
 
           {warnings && warnings.length > 0 ? (
-            <section className="recipe-card recipe-view-warnings print-hide">
+            <section className="recipe-panel recipe-view-warnings print-hide">
               <h2 className="recipe-section-title">
                 <Icon name="info" size={18} /> Worth a double-check
               </h2>

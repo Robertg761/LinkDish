@@ -1,4 +1,3 @@
-import { AuthenticateWithRedirectCallback } from "@clerk/clerk-react";
 import React, { Suspense, useEffect } from "react";
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 
@@ -6,63 +5,32 @@ import { RouteAnalytics } from "../analytics/RouteAnalytics";
 import { getAppRouteMeta } from "../components/app-route-meta";
 import { AppShell } from "../components/AppShell";
 import { ErrorBoundary } from "../components/ErrorBoundary";
-import { LoadingState } from "../components/LoadingState";
 import { ToastProvider } from "../components/Toast";
-import { LibraryPage } from "../features/library/LibraryPage";
+import { CommandCenter } from "../features/command-palette/CommandCenter";
 import { UpgradeSheetProvider } from "../features/upgrade/UpgradeSheet";
 import { formatDocumentTitle } from "../lib/use-document-title";
-import { lazyWithRetry } from "../platform/lazy";
 import { initPreferences } from "../preferences/preferences-store";
 
+import { AppUpdatePrompt } from "./AppUpdatePrompt";
 import { AppProviders } from "./providers";
+import { RouteFallback } from "./RouteFallback";
+import {
+  AccountPage,
+  ExtractPage,
+  FeaturedRecipePage,
+  HouseholdPage,
+  InstallPage,
+  LibraryPage,
+  PlanPage,
+  PricingPage,
+  PrivacyPage,
+  RecipePage,
+  SettingsPage,
+  ShoppingListPage,
+  SsoCallbackPage,
+  SupportPage
+} from "./routes";
 import { ScrollManager } from "./ScrollManager";
-
-import type { LoadingStateVariant } from "../components/LoadingState";
-
-const AccountPage = lazyWithRetry(() =>
-  import("../features/account/AccountPage").then((module) => ({ default: module.AccountPage }))
-);
-const ExtractPage = lazyWithRetry(() =>
-  import("../features/extract/ExtractPage").then((module) => ({ default: module.ExtractPage }))
-);
-const FeaturedRecipePage = lazyWithRetry(() =>
-  import("../features/featured/FeaturedRecipePage").then((module) => ({
-    default: module.FeaturedRecipePage
-  }))
-);
-const HouseholdPage = lazyWithRetry(() =>
-  import("../features/household/HouseholdPage").then((module) => ({
-    default: module.HouseholdPage
-  }))
-);
-const InstallPage = lazyWithRetry(() =>
-  import("../features/install/InstallPage").then((module) => ({ default: module.InstallPage }))
-);
-const PlanPage = lazyWithRetry(() =>
-  import("../features/plan/PlanPage").then((module) => ({ default: module.PlanPage }))
-);
-const RecipePage = lazyWithRetry(() =>
-  import("../features/library/RecipePage").then((module) => ({ default: module.RecipePage }))
-);
-const PricingPage = lazyWithRetry(() =>
-  import("../features/pricing/PricingPage").then((module) => ({ default: module.PricingPage }))
-);
-const PrivacyPage = lazyWithRetry(() =>
-  import("../components/PrivacyPage").then((module) => ({ default: module.PrivacyPage }))
-);
-const SettingsPage = lazyWithRetry(() =>
-  import("../features/settings/SettingsPage").then((module) => ({
-    default: module.SettingsPage
-  }))
-);
-const ShoppingListPage = lazyWithRetry(() =>
-  import("../features/shopping/ShoppingListPage").then((module) => ({
-    default: module.ShoppingListPage
-  }))
-);
-const SupportPage = lazyWithRetry(() =>
-  import("../components/SupportPage").then((module) => ({ default: module.SupportPage }))
-);
 
 /**
  * Sets a sensible document.title for every route. It renders before the routes, so
@@ -78,23 +46,13 @@ const RouteDocumentTitle: React.FC = () => {
   return null;
 };
 
-const getSuspenseVariant = (pathname: string): LoadingStateVariant =>
-  pathname.startsWith("/recipes/") || pathname.startsWith("/featured/") ? "recipe" : "page";
-
 const AppRoutes: React.FC = () => {
   const location = useLocation();
 
   return (
     // Keyed by route so navigating away from a broken page clears the fallback.
     <ErrorBoundary key={location.pathname}>
-      <Suspense
-        fallback={
-          <LoadingState
-            message="Loading LinkDish..."
-            variant={getSuspenseVariant(location.pathname)}
-          />
-        }
-      >
+      <Suspense fallback={<RouteFallback pathname={location.pathname} />}>
         <Routes>
           <Route path="/" element={<LibraryPage />} />
           <Route path="/featured/:slug" element={<FeaturedRecipePage />} />
@@ -111,7 +69,7 @@ const AppRoutes: React.FC = () => {
           <Route path="/privacy" element={<PrivacyPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/support" element={<SupportPage />} />
-          <Route path="/sso-callback" element={<AuthenticateWithRedirectCallback />} />
+          <Route path="/sso-callback" element={<SsoCallbackPage />} />
 
           {/* Catch-all 404 handler redirecting to home */}
           <Route path="*" element={<Navigate to="/" replace />} />
@@ -129,8 +87,8 @@ export const App: React.FC = () => {
   }, []);
 
   return (
-    <AppProviders>
-      <BrowserRouter>
+    <BrowserRouter>
+      <AppProviders>
         <RouteAnalytics />
         <ScrollManager />
         <RouteDocumentTitle />
@@ -139,9 +97,11 @@ export const App: React.FC = () => {
             <AppShell>
               <AppRoutes />
             </AppShell>
+            <CommandCenter />
+            <AppUpdatePrompt />
           </UpgradeSheetProvider>
         </ToastProvider>
-      </BrowserRouter>
-    </AppProviders>
+      </AppProviders>
+    </BrowserRouter>
   );
 };
