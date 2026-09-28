@@ -199,12 +199,21 @@
     };
     var body = JSON.stringify({ events: [event] });
 
-    if (navigator.sendBeacon) {
-      navigator.sendBeacon(
-        apiBaseUrl + "/analytics/events",
-        new Blob([body], { type: "application/json" })
-      );
-      return;
+    // text/plain keeps the beacon a CORS "simple" request (no preflight; Chrome throws for a
+    // Blob type such as application/json) and the API parses the JSON text. A beacon the
+    // browser refuses or rejects falls back to a keepalive fetch.
+    try {
+      if (
+        navigator.sendBeacon &&
+        navigator.sendBeacon(
+          apiBaseUrl + "/analytics/events",
+          new Blob([body], { type: "text/plain;charset=UTF-8" })
+        )
+      ) {
+        return;
+      }
+    } catch (_error) {
+      // Fall through to fetch.
     }
 
     fetch(apiBaseUrl + "/analytics/events", {
