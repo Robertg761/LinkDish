@@ -26,6 +26,11 @@ export interface ShoppingSyncState {
   mode: ShoppingMode;
   /** True once we know (fresh or cached) whether this account shares a household list. */
   modeResolved: boolean;
+  /**
+   * The household the list syncs with (fresh or cached); null outside a household and until it
+   * is known. Nothing is sent without it, so changes only ever reach the household they belong to.
+   */
+  householdId: string | null;
   userId: string | null;
   phase: ShoppingSyncPhase;
   lastSyncedAt: number | null;
@@ -53,11 +58,14 @@ const POLL_INTERVAL_MS = 30_000;
 interface HouseholdCache {
   checkedAt: number;
   household: boolean;
+  /** Added later: caches written before it make the next sync check the household first. */
+  householdId?: string | undefined;
   userId: string;
 }
 
 const initialState: ShoppingSyncState = {
   error: null,
+  householdId: null,
   lastSyncedAt: null,
   mode: "local",
   modeResolved: false,
@@ -83,6 +91,8 @@ let householdInflightKey: string | null | undefined;
 let credentialsPending = false;
 /** A sync was asked for while auth was settling; it runs once it has. */
 let syncWhenReady = false;
+/** Why the last household check failed (cleared when one succeeds). */
+let householdCheckError: unknown = null;
 
 const setState = (patch: Partial<ShoppingSyncState>) => {
   state = { ...state, ...patch };
@@ -102,7 +112,13 @@ const readHouseholdCache = (): HouseholdCache | null => {
       typeof parsed.household === "boolean" &&
       typeof parsed.checkedAt === "number"
     ) {
-      return parsed as HouseholdCache;
+      const { checkedAt, household, householdId, userId } = parsed;
+      return {
+        checkedAt,
+        household,
+        userId,
+        ...(household && typeof householdId === "string" && householdId ? { householdId } : {})
+      };
     }
   } catch {
     // A corrupt cache only costs one network check.
@@ -114,6 +130,14 @@ const readHouseholdCache = (): HouseholdCache | null => {
 const writeHouseholdCache = (cache: HouseholdCache) => {
   safeSetItem(SHOPPING_HOUSEHOLD_CACHE_KEY, JSON.stringify(cache));
 };
+
+/** Mode and household from a cache entry for this account. */
+const cachedHouseholdState = (
+  cache: HouseholdCache
+): Pick<ShoppingSyncState, "householdId" | "mode"> => ({
+  householdId: cache.household ? (cache.householdId ?? null) : null,
+  mode: cache.household ? "household" : "local"
+});
 
 export const getShoppingSyncState = (): ShoppingSyncState => state;
 
@@ -127,6 +151,7 @@ export const subscribeShoppingSync = (listener: () => void): (() => void) => {
 /** Options for store writes: household items are marked for sync. */
 export const getShoppingWriteOptions = (): ShoppingWriteOptions => ({
   canSync: state.mode === "household",
+  ...(state.mode === "household" && state.householdId ? { householdId: state.householdId } : {}),
   ...(state.userId ? { userId: state.userId } : {})
 });
 
@@ -144,6 +169,7 @@ export function refreshShoppingHousehold(options: { force?: boolean } = {}): Pro
     !options.force &&
     cache?.userId === userId &&
     Date.now() - cache.checkedAt < HOUSEHOLD_TTL_MS &&
+    (!cache.household || Boolean(cache.householdId)) &&
     state.modeResolved
   ) {
     return Promise.resolve();
@@ -165,16 +191,29 @@ export function refreshShoppingHousehold(options: { force?: boolean } = {}): Pro
           return;
         }
 
-        const household = Boolean(response.household);
-        writeHouseholdCache({ checkedAt: Date.now(), household, userId });
-        const becameHousehold = household && state.mode !== "household";
-        setState({ mode: household ? "household" : "local", modeResolved: true });
+        const householdId = response.household?.id ?? null;
+        const household = householdId !== null;
+        householdCheckError = null;
+        writeHouseholdCache({
+          checkedAt: Date.now(),
+          household,
+          ...(householdId ? { householdId } : {}),
+          userId
+        });
+        // Joined one, or moved to another: sync now so the list follows the new household.
+        const householdChanged =
+          household &&
+          (state.mode !== "household" ||
+            (state.householdId !== null && state.householdId !== householdId));
+        setState({ householdId, mode: household ? "household" : "local", modeResolved: true });
 
-        if (becameHousehold && lifecycleUsers > 0) {
+        if (householdChanged && lifecycleUsers > 0) {
           void syncShoppingNow();
         }
       },
-      () => {
+      (error: unknown) => {
+        householdCheckError = error;
+
         if (state.userId === userId && !state.modeResolved) {
           // Unknown: keep working locally; the next focus retries.
           setState({ modeResolved: true });
@@ -208,11 +247,7 @@ export function setShoppingAccount(account: ShoppingAccount): void {
       accountConfigured = true;
 
       if (cache) {
-        setState({
-          mode: cache.household ? "household" : "local",
-          modeResolved: false,
-          userId: cache.userId
-        });
+        setState({ ...cachedHouseholdState(cache), modeResolved: false, userId: cache.userId });
       }
     }
 
@@ -226,7 +261,14 @@ export function setShoppingAccount(account: ShoppingAccount): void {
     syncWhenReady = false;
 
     if (state.userId !== null || !state.modeResolved || state.mode !== "local") {
-      setState({ error: null, mode: "local", modeResolved: true, phase: "idle", userId: null });
+      setState({
+        error: null,
+        householdId: null,
+        mode: "local",
+        modeResolved: true,
+        phase: "idle",
+        userId: null
+      });
     }
 
     return;
@@ -247,14 +289,16 @@ export function setShoppingAccount(account: ShoppingAccount): void {
     if (state.userId !== userId) {
       setState({
         error: null,
+        householdId: null,
         lastSyncedAt: null,
-        mode: cached?.household ? "household" : "local",
+        mode: "local",
+        ...(cached ? cachedHouseholdState(cached) : {}),
         modeResolved: Boolean(cached),
         phase: "idle",
         userId
       });
     } else if (cached && !state.modeResolved) {
-      setState({ mode: cached.household ? "household" : "local", modeResolved: true });
+      setState({ ...cachedHouseholdState(cached), modeResolved: true });
     }
 
     void refreshShoppingHousehold();
@@ -273,6 +317,31 @@ export function setShoppingAccount(account: ShoppingAccount): void {
 
 const classifyError = (error: unknown): ShoppingSyncPhase =>
   isOffline() || isNetworkError(error) || isTimeoutError(error) ? "offline" : "error";
+
+/**
+ * One sync with the household this device is in. Which household that is gets checked first
+ * when it isn't known yet (a cache from before household ids), since changes must only go to the
+ * household they belong to. Resolves false when the account turned out not to be in one.
+ */
+const syncWithHousehold = async (): Promise<boolean> => {
+  if (!state.householdId) {
+    await refreshShoppingHousehold({ force: true });
+  }
+
+  if (state.mode !== "household") {
+    return false;
+  }
+
+  if (!state.householdId) {
+    // Reported like the check's own failure (offline, timeout...) so the status reads right.
+    throw householdCheckError instanceof Error
+      ? householdCheckError
+      : new Error("We couldn't check your household.");
+  }
+
+  await syncShoppingItems({ canSync: true, householdId: state.householdId });
+  return true;
+};
 
 /** Pushes local changes and pulls the household list now (joining a sync already running). */
 export function syncShoppingNow(): Promise<void> {
@@ -297,10 +366,14 @@ export function syncShoppingNow(): Promise<void> {
 
   setState({ phase: "syncing" });
 
-  const run = syncShoppingItems({ canSync: true })
+  const run = syncWithHousehold()
     .then(
-      () => {
-        setState({ error: null, lastSyncedAt: Date.now(), phase: "synced" });
+      (synced) => {
+        setState(
+          synced
+            ? { error: null, lastSyncedAt: Date.now(), phase: "synced" }
+            : { error: null, phase: "idle" }
+        );
       },
       (error: unknown) => {
         setState({ error, phase: classifyError(error) });
@@ -455,6 +528,7 @@ export function resetShoppingSyncForTests(): void {
   credentialsKey = undefined;
   credentialsPending = false;
   syncWhenReady = false;
+  householdCheckError = null;
   accountConfigured = false;
   state = initialState;
   listeners.forEach((listener) => {

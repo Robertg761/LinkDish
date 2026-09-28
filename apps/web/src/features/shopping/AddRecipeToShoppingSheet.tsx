@@ -203,6 +203,7 @@ export const AddRecipeToShoppingSheet: React.FC<AddRecipeToShoppingSheetProps> =
       const defaults = getShoppingWriteOptions();
       const writeOptions = {
         canSync: canSync ?? defaults.canSync,
+        ...(defaults.householdId ? { householdId: defaults.householdId } : {}),
         ...((userId ?? defaults.userId) ? { userId: userId ?? defaults.userId } : {})
       };
       await addShoppingItems(selectedInputs, writeOptions);

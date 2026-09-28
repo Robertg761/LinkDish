@@ -2,6 +2,7 @@ import { upsertShoppingItemsRequestSchema } from "@linkdish/api-contracts";
 import { renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { ExtractorApiError } from "../../api/errors";
 import { getLinkDishWebDb, resetLinkDishWebDbForTests } from "../../storage/linkdish-db";
 import { fakeIdb } from "../../storage/testing/fake-idb";
 
@@ -32,7 +33,10 @@ import {
   type WebShoppingItem
 } from "./shopping-list-store";
 
-import type { UpsertShoppingItemsRequest } from "@linkdish/api-contracts";
+import type {
+  DeleteShoppingItemsRequest,
+  UpsertShoppingItemsRequest
+} from "@linkdish/api-contracts";
 import type { Recipe } from "@linkdish/recipe-domain";
 
 const apiMocks = vi.hoisted(() => ({
@@ -358,6 +362,105 @@ describe("shopping-list-store", () => {
     expect(items.every((item) => item.sync.status === "synced")).toBe(true);
   });
 
+  it("sets aside only the items the API says belong to another household", async () => {
+    const deletedAt = "2026-07-04T11:00:00.000Z";
+    // Written before items recorded their household, so only the API can tell they're foreign.
+    await putShoppingItems([
+      makeItem({ id: "foreign", text: "cream" }),
+      makeItem({ id: "mine", text: "jam" }),
+      makeItem({ id: "mine-2", text: "butter" }),
+      makeItem({ deletedAt, id: "foreign-gone", isDeleted: true, text: "salt" }),
+      makeItem({ deletedAt, id: "mine-gone", isDeleted: true, text: "pepper" })
+    ]);
+    const otherHousehold = new Set(["foreign", "foreign-gone"]);
+    const refuse = () =>
+      Promise.reject(
+        new ExtractorApiError(
+          "Extractor API request failed.",
+          403,
+          { message: "This shopping item belongs to another household." },
+          { serverMessage: "This shopping item belongs to another household." }
+        )
+      );
+    const server = new Map<string, UpsertShoppingItemsRequest["items"][number]>();
+    const deleted: string[] = [];
+    apiMocks.upsertShoppingItems.mockImplementation((input: UpsertShoppingItemsRequest) => {
+      if (input.items.some((item) => otherHousehold.has(item.id))) {
+        return refuse();
+      }
+
+      input.items.forEach((item) => server.set(item.id, item));
+      return Promise.resolve({ ignored: [], items: [...server.values()] });
+    });
+    apiMocks.deleteShoppingItems.mockImplementation((input: DeleteShoppingItemsRequest) => {
+      if (input.items.some((item) => otherHousehold.has(item.id))) {
+        return refuse();
+      }
+
+      deleted.push(...input.items.map((item) => item.id));
+      return Promise.resolve({
+        deletedItemIds: input.items.map((item) => item.id),
+        ignored: [],
+        status: "deleted"
+      });
+    });
+    apiMocks.getShoppingList.mockImplementation(() =>
+      Promise.resolve({ items: [...server.values()] })
+    );
+
+    await syncShoppingItems({ canSync: true, householdId: "h2" });
+
+    expect([...server.keys()].sort()).toEqual(["mine", "mine-2"]);
+    expect(deleted).toEqual(["mine-gone"]);
+    expect(apiMocks.getShoppingList).toHaveBeenCalledTimes(1);
+    const all = await getShoppingItems({ includeDeleted: true });
+    expect(all.map((item) => [item.text, item.sync.status, item.sync.householdId])).toEqual([
+      ["cream", "local_only", undefined],
+      ["jam", "synced", "h2"],
+      ["butter", "synced", "h2"]
+    ]);
+    expect(all[0]?.id).not.toBe("foreign");
+
+    // Nothing is left that would be refused again.
+    apiMocks.upsertShoppingItems.mockClear();
+    apiMocks.deleteShoppingItems.mockClear();
+    await syncShoppingItems({ canSync: true, householdId: "h2" });
+    expect(apiMocks.upsertShoppingItems).not.toHaveBeenCalled();
+    expect(apiMocks.deleteShoppingItems).not.toHaveBeenCalled();
+  });
+
+  it("keeps failing the sync, and every change, when the whole household is refused", async () => {
+    await putShoppingItems([makeItem({ id: "mine", text: "jam" })]);
+    const refused = new ExtractorApiError(
+      "Extractor API request failed.",
+      403,
+      { message: "An active LinkDish Family household is required." },
+      { serverMessage: "An active LinkDish Family household is required." }
+    );
+    apiMocks.upsertShoppingItems.mockRejectedValue(refused);
+
+    await expect(syncShoppingItems({ canSync: true, householdId: "h1" })).rejects.toBe(refused);
+
+    expect(apiMocks.upsertShoppingItems).toHaveBeenCalledTimes(1);
+    expect(await getShoppingItems()).toEqual([
+      expect.objectContaining({ id: "mine", sync: { status: "dirty" } })
+    ]);
+  });
+
+  it("records the household an item belongs to without sending it", async () => {
+    await addShoppingItems([{ text: "jam" }], { canSync: true, householdId: "h1", userId: "u1" });
+    const [jam] = await getShoppingItems();
+    expect(jam?.sync).toEqual({ householdId: "h1", status: "dirty" });
+
+    // Signed out: still h1's change, never re-homed by a local edit.
+    const edited = await updateShoppingItemFromLine(jam?.id ?? "", "2 jars jam", {
+      canSync: false
+    });
+    expect(edited?.sync).toEqual({ householdId: "h1", status: "dirty" });
+    expect(toApiShoppingItem(edited ?? makeItem({}))).not.toHaveProperty("sync");
+    expect(JSON.stringify(toApiShoppingItem(edited ?? makeItem({})))).not.toContain("h1");
+  });
+
   it("writes, re-renders and broadcasts nothing when the household list is unchanged", async () => {
     const postMessage = vi.fn();
     setShoppingChannelFactoryForTests(() => ({ close: vi.fn(), onmessage: null, postMessage }));
@@ -371,7 +474,7 @@ describe("shopping-list-store", () => {
       return Promise.resolve({ ignored: [], items: input.items });
     });
     apiMocks.getShoppingList.mockImplementation(() => Promise.resolve({ items: server }));
-    await syncShoppingItems({ canSync: true });
+    await syncShoppingItems({ canSync: true, householdId: "h1" });
     await loadShoppingList();
 
     const db = await getLinkDishWebDb();
@@ -380,7 +483,7 @@ describe("shopping-list-store", () => {
     postMessage.mockClear();
 
     // The 30-second poll: nothing to push, and the server returns exactly what we have.
-    await syncShoppingItems({ canSync: true });
+    await syncShoppingItems({ canSync: true, householdId: "h1" });
 
     expect(put).not.toHaveBeenCalled();
     expect(postMessage).not.toHaveBeenCalled();
