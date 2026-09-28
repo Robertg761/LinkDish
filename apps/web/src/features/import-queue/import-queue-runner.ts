@@ -4,6 +4,7 @@ import { apiClient } from "../../api/client";
 import { getFriendlyErrorMessage } from "../../api/error-message";
 import {
   claimNextQueuedImport,
+  holdImportForSave,
   IMPORT_CLAIM_RENEW_MS,
   markImportDone,
   markImportFailed,
@@ -11,7 +12,8 @@ import {
   recoverStaleImports,
   renewImportClaim,
   retryImport,
-  type ImportQueueItem
+  type ImportQueueItem,
+  type ImportQueuePendingSave
 } from "../../data/import-queue-store";
 import { getSavedRecipesSnapshot, loadSavedRecipes } from "../../data/library-store";
 import { isOnline } from "../../platform/detect-network";
@@ -43,6 +45,8 @@ import {
 } from "../library/saved-recipe-store";
 
 import type { WebBillingTier } from "../billing/web-billing";
+import type { SaveRecipeInput } from "../library/saved-recipe-store";
+import type { WebSavedRecipe } from "../library/saved-recipe-types";
 import type { ExtractRecipeResponse } from "@linkdish/api-contracts";
 import type { V2AnalyticsImportProperties } from "@linkdish/utils";
 
@@ -53,6 +57,10 @@ import type { V2AnalyticsImportProperties } from "@linkdish/utils";
  * queue with a plain reason; running out of room or imports pauses the queue instead. The runner
  * never opens UI itself: a pause shows up quietly in the queue panel, and the upgrade sheet opens
  * only when the cook taps it there.
+ *
+ * An import that worked but whose recipe couldn't be kept (the cookbook filled up meanwhile, or
+ * saving failed) is paid for, so its item keeps the recipe (see ImportQueuePendingSave), and from
+ * then on is only ever saved: no import is spent, or charged, on it twice.
  *
  * Each item is claimed for this tab before any work starts (see claimNextQueuedImport), so a
  * second tab working through the same queue never imports it again.
@@ -116,10 +124,132 @@ const extract = (
         { signal }
       );
 
+/** The cookbook as stored. Throws when it can't be read (the load itself never rejects). */
+const readCookbook = async (): Promise<readonly WebSavedRecipe[]> => {
+  await loadSavedRecipes();
+  const cookbook = getSavedRecipesSnapshot();
+
+  if (cookbook.status !== "ready") {
+    throw cookbook.error instanceof Error || cookbook.error instanceof DOMException
+      ? cookbook.error
+      : new Error("The cookbook couldn't be read.", { cause: cookbook.error });
+  }
+
+  return cookbook.data;
+};
+
+/**
+ * Whether the cookbook has room for one more recipe. Only a full cookbook says no; anything else
+ * (storage that can't be read) throws, and stops the run.
+ */
+const hasRoomToSave = async (tier: WebBillingTier): Promise<boolean> => {
+  try {
+    await assertCanAddSavedRecipe({ isPremiumUser: isPaid(tier) });
+    return true;
+  } catch (error) {
+    if (error instanceof SavedRecipeLimitError) {
+      return false;
+    }
+
+    throw error;
+  }
+};
+
+/**
+ * Saves an imported recipe and finishes its item. Should the cookbook be full after all (another
+ * tab took the last free slot since the room check), the item goes back in the queue with the
+ * recipe, in the same write that lets it go: the import is paid for, so making room saves it as
+ * it is, never importing it again.
+ */
+async function keepImportedRecipe(
+  item: ImportQueueItem,
+  imported: ImportQueuePendingSave,
+  context: QueueRunnerContext
+): Promise<QueueItemOutcome> {
+  const { isAuthenticated, owner, tier } = context;
+  const input: SaveRecipeInput = {
+    extraction: imported.extraction,
+    recipe: imported.recipe,
+    sourceUrl: imported.sourceUrl
+  };
+  const saved = await saveRecipe(input, isPaid(tier));
+
+  if (saved.error === "limit_exceeded") {
+    await holdImportForSave(item.id, imported, owner);
+    return { reason: "save_limit", status: "paused" };
+  }
+
+  if (saved.success && saved.recipe) {
+    trackWebV2AnalyticsEvent({
+      correlationId: imported.correlationId,
+      name: "recipe_saved",
+      properties: { source_type: getImportSourceType(input), surface: "import_result" },
+      routeOrScreen: IMPORT_ANALYTICS_ROUTE
+    });
+    markRecipeSaved();
+
+    if (isAuthenticated) {
+      void syncRecipeToHousehold(saved.recipe).catch(() => undefined);
+    }
+  }
+
+  // A duplicate_prompt means this exact recipe is already saved under the same id.
+  const recipeId =
+    saved.recipe?.id ?? (await generateDeterministicId(input.sourceUrl, input.recipe.title));
+  await markImportDone(item.id, { recipeId }, owner);
+  return { duplicate: !saved.success, recipeId, status: "done" };
+}
+
+/**
+ * Saves the recipe an earlier run imported but couldn't keep (see ImportQueuePendingSave). That
+ * import is paid for: nothing is imported or spent now. A recipe saved meanwhile (another tab
+ * imported the same link) finishes the item; a cookbook that is still full pauses it again.
+ */
+async function savePendingImport(
+  item: ImportQueueItem,
+  pending: ImportQueuePendingSave,
+  context: QueueRunnerContext
+): Promise<QueueItemOutcome> {
+  const { owner, signal, tier } = context;
+  const cookbook = await readCookbook();
+  const id = await generateDeterministicId(pending.sourceUrl, pending.recipe.title);
+  const existing =
+    cookbook.find((recipe) => recipe.id === id) ??
+    (item.url ? findSavedDuplicate(item.url, cookbook) : undefined);
+
+  if (existing) {
+    await markImportDone(item.id, { recipeId: existing.id }, owner);
+    return { duplicate: true, recipeId: existing.id, status: "done" };
+  }
+
+  if (!(await hasRoomToSave(tier))) {
+    await retryImport(item.id, owner);
+    return { reason: "save_limit", status: "paused" };
+  }
+
+  if (signal.aborted) {
+    await retryImport(item.id, owner);
+    return { status: "stopped" };
+  }
+
+  if (!(await markImportProcessing(item.id, owner))) {
+    return { status: "skipped" };
+  }
+
+  try {
+    return await keepImportedRecipe(item, pending, context);
+  } catch (error) {
+    // Keeping it didn't work (storage): it stays failed with the recipe, for Retry to save.
+    const message = getFriendlyErrorMessage(error, "save");
+    await markImportFailed(item.id, message, owner).catch(() => undefined);
+    return { message, status: "failed" };
+  }
+}
+
 /**
  * Processes one queued item, claimed for `context.owner`. Throws only on storage trouble while
- * nothing has been spent (e.g. the cookbook can't be read before the import starts); the caller
- * then lets the item go.
+ * nothing has been spent (e.g. the cookbook can't be read before the import starts, or before a
+ * recipe imported earlier is saved); the caller then lets the item go, with any such recipe.
  */
 export async function processImportQueueItem(
   item: ImportQueueItem,
@@ -127,19 +257,15 @@ export async function processImportQueueItem(
 ): Promise<QueueItemOutcome> {
   const { isAuthenticated, owner, signal, tier } = context;
 
-  // 1. Already saved? Nothing to import, nothing spent.
+  // Imported already, and paid for: it only needs saving.
+  if (item.pendingSave) {
+    return savePendingImport(item, item.pendingSave, context);
+  }
+
+  // 1. Already saved? Nothing to import, nothing spent. (An unreadable cookbook throws: importing
+  // now could spend one on a recipe we have.)
   if (item.url) {
-    await loadSavedRecipes();
-    const cookbook = getSavedRecipesSnapshot();
-
-    if (cookbook.status !== "ready") {
-      // Unreadable (the load never rejects): importing now could spend one on a recipe we have.
-      throw cookbook.error instanceof Error || cookbook.error instanceof DOMException
-        ? cookbook.error
-        : new Error("The cookbook couldn't be read.", { cause: cookbook.error });
-    }
-
-    const existing = findSavedDuplicate(item.url, cookbook.data);
+    const existing = findSavedDuplicate(item.url, await readCookbook());
 
     if (existing) {
       await markImportDone(item.id, { recipeId: existing.id }, owner);
@@ -147,15 +273,8 @@ export async function processImportQueueItem(
     }
   }
 
-  // 2. Room in the cookbook, before an import is spent on a recipe that can't be kept. Only a
-  // full cookbook pauses the queue; anything else (storage that can't be read) stops the run.
-  try {
-    await assertCanAddSavedRecipe({ isPremiumUser: isPaid(tier) });
-  } catch (error) {
-    if (!(error instanceof SavedRecipeLimitError)) {
-      throw error;
-    }
-
+  // 2. Room in the cookbook, before an import is spent on a recipe that can't be kept.
+  if (!(await hasRoomToSave(tier))) {
     await retryImport(item.id, owner);
     return { reason: "save_limit", status: "paused" };
   }
@@ -185,6 +304,10 @@ export async function processImportQueueItem(
   let properties = propertiesFor(item);
   let attempt: "primary" | "fallback" = item.url ? "primary" : "fallback";
   let terminal = false;
+  /** Set once the import worked (and is paid for): the item must not let go of it from then on. */
+  let imported: ImportQueuePendingSave | undefined;
+  const release = () =>
+    imported ? holdImportForSave(item.id, imported, owner) : retryImport(item.id, owner);
   const fail = async (failureProperties: Record<string, string | number>, message: string) => {
     terminal = true;
     trackWebV2AnalyticsEvent({
@@ -260,7 +383,8 @@ export async function processImportQueueItem(
         }
       }
 
-      const input = {
+      imported = {
+        correlationId,
         extraction: {
           fetchMode: response.extraction.fetchMode,
           provenance: response.extraction.provenance,
@@ -270,33 +394,7 @@ export async function processImportQueueItem(
         recipe: response.recipe,
         sourceUrl: item.url ?? response.recipe.sourceUrl
       };
-      const saved = await saveRecipe(input, isPaid(tier));
-
-      if (saved.error === "limit_exceeded") {
-        // Another tab took the last free slot after step 2: pause with the link still waiting,
-        // like step 2 does, so making room resumes it.
-        await retryImport(item.id, owner);
-        return { reason: "save_limit", status: "paused" };
-      }
-
-      if (saved.success && saved.recipe) {
-        trackWebV2AnalyticsEvent({
-          name: "recipe_saved",
-          properties: { source_type: getImportSourceType(input), surface: "import_result" },
-          routeOrScreen: IMPORT_ANALYTICS_ROUTE
-        });
-        markRecipeSaved();
-
-        if (isAuthenticated) {
-          void syncRecipeToHousehold(saved.recipe).catch(() => undefined);
-        }
-      }
-
-      // A duplicate_prompt means this exact recipe is already saved under the same id.
-      const recipeId =
-        saved.recipe?.id ?? (await generateDeterministicId(input.sourceUrl, input.recipe.title));
-      await markImportDone(item.id, { recipeId }, owner);
-      return { duplicate: !saved.success, recipeId, status: "done" };
+      return await keepImportedRecipe(item, imported, context);
     }
 
     if (response.status === "needs_retry") {
@@ -335,7 +433,7 @@ export async function processImportQueueItem(
         });
       }
 
-      await retryImport(item.id, owner);
+      await release();
       return { status: "stopped" };
     }
 
@@ -349,14 +447,15 @@ export async function processImportQueueItem(
         });
       }
 
-      await retryImport(item.id, owner);
+      await release();
       return { reason: "offline", status: "paused" };
     }
 
     if (terminal) {
-      // The import itself finished (and was recorded); keeping the recipe didn't work.
+      // The import itself finished (and was recorded); keeping the recipe didn't work. The item
+      // keeps the recipe, so Retry saves it without importing it again.
       const message = getFriendlyErrorMessage(error, "save");
-      await markImportFailed(item.id, message, owner).catch(() => undefined);
+      await markImportFailed(item.id, message, owner, imported).catch(() => undefined);
       return { message, status: "failed" };
     }
 
@@ -401,7 +500,7 @@ export async function runImportQueue(context: QueueRunnerContext): Promise<Queue
       outcome = await processImportQueueItem(next, itemContext);
     } catch (error) {
       // Storage trouble before the import started (nothing spent): let the item go for the next
-      // run, and stop this one.
+      // run (a recipe it waits to save stays with it), and stop this one.
       await retryImport(next.id, owner).catch(() => undefined);
       throw error;
     } finally {

@@ -12,6 +12,7 @@ import {
   enqueueImports,
   getImportQueue,
   getNextQueuedImport,
+  holdImportForSave,
   ImportQueueValidationError,
   markImportDone,
   markImportFailed,
@@ -24,6 +25,8 @@ import {
   STALE_PROCESSING_MS,
   useImportQueue
 } from "./import-queue-store";
+
+import type { ImportQueuePendingSave } from "./import-queue-store";
 
 vi.mock("idb", async () => (await import("../storage/testing/fake-idb")).fakeIdbModule);
 
@@ -308,6 +311,75 @@ describe("import-queue-store", () => {
     expect(await renewImportClaim(item.id, "tab-a")).toBeUndefined();
     expect(fakeIdb.record(IMPORT_QUEUE_STORE_NAME, item.id)).toMatchObject({ status: "queued" });
     expect(fakeIdb.record(IMPORT_QUEUE_STORE_NAME, item.id)).not.toHaveProperty("claimedBy");
+  });
+
+  describe("an item imported but not saved yet", () => {
+    const pendingSave = {
+      correlationId: "5d9a4b20-7e1f-4d5f-8fa2-838071ca35cb",
+      extraction: {
+        fetchMode: "http",
+        provenance: ["jsonld"],
+        strategy: "recipe-schema",
+        warnings: []
+      },
+      recipe: {
+        ingredients: [{ text: "1 onion" }],
+        sourceUrl: "https://example.com/soup",
+        steps: [{ index: 1, text: "Simmer." }],
+        title: "Onion soup"
+      },
+      sourceUrl: "https://example.com/soup"
+    } as unknown as ImportQueuePendingSave;
+
+    it("waits with its recipe through stale recovery, a failed save and Retry until it's done", async () => {
+      const item = await enqueueImport({ url: "https://example.com/soup" });
+      const start = Date.parse("2026-09-28T10:00:00.000Z");
+      await claimNextQueuedImport("tab-a", start);
+
+      // Only the tab holding it puts it back with the recipe, letting go of it in the same write.
+      expect(await holdImportForSave(item.id, pendingSave, "tab-b")).toBeUndefined();
+      const held = await holdImportForSave(item.id, pendingSave, "tab-a");
+      expect(held).toMatchObject({ pendingSave, status: "queued" });
+      expect(held).not.toHaveProperty("claimedBy");
+
+      // Claimed again, and recovered once that tab closed, it still has the recipe.
+      expect(await claimNextQueuedImport("tab-b", start)).toMatchObject({ pendingSave });
+      expect(await recoverStaleImports(start + STALE_PROCESSING_MS + 1)).toBe(1);
+      expect(fakeIdb.record(IMPORT_QUEUE_STORE_NAME, item.id)).toMatchObject({
+        pendingSave,
+        status: "queued"
+      });
+
+      // A save that didn't work keeps it, for Retry or for adding the link again.
+      await claimNextQueuedImport("tab-c");
+      expect(await markImportFailed(item.id, "The disk is full.", "tab-c")).toMatchObject({
+        pendingSave,
+        status: "failed"
+      });
+      expect(await retryImport(item.id)).toMatchObject({ pendingSave, status: "queued" });
+      await claimNextQueuedImport("tab-c");
+      await markImportFailed(item.id, "The disk is full.", "tab-c");
+      expect(await enqueueImport({ url: "https://example.com/soup" })).toMatchObject({
+        id: item.id,
+        pendingSave,
+        status: "queued"
+      });
+
+      // Saved: the recipe is in the cookbook now, not on the item.
+      await claimNextQueuedImport("tab-c");
+      const done = await markImportDone(item.id, { recipeId: "recipe-1" }, "tab-c");
+      expect(done).toMatchObject({ recipeId: "recipe-1", status: "done" });
+      expect(done).not.toHaveProperty("pendingSave");
+    });
+
+    it("is claimed ahead of older links, which may need an import there's none left of", async () => {
+      const older = await enqueueImport({ url: "https://example.com/stew" });
+      const waiting = await enqueueImport({ url: "https://example.com/soup" });
+      await holdImportForSave(waiting.id, pendingSave);
+
+      expect((await claimNextQueuedImport("tab-a"))?.id).toBe(waiting.id);
+      expect((await claimNextQueuedImport("tab-a"))?.id).toBe(older.id);
+    });
   });
 
   it("counts pending and failed items in the hook", async () => {

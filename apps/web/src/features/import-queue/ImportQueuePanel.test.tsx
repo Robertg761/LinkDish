@@ -156,6 +156,49 @@ describe("ImportQueuePanel", () => {
     );
   });
 
+  it("shows a recipe that's imported but waiting for room, without offering to import it again", async () => {
+    const pendingSave = {
+      correlationId: "5d9a4b20-7e1f-4d5f-8fa2-838071ca35cb",
+      extraction: {
+        fetchMode: "http",
+        provenance: ["jsonld"],
+        strategy: "recipe-schema",
+        warnings: []
+      },
+      recipe: { title: "Weeknight Rice" },
+      sourceUrl: "https://www.bonappetit.com/recipe/rice"
+    } as unknown as NonNullable<ImportQueueItem["pendingSave"]>;
+    fakeIdb.seed(IMPORT_QUEUE_STORE_NAME, [
+      item("a-waiting", { pendingSave, url: "https://www.bonappetit.com/recipe/rice" }),
+      item("b-saving", {
+        pendingSave: { ...pendingSave, recipe: { ...pendingSave.recipe, title: "Tomato Soup" } },
+        status: "processing",
+        url: "https://cooking.nytimes.com/recipes/soup"
+      }),
+      item("c-failed", {
+        error: "Your browser storage is full.",
+        pendingSave: { ...pendingSave, recipe: { ...pendingSave.recipe, title: "Pie" } },
+        status: "failed",
+        url: "https://www.seriouseats.com/pie"
+      })
+    ]);
+
+    renderPanel(runner({ paused: "save_limit" }));
+
+    const [waiting, saving, failed] = await screen.findAllByRole("listitem");
+    // The recipe is known: its title shows, not the site.
+    expect(waiting?.querySelector(".import-queue-item-title")).toHaveTextContent("Weeknight Rice");
+    expect(waiting?.querySelector(".import-queue-item-title")).not.toHaveClass("is-source");
+    expect(waiting).toHaveTextContent("Waiting for room · bonappetit.com");
+    expect(saving).toHaveTextContent("Saving…");
+    // Retry saves it; Open would import it (and spend an import) all over again.
+    expect(failed).toHaveTextContent("Pie");
+    expect(
+      within(failed as HTMLElement).getByRole("button", { name: "Retry seriouseats.com" })
+    ).toBeVisible();
+    expect(within(failed as HTMLElement).queryByRole("button", { name: "Open" })).toBeNull();
+  });
+
   it("keeps a waiting link that another tab started importing when Remove is tapped", async () => {
     const waiting = item("waiting", { url: "https://www.bonappetit.com/recipe/rice" });
     fakeIdb.seed(IMPORT_QUEUE_STORE_NAME, [waiting]);
