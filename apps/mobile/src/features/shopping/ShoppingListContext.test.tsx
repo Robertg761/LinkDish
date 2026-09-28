@@ -1,3 +1,4 @@
+import { ExtractorApiError } from "@linkdish/api-client";
 import React from "react";
 import { act, create } from "react-test-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -26,8 +27,8 @@ vi.mock("@react-native-async-storage/async-storage", () => ({
   default: asyncStorageMocks
 }));
 
-vi.mock("@linkdish/api-client", () => ({
-  ExtractorApiError: class ExtractorApiError extends Error {},
+vi.mock("@linkdish/api-client", async (importOriginal) => ({
+  ...(await importOriginal<typeof ApiClientModule>()),
   createExtractorApiClient: apiMocks.createExtractorApiClient
 }));
 
@@ -58,7 +59,10 @@ import {
   ShoppingListProvider,
   useShoppingList
 } from "./ShoppingListContext";
+import { setAsideShoppingItemId } from "./store";
 
+import type { MobileShoppingItem } from "./store";
+import type * as ApiClientModule from "@linkdish/api-client";
 import type { ShoppingItem } from "@linkdish/recipe-domain";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -386,5 +390,997 @@ describe("ShoppingListProvider household sync", () => {
       | { items: Array<{ id: string }> }
       | undefined;
     expect(deleteRequest?.items.map((item) => item.id)).toEqual(["a"]);
+  });
+});
+
+const OTHER_HOUSEHOLD_MESSAGE = "This shopping item belongs to another household.";
+
+/**
+ * The household list API as the server runs it: every item lives in one household, and a batch
+ * holding another household's item is refused whole (403) without writing anything.
+ */
+const createHouseholdServer = (records: Array<{ householdId: string; item: ShoppingItem }>) => {
+  const stored = new Map(records.map((record) => [record.item.id, record]));
+  /**
+   * Whose household requests reach (the signed-in account's; null when it isn't in one), and
+   * whether they reach it at all.
+   */
+  const session = { householdId: "household_1" as string | null, online: true };
+  /** The household each upsert or delete request reached, with the ids it carried. */
+  const requests: Array<{ householdId: string; ids: string[] }> = [];
+  const unreachable = () => Promise.reject(new TypeError("Network request failed"));
+  const listItems = () =>
+    [...stored.values()]
+      .filter((record) => record.householdId === session.householdId)
+      .map((record) => record.item);
+  const holdsForeignItem = (ids: string[]) =>
+    ids.some((id) => {
+      const record = stored.get(id);
+      return record !== undefined && record.householdId !== session.householdId;
+    });
+  const refuse = (message = OTHER_HOUSEHOLD_MESSAGE) =>
+    Promise.reject(new ExtractorApiError("Extractor API request failed.", 403, { message }));
+  const noHousehold = () => refuse("An active LinkDish Family household is required.");
+  const client = {
+    deleteShoppingItems: vi.fn(({ items }: { items: Array<{ id: string }> }) => {
+      const { householdId } = session;
+
+      if (!session.online) {
+        return unreachable();
+      }
+
+      if (!householdId) {
+        return noHousehold();
+      }
+
+      requests.push({ householdId, ids: items.map((item) => item.id) });
+
+      if (holdsForeignItem(items.map((item) => item.id))) {
+        return refuse();
+      }
+
+      items.forEach((item) => stored.delete(item.id));
+      return Promise.resolve({
+        deletedItemIds: items.map((item) => item.id),
+        ignored: [],
+        status: "deleted"
+      });
+    }),
+    getHousehold: vi.fn(() =>
+      session.online
+        ? Promise.resolve({ household: session.householdId ? { id: session.householdId } : null })
+        : unreachable()
+    ),
+    getShoppingList: vi.fn(() => {
+      if (!session.online) {
+        return unreachable();
+      }
+
+      return session.householdId ? Promise.resolve({ items: listItems() }) : noHousehold();
+    }),
+    upsertShoppingItems: vi.fn(({ items }: { items: ShoppingItem[] }) => {
+      const { householdId } = session;
+
+      if (!session.online) {
+        return unreachable();
+      }
+
+      if (!householdId) {
+        return noHousehold();
+      }
+
+      requests.push({ householdId, ids: items.map((item) => item.id) });
+
+      if (holdsForeignItem(items.map((item) => item.id))) {
+        return refuse();
+      }
+
+      items.forEach((item) => stored.set(item.id, { householdId, item: { ...item } }));
+      return Promise.resolve({ ignored: [], items: listItems() });
+    })
+  };
+  /** `userId` leaves its household: like the API, the list drops the lines it added there. */
+  const leave = (userId: string) => {
+    for (const [id, record] of stored) {
+      if (record.householdId === session.householdId && record.item.addedBy === userId) {
+        stored.delete(id);
+      }
+    }
+
+    session.householdId = null;
+  };
+
+  return { client, leave, requests, session, stored };
+};
+
+type HouseholdServer = ReturnType<typeof createHouseholdServer>;
+
+const switchAccount = async (
+  renderer: ReturnType<typeof create>,
+  user: { email: string; id: string } | null
+) => {
+  accountState.isSignedIn = user !== null;
+  accountState.user = user;
+
+  await act(async () => {
+    renderer.update(
+      <ShoppingListProvider>
+        <Probe />
+      </ShoppingListProvider>
+    );
+    await flushAsyncWork();
+  });
+  await act(async () => {
+    await flushAsyncWork();
+  });
+};
+
+/** Every id sent to the household list in upserts and deletes, in order. */
+const sentIds = (server: HouseholdServer) => [
+  ...server.client.upsertShoppingItems.mock.calls.flatMap(([input]) =>
+    input.items.map((item) => item.id)
+  ),
+  ...server.client.deleteShoppingItems.mock.calls.flatMap(([input]) =>
+    input.items.map((item) => item.id)
+  )
+];
+
+const listSummary = () =>
+  (latestShoppingList?.shoppingItems ?? [])
+    .map((item) => [item.text, item.checked, item.sync.status] as const)
+    .sort(([a], [b]) => a.localeCompare(b));
+
+/** Everything this device keeps, as last written (other households' records included). */
+const storedItems = async (): Promise<MobileShoppingItem[]> => {
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(SHOPPING_PERSIST_DEBOUNCE_MS);
+  });
+  const writes = shoppingWrites();
+  return JSON.parse(writes[writes.length - 1] ?? "[]") as MobileShoppingItem[];
+};
+
+/** Every item id that reached `householdId` in an upsert or delete request. */
+const idsSentTo = (server: HouseholdServer, householdId: string) =>
+  server.requests
+    .filter((request) => request.householdId === householdId)
+    .flatMap((request) => request.ids);
+
+/** Items a household holds on the server, as [text, qty, checked], in the order stored. */
+const householdItems = (server: HouseholdServer, householdId: string) =>
+  [...server.stored.values()]
+    .filter((record) => record.householdId === householdId)
+    .map((record) => [record.item.text, record.item.qty ?? null, record.item.checked] as const);
+
+describe("ShoppingListProvider across accounts on one device", () => {
+  const firstCook = { email: "first@example.com", id: "user_1" };
+  const nextCook = { email: "next@example.com", id: "user_2" };
+  const updatedAt = "2026-07-04T12:00:00.000Z";
+  const milk: ShoppingItem = {
+    addedBy: "user_1",
+    checked: false,
+    id: "milk",
+    text: "milk",
+    updatedAt
+  };
+  const bread: ShoppingItem = {
+    addedBy: "user_2",
+    checked: false,
+    id: "bread",
+    text: "bread",
+    updatedAt
+  };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    // Shortly after the stored changes below were made (other households' changes expire).
+    vi.setSystemTime(new Date("2026-07-04T13:00:00.000Z"));
+    latestShoppingList = null;
+    appStateMocks.listeners = [];
+    accountState.getAuthHeaders.mockReset();
+    accountState.getAuthHeaders.mockResolvedValue({});
+    accountState.isSignedIn = true;
+    accountState.user = firstCook;
+    asyncStorageMocks.getItem.mockReset();
+    asyncStorageMocks.getItem.mockResolvedValue(null);
+    asyncStorageMocks.setItem.mockReset();
+    asyncStorageMocks.setItem.mockResolvedValue(undefined);
+    apiMocks.createExtractorApiClient.mockReset();
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** Signed in to household_1, the first cook makes `edit` offline, then signs out. */
+  const leaveUnsentChange = async (server: HouseholdServer, edit: () => void) => {
+    apiMocks.createExtractorApiClient.mockReturnValue(server.client);
+    const renderer = await renderProvider();
+
+    await makeOfflineChange(server, edit);
+
+    await switchAccount(renderer, null);
+    return renderer;
+  };
+
+  /** `edit` is made while the household list can't be reached, so it stays unsent. */
+  const makeOfflineChange = async (server: HouseholdServer, edit: () => void) => {
+    server.session.online = false;
+    await act(async () => {
+      edit();
+      await vi.advanceTimersByTimeAsync(SHOPPING_SYNC_DEBOUNCE_MS);
+      await flushAsyncWork();
+    });
+    expect(latestShoppingList?.shoppingError).toBe("Network request failed");
+    server.session.online = true;
+  };
+
+  /** Signs whoever is signed in out, then `user` in to `householdId`. */
+  const signInTo = async (
+    renderer: ReturnType<typeof create>,
+    server: HouseholdServer,
+    user: { email: string; id: string },
+    householdId: string
+  ) => {
+    await switchAccount(renderer, null);
+    server.session.householdId = householdId;
+    await switchAccount(renderer, user);
+  };
+
+  it("never sends the last account's unsent change to the next account's household", async () => {
+    const server = createHouseholdServer([
+      { householdId: "household_1", item: milk },
+      { householdId: "household_2", item: bread }
+    ]);
+    const renderer = await leaveUnsentChange(server, () => {
+      latestShoppingList!.setItemChecked("milk", true);
+    });
+    const sentBefore = sentIds(server).length;
+
+    server.session.householdId = "household_2";
+    await switchAccount(renderer, nextCook);
+
+    // The check-off waits on this device for household_1, out of household_2's list, and
+    // doesn't block it.
+    expect(sentIds(server).slice(sentBefore)).toEqual([]);
+    expect(latestShoppingList?.shoppingError).toBeNull();
+    expect(listSummary()).toEqual([["bread", false, "synced"]]);
+    expect(server.stored.get("milk")).toEqual({ householdId: "household_1", item: milk });
+    expect((await storedItems()).find((item) => item.id === "milk")).toMatchObject({
+      checked: true,
+      sync: { householdId: "household_1", status: "sync_failed" }
+    });
+
+    // Nothing is sent that the household list would refuse.
+    await act(async () => {
+      await latestShoppingList!.refreshShoppingList();
+    });
+    expect(sentIds(server).slice(sentBefore)).toEqual([]);
+    expect(latestShoppingList?.shoppingError).toBeNull();
+  });
+
+  it("does not recreate the last account's items in the next account's household", async () => {
+    const server = createHouseholdServer([{ householdId: "household_1", item: milk }]);
+    const renderer = await leaveUnsentChange(server, () => {
+      latestShoppingList!.setItemChecked("milk", true);
+      latestShoppingList!.addItems([{ text: "2 eggs" }]);
+    });
+
+    // Another member of the first household deletes the milk meanwhile.
+    server.stored.delete("milk");
+    server.session.householdId = "household_2";
+    await switchAccount(renderer, nextCook);
+
+    expect([...server.stored.values()]).toEqual([]);
+    expect(latestShoppingList?.shoppingError).toBeNull();
+    expect(listSummary()).toEqual([]);
+    expect(
+      (await storedItems()).map((item) => [item.text, item.sync.householdId, item.sync.status])
+    ).toEqual(
+      expect.arrayContaining([
+        ["milk", "household_1", "sync_failed"],
+        ["eggs", "household_1", "sync_failed"]
+      ])
+    );
+  });
+
+  it("sends the last account's unsent edit to its household, once, when it signs back in", async () => {
+    const server = createHouseholdServer([
+      { householdId: "household_1", item: milk },
+      { householdId: "household_2", item: bread }
+    ]);
+    const renderer = await leaveUnsentChange(server, () => {
+      latestShoppingList!.setItemChecked("milk", true);
+    });
+
+    server.session.householdId = "household_2";
+    await switchAccount(renderer, nextCook);
+    expect(latestShoppingList?.shoppingError).toBeNull();
+    expect(listSummary()).toEqual([["bread", false, "synced"]]);
+
+    // The first cook comes back.
+    const sentBefore = sentIds(server).length;
+    await signInTo(renderer, server, firstCook, "household_1");
+
+    expect(sentIds(server).slice(sentBefore)).toEqual(["milk"]);
+    expect(server.stored.get("milk")).toMatchObject({
+      householdId: "household_1",
+      item: { checked: true, checkedBy: "user_1" }
+    });
+    expect(latestShoppingList?.shoppingError).toBeNull();
+    expect(listSummary()).toEqual([["milk", true, "synced"]]);
+    // One milk on this device: the edit went back as itself, not as a copy.
+    expect((await storedItems()).filter((item) => item.text === "milk")).toHaveLength(1);
+
+    await act(async () => {
+      await latestShoppingList!.refreshShoppingList();
+    });
+    expect(sentIds(server).slice(sentBefore)).toEqual(["milk"]);
+  });
+
+  it("keeps the last account's unsent deletion for its household", async () => {
+    const eggs: ShoppingItem = { ...milk, id: "eggs", text: "eggs" };
+    const server = createHouseholdServer([
+      { householdId: "household_1", item: milk },
+      { householdId: "household_1", item: eggs },
+      { householdId: "household_2", item: bread }
+    ]);
+    const renderer = await leaveUnsentChange(server, () => {
+      latestShoppingList!.deleteItem("eggs");
+    });
+    const sentBefore = sentIds(server).length;
+
+    server.session.householdId = "household_2";
+    await switchAccount(renderer, nextCook);
+    expect(sentIds(server).slice(sentBefore)).toEqual([]);
+    expect(latestShoppingList?.shoppingError).toBeNull();
+    expect(listSummary()).toEqual([["bread", false, "synced"]]);
+
+    await signInTo(renderer, server, firstCook, "household_1");
+
+    expect(server.stored.has("eggs")).toBe(false);
+    expect(latestShoppingList?.shoppingError).toBeNull();
+    expect(listSummary()).toEqual([["milk", false, "synced"]]);
+    expect((await storedItems()).map((item) => item.id).sort()).toEqual(["bread", "milk"]);
+  });
+
+  it("keeps the last household's items out of the next account's list, merges and edits", async () => {
+    const cupOfMilk: ShoppingItem = { ...milk, qty: 1, unit: "cup" };
+    const server = createHouseholdServer([
+      { householdId: "household_1", item: cupOfMilk },
+      { householdId: "household_2", item: bread }
+    ]);
+    const renderer = await leaveUnsentChange(server, () => {
+      latestShoppingList!.addItems([{ text: "limes" }]);
+    });
+    const limesId = (await storedItems()).find((item) => item.text === "limes")?.id ?? "";
+    const sentBefore = sentIds(server).length;
+
+    server.session.householdId = "household_2";
+    await switchAccount(renderer, nextCook);
+    expect(listSummary()).toEqual([["bread", false, "synced"]]);
+
+    // The next cook adds milk from a recipe and reaches for household_1's items by id.
+    await act(async () => {
+      latestShoppingList!.addItems([{ recipeId: "recipe_1", text: "2 cups milk" }]);
+      latestShoppingList!.setItemChecked("milk", true);
+      latestShoppingList!.deleteItem(limesId);
+      latestShoppingList!.setItemChecked("bread", true);
+      await vi.advanceTimersByTimeAsync(SHOPPING_SYNC_DEBOUNCE_MS);
+      await flushAsyncWork();
+    });
+
+    expect(latestShoppingList?.shoppingError).toBeNull();
+    expect(householdItems(server, "household_2")).toEqual([
+      ["bread", null, true],
+      ["milk", 2, false]
+    ]);
+    expect(server.stored.get("milk")).toEqual({ householdId: "household_1", item: cupOfMilk });
+    expect(sentIds(server).slice(sentBefore)).not.toContain("milk");
+    expect(sentIds(server).slice(sentBefore)).not.toContain(limesId);
+    expect(listSummary()).toEqual([
+      ["bread", true, "synced"],
+      ["milk", false, "synced"]
+    ]);
+    expect(latestShoppingList?.shoppingItems.map((item) => item.id)).not.toContain("milk");
+
+    // Household_1's records on this device are as the first cook left them.
+    const stored = await storedItems();
+    expect(stored.find((item) => item.id === "milk")).toMatchObject({
+      checked: false,
+      qty: 1,
+      sync: { householdId: "household_1", status: "synced" }
+    });
+    expect(stored.find((item) => item.id === limesId)).toMatchObject({
+      sync: { householdId: "household_1", status: "sync_failed" },
+      text: "limes"
+    });
+    expect(stored.find((item) => item.id === limesId)).not.toHaveProperty("isDeleted");
+
+    // While its household can't be checked (offline), the list is still household_2's.
+    server.session.online = false;
+    await act(async () => {
+      await latestShoppingList!.refreshShoppingList();
+    });
+    server.session.online = true;
+    expect(latestShoppingList?.shoppingError).toBe("Network request failed");
+    expect(latestShoppingList?.canSyncShoppingList).toBe(true);
+    expect(listSummary()).toEqual([
+      ["bread", true, "synced"],
+      ["milk", false, "synced"]
+    ]);
+  });
+
+  it("still sends offline edits when another member of the same household signs in", async () => {
+    const server = createHouseholdServer([{ householdId: "household_1", item: milk }]);
+    const renderer = await leaveUnsentChange(server, () => {
+      latestShoppingList!.setItemChecked("milk", true);
+    });
+
+    await switchAccount(renderer, nextCook);
+
+    expect(server.stored.get("milk")).toMatchObject({
+      householdId: "household_1",
+      item: { checked: true, checkedBy: "user_1", id: "milk" }
+    });
+    expect(latestShoppingList?.shoppingError).toBeNull();
+    expect(listSummary()).toEqual([["milk", true, "synced"]]);
+  });
+
+  it("still sends offline edits to their household after another household used the device", async () => {
+    const server = createHouseholdServer([
+      { householdId: "household_1", item: milk },
+      { householdId: "household_2", item: bread }
+    ]);
+    const renderer = await leaveUnsentChange(server, () => {
+      latestShoppingList!.setItemChecked("milk", true);
+    });
+
+    server.session.householdId = "household_2";
+    await switchAccount(renderer, nextCook);
+    expect(server.stored.get("milk")?.item.checked).toBe(false);
+
+    // Another member of household_1 signs in.
+    await signInTo(renderer, server, { email: "partner@example.com", id: "user_3" }, "household_1");
+
+    expect(server.stored.get("milk")).toMatchObject({
+      householdId: "household_1",
+      item: { checked: true, checkedBy: "user_1" }
+    });
+    expect(latestShoppingList?.shoppingError).toBeNull();
+    expect(listSummary()).toEqual([["milk", true, "synced"]]);
+  });
+
+  it("takes an account's unsent changes along when it moves to another household", async () => {
+    const jam: ShoppingItem = { ...milk, addedBy: "user_3", id: "jam", text: "jam" };
+    const server = createHouseholdServer([
+      { householdId: "household_1", item: milk },
+      { householdId: "household_1", item: jam },
+      { householdId: "household_3", item: bread }
+    ]);
+    apiMocks.createExtractorApiClient.mockReturnValue(server.client);
+    await renderProvider();
+    await makeOfflineChange(server, () => {
+      latestShoppingList!.addItems([{ text: "limes" }]);
+    });
+
+    // The first cook leaves household_1 for household_3.
+    server.leave(firstCook.id);
+    server.session.householdId = "household_3";
+    await act(async () => {
+      await latestShoppingList!.refreshShoppingList();
+    });
+
+    expect(householdItems(server, "household_3")).toEqual([
+      ["bread", null, false],
+      ["limes", null, false]
+    ]);
+    expect(latestShoppingList?.shoppingError).toBeNull();
+    // Their own milk stays on their list (as before items recorded their household); the jam
+    // another member added stays household_1's.
+    expect(listSummary()).toEqual([
+      ["bread", false, "synced"],
+      ["limes", false, "synced"],
+      ["milk", false, "synced"]
+    ]);
+  });
+
+  it("keeps an account's own lines, and its changes while in no household, when it joins another", async () => {
+    const apples: ShoppingItem = { ...milk, addedBy: "user_3", id: "apples", text: "apples" };
+    const server = createHouseholdServer([{ householdId: "household_1", item: apples }]);
+    apiMocks.createExtractorApiClient.mockReturnValue(server.client);
+    await renderProvider();
+    await act(async () => {
+      latestShoppingList!.addItems([{ text: "1 cup milk" }, { text: "rice" }]);
+      await vi.advanceTimersByTimeAsync(SHOPPING_SYNC_DEBOUNCE_MS);
+      await flushAsyncWork();
+    });
+    expect(householdItems(server, "household_1")).toEqual([
+      ["apples", null, false],
+      ["milk", 1, false],
+      ["rice", null, false]
+    ]);
+
+    // The first cook leaves household_1 and keeps using the list on their own.
+    server.leave(firstCook.id);
+    await act(async () => {
+      await latestShoppingList!.refreshShoppingList();
+    });
+    expect(latestShoppingList?.canSyncShoppingList).toBe(false);
+    expect(listSummary()).toEqual([
+      ["apples", false, "synced"],
+      ["milk", false, "synced"],
+      ["rice", false, "synced"]
+    ]);
+    const riceId = latestShoppingList?.shoppingItems.find((item) => item.text === "rice")?.id;
+    await act(async () => {
+      latestShoppingList!.addItems([{ text: "2 cups milk" }, { text: "bread" }]);
+      latestShoppingList!.setItemChecked(riceId ?? "", true);
+      await vi.advanceTimersByTimeAsync(SHOPPING_SYNC_DEBOUNCE_MS);
+      await flushAsyncWork();
+    });
+
+    // Later they start household_2: their lines and what they added come along.
+    server.session.householdId = "household_2";
+    await act(async () => {
+      await latestShoppingList!.refreshShoppingList();
+    });
+
+    expect(latestShoppingList?.shoppingError).toBeNull();
+    expect(householdItems(server, "household_2")).toEqual([["milk", 3, false]]);
+    expect(householdItems(server, "household_1")).toEqual([["apples", null, false]]);
+    expect(listSummary()).toEqual([
+      ["bread", false, "local_only"],
+      ["milk", false, "synced"],
+      ["rice", true, "local_only"]
+    ]);
+
+    await act(async () => {
+      latestShoppingList!.addItems([{ text: "1 cup milk" }]);
+      await vi.advanceTimersByTimeAsync(SHOPPING_SYNC_DEBOUNCE_MS);
+      await flushAsyncWork();
+    });
+    expect(householdItems(server, "household_2")).toEqual([["milk", 4, false]]);
+    expect(listSummary()).toEqual([
+      ["bread", false, "local_only"],
+      ["milk", false, "synced"],
+      ["rice", true, "local_only"]
+    ]);
+  });
+
+  it("still takes an account's unsent changes along when it was in no household in between", async () => {
+    const partnersMilk: ShoppingItem = { ...milk, addedBy: "user_3", qty: 1, unit: "cup" };
+    const server = createHouseholdServer([{ householdId: "household_1", item: partnersMilk }]);
+    apiMocks.createExtractorApiClient.mockReturnValue(server.client);
+    await renderProvider();
+
+    server.leave(firstCook.id);
+    await act(async () => {
+      await latestShoppingList!.refreshShoppingList();
+    });
+    expect(latestShoppingList?.canSyncShoppingList).toBe(false);
+    // On their own, the first cook adds more milk to the line they still see.
+    act(() => {
+      latestShoppingList!.addItems([{ text: "2 cups milk" }]);
+    });
+    expect(latestShoppingList?.shoppingItems).toMatchObject([{ id: "milk", qty: 3 }]);
+
+    server.session.householdId = "household_2";
+    await act(async () => {
+      await latestShoppingList!.refreshShoppingList();
+    });
+
+    // As when moving straight to household_2: household_1 keeps its line, and the amount they
+    // added stays on their list, on this device.
+    expect(idsSentTo(server, "household_2")).toEqual(["milk"]);
+    expect(server.stored.get("milk")).toEqual({ householdId: "household_1", item: partnersMilk });
+    expect(householdItems(server, "household_2")).toEqual([]);
+    expect(latestShoppingList?.shoppingError).toBeNull();
+    expect(latestShoppingList?.shoppingItems).toMatchObject([
+      {
+        id: setAsideShoppingItemId("milk", "household_2"),
+        qty: 3,
+        sync: { status: "local_only" },
+        text: "milk",
+        unit: "cup"
+      }
+    ]);
+  });
+
+  it("leaves another account's older unsent items to that account, or to a household that has them", async () => {
+    const later = "2026-07-04T12:30:00.000Z";
+    // Stored by the first cook before changes recorded their household: jam was never sent, and
+    // milk (on household_2's list: the first cook is a member too) was checked off offline.
+    asyncStorageMocks.getItem.mockImplementation((key: string) =>
+      Promise.resolve(
+        key === "linkdish.shoppingItems.v1"
+          ? JSON.stringify([
+              {
+                addedBy: "user_1",
+                checked: false,
+                createdAt: updatedAt,
+                id: "jam",
+                sync: { status: "dirty" },
+                text: "jam",
+                updatedAt
+              },
+              {
+                ...milk,
+                checked: true,
+                checkedBy: "user_1",
+                createdAt: updatedAt,
+                sync: { status: "sync_failed" },
+                updatedAt: later
+              }
+            ])
+          : null
+      )
+    );
+    const server = createHouseholdServer([
+      { householdId: "household_2", item: milk },
+      { householdId: "household_2", item: bread }
+    ]);
+    server.session.householdId = "household_2";
+    accountState.user = nextCook;
+    apiMocks.createExtractorApiClient.mockReturnValue(server.client);
+
+    const renderer = await renderProvider();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+      await flushAsyncWork();
+    });
+
+    // The next cook's household gets the milk it has, not the jam no household has.
+    expect(idsSentTo(server, "household_2")).toEqual(["milk"]);
+    expect(householdItems(server, "household_2")).toEqual([
+      ["milk", null, true],
+      ["bread", null, false]
+    ]);
+    expect(latestShoppingList?.shoppingError).toBeNull();
+    expect((await storedItems()).find((item) => item.id === "jam")?.sync).toEqual({
+      status: "dirty"
+    });
+
+    await act(async () => {
+      await latestShoppingList!.refreshShoppingList();
+    });
+    expect(idsSentTo(server, "household_2")).toEqual(["milk"]);
+
+    // The jam goes to the first cook's household when they sign in here again.
+    await signInTo(renderer, server, firstCook, "household_1");
+    expect(idsSentTo(server, "household_1")).toEqual(["jam"]);
+    expect(householdItems(server, "household_1")).toEqual([["jam", null, false]]);
+  });
+
+  it("drops another household's unsent changes after 30 days", async () => {
+    vi.setSystemTime(new Date("2026-08-10T12:00:00.000Z"));
+    const daysAgo = (days: number) =>
+      new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+    const storedItem = (id: string, sync: MobileShoppingItem["sync"], changedAt: string) => ({
+      addedBy: "user_1",
+      checked: true,
+      checkedBy: "user_1",
+      createdAt: changedAt,
+      id,
+      sync,
+      text: id,
+      updatedAt: changedAt
+    });
+    asyncStorageMocks.getItem.mockImplementation((key: string) =>
+      Promise.resolve(
+        key === "linkdish.shoppingItems.v1"
+          ? JSON.stringify([
+              storedItem(
+                "limes",
+                { householdId: "household_1", status: "sync_failed" },
+                daysAgo(31)
+              ),
+              storedItem("eggs", { householdId: "household_1", status: "dirty" }, daysAgo(29)),
+              storedItem("jam", { householdId: "household_2", status: "sync_failed" }, daysAgo(60))
+            ])
+          : null
+      )
+    );
+    const server = createHouseholdServer([{ householdId: "household_2", item: bread }]);
+    server.session.householdId = "household_2";
+    accountState.user = nextCook;
+    apiMocks.createExtractorApiClient.mockReturnValue(server.client);
+
+    const renderer = await renderProvider();
+
+    // Household_2's own old change is still sent; household_1's month-old one is gone.
+    expect(idsSentTo(server, "household_2")).toEqual(["jam"]);
+    expect(
+      (await storedItems()).map((item) => [item.id, item.sync.householdId, item.sync.status])
+    ).toEqual(
+      expect.arrayContaining([
+        ["eggs", "household_1", "dirty"],
+        ["jam", "household_2", "synced"]
+      ])
+    );
+    expect((await storedItems()).map((item) => item.id)).not.toContain("limes");
+
+    await signInTo(renderer, server, firstCook, "household_1");
+    expect(idsSentTo(server, "household_1")).toEqual(["eggs"]);
+  });
+
+  it("does not use a household answer that arrives after its account signed out", async () => {
+    const storedItem = (id: string, sync: MobileShoppingItem["sync"]) => ({
+      addedBy: "user_1",
+      checked: false,
+      createdAt: updatedAt,
+      id,
+      sync,
+      text: id,
+      updatedAt
+    });
+    asyncStorageMocks.getItem.mockImplementation((key: string) =>
+      Promise.resolve(
+        key === "linkdish.shoppingItems.v1"
+          ? JSON.stringify([
+              storedItem("limes", { householdId: "household_1", status: "sync_failed" }),
+              // Added signed out and stored before items recorded their household.
+              { ...storedItem("jam", { status: "dirty" }), addedBy: "local" }
+            ])
+          : null
+      )
+    );
+    const server = createHouseholdServer([
+      { householdId: "household_1", item: milk },
+      { householdId: "household_2", item: bread }
+    ]);
+    apiMocks.createExtractorApiClient.mockReturnValue(server.client);
+    // The first cook's household check is slow to answer; meanwhile they sign out and the next
+    // cook signs in to household_2.
+    const householdAnswer = createDeferred<{ household: { id: string } }>();
+    server.client.getHousehold.mockReturnValueOnce(householdAnswer.promise);
+    const renderer = await renderProvider();
+    await signInTo(renderer, server, nextCook, "household_2");
+
+    await act(async () => {
+      householdAnswer.resolve({ household: { id: "household_1" } });
+      await flushAsyncWork();
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    // The first cook's pass stopped there: its limes wait for household_1, and the change that
+    // names no household went to the household of the account signed in now.
+    expect(idsSentTo(server, "household_2")).toEqual(["jam"]);
+    expect(householdItems(server, "household_2")).toEqual([
+      ["bread", null, false],
+      ["jam", null, false]
+    ]);
+    expect(latestShoppingList?.shoppingError).toBeNull();
+    expect(listSummary()).toEqual([
+      ["bread", false, "synced"],
+      ["jam", false, "synced"]
+    ]);
+    expect((await storedItems()).find((item) => item.id === "limes")?.sync).toEqual({
+      householdId: "household_1",
+      status: "sync_failed"
+    });
+
+    // The limes still reach household_1 when the first cook is back.
+    await signInTo(renderer, server, firstCook, "household_1");
+    expect(householdItems(server, "household_1")).toEqual([
+      ["milk", null, false],
+      ["limes", null, false]
+    ]);
+    expect(idsSentTo(server, "household_2")).toEqual(["jam"]);
+  });
+
+  it("sends nothing more once its account signs out in the middle of a push", async () => {
+    const eggs: ShoppingItem = { ...milk, id: "eggs", text: "eggs" };
+    const server = createHouseholdServer([
+      { householdId: "household_1", item: milk },
+      { householdId: "household_1", item: eggs },
+      { householdId: "household_2", item: bread }
+    ]);
+    apiMocks.createExtractorApiClient.mockReturnValue(server.client);
+    const renderer = await renderProvider();
+
+    // The first cook checks off milk and removes eggs. The check-off reaches household_1, but
+    // its answer is slow; by the time it arrives the next cook has signed in to household_2.
+    const answered = createDeferred<undefined>();
+    const upsert = server.client.upsertShoppingItems.getMockImplementation();
+    server.client.upsertShoppingItems.mockImplementationOnce(
+      async (input: { items: ShoppingItem[] }) => {
+        const result = await upsert!(input);
+        await answered.promise;
+        return result;
+      }
+    );
+    await act(async () => {
+      latestShoppingList!.setItemChecked("milk", true);
+      latestShoppingList!.deleteItem("eggs");
+      await vi.advanceTimersByTimeAsync(SHOPPING_SYNC_DEBOUNCE_MS);
+      await flushAsyncWork();
+    });
+    expect(idsSentTo(server, "household_1")).toEqual(["milk"]);
+    await signInTo(renderer, server, nextCook, "household_2");
+
+    await act(async () => {
+      answered.resolve(undefined);
+      await flushAsyncWork();
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    // The first cook's removal was not sent to household_2, and still waits for household_1.
+    expect(idsSentTo(server, "household_2")).toEqual([]);
+    expect(latestShoppingList?.shoppingError).toBeNull();
+    expect(listSummary()).toEqual([["bread", false, "synced"]]);
+
+    await signInTo(renderer, server, firstCook, "household_1");
+    expect(server.stored.has("eggs")).toBe(false);
+    expect(server.stored.get("milk")).toMatchObject({
+      householdId: "household_1",
+      item: { checked: true }
+    });
+    expect(idsSentTo(server, "household_2")).toEqual([]);
+    expect(listSummary()).toEqual([["milk", true, "synced"]]);
+  });
+
+  it("does not record a list that answers after its account signed out", async () => {
+    const server = createHouseholdServer([
+      { householdId: "household_1", item: milk },
+      { householdId: "household_2", item: bread }
+    ]);
+    apiMocks.createExtractorApiClient.mockReturnValue(server.client);
+    const renderer = await renderProvider();
+
+    // The first cook refreshes; the list is slow to answer. Meanwhile they sign out and the next
+    // cook signs in (offline, so their own check can't answer yet).
+    const listed = createDeferred<{ items: ShoppingItem[] }>();
+    server.client.getShoppingList.mockReturnValueOnce(listed.promise);
+    let refreshing: Promise<void> | undefined;
+    await act(async () => {
+      refreshing = latestShoppingList!.refreshShoppingList();
+      await flushAsyncWork();
+    });
+    server.session.online = false;
+    await signInTo(renderer, server, nextCook, "household_2");
+
+    // The answer is household_2's list: the request went out as the next cook.
+    await act(async () => {
+      listed.resolve({ items: [bread] });
+      await refreshing;
+      await flushAsyncWork();
+    });
+
+    const stored = await storedItems();
+    expect(stored.find((item) => item.id === "bread")).toBeUndefined();
+    expect(stored.map((item) => [item.id, item.sync.householdId])).toEqual([
+      ["milk", "household_1"]
+    ]);
+  });
+
+  it("does not send a pass's request with the next account's credentials", async () => {
+    const server = createHouseholdServer([{ householdId: "household_2", item: bread }]);
+    // Like the real client, each request asks for credentials right before it goes out.
+    apiMocks.createExtractorApiClient.mockImplementation(
+      ({ getHeaders }: { getHeaders: () => Promise<Record<string, string>> }) => ({
+        ...server.client,
+        upsertShoppingItems: async (input: { items: ShoppingItem[] }) => {
+          await getHeaders();
+          return server.client.upsertShoppingItems(input);
+        }
+      })
+    );
+    const renderer = await renderProvider();
+
+    // The first cook adds limes; fetching the credentials for the push takes a moment, and the
+    // next cook has signed in to household_2 by the time they arrive.
+    const credentials = createDeferred<Record<string, string>>();
+    accountState.getAuthHeaders.mockReturnValueOnce(credentials.promise);
+    await act(async () => {
+      latestShoppingList!.addItems([{ text: "limes" }]);
+      await vi.advanceTimersByTimeAsync(SHOPPING_SYNC_DEBOUNCE_MS);
+      await flushAsyncWork();
+    });
+    await signInTo(renderer, server, nextCook, "household_2");
+    await act(async () => {
+      credentials.resolve({ authorization: "Bearer next-cook" });
+      await flushAsyncWork();
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    expect(householdItems(server, "household_2")).toEqual([["bread", null, false]]);
+    expect(latestShoppingList?.shoppingError).toBeNull();
+    expect(listSummary()).toEqual([["bread", false, "synced"]]);
+  });
+
+  it("sets aside only the items the household list refuses, so the rest still sync", async () => {
+    const deletedAt = "2026-07-04T11:00:00.000Z";
+    // The next cook's own changes, stored before items recorded their household (e.g. before
+    // it moved household): only the API can tell which are foreign.
+    const storedItem = (id: string, status: "dirty" | "sync_failed", deleted = false) => ({
+      addedBy: "user_2",
+      checked: false,
+      createdAt: updatedAt,
+      id,
+      sync: { status },
+      text: id,
+      updatedAt,
+      ...(deleted ? { deletedAt, isDeleted: true } : {})
+    });
+    asyncStorageMocks.getItem.mockImplementation((key: string) =>
+      Promise.resolve(
+        key === "linkdish.shoppingItems.v1"
+          ? JSON.stringify([
+              storedItem("cream", "sync_failed"),
+              storedItem("jam", "dirty"),
+              storedItem("butter", "sync_failed"),
+              storedItem("salt", "dirty", true),
+              storedItem("pepper", "dirty", true)
+            ])
+          : null
+      )
+    );
+    const server = createHouseholdServer([
+      { householdId: "household_1", item: { ...milk, id: "cream", text: "cream" } },
+      { householdId: "household_1", item: { ...milk, id: "salt", text: "salt" } },
+      { householdId: "household_2", item: { ...milk, id: "pepper", text: "pepper" } },
+      { householdId: "household_2", item: bread }
+    ]);
+    server.session.householdId = "household_2";
+    accountState.user = nextCook;
+    apiMocks.createExtractorApiClient.mockReturnValue(server.client);
+
+    await renderProvider();
+
+    expect(
+      [...server.stored.values()]
+        .filter((record) => record.householdId === "household_2")
+        .map((record) => record.item.id)
+        .sort()
+    ).toEqual(["bread", "butter", "jam"]);
+    expect(server.stored.get("cream")?.householdId).toBe("household_1");
+    expect(server.stored.get("salt")?.householdId).toBe("household_1");
+    expect(latestShoppingList?.shoppingError).toBeNull();
+    expect(listSummary()).toEqual([
+      ["bread", false, "synced"],
+      ["butter", false, "synced"],
+      ["cream", false, "local_only"],
+      ["jam", false, "synced"]
+    ]);
+    // The copy's id comes from the original's, so a retried set-aside can't make a second one.
+    expect(latestShoppingList?.shoppingItems.find((item) => item.text === "cream")?.id).toBe(
+      setAsideShoppingItemId("cream", "household_2")
+    );
+
+    // Nothing is left that the household list would refuse again.
+    server.client.upsertShoppingItems.mockClear();
+    server.client.deleteShoppingItems.mockClear();
+    await act(async () => {
+      await latestShoppingList!.refreshShoppingList();
+    });
+    expect(sentIds(server)).toEqual([]);
+  });
+
+  it("keeps every change pending when the whole household list is refused", async () => {
+    const client = buildClient();
+    client.getHousehold.mockResolvedValue({ household: { id: "household_1" } });
+    client.upsertShoppingItems.mockRejectedValue(
+      new ExtractorApiError("Extractor API request failed.", 403, {
+        message: "An active LinkDish Family household is required."
+      })
+    );
+    apiMocks.createExtractorApiClient.mockReturnValue(client);
+
+    await renderProvider();
+    await act(async () => {
+      latestShoppingList!.addItems([{ text: "jam" }, { text: "butter" }]);
+      await vi.advanceTimersByTimeAsync(SHOPPING_SYNC_DEBOUNCE_MS);
+      await flushAsyncWork();
+    });
+
+    expect(client.upsertShoppingItems).toHaveBeenCalledTimes(1);
+    expect(latestShoppingList?.shoppingError).toBe(
+      "An active LinkDish Family household is required."
+    );
+    expect(listSummary()).toEqual([
+      ["butter", false, "sync_failed"],
+      ["jam", false, "sync_failed"]
+    ]);
   });
 });

@@ -26,6 +26,18 @@ export interface MobileShoppingItem extends ShoppingItem {
   deletedAt?: string | undefined;
   isDeleted?: boolean | undefined;
   sync: {
+    /**
+     * Local only (never sent): the household this item belongs to. Set when it is written in, or
+     * confirmed by, a household; its changes are only ever sent back there, and while another
+     * household's account is signed in it stays on this device, out of that account's list, until
+     * its own household syncs again. Unsent changes stored before it existed get the household
+     * the signed-in account's next check confirms (claimShoppingChanges), or, for an item another
+     * account added, that account's (or the household whose list has the item). An item goes
+     * with the account that added it when that account is in another household now, and so do
+     * that account's unsent changes when it moves (claimShoppingChanges). Unsent changes kept for
+     * another household are dropped after 30 days (pruneStaleShoppingRecords).
+     */
+    householdId?: string | undefined;
     lastError?: string | undefined;
     lastSyncedAt?: string | undefined;
     status: ShoppingSyncStatus;
@@ -41,6 +53,12 @@ export interface AddShoppingItemInput {
 
 export interface ShoppingMutationOptions {
   canSync: boolean;
+  /**
+   * The household the list syncs with right now, when there is one (see `sync.householdId`).
+   * Other households' records are not on its list: nothing merges into them and they can't be
+   * checked off or deleted.
+   */
+  householdId?: string | undefined;
   now?: string | undefined;
   userId?: string | undefined;
 }
@@ -101,6 +119,77 @@ const clipApiField = (
 
 const createShoppingItemId = (timestamp: string, index: number): string =>
   `shopping_${timestamp.replace(/\D/gu, "")}_${index}_${Math.random().toString(36).slice(2, 10)}`;
+
+/** A change the household list hasn't confirmed yet (an edit or a deletion). */
+const needsPush = (item: Pick<MobileShoppingItem, "sync">): boolean =>
+  item.sync.status === "dirty" || item.sync.status === "sync_failed";
+
+/**
+ * Changes that may never sync are dropped after this long: unsent changes kept for another
+ * household. They are only sent when that household syncs on this device again, and by then it
+ * may well have removed the item, which the change would bring back.
+ */
+const STALE_CHANGE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+/**
+ * True for an unsent change that another account (not `userId`) left on this device without
+ * naming a household (stored before changes recorded it): the item was added by that account
+ * (`addedBy`, the account id; "local" when added signed out). It may never have been sent, so no
+ * household has it and the API would create it in whichever one it is sent to: it is neither
+ * claimed for nor sent to `userId`'s household. It waits for its own account's claim
+ * (claimShoppingChanges), or for a household whose list has the item (applyRemoteShoppingItems).
+ * An edit `userId` makes to it records `userId`'s household (syncStateAfterEdit), so it is theirs
+ * from then. (A local change clears `lastSyncedAt`, so an edit of a synced item looks the same
+ * until that list shows it.)
+ */
+const isAnotherAccountsChange = (item: MobileShoppingItem, userId: string): boolean => {
+  const addedBy = item.addedBy.trim();
+
+  return (
+    needsPush(item) &&
+    !item.sync.householdId &&
+    !item.sync.lastSyncedAt &&
+    addedBy.length > 0 &&
+    addedBy !== LOCAL_SHOPPING_USER &&
+    addedBy !== userId
+  );
+};
+
+/**
+ * True when the item is kept for a household other than `householdId` (see `sync.householdId`):
+ * it came from, or was changed in, another household (another account used this device, or this
+ * one moved). Never sent to `householdId`, and left out of its list. Signed out (no household),
+ * nothing is another household's.
+ */
+export const belongsToOtherHousehold = (
+  item: Pick<MobileShoppingItem, "sync">,
+  householdId: string | null | undefined
+): boolean =>
+  Boolean(householdId && item.sync.householdId && item.sync.householdId !== householdId);
+
+/** `sync.householdId` of an item, to spread into its next sync state (nothing when it has none). */
+const householdOf = (
+  item: Pick<MobileShoppingItem, "sync">
+): Pick<MobileShoppingItem["sync"], "householdId"> =>
+  item.sync.householdId ? { householdId: item.sync.householdId } : {};
+
+/**
+ * Sync state after a local edit. An item keeps the household it belongs to, even when edited
+ * signed out or by the next account on this device, so its change can only ever go back there;
+ * any other item joins the current household when the list syncs.
+ */
+const syncStateAfterEdit = (
+  options: Pick<ShoppingMutationOptions, "canSync" | "householdId">,
+  existing?: MobileShoppingItem
+): MobileShoppingItem["sync"] => {
+  const householdId =
+    existing?.sync.householdId ?? (options.canSync ? options.householdId : undefined);
+
+  return {
+    ...(householdId ? { householdId } : {}),
+    status: options.canSync ? "dirty" : "local_only"
+  };
+};
 
 /**
  * Display text for a stored item: friendly fractions and ranges ("⅔ cup milk", "1–2 tsp
@@ -195,10 +284,14 @@ export const mergeShoppingItems = (
       recipeId: existing.recipeId ?? incoming.recipeId,
       recipeTitle: existing.recipeTitle ?? incoming.recipeTitle,
       section: existing.section ?? incoming.section,
-      sync:
-        existing.sync.status === "local_only" && incoming.sync.status === "local_only"
-          ? { status: "local_only" }
-          : { status: "dirty" },
+      sync: {
+        // The merged item keeps the existing id, so it stays with that item's household.
+        ...householdOf(existing.sync.householdId ? existing : incoming),
+        status:
+          existing.sync.status === "local_only" && incoming.sync.status === "local_only"
+            ? "local_only"
+            : "dirty"
+      },
       text: clipShoppingItemText(merged.text),
       unit: merged.unit ?? null,
       updatedAt:
@@ -209,6 +302,10 @@ export const mergeShoppingItems = (
     SHOPPING_MERGE_OPTIONS
   );
 
+/**
+ * Adds typed or recipe lines, merging each into a matching item on the current household's list.
+ * Records kept for another household are not on it, so a new amount never lands on them.
+ */
 export const addShoppingItemsToList = (
   existingItems: MobileShoppingItem[],
   inputs: AddShoppingItemInput[],
@@ -235,13 +332,23 @@ export const addShoppingItemsToList = (
         addedBy: options.userId ?? LOCAL_SHOPPING_USER,
         checked: false,
         checkedBy: null,
-        sync: { status: options.canSync ? "dirty" : "local_only" },
+        sync: syncStateAfterEdit(options),
         updatedAt: timestamp
       } satisfies MobileShoppingItem;
     })
     .filter((item): item is MobileShoppingItem => item != null);
+  const elsewhere = existingItems.filter((item) =>
+    belongsToOtherHousehold(item, options.householdId)
+  );
 
-  return mergeShoppingItems(existingItems, incoming);
+  if (elsewhere.length === 0) {
+    return mergeShoppingItems(existingItems, incoming);
+  }
+
+  const onList = existingItems.filter(
+    (item) => !belongsToOtherHousehold(item, options.householdId)
+  );
+  return [...mergeShoppingItems(onList, incoming), ...elsewhere];
 };
 
 export const setShoppingItemCheckedInList = (
@@ -251,12 +358,12 @@ export const setShoppingItemCheckedInList = (
   options: ShoppingMutationOptions
 ): MobileShoppingItem[] =>
   items.map((item) =>
-    item.id === id
+    item.id === id && !belongsToOtherHousehold(item, options.householdId)
       ? {
           ...item,
           checked,
           checkedBy: checked ? (options.userId ?? LOCAL_SHOPPING_USER) : null,
-          sync: { status: options.canSync ? "dirty" : "local_only" },
+          sync: syncStateAfterEdit(options, item),
           updatedAt: options.now ?? new Date().toISOString()
         }
       : item
@@ -272,6 +379,7 @@ export const markShoppingItemsSyncFailed = (
       ? {
           ...item,
           sync: {
+            ...householdOf(item),
             lastError: message,
             status: "sync_failed"
           }
@@ -281,7 +389,8 @@ export const markShoppingItemsSyncFailed = (
 
 /**
  * Removes items: local-only items (or any item when the list does not sync) disappear, synced
- * items become dirty tombstones so the household list learns about the delete.
+ * items become dirty tombstones so the household list learns about the delete. Another
+ * household's records are not on the list, so they stay.
  */
 export const deleteShoppingItemsInList = (
   items: MobileShoppingItem[],
@@ -291,7 +400,7 @@ export const deleteShoppingItemsInList = (
   const timestamp = options.now ?? new Date().toISOString();
 
   return items.flatMap((item) => {
-    if (!ids.has(item.id)) {
+    if (!ids.has(item.id) || belongsToOtherHousehold(item, options.householdId)) {
       return [item];
     }
 
@@ -304,7 +413,7 @@ export const deleteShoppingItemsInList = (
         ...item,
         deletedAt: timestamp,
         isDeleted: true,
-        sync: { status: "dirty" },
+        sync: syncStateAfterEdit(options, item),
         updatedAt: timestamp
       }
     ];
@@ -338,9 +447,14 @@ export interface ShoppingAisleGroup {
 export const groupShoppingItemsByAisle = (items: MobileShoppingItem[]): ShoppingAisleGroup[] =>
   groupByShoppingCategory(items, (item) => getShoppingItemDisplayText(item));
 
+/**
+ * Applies household items (last write wins), recording `householdId` as the one they came from
+ * (and on unsent changes to them that don't name a household yet).
+ */
 export const applyRemoteShoppingItems = (
   localItems: MobileShoppingItem[],
-  remoteItems: ShoppingItem[]
+  remoteItems: ShoppingItem[],
+  householdId?: string
 ): MobileShoppingItem[] => {
   const localById = new Map(localItems.map((item) => [item.id, item]));
   const nextById = new Map(localItems.map((item) => [item.id, item]));
@@ -360,6 +474,12 @@ export const applyRemoteShoppingItems = (
         localItem.sync.status === "sync_failed") &&
       !isRemoteNewer(remoteItem.updatedAt, localItem.updatedAt)
     ) {
+      // An unsent change that names no household, to an item this household has, is this
+      // household's (e.g. its item checked off before changes recorded their household).
+      if (householdId && needsPush(localItem) && !localItem.sync.householdId) {
+        nextById.set(localItem.id, { ...localItem, sync: { ...localItem.sync, householdId } });
+      }
+
       continue;
     }
 
@@ -367,6 +487,7 @@ export const applyRemoteShoppingItems = (
       ...remoteItem,
       createdAt: localItem?.createdAt ?? remoteItem.updatedAt,
       sync: {
+        ...(householdId ? { householdId } : {}),
         lastSyncedAt: remoteItem.updatedAt,
         status: "synced"
       }
@@ -379,22 +500,163 @@ export const applyRemoteShoppingItems = (
 /**
  * Marks items the server accepted as synced. `pushedVersions` maps each pushed id to the
  * updatedAt that was sent; an item edited again while the push was in flight keeps its newer,
- * still-dirty version so the follow-up sync sends it.
+ * still-dirty version so the follow-up sync sends it. `householdId` is the household that
+ * accepted them.
  */
 export const markShoppingItemsSynced = (
   items: MobileShoppingItem[],
   pushedVersions: ReadonlyMap<string, string>,
-  syncedAt: string
+  syncedAt: string,
+  householdId?: string
 ): MobileShoppingItem[] =>
   items.map((item) =>
     pushedVersions.get(item.id) === item.updatedAt && !item.isDeleted
-      ? { ...item, sync: { lastSyncedAt: syncedAt, status: "synced" } }
+      ? {
+          ...item,
+          sync: {
+            ...(householdId ? { householdId } : householdOf(item)),
+            lastSyncedAt: syncedAt,
+            status: "synced"
+          }
+        }
       : item
   );
 
 /** Items waiting to be pushed to the household list (edits and delete tombstones). */
 export const getSyncableDirtyItems = (items: MobileShoppingItem[]): MobileShoppingItem[] =>
-  items.filter((item) => item.sync.status === "dirty" || item.sync.status === "sync_failed");
+  items.filter(needsPush);
+
+/**
+ * The list as `householdId` sees it: live items, without the records kept for another
+ * household. Signed out (no household), every item on this device shows.
+ */
+export const getShoppingListItems = (
+  items: MobileShoppingItem[],
+  householdId: string | null | undefined
+): MobileShoppingItem[] =>
+  items.filter((item) => !item.isDeleted && !belongsToOtherHousehold(item, householdId));
+
+/**
+ * Unsent changes (edits and delete tombstones) that signed-in account `userId` may send to
+ * `householdId`. Another household's wait on this device, untouched, until that household syncs
+ * here again; so does another account's change that names no household (isAnotherAccountsChange).
+ */
+export const getPendingShoppingChanges = (
+  items: MobileShoppingItem[],
+  householdId: string,
+  userId: string
+): MobileShoppingItem[] =>
+  items.filter(
+    (item) =>
+      needsPush(item) &&
+      !belongsToOtherHousehold(item, householdId) &&
+      !isAnotherAccountsChange(item, userId)
+  );
+
+/**
+ * Records `householdId` (signed-in account `userId`'s, just confirmed) on unsent changes that
+ * don't name a household yet: stored before items recorded one. Another account's item that
+ * names none waits for that account (see isAnotherAccountsChange). Items `userId` added that name
+ * another household are its lines of a household it has left (an account is in one household at
+ * a time, and a household's list drops a member's lines when it leaves): they are this one's now,
+ * with any change to them, as they were before items recorded their household. With `from`, this
+ * account has moved from that household, so its changes for it can only go to the new one now.
+ * Other households' items and changes are left alone. Returns `items` itself when nothing changes.
+ */
+export const claimShoppingChanges = (
+  items: MobileShoppingItem[],
+  householdId: string,
+  options: { from?: string | undefined; userId: string }
+): MobileShoppingItem[] => {
+  const claims = (item: MobileShoppingItem) =>
+    item.sync.householdId
+      ? item.sync.householdId !== householdId &&
+        (item.addedBy.trim() === options.userId ||
+          (needsPush(item) && item.sync.householdId === options.from))
+      : needsPush(item) && !isAnotherAccountsChange(item, options.userId);
+
+  return items.some(claims)
+    ? items.map((item) => (claims(item) ? { ...item, sync: { ...item.sync, householdId } } : item))
+    : items;
+};
+
+/**
+ * Drops unsent changes kept for a household other than `householdId` (the one syncing now) whose
+ * last change is more than 30 days old (see STALE_CHANGE_TTL_MS). The current household's
+ * changes, ones that name no household (made signed out, or not claimed yet) and synced records
+ * are never dropped. Returns `items` itself when nothing is dropped.
+ */
+export const pruneStaleShoppingRecords = (
+  items: MobileShoppingItem[],
+  householdId: string,
+  now: number = Date.now()
+): MobileShoppingItem[] => {
+  const isStale = (item: MobileShoppingItem) =>
+    needsPush(item) &&
+    belongsToOtherHousehold(item, householdId) &&
+    now - new Date(item.updatedAt).getTime() > STALE_CHANGE_TTL_MS;
+
+  return items.some(isStale) ? items.filter((item) => !isStale(item)) : items;
+};
+
+/** FNV-1a over `text` from `seed`, in base 36. */
+const fnv1a = (text: string, seed: number): string => {
+  let hash = seed;
+
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16_777_619) >>> 0;
+  }
+
+  return hash.toString(36).padStart(7, "0");
+};
+
+/**
+ * The id a set-aside copy of item `id` gets once `householdId` refused it: derived from both, so
+ * setting the same change aside again can never make a second copy.
+ */
+export const setAsideShoppingItemId = (id: string, householdId: string | undefined): string => {
+  const key = `set-aside:${householdId ?? ""}:${id}`;
+  return `shopping_aside_${fnv1a(key, 2_166_136_261)}${fnv1a(key, 3_735_928_559)}`;
+};
+
+/**
+ * Unsent changes the household list refused because the item is stored in another household,
+ * one this device can't name (they were stored before items recorded their household). An edited
+ * item stays on this device as a local-only item under a new id (see setAsideShoppingItemId), so
+ * it can never be sent in place of the other household's record. A deletion can't apply here, so
+ * it is dropped.
+ */
+export const setAsideShoppingItems = (
+  items: MobileShoppingItem[],
+  ids: ReadonlySet<string>,
+  householdId: string | undefined
+): MobileShoppingItem[] => {
+  if (ids.size === 0) {
+    return items;
+  }
+
+  const copies = new Map<string, MobileShoppingItem>();
+
+  for (const item of items) {
+    if (ids.has(item.id) && !item.isDeleted) {
+      const id = setAsideShoppingItemId(item.id, householdId);
+      copies.set(id, { ...item, id, sync: { status: "local_only" } });
+    }
+  }
+
+  return items.flatMap((item): MobileShoppingItem[] => {
+    if (ids.has(item.id)) {
+      const copy = item.isDeleted
+        ? undefined
+        : copies.get(setAsideShoppingItemId(item.id, householdId));
+      return copy ? [copy] : [];
+    }
+
+    // An earlier copy of the same change: the new copy takes its place.
+    return copies.has(item.id) ? [] : [item];
+  });
+};
 
 export const sortShoppingItems = (items: MobileShoppingItem[]): MobileShoppingItem[] =>
   [...items].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
@@ -443,16 +705,17 @@ export const readShoppingItems = (serializedItems: string | null): ShoppingItems
           candidate.sync !== null
         );
       })
-      .map((item) => ({
+      .map(({ sync: { householdId, ...sync }, ...item }) => ({
         ...item,
         sync: {
-          ...item.sync,
+          ...sync,
+          ...(typeof householdId === "string" && householdId ? { householdId } : {}),
           status:
-            item.sync.status === "dirty" ||
-            item.sync.status === "local_only" ||
-            item.sync.status === "sync_failed" ||
-            item.sync.status === "synced"
-              ? item.sync.status
+            sync.status === "dirty" ||
+            sync.status === "local_only" ||
+            sync.status === "sync_failed" ||
+            sync.status === "synced"
+              ? sync.status
               : "local_only"
         }
       }));
