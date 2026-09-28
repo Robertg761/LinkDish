@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { MAX_RECIPE_TITLE_LENGTH } from "./limits.js";
+
 const MAX_URL_LENGTH = 2_048;
 
 const HTTP_PROTOCOLS = new Set(["http:", "https:"]);
@@ -73,7 +75,7 @@ export const missingRecipeFieldSchema = z.enum([
 
 export type MissingRecipeField = z.infer<typeof missingRecipeFieldSchema>;
 
-export const MAX_RECIPE_TITLE_LENGTH = 300;
+export { MAX_RECIPE_TITLE_LENGTH };
 export const MAX_RECIPE_INGREDIENT_TEXT_LENGTH = 2_000;
 export const MAX_RECIPE_INGREDIENT_SECTION_LENGTH = 200;
 export const MAX_RECIPE_INGREDIENT_COUNT = 300;

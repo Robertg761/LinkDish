@@ -3,56 +3,24 @@
  * list. Dates are ISO calendar dates ("2026-09-27") with no time zone, so a plan means the same
  * days on every device; date arithmetic runs in UTC to stay clear of daylight-saving shifts.
  */
-import { z } from "zod";
-
-import { MAX_RECIPE_TITLE_LENGTH } from "./recipe-schema.js";
+import {
+  isValidIsoDate,
+  MAX_MEAL_PLAN_NOTE_LENGTH,
+  MAX_MEAL_PLAN_SERVINGS,
+  MEAL_SLOTS
+} from "./limits.js";
 import { scaleFactorForServings } from "./servings.js";
 import { recipeIngredientsToShoppingInputs } from "./shopping-aggregate.js";
 
 import type { IngredientUnitsPreference } from "./conversion.js";
+import type { MealPlanEntry, MealSlot } from "./meal-plan-schema.js";
 import type { Recipe } from "./recipe-schema.js";
 import type { ShoppingInput } from "./shopping-aggregate.js";
 
-export const MEAL_SLOTS = ["breakfast", "lunch", "dinner", "snack"] as const;
-export const MAX_MEAL_PLAN_NOTE_LENGTH = 2_000;
-export const MAX_MEAL_PLAN_SERVINGS = 1_000;
+export { MAX_MEAL_PLAN_NOTE_LENGTH, MAX_MEAL_PLAN_SERVINGS, MEAL_SLOTS };
 
 const ISO_DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/u;
 
-const isValidIsoDate = (value: string): boolean => {
-  const match = ISO_DATE_PATTERN.exec(value);
-
-  if (!match) {
-    return false;
-  }
-
-  const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])];
-  const date = new Date(Date.UTC(year, month - 1, day));
-  return (
-    date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
-  );
-};
-
-export const isoDateSchema = z.string().refine(isValidIsoDate, "Expected a YYYY-MM-DD date.");
-export const mealSlotSchema = z.enum(MEAL_SLOTS);
-
-/**
- * One planned meal: a saved recipe (by id) or a free-text entry ("Leftovers"). Follows the
- * household sync convention (id + ISO updatedAt, last write wins) so it can sync later.
- */
-export const mealPlanEntrySchema = z.object({
-  id: z.string().trim().min(1).max(120),
-  date: isoDateSchema,
-  slot: mealSlotSchema.nullable().optional(),
-  recipeId: z.string().trim().min(1).max(180).nullable().optional(),
-  title: z.string().trim().min(1).max(MAX_RECIPE_TITLE_LENGTH).nullable().optional(),
-  servings: z.number().positive().max(MAX_MEAL_PLAN_SERVINGS).nullable().optional(),
-  note: z.string().max(MAX_MEAL_PLAN_NOTE_LENGTH).nullable().optional(),
-  updatedAt: z.string().datetime().optional()
-});
-
-export type MealSlot = z.infer<typeof mealSlotSchema>;
-export type MealPlanEntry = z.infer<typeof mealPlanEntrySchema>;
 export type WeekStartsOn = 0 | 1;
 
 const pad = (value: number, length = 2): string => String(value).padStart(length, "0");

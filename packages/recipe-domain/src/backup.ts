@@ -6,10 +6,10 @@
  */
 import { z } from "zod";
 
-import { mealPlanEntrySchema } from "./meal-plan.js";
+import { mealPlanEntrySchema } from "./meal-plan-schema.js";
 import { httpUrlSchema, recipeSchema } from "./recipe-schema.js";
 
-import type { MealPlanEntry } from "./meal-plan.js";
+import type { MealPlanEntry } from "./meal-plan-schema.js";
 import type { Recipe } from "./recipe-schema.js";
 
 export const LINKDISH_BACKUP_FORMAT = "linkdish-backup";

@@ -10,8 +10,8 @@ import { isRangeValue, maxOfValue } from "./format-internal.js";
 import { categorizeIngredient } from "./grocery-categories.js";
 import { inflectIngredientPhrase, singularizeNoun } from "./inflection.js";
 import { parseIngredientQuantity } from "./ingredient-quantities.js";
+import { MAX_SHOPPING_ITEM_TEXT_LENGTH } from "./limits.js";
 import { formatIngredientQuantity } from "./quantity-format.js";
-import { MAX_SHOPPING_ITEM_TEXT_LENGTH } from "./shopping.js";
 import { canonicalUnit, getUnitDefinition, UNIT_ALIAS_LOOKUP } from "./units.js";
 
 import type { IngredientUnitsPreference } from "./conversion.js";
