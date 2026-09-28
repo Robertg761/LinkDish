@@ -136,8 +136,8 @@ already shared with them keep their preview.
 ## Deployment And Ownership
 
 Changes under `site/` deploy from the public `Robertg761/LinkDish` repository
-after they reach `main`. The workflow uploads only this directory; app and API
-files are not part of the Pages artifact.
+after they reach `main`. The workflow uploads only this directory, without this
+README; app and API files are not part of the Pages artifact.
 
 The custom domain, Pages configuration, deployment workflow, and complete site
 history are owned by this monorepo. The former `Robertg761/LinkDish-site`
