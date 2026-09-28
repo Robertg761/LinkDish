@@ -1,4 +1,4 @@
-import { access, readFile, readdir } from "node:fs/promises";
+import { access, readFile, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -12,17 +12,28 @@ const requiredFiles = [
   "404.html",
   "CNAME",
   "analytics.js",
+  "apple-touch-icon.png",
+  "base.css",
+  "favicon.ico",
   "index.html",
+  "info.css",
   "invite/index.html",
+  "marketing.css",
+  "meal-planner-and-grocery-list/index.html",
   "paprika-alternative/index.html",
   "privacy/index.html",
   "recipe-saver-app/index.html",
   "robots.txt",
   "save-recipes-from-websites/index.html",
+  "save-recipes-from-youtube/index.html",
+  "scan-recipes-from-photos/index.html",
   "site.js",
   "sitemap.xml",
   "support/index.html"
 ];
+
+// Link previews (WhatsApp in particular) drop og:image files above roughly 300 KB.
+const maxSocialImageBytes = 300 * 1024;
 
 const exists = async (filePath) => {
   try {
@@ -111,10 +122,69 @@ const htmlByPath = new Map(
   await Promise.all(htmlFiles.map(async (filePath) => [filePath, await readFile(filePath, "utf8")]))
 );
 
+const decodeEntities = (text) =>
+  text
+    .replaceAll("&nbsp;", " ")
+    .replaceAll("&quot;", '"')
+    .replaceAll("&#39;", "'")
+    .replaceAll("&lt;", "<")
+    .replaceAll("&gt;", ">")
+    .replaceAll("&amp;", "&");
+
+const visibleText = (html) =>
+  decodeEntities(
+    html
+      .replace(/<script\b[\s\S]*?<\/script>/gu, " ")
+      .replace(/<style\b[\s\S]*?<\/style>/gu, " ")
+      .replace(/<[^>]+>/gu, " ")
+  )
+    .replace(/\s+/gu, " ")
+    .replace(/\s([.,;:!?)])/gu, "$1");
+
+// srcset="a.avif 360w, b.avif 720w" (also imagesrcset on preload links) -> ["a.avif", "b.avif"]
+const srcsetReferences = (html) =>
+  [...html.matchAll(/\b(?:srcset|imagesrcset)="([^"]*)"/gu)].flatMap((match) =>
+    match[1]
+      .split(",")
+      .map((candidate) => candidate.trim().split(/\s+/u)[0])
+      .filter(Boolean)
+  );
+
+const attribute = (tag, name) => tag.match(new RegExp(`\\s${name}="([^"]*)"`, "u"))?.[1];
+
 for (const [filePath, html] of htmlByPath) {
   const fileLabel = relativeSitePath(filePath);
   const pageUrl = pageUrlForFile(filePath);
-  const references = [...html.matchAll(/\b(?:href|src)="([^"]+)"/gu)].map((match) => match[1]);
+  const references = [
+    ...[...html.matchAll(/\b(?:href|src)="([^"]+)"/gu)].map((match) => match[1]),
+    ...srcsetReferences(html)
+  ];
+
+  for (const tag of html.match(/<img\b[^>]*>/gu) || []) {
+    for (const name of ["alt", "width", "height"]) {
+      if (attribute(tag, name) === undefined) {
+        errors.push(`${fileLabel} has an <img> without ${name}: ${tag.slice(0, 120)}`);
+      }
+    }
+  }
+
+  for (const tag of html.match(/<source\b[^>]*>/gu) || []) {
+    if (!attribute(tag, "srcset") || !attribute(tag, "type")) {
+      errors.push(`${fileLabel} has a <source> without srcset and type: ${tag.slice(0, 120)}`);
+    }
+  }
+
+  // Every link into the web app or Google Play names its placement for attribution.
+  for (const tag of html.match(/<a\b[^>]*>/gu) || []) {
+    const href = attribute(tag, "href") || "";
+
+    if (
+      /^https:\/\/(?:app\.linkdish\.ca|play\.google\.com)(?:[/?#]|$)/u.test(href) &&
+      !attribute(tag, "data-cta")
+    ) {
+      errors.push(`${fileLabel} links to ${href} without a data-cta placement`);
+    }
+  }
 
   for (const rawReference of references) {
     if (/^(?:data|javascript|linkdish|mailto|sms):/iu.test(rawReference)) {
@@ -154,13 +224,45 @@ for (const [filePath, html] of htmlByPath) {
     }
   }
 
+  const pageText = visibleText(html);
+
   for (const match of html.matchAll(
     /<script\b[^>]*type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/gu
   )) {
+    let data;
+
     try {
-      JSON.parse(match[1]);
+      data = JSON.parse(match[1]);
     } catch (error) {
       errors.push(`${fileLabel} has invalid JSON-LD: ${error.message}`);
+      continue;
+    }
+
+    // FAQ rich results must mirror questions that are visible on the page.
+    if (data["@type"] === "FAQPage") {
+      for (const question of data.mainEntity || []) {
+        if (!question?.name || !pageText.includes(question.name)) {
+          errors.push(`${fileLabel} FAQPage question is not on the page: ${question?.name}`);
+        }
+      }
+    }
+  }
+
+  const pageSocialImage = html.match(/<meta\s+property="og:image"\s+content="([^"]+)"/u)?.[1];
+  const pageTwitterImage = html.match(/<meta\s+name="twitter:image"\s+content="([^"]+)"/u)?.[1];
+
+  if (pageSocialImage && pageTwitterImage && pageSocialImage !== pageTwitterImage) {
+    errors.push(`${fileLabel} og:image and twitter:image differ`);
+  }
+
+  if (pageSocialImage) {
+    const socialUrl = new URL(pageSocialImage);
+    const socialPath = socialUrl.origin === siteOrigin ? localPathForUrl(socialUrl) : null;
+
+    if (!socialPath || !(await exists(socialPath))) {
+      errors.push(`${fileLabel} og:image is not a local linkdish.ca asset: ${pageSocialImage}`);
+    } else if ((await stat(socialPath)).size > maxSocialImageBytes) {
+      errors.push(`${fileLabel} og:image is larger than 300 KB: ${pageSocialImage}`);
     }
   }
 
@@ -236,10 +338,13 @@ for (const entry of sitemapUrls) {
 
 for (const requiredPage of [
   "/",
+  "/meal-planner-and-grocery-list/",
   "/paprika-alternative/",
   "/privacy/",
   "/recipe-saver-app/",
   "/save-recipes-from-websites/",
+  "/save-recipes-from-youtube/",
+  "/scan-recipes-from-photos/",
   "/support/"
 ]) {
   if (!sitemapUrls.includes(`${siteOrigin}${requiredPage}`)) {

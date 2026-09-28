@@ -7,13 +7,23 @@ import { fileURLToPath } from "node:url";
 const port = Number.parseInt(process.env.PORT || "4173", 10);
 const siteRoot = path.resolve(fileURLToPath(new URL("../site/", import.meta.url)));
 const contentTypes = new Map([
+  [".avif", "image/avif"],
   [".css", "text/css; charset=utf-8"],
+  [".gif", "image/gif"],
   [".html", "text/html; charset=utf-8"],
+  [".ico", "image/x-icon"],
+  [".jpeg", "image/jpeg"],
+  [".jpg", "image/jpeg"],
   [".js", "text/javascript; charset=utf-8"],
   [".json", "application/json; charset=utf-8"],
+  [".md", "text/markdown; charset=utf-8"],
+  [".mp4", "video/mp4"],
   [".png", "image/png"],
   [".svg", "image/svg+xml"],
   [".txt", "text/plain; charset=utf-8"],
+  [".webm", "video/webm"],
+  [".webmanifest", "application/manifest+json"],
+  [".webp", "image/webp"],
   [".woff2", "font/woff2"],
   [".xml", "application/xml; charset=utf-8"]
 ]);
