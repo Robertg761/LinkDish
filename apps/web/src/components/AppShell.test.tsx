@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { OPEN_COMMAND_PALETTE_EVENT } from "../lib/command-palette-events";
 
 import { AppShell, AppTopBarActions } from "./AppShell";
+import { isCoreIconName } from "./icons/lucide-icons";
 import { useHideTabBar } from "./tab-bar-visibility";
 
 const importQueue = vi.hoisted(() => ({ count: 0, failed: 0, pending: 0 }));
@@ -216,6 +217,21 @@ describe("AppShell side rail", () => {
     expect(onOpenPalette).toHaveBeenCalledTimes(1);
 
     window.removeEventListener(OPEN_COMMAND_PALETTE_EVENT, onOpenPalette);
+  });
+
+  it.each([
+    ["phone", () => false],
+    ["desktop", (query: string) => query.includes("min-width: 1024px")]
+  ])("draws the %s shell with core icons only, so it never waits for the rest", (_, matches) => {
+    mockMatchMedia(matches);
+
+    renderShell("/");
+
+    const names = Array.from(document.querySelectorAll("[data-icon]"), (icon) =>
+      icon.getAttribute("data-icon")
+    );
+    expect(names.length).toBeGreaterThan(3);
+    expect(names.filter((name) => !isCoreIconName(name ?? ""))).toEqual([]);
   });
 
   it("keeps the rail on recipe detail pages and marks Cookbook active", () => {

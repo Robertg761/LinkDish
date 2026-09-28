@@ -3,6 +3,7 @@ import React from "react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { isCoreIconName } from "../../components/icons/lucide-icons";
 import { MENU_SHEET_MEDIA_QUERY } from "../../components/Menu";
 import { ToastProvider } from "../../components/Toast";
 import { resetDataChangeFeedForTests, setDataChannelFactoryForTests } from "../../data/change-feed";
@@ -693,6 +694,12 @@ describe("LibraryPage", () => {
     ).toBeInTheDocument();
     expect(await screen.findByRole("heading", { name: /Starter recipes/ })).toBeInTheDocument();
     expect(cardFor("Berry Oat Bars").textContent).toContain("Starter");
+    // A new cook's first paint doesn't wait for the rest of the icon set.
+    expect(
+      Array.from(document.querySelectorAll("[data-icon]"), (icon) =>
+        icon.getAttribute("data-icon")
+      ).filter((name) => !isCoreIconName(name ?? ""))
+    ).toEqual([]);
   });
 
   it("shows an error with a retry instead of an empty cookbook when storage fails", async () => {
@@ -864,6 +871,41 @@ describe("LibraryPage", () => {
       expect(screen.queryByRole("region", { name: "Cook again" })).not.toBeInTheDocument()
     );
     expect(screen.getByRole("button", { name: /Quick/ })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("draws the Cookbook and its menus with core icons only, so it never waits for the rest", async () => {
+    seedRecipes([
+      makeRecipe("a", {
+        cook: 10,
+        extra: { favorite: true, lastCookedAt: iso(1), timesCooked: 3 },
+        title: "Alpha"
+      }),
+      makeRecipe("b", {
+        cook: 20,
+        extra: { lastCookedAt: iso(3), timesCooked: 1 },
+        title: "Bravo"
+      }),
+      makeRecipe("c", { cook: 90, extra: { tags: ["dinner"] }, image: true, title: "Charlie" }),
+      makeRecipe("d", { cook: 15, title: "Delta Cake" }),
+      makeRecipe("e", { cook: 60, title: "Echo Salad" }),
+      makeRecipe("starter-soup", { extra: { isStarter: true }, title: "Starter Soup" })
+    ]);
+    const nonCoreIcons = () =>
+      Array.from(document.querySelectorAll("[data-icon]"), (icon) =>
+        icon.getAttribute("data-icon")
+      ).filter((name) => !isCoreIconName(name ?? ""));
+
+    renderPage();
+    await screen.findByRole("region", { name: "Cook again" });
+    expect(document.querySelectorAll("[data-icon]").length).toBeGreaterThan(10);
+    expect(nonCoreIcons()).toEqual([]);
+
+    fireEvent.click(screen.getByRole("button", { name: /^Sort recipes\. Current:/ }));
+    expect(nonCoreIcons()).toEqual([]);
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+
+    openCardMenu("Charlie");
+    expect(nonCoreIcons()).toEqual([]);
   });
 
   it("jumps to search with the slash key when not typing", async () => {

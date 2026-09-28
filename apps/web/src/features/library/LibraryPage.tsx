@@ -113,9 +113,12 @@ const PRIORITY_CARD_COUNT = 6;
 /** Keeps the subtitle's line while the count is unknown, so nothing jumps when it arrives. */
 const BLANK_SUBTITLE = "\u00a0";
 
-// New cooks and the Family tab are the minority of visits, so their UI loads on demand.
-const LibraryWelcome = lazyWithRetry(() =>
-  import("./components/LibraryWelcome").then((module) => ({ default: module.LibraryWelcome }))
+// New cooks and the Family tab are the minority of visits, so their UI loads on demand. The
+// welcome is a new cook's first paint: it uses only core icons and doesn't wait for the rest.
+const LibraryWelcome = lazyWithRetry(
+  () =>
+    import("./components/LibraryWelcome").then((module) => ({ default: module.LibraryWelcome })),
+  { standalone: true }
 );
 const FamilyCookbook = lazyWithRetry(() =>
   import("./components/FamilyCookbook").then((module) => ({ default: module.FamilyCookbook }))

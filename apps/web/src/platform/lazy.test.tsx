@@ -12,7 +12,8 @@ import {
   installChunkErrorRecovery,
   isChunkLoadError,
   lazyWithRetry,
-  reloadOnceForChunkError
+  reloadOnceForChunkError,
+  setLazyCompanionLoad
 } from "./lazy";
 
 vi.mock("../analytics/client", () => ({
@@ -149,6 +150,56 @@ describe("lazyWithRetry", () => {
     // Synchronously there: no fallback frame, no extra render pass.
     expect(screen.getByText("Hello cook")).toBeInTheDocument();
     expect(screen.queryByText("Loading")).not.toBeInTheDocument();
+  });
+
+  it("waits for the companion load unless standalone, and never fails because of it", async () => {
+    let finishCompanion: () => void = () => undefined;
+    const companion = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishCompanion = resolve;
+        })
+    );
+    setLazyCompanionLoad(companion);
+
+    try {
+      const Page: React.FC<{ name: string }> = ({ name }) => <p>{name}</p>;
+      const WithIcons = lazyWithRetry(() => Promise.resolve({ default: Page }));
+      const Landing = lazyWithRetry(() => Promise.resolve({ default: Page }), {
+        standalone: true
+      });
+
+      render(
+        <>
+          <Suspense fallback={<p>Loading the landing page</p>}>
+            <Landing name="Cookbook" />
+          </Suspense>
+          <Suspense fallback={<p>Loading the plan</p>}>
+            <WithIcons name="Plan" />
+          </Suspense>
+        </>
+      );
+
+      // The standalone page doesn't wait; the other one waits for the companion too.
+      expect(await screen.findByText("Cookbook")).toBeInTheDocument();
+      expect(screen.getByText("Loading the plan")).toBeInTheDocument();
+      expect(companion).toHaveBeenCalledTimes(1);
+
+      finishCompanion();
+      expect(await screen.findByText("Plan")).toBeInTheDocument();
+
+      // A failed companion (offline) still lets the chunk render.
+      setLazyCompanionLoad(() => Promise.reject(new Error("offline")));
+      const Sheet = lazyWithRetry(() => Promise.resolve({ default: Page }));
+      render(
+        <Suspense fallback={<p>Loading sheet</p>}>
+          <Sheet name="Sheet" />
+        </Suspense>
+      );
+      expect(await screen.findByText("Sheet")).toBeInTheDocument();
+    } finally {
+      setLazyCompanionLoad(null);
+    }
   });
 
   it("still suspends when the page was not preloaded", async () => {

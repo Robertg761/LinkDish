@@ -7,8 +7,11 @@ import { lazyWithRetry } from "../platform/lazy";
  * the Cookbook's chunk is also preloaded from index.html (vite.config.ts).
  */
 
-export const LibraryPage = lazyWithRetry(() =>
-  import("../features/library/LibraryPage").then((module) => ({ default: module.LibraryPage }))
+// The landing page uses only core icons, so it never waits for the extended set.
+export const LibraryPage = lazyWithRetry(
+  () =>
+    import("../features/library/LibraryPage").then((module) => ({ default: module.LibraryPage })),
+  { standalone: true }
 );
 export const AccountPage = lazyWithRetry(() =>
   import("../features/account/AccountPage").then((module) => ({ default: module.AccountPage }))
