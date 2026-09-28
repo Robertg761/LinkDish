@@ -13,17 +13,21 @@ import {
   getLinkDishWebDb,
   RECIPE_SOURCE_IMAGES_STORE_NAME,
   resetLinkDishWebDbForTests,
-  SAVED_RECIPES_STORE_NAME
+  SAVED_RECIPES_STORE_NAME,
+  SHOPPING_ITEMS_STORE_NAME
 } from "../../storage/linkdish-db";
 import { fakeIdb } from "../../storage/testing/fake-idb";
 import { flushCookSessionWrites } from "../cook-mode/cook-session-writer";
 import { resetKitchenTimersForTests } from "../cook-mode/timer-store";
+import { resetShoppingListStoreForTests } from "../shopping/shopping-list-store";
+import { resetShoppingSyncForTests, SHOPPING_HOUSEHOLD_CACHE_KEY } from "../shopping/shopping-sync";
 
 import { RecipePage } from "./RecipePage";
 
 import type { WebSavedRecipe } from "./saved-recipe-types";
 import type * as ApiClientModuleNamespace from "../../api/client";
 import type { CookSession } from "../../data/cook-session-store";
+import type { WebShoppingItem } from "../shopping/shopping-list-store";
 import type { SharedRecipe } from "@linkdish/api-contracts";
 import type { Recipe } from "@linkdish/recipe-domain";
 
@@ -36,7 +40,8 @@ const apiMocks = vi.hoisted(() => ({
   deleteSharedRecipe: vi.fn(),
   getHousehold: vi.fn(),
   getSharedRecipes: vi.fn(),
-  updateSharedRecipe: vi.fn()
+  updateSharedRecipe: vi.fn(),
+  upsertShoppingItems: vi.fn()
 }));
 
 vi.mock("../../api/client", async (importOriginal) => ({
@@ -170,6 +175,8 @@ beforeEach(() => {
   resetCookSessionStoreForTests();
   resetKitchenTimersForTests();
   resetPreferencesForTests();
+  resetShoppingListStoreForTests();
+  resetShoppingSyncForTests();
   setDataChannelFactoryForTests(() => null);
   authMocks.user = null;
   Object.values(apiMocks).forEach((mock) => mock.mockReset());
@@ -545,6 +552,31 @@ describe("RecipePage saved route", () => {
       expect(stored("recipe_local")?.recipe.title).toBe("Best Chili");
       expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Best Chili");
     });
+  });
+
+  it("adds a household member's ingredients to the household list even when the check fails", async () => {
+    authMocks.user = { billingPlan: "family", email: "a@example.com", id: "user_1" };
+    // This account is known (cached) to share a household list; right now the API is unreachable.
+    localStorage.setItem(
+      SHOPPING_HOUSEHOLD_CACHE_KEY,
+      JSON.stringify({ checkedAt: Date.now(), household: true, userId: "user_1" })
+    );
+    apiMocks.getHousehold.mockRejectedValue(new TypeError("Failed to fetch"));
+    apiMocks.upsertShoppingItems.mockReturnValue(new Promise(() => undefined));
+    await seed([savedRecipe()]);
+    renderAt("/recipes/recipe_local");
+    await screen.findByRole("heading", { level: 1, name: "Weeknight Chili" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Add to shopping list" }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Add \d+ items?$/u }));
+
+    await waitFor(() =>
+      expect(fakeIdb.records<WebShoppingItem>(SHOPPING_ITEMS_STORE_NAME).length).toBeGreaterThan(0)
+    );
+    // Marked for the household list, not kept on this device for good.
+    expect(
+      fakeIdb.records<WebShoppingItem>(SHOPPING_ITEMS_STORE_NAME).map((item) => item.sync.status)
+    ).not.toContain("local_only");
   });
 
   it("opens the editor for ?edit=1 links", async () => {

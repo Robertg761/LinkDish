@@ -41,6 +41,7 @@ import { RecipeEditorSheet } from "../recipe-view/RecipeEditorSheet";
 import { RecipeView } from "../recipe-view/RecipeView";
 import { useIngredientChecks } from "../recipe-view/use-ingredient-checks";
 import { AddRecipeToShoppingSheet } from "../shopping/AddRecipeToShoppingSheet";
+import { setShoppingAccount } from "../shopping/shopping-sync";
 import { useUpgradeSheet } from "../upgrade/UpgradeSheet";
 
 import {
@@ -351,7 +352,7 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
   const shared = props.kind === "shared" ? props.shared : null;
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated, loading: authLoading, user } = useAuth();
   const { requestUpgradeSheet } = useUpgradeSheet();
   const { showToast } = useToast();
   const isDesktop = useMediaQuery(RAIL_MEDIA_QUERY);
@@ -359,7 +360,8 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
   const [cookOpen, setCookOpen] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
   const [shoppingOpen, setShoppingOpen] = useState(false);
-  const [shoppingCanSync, setShoppingCanSync] = useState(false);
+  /** Undefined when the household check could not answer: the sheet uses the cached mode. */
+  const [shoppingCanSync, setShoppingCanSync] = useState<boolean | undefined>(undefined);
   const [confirm, setConfirm] = useState<"delete-synced" | "unshare" | null>(null);
   const [busy, setBusy] = useState<"delete" | "duplicate" | "sync" | "share-card" | null>(null);
 
@@ -432,19 +434,22 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
   /* ----------------------------------- actions ----------------------------------- */
 
   const openShoppingSheet = useCallback(async () => {
-    setShoppingCanSync(false);
+    setShoppingCanSync(isAuthenticated ? undefined : false);
+    // Offline (or when the check fails) a household member's items must still be marked for the
+    // household list: the sheet then falls back to the shopping sync layer's (cached) mode.
+    setShoppingAccount({ isAuthenticated, loading: authLoading, userId: user?.id });
 
     if (isAuthenticated) {
       try {
         const householdResponse = await apiClient.getHousehold();
         setShoppingCanSync(Boolean(householdResponse.household));
       } catch {
-        setShoppingCanSync(false);
+        // Unknown: leave it to the sync layer.
       }
     }
 
     setShoppingOpen(true);
-  }, [isAuthenticated]);
+  }, [authLoading, isAuthenticated, user?.id]);
 
   const handleShare = async () => {
     const title = recipe.title;

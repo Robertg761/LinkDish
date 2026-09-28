@@ -11,9 +11,12 @@ import {
   COLLECTIONS_STORE_NAME,
   getLinkDishWebDb,
   resetLinkDishWebDbForTests,
-  SAVED_RECIPES_STORE_NAME
+  SAVED_RECIPES_STORE_NAME,
+  SHOPPING_ITEMS_STORE_NAME
 } from "../../storage/linkdish-db";
 import { fakeIdb } from "../../storage/testing/fake-idb";
+import { resetShoppingListStoreForTests } from "../shopping/shopping-list-store";
+import { resetShoppingSyncForTests, SHOPPING_HOUSEHOLD_CACHE_KEY } from "../shopping/shopping-sync";
 
 import { resetLibrarySessionStateForTests } from "./components/library-model";
 import { resetSearchEngineForTests } from "./components/use-library-search";
@@ -22,6 +25,7 @@ import { LibraryPage } from "./LibraryPage";
 
 import type { WebSavedRecipe } from "./saved-recipe-types";
 import type { WebCollection } from "../../data/collections-store";
+import type { WebShoppingItem } from "../shopping/shopping-list-store";
 import type { SharedRecipe } from "@linkdish/api-contracts";
 
 vi.mock("idb", async () => (await import("../../storage/testing/fake-idb")).fakeIdbModule);
@@ -44,7 +48,8 @@ const apiMocks = vi.hoisted(() => {
     deleteSharedRecipe: vi.fn(),
     getHousehold: vi.fn(),
     getSharedRecipes: vi.fn(),
-    updateSharedRecipe: vi.fn()
+    updateSharedRecipe: vi.fn(),
+    upsertShoppingItems: vi.fn()
   };
 });
 
@@ -55,7 +60,8 @@ vi.mock("../../api/client", () => ({
     deleteSharedRecipe: apiMocks.deleteSharedRecipe,
     getHousehold: apiMocks.getHousehold,
     getSharedRecipes: apiMocks.getSharedRecipes,
-    updateSharedRecipe: apiMocks.updateSharedRecipe
+    updateSharedRecipe: apiMocks.updateSharedRecipe,
+    upsertShoppingItems: apiMocks.upsertShoppingItems
   },
   ExtractorApiError: apiMocks.ExtractorApiError,
   isExtractorApiError: (error: unknown) => error instanceof apiMocks.ExtractorApiError
@@ -470,6 +476,36 @@ describe("LibraryPage", () => {
       )
     ).toBeInTheDocument();
     expect(storedRecipe("chili")).toBeDefined();
+  });
+
+  it("adds a household member's ingredients to the household list before the check answers", async () => {
+    resetShoppingListStoreForTests();
+    resetShoppingSyncForTests();
+    authMocks.user = { billingPlan: "family", email: "cook@example.com", id: "user_1" };
+    // This account is known (cached) to share a household list; the fresh check is still out.
+    localStorage.setItem(
+      SHOPPING_HOUSEHOLD_CACHE_KEY,
+      JSON.stringify({ checkedAt: Date.now(), household: true, userId: "user_1" })
+    );
+    apiMocks.getHousehold.mockReturnValue(new Promise(() => undefined));
+    apiMocks.upsertShoppingItems.mockReturnValue(new Promise(() => undefined));
+    seedRecipes([makeRecipe("soup", { ingredients: ["2 carrots"], title: "Tomato Soup" })]);
+
+    renderPage();
+    await screen.findByRole("link", { name: "Tomato Soup" });
+    fireEvent.click(
+      within(openCardMenu("Tomato Soup")).getByRole("menuitem", { name: "Add to shopping list" })
+    );
+    fireEvent.click(await screen.findByRole("button", { name: /^Add \d+ items?$/u }));
+
+    await waitFor(() =>
+      expect(fakeIdb.records<WebShoppingItem>(SHOPPING_ITEMS_STORE_NAME)).toHaveLength(1)
+    );
+    // Marked for the household list, not kept on this device for good.
+    expect(fakeIdb.records<WebShoppingItem>(SHOPPING_ITEMS_STORE_NAME)[0]?.sync.status).not.toBe(
+      "local_only"
+    );
+    resetShoppingSyncForTests();
   });
 
   it("duplicates a recipe and opens the copy", async () => {

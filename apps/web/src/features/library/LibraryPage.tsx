@@ -60,6 +60,7 @@ import {
   LibraryShoppingSheet,
   ManageCollectionsSheet,
   preloadRecipeMenuSheets,
+  primeShoppingAccount,
   TagEditorSheet
 } from "./components/library-sheets";
 import { LibraryFilterBar } from "./components/LibraryFilterBar";
@@ -152,12 +153,13 @@ const isMacLike = (): boolean => {
 
 interface ShoppingSheetState {
   recipe: WebSavedRecipe;
-  canSync: boolean;
+  /** Undefined until the household check answers (the sheet then uses the cached mode). */
+  canSync: boolean | undefined;
 }
 
 export const LibraryPage: React.FC = () => {
   const navigate = useNavigate();
-  const { credentialsKey, isAuthenticated, user } = useAuth();
+  const { credentialsKey, isAuthenticated, loading: authLoading, user } = useAuth();
   const { requestUpgradeSheet } = useUpgradeSheet();
   const { showToast } = useToast();
   const library = useSavedRecipes();
@@ -469,7 +471,10 @@ export const LibraryPage: React.FC = () => {
   };
 
   const openShopping = (recipe: WebSavedRecipe) => {
-    setShoppingSheet({ canSync: false, recipe });
+    // Not "false" while the household check is out (or when it fails): items added then would
+    // stay on this device for good. Unknown falls back to the shopping sync layer's mode.
+    setShoppingSheet({ canSync: undefined, recipe });
+    primeShoppingAccount({ isAuthenticated, loading: authLoading, userId: user?.id });
 
     if (isAuthenticated) {
       apiClient
