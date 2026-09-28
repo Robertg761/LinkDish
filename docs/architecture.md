@@ -240,7 +240,10 @@ Performance pieces in `services/extractor-api/src/modules/extract`:
   normal pages no longer force a browser render.
 - **Entitlements** (`billing/revenuecat-entitlements.ts`): paid plans are cached in
   Upstash for 5 minutes. "free" is never cached. The RevenueCat webhook invalidates every
-  user an event concerns. Household changes that require Family use fresh lookups.
+  user an event concerns and leaves a 5-minute marker; a lookup only caches a paid plan
+  when no marker exists (checked and written in one EVAL) and it started less than 5
+  minutes ago, so a lookup still waiting on RevenueCat when a refund or expiry arrives
+  cannot put the old plan back. Household changes that require Family use fresh lookups.
 
 ## Authentication
 

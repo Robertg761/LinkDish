@@ -100,6 +100,79 @@ describe("RevenueCat entitlement cache", () => {
     expect(fetchMock).toHaveBeenCalledTimes(4);
   });
 
+  it("does not let a lookup that started before an invalidation re-cache its stale plan", async () => {
+    const releases: Array<(response: Response) => void> = [];
+    const familyResponse = () =>
+      new Response(
+        JSON.stringify({ subscriber: { entitlements: { Family: { expires_date: null } } } }),
+        { headers: { "content-type": "application/json" }, status: 200 }
+      );
+    const fetchMock = vi.fn(
+      () =>
+        new Promise<Response>((resolve) => {
+          releases.push(resolve);
+        })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const entitlements = await importEntitlements();
+
+    /* An import asks RevenueCat, which still answers with the pre-refund state... */
+    const lookup = entitlements.getRevenueCatBillingPlanId("user_refunded");
+    await vi.waitFor(() => {
+      expect(releases).toHaveLength(1);
+    });
+    /* ...the refund webhook drops the cache while that answer is on its way... */
+    await entitlements.invalidateRevenueCatEntitlementCache("user_refunded");
+    releases[0]?.(familyResponse());
+
+    /* ...and the stale answer must not be cached as if it were current. */
+    await expect(lookup).resolves.toBe("family");
+    await expect(
+      entitlements.peekCachedRevenueCatBillingPlanId("user_refunded")
+    ).resolves.toBeNull();
+
+    const recheck = entitlements.hasActiveRevenueCatFamilyEntitlement("user_refunded");
+    await vi.waitFor(() => {
+      expect(releases).toHaveLength(2);
+    });
+    releases[1]?.(new Response(JSON.stringify({ subscriber: { entitlements: {} } })));
+    await expect(recheck).resolves.toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not cache a plan from a lookup that outlived the invalidation window", async () => {
+    let release: (response: Response) => void = () => undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        () =>
+          new Promise<Response>((resolve) => {
+            release = resolve;
+          })
+      )
+    );
+    const entitlements = await importEntitlements();
+    const startedAt = Date.now();
+    const now = vi.spyOn(Date, "now");
+
+    const lookup = entitlements.getRevenueCatBillingPlanId("user_slow");
+    await vi.waitFor(() => {
+      expect(fetch).toHaveBeenCalledTimes(1);
+    });
+    now.mockReturnValue(
+      startedAt + entitlements.REVENUECAT_ENTITLEMENT_CACHE_TTL_SECONDS * 1_000 + 1_000
+    );
+    release(
+      new Response(
+        JSON.stringify({ subscriber: { entitlements: { Plus: { expires_date: null } } } })
+      )
+    );
+
+    await expect(lookup).resolves.toBe("plus");
+    await expect(entitlements.peekCachedRevenueCatBillingPlanId("user_slow")).resolves.toBeNull();
+    now.mockRestore();
+  });
+
   it("shares one RevenueCat call between concurrent lookups for the same user", async () => {
     const fetchMock = stubRevenueCat(new Map([["user_busy", "family" as const]]));
     const entitlements = await importEntitlements();
