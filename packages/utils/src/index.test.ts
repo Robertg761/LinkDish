@@ -53,7 +53,9 @@ describe("decodeHtmlEntities", () => {
   });
 
   it("does not emit raw control characters", () => {
-    for (const entity of ["&#1;", "&#x1B;", "&#127;", "&#x9F;", "&#x0B;"]) {
+    // 0x81 and 0x9D are the C1 slots Windows-1252 leaves undefined, so HTML5 has no
+    // character to map them to; they must stay encoded like any other control character.
+    for (const entity of ["&#1;", "&#x1B;", "&#127;", "&#x81;", "&#x9D;", "&#x0B;"]) {
       const decoded = decodeHtmlEntities(`x${entity}y`);
 
       expect(decoded).toBe(`x${entity}y`);
@@ -66,5 +68,68 @@ describe("decodeHtmlEntities", () => {
     expect(decodeHtmlEntities("a&#10;b")).toBe("a\nb");
     expect(decodeHtmlEntities("a&#9;b")).toBe("a\tb");
     expect(decodeHtmlEntities("a&#13;b")).toBe("a\rb");
+  });
+});
+
+describe("decodeHtmlEntities recipe vocabulary (bug 1)", () => {
+  // Every entity here showed up raw in JSON-LD recipe text ("350&deg;F", "Grandma&rsquo;s").
+  const namedEntityCorpus: ReadonlyArray<readonly [string, string]> = [
+    ["Bake at 350&deg;F", "Bake at 350°F"],
+    ["Grandma&rsquo;s Pie", "Grandma’s Pie"],
+    ["&lsquo;quoted&rsquo;", "‘quoted’"],
+    ["&ldquo;Best ever&rdquo; brownies", "“Best ever” brownies"],
+    ["Saut&eacute;ed onions", "Sautéed onions"],
+    ["Cr&egrave;me fra&icirc;che", "Crème fraîche"],
+    ["1 jalape&ntilde;o", "1 jalapeño"],
+    ["2 &times; 400g tins", "2 × 400g tins"],
+    ["&frac12; cup", "½ cup"],
+    ["&frac13; cup", "⅓ cup"],
+    ["&frac14; cup", "¼ cup"],
+    ["&frac34; cup", "¾ cup"],
+    ["&frac18; tsp", "⅛ tsp"],
+    ["&frac23; cup", "⅔ cup"],
+    ["Stir&hellip;", "Stir…"],
+    ["5&ndash;7 minutes", "5–7 minutes"],
+    ["Rest&mdash;covered", "Rest—covered"],
+    ["a&nbsp;b", "a b"],
+    ["Cr&Egrave;ME", "CrÈME"],
+    ["&Eacute;clair", "Éclair"],
+    ["Fish &amp; Chips", "Fish & Chips"],
+    ["Pi&ntilde;a Colada &copy; 2026", "Piña Colada © 2026"],
+    ["Stra&szlig;e M&uuml;sli", "Straße Müsli"]
+  ];
+
+  it("decodes the named entities recipe sites use", () => {
+    expect(namedEntityCorpus).toHaveLength(23);
+
+    for (const [input, expected] of namedEntityCorpus) {
+      expect(decodeHtmlEntities(input), input).toBe(expected);
+    }
+  });
+
+  it("decodes numeric typographic quotes in decimal and hex", () => {
+    expect(decodeHtmlEntities("Grandma&#8217;s")).toBe("Grandma’s");
+    expect(decodeHtmlEntities("Grandma&#x2019;s")).toBe("Grandma’s");
+    expect(decodeHtmlEntities("Grandma&#X2019;s")).toBe("Grandma’s");
+    expect(decodeHtmlEntities("&#8220;hi&#8221;")).toBe("“hi”");
+    expect(decodeHtmlEntities("350&#176;F")).toBe("350°F");
+  });
+
+  it("decodes legacy Windows-1252 references the way browsers do", () => {
+    expect(decodeHtmlEntities("Grandma&#146;s")).toBe("Grandma’s");
+    expect(decodeHtmlEntities("5&#150;7 minutes")).toBe("5–7 minutes");
+    expect(decodeHtmlEntities("&#147;quoted&#148;")).toBe("“quoted”");
+    expect(decodeHtmlEntities("wait&#133;")).toBe("wait…");
+    expect(decodeHtmlEntities("&#x9F;")).toBe("Ÿ");
+  });
+
+  it("prefers the exact-case entity and falls back to lowercase", () => {
+    expect(decodeHtmlEntities("&AMP;")).toBe("&");
+    expect(decodeHtmlEntities("&Ntilde;")).toBe("Ñ");
+    expect(decodeHtmlEntities("&NTILDE;")).toBe("ñ");
+  });
+
+  it("decodes once so a double-encoded entity keeps its literal text", () => {
+    expect(decodeHtmlEntities("&amp;rsquo;")).toBe("&rsquo;");
   });
 });

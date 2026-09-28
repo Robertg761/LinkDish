@@ -139,11 +139,31 @@ describe("unit coverage (bug 2)", () => {
   });
 
   it("maps case-sensitive single-letter abbreviations to the right unit", () => {
-    expect(parseIngredientQuantity("2 T sugar")).toMatchObject({ qty: 2, unit: "Tbsp", item: "sugar" });
-    expect(parseIngredientQuantity("1 t vanilla")).toMatchObject({ qty: 1, unit: "tsp", item: "vanilla" });
-    expect(parseIngredientQuantity("1 c flour")).toMatchObject({ qty: 1, unit: "cup", item: "flour" });
-    expect(parseIngredientQuantity("1 c. flour")).toMatchObject({ qty: 1, unit: "cup", item: "flour" });
-    expect(parseIngredientQuantity("2 T-bone steaks")).toMatchObject({ qty: 2, unit: null, item: "T-bone steaks" });
+    expect(parseIngredientQuantity("2 T sugar")).toMatchObject({
+      qty: 2,
+      unit: "Tbsp",
+      item: "sugar"
+    });
+    expect(parseIngredientQuantity("1 t vanilla")).toMatchObject({
+      qty: 1,
+      unit: "tsp",
+      item: "vanilla"
+    });
+    expect(parseIngredientQuantity("1 c flour")).toMatchObject({
+      qty: 1,
+      unit: "cup",
+      item: "flour"
+    });
+    expect(parseIngredientQuantity("1 c. flour")).toMatchObject({
+      qty: 1,
+      unit: "cup",
+      item: "flour"
+    });
+    expect(parseIngredientQuantity("2 T-bone steaks")).toMatchObject({
+      qty: 2,
+      unit: null,
+      item: "T-bone steaks"
+    });
   });
 
   it("does not silently floor a scaled-down single item to 1", () => {
@@ -162,9 +182,18 @@ describe("pluralization (bug 3)", () => {
 
 describe("amount-only lines (bug 4)", () => {
   it("scales lines that carry a quantity and unit but no item text", () => {
-    expect(parseIngredientQuantity("2 cups")).toMatchObject({ qty: 2, unit: "cup", item: "", confident: true });
+    expect(parseIngredientQuantity("2 cups")).toMatchObject({
+      qty: 2,
+      unit: "cup",
+      item: "",
+      confident: true
+    });
     expect(scaleQuantity(parseIngredientQuantity("2 cups"), 0.5)).toBe("1 cup");
-    expect(parseIngredientQuantity("10 1/2 oz")).toMatchObject({ qty: 10.5, unit: "oz", confident: true });
+    expect(parseIngredientQuantity("10 1/2 oz")).toMatchObject({
+      qty: 10.5,
+      unit: "oz",
+      confident: true
+    });
     expect(scaleQuantity(parseIngredientQuantity("10 1/2 oz"), 2)).toBe("21 oz");
   });
 
@@ -186,7 +215,11 @@ describe("bad scale factors (bug 5)", () => {
 
 describe("shared number phrases (bug 7)", () => {
   it("reads every vulgar fraction the timer parser knows", () => {
-    expect(parseIngredientQuantity("⅕ cup broth")).toMatchObject({ qty: 0.2, unit: "cup", confident: true });
+    expect(parseIngredientQuantity("⅕ cup broth")).toMatchObject({
+      qty: 0.2,
+      unit: "cup",
+      confident: true
+    });
     expect(parseIngredientQuantity("⅙ cup cream")).toMatchObject({ unit: "cup", confident: true });
     expect(parseIngredientQuantity("⅚ cup water")).toMatchObject({ unit: "cup", confident: true });
   });
@@ -194,7 +227,10 @@ describe("shared number phrases (bug 7)", () => {
 
 describe("zero quantities (bug 8)", () => {
   it("treats a zero amount as unconfident", () => {
-    expect(parseIngredientQuantity("0 cups sugar")).toMatchObject({ confident: false, item: "0 cups sugar" });
+    expect(parseIngredientQuantity("0 cups sugar")).toMatchObject({
+      confident: false,
+      item: "0 cups sugar"
+    });
     expect(scaleQuantity(parseIngredientQuantity("0 cups sugar"), 2)).toBe("0 cups sugar");
   });
 });
@@ -228,7 +264,23 @@ describe("scale round-trip", () => {
     "1 dash bitters",
     "1 bunch parsley",
     "2 cups",
-    "1 1/3 cups flour"
+    "1 1/3 cups flour",
+    "1-1/2 cups flour",
+    "1½ cups milk",
+    "1⁄2 cup sugar",
+    ".5 cup oil",
+    "200g pasta",
+    "3 cups (360g) flour",
+    "1/2 to 2/3 cup (113g to 152g) hot water",
+    "1 (15-ounce) can chickpeas",
+    "2 (14 oz) cans",
+    "2 x 400g tins chopped tomatoes",
+    "2 large eggs, beaten",
+    "1 red bell pepper, thinly sliced",
+    "4 tablespoons (57g) melted butter or 1/4 cup (50g) vegetable oil",
+    "one onion",
+    "1 cup plus 2 tablespoons (140g) flour",
+    "2 tbsp + 1 tsp sugar"
   ];
   const roundTripFactors = [0.05, 0.25, 0.5, 0.665, 1, 1.05, 1.4, 1.5, 2, 3, 50, 1e21, 1e-9];
 
