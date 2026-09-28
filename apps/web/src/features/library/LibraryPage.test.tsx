@@ -12,6 +12,7 @@ import { resetLibraryStoreForTests } from "../../data/library-store";
 import {
   COLLECTIONS_STORE_NAME,
   getLinkDishWebDb,
+  RECIPE_SOURCE_IMAGES_STORE_NAME,
   resetLinkDishWebDbForTests,
   SAVED_RECIPES_STORE_NAME,
   SHOPPING_ITEMS_STORE_NAME
@@ -439,6 +440,30 @@ describe("LibraryPage", () => {
     await waitFor(() => expect(storedRecipe("soup")?.recipe.title).toBe("Tomato Soup"));
   });
 
+  it("still deletes a recipe whose scans can't be read back, without offering Undo", async () => {
+    seedRecipes([makeRecipe("soup", { title: "Tomato Soup" })]);
+    fakeIdb.seed(RECIPE_SOURCE_IMAGES_STORE_NAME, [
+      { images: [], recipeId: "soup", updatedAt: iso(1) }
+    ]);
+
+    renderPage();
+    await screen.findByText("Tomato Soup");
+    // Chrome: the file behind a large stored value is gone ("Failed to read large IndexedDB value").
+    fakeIdb.failNextGet(
+      RECIPE_SOURCE_IMAGES_STORE_NAME,
+      new DOMException("Failed to read large IndexedDB value", "NotReadableError")
+    );
+    fireEvent.click(within(openCardMenu("Tomato Soup")).getByRole("menuitem", { name: "Delete" }));
+
+    expect(await screen.findByText("Deleted “Tomato Soup”")).toBeInTheDocument();
+    expect(storedRecipe("soup")).toBeUndefined();
+    expect(fakeIdb.record(RECIPE_SOURCE_IMAGES_STORE_NAME, "soup")).toBeUndefined();
+    expect(screen.queryByRole("button", { name: "Undo" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("This recipe could not be deleted. Please try again.")
+    ).not.toBeInTheDocument();
+  });
+
   it("keeps the copy saved again elsewhere when Undo comes after it", async () => {
     seedRecipes([makeRecipe("soup", { title: "Tomato Soup" })]);
 
@@ -509,6 +534,40 @@ describe("LibraryPage", () => {
 
     await waitFor(() => expect(storedRecipe("chili")).toBeUndefined());
     expect(apiMocks.deleteSharedRecipe).toHaveBeenCalledWith("shared_9");
+  });
+
+  it("removes a synced recipe here once its household copy is gone, even if its scans can't be read", async () => {
+    authMocks.user = { billingPlan: "family", email: "owner@example.com", id: "user_owner" };
+    seedRecipes([
+      makeRecipe("chili", {
+        extra: { sync: { sharedRecipeId: "shared_9", status: "synced" } },
+        title: "Chili"
+      })
+    ]);
+    fakeIdb.seed(RECIPE_SOURCE_IMAGES_STORE_NAME, [
+      { images: [], recipeId: "chili", updatedAt: iso(1) }
+    ]);
+
+    renderPage();
+    await screen.findByText("Chili");
+    fakeIdb.failNextGet(
+      RECIPE_SOURCE_IMAGES_STORE_NAME,
+      new DOMException("Failed to read large IndexedDB value", "NotReadableError")
+    );
+    fireEvent.click(within(openCardMenu("Chili")).getByRole("menuitem", { name: "Delete" }));
+    fireEvent.click(
+      within(await screen.findByRole("dialog", { name: "Delete shared recipe?" })).getByRole(
+        "button",
+        { name: "Delete everywhere" }
+      )
+    );
+
+    expect(
+      await screen.findByText("Deleted “Chili” here and from your Family cookbook")
+    ).toBeInTheDocument();
+    expect(apiMocks.deleteSharedRecipe).toHaveBeenCalledWith("shared_9");
+    expect(storedRecipe("chili")).toBeUndefined();
+    expect(fakeIdb.record(RECIPE_SOURCE_IMAGES_STORE_NAME, "chili")).toBeUndefined();
   });
 
   it("keeps a synced recipe when the household copy could not be deleted", async () => {

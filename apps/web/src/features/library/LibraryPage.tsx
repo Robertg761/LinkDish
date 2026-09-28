@@ -481,7 +481,8 @@ export const LibraryPage: React.FC = () => {
       }
 
       shared.removeLocal(sharedRecipeId);
-      await removeSavedRecipe(recipe.id);
+      // No Undo here (the household copy is already gone), so nothing to read back.
+      await removeSavedRecipe(recipe.id, { snapshot: false });
       setPendingSyncedDelete(null);
       showToast({
         icon: "trash",

@@ -679,7 +679,8 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
           }
         }
 
-        await removeSavedRecipe(record.id);
+        // No Undo here (the household copy is already gone), so nothing to read back.
+        await removeSavedRecipe(record.id, { snapshot: false });
         setConfirm(null);
         showToast({ message: `Deleted “${recipe.title}” here and from your household.` });
         void navigate("/");

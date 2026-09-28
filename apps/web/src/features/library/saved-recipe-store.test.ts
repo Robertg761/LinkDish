@@ -568,6 +568,68 @@ describe("saved-recipe-store v4 behaviour", () => {
     });
   });
 
+  it("still deletes a recipe whose scans can't be read back, with nothing for Undo", async () => {
+    const saved = await saveScanned();
+    fakeIdb.seed("cookSessions", [{ recipeId: saved.id, stepIndex: 2 }]);
+    const changes: unknown[] = [];
+    subscribeDataChanges("savedRecipes", (change) => changes.push(change));
+    // Chrome: the file behind a large stored value is gone ("Failed to read large IndexedDB value").
+    fakeIdb.failNextGet(
+      RECIPE_SOURCE_IMAGES_STORE_NAME,
+      new DOMException("Failed to read large IndexedDB value", "NotReadableError")
+    );
+
+    expect(await deleteSavedRecipe(saved.id)).toBeUndefined();
+
+    expect(fakeIdb.record(SAVED_RECIPES_STORE_NAME, saved.id)).toBeUndefined();
+    expect(fakeIdb.record(RECIPE_SOURCE_IMAGES_STORE_NAME, saved.id)).toBeUndefined();
+    expect(fakeIdb.record("cookSessions", saved.id)).toBeUndefined();
+    expect(changes).toEqual([{ deletedIds: [saved.id], topic: "savedRecipes" }]);
+  });
+
+  it("deletes without reading the recipe or its scans when no Undo copy is wanted", async () => {
+    const saved = await saveScanned();
+    const readFailure = new DOMException(
+      "Failed to read large IndexedDB value",
+      "NotReadableError"
+    );
+    fakeIdb.failNextGet(RECIPE_SOURCE_IMAGES_STORE_NAME, readFailure);
+
+    expect(await deleteSavedRecipe(saved.id, { snapshot: false })).toBeUndefined();
+
+    expect(fakeIdb.record(SAVED_RECIPES_STORE_NAME, saved.id)).toBeUndefined();
+    expect(fakeIdb.record(RECIPE_SOURCE_IMAGES_STORE_NAME, saved.id)).toBeUndefined();
+    // The scans were never read: the failure armed for the next read is still waiting.
+    await expect(getSavedRecipeSourceImages(saved.id)).rejects.toBe(readFailure);
+  });
+
+  it("reports a failed delete instead of retrying it without the Undo copy", async () => {
+    const saved = await saveScanned();
+    const db = await getDb();
+    const transaction = db.transaction.bind(db);
+    // The recipe and its scans read fine; deleting its cook session fails.
+    vi.spyOn(db, "transaction").mockImplementationOnce(((
+      ...args: Parameters<typeof transaction>
+    ) => {
+      const tx = transaction(...args);
+      const objectStore = tx.objectStore.bind(tx);
+      return Object.assign(tx, {
+        objectStore: (name: string) =>
+          name === "cookSessions"
+            ? {
+                ...objectStore(name),
+                delete: () => Promise.reject(new DOMException("disk gone", "UnknownError"))
+              }
+            : objectStore(name)
+      });
+    }) as typeof db.transaction);
+
+    await expect(deleteSavedRecipe(saved.id)).rejects.toMatchObject({ name: "UnknownError" });
+
+    expect(fakeIdb.record(SAVED_RECIPES_STORE_NAME, saved.id)).toBeDefined();
+    expect(fakeIdb.record(RECIPE_SOURCE_IMAGES_STORE_NAME, saved.id)).toBeDefined();
+  });
+
   it("saves neither a recipe nor its scans when the scans don't fit", async () => {
     fakeIdb.failNextPut(
       RECIPE_SOURCE_IMAGES_STORE_NAME,

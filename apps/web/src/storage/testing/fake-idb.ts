@@ -27,6 +27,7 @@ interface FakeIdbState {
   afterGetAll: Map<string, () => Promise<void> | void>;
   blockedOnce: boolean;
   callbacks: FakeOpenCallbacks | null;
+  failGets: Map<string, Error>;
   failPuts: Map<string, Error>;
   definitions: Map<string, FakeStoreDefinition>;
   failNextOpen: Error | null;
@@ -43,6 +44,7 @@ const state: FakeIdbState = {
   afterGetAll: new Map(),
   blockedOnce: false,
   callbacks: null,
+  failGets: new Map(),
   failPuts: new Map(),
   definitions: new Map(),
   failNextOpen: null,
@@ -153,7 +155,18 @@ const createStoreApi = (name: string, request: RunRequest, beforeWrite?: BeforeW
         beforeWrite?.(name);
         records.delete(String(key));
       }),
-    get: (key: string) => request(() => clone(requireStore(name).records.get(String(key)))),
+    get: (key: string) =>
+      request(() => {
+        const { records } = requireStore(name);
+        const failure = state.failGets.get(name);
+
+        if (failure) {
+          state.failGets.delete(name);
+          throw failure;
+        }
+
+        return clone(records.get(String(key)));
+      }),
     getAll: () =>
       request(
         () => Array.from(requireStore(name).records.values()).map(clone),
@@ -514,6 +527,7 @@ export const fakeIdb = {
     state.openHold = null;
     state.blockedOnce = false;
     state.callbacks = null;
+    state.failGets = new Map();
     state.failPuts = new Map();
     state.writers = [];
     state.afterGetAll = new Map();
@@ -580,6 +594,15 @@ export const fakeIdb = {
    */
   afterNextGetAll(storeName: string, callback: () => Promise<void> | void): void {
     state.afterGetAll.set(storeName, callback);
+  },
+
+  /**
+   * The next `get` from `storeName` (in any transaction) fails with `error`, e.g. a value the
+   * browser can no longer read back (Chrome's `NotReadableError` for a large value whose file is
+   * gone). As through `idb`, the failed request aborts the transaction it was made in.
+   */
+  failNextGet(storeName: string, error: Error): void {
+    state.failGets.set(storeName, error);
   },
 
   /** The next `put` into `storeName` (in any transaction) throws `error`. */

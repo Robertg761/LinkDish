@@ -583,6 +583,34 @@ describe("RecipePage saved route", () => {
     expect(stored("recipe_local")).toBeUndefined();
   });
 
+  it("removes a synced recipe here once its household copy is gone, even if its scans can't be read", async () => {
+    authMocks.user = { billingPlan: "family", email: "a@example.com", id: "user_1" };
+    apiMocks.deleteSharedRecipe.mockResolvedValue(undefined);
+    await seed([savedRecipe({ sync: { sharedRecipeId: "shared_9", status: "synced" } })]);
+    fakeIdb.seed(RECIPE_SOURCE_IMAGES_STORE_NAME, [
+      { images: [], recipeId: "recipe_local", updatedAt: "2026-06-02T12:00:00.000Z" }
+    ]);
+    renderAt("/recipes/recipe_local");
+    await screen.findByRole("heading", { level: 1, name: "Weeknight Chili" });
+    // Chrome: the file behind a large stored value is gone ("Failed to read large IndexedDB value").
+    fakeIdb.failNextGet(
+      RECIPE_SOURCE_IMAGES_STORE_NAME,
+      new DOMException("Failed to read large IndexedDB value", "NotReadableError")
+    );
+
+    fireEvent.click(within(openMenu()).getByRole("menuitem", { name: "Delete recipe" }));
+    fireEvent.click(
+      within(screen.getByRole("dialog", { name: "Delete recipe?" })).getByRole("button", {
+        name: "Delete"
+      })
+    );
+
+    expect(await screen.findByText("Cookbook route")).toBeInTheDocument();
+    expect(apiMocks.deleteSharedRecipe).toHaveBeenCalledWith("shared_9");
+    expect(stored("recipe_local")).toBeUndefined();
+    expect(fakeIdb.record(RECIPE_SOURCE_IMAGES_STORE_NAME, "recipe_local")).toBeUndefined();
+  });
+
   it("keeps a synced recipe when the household copy can't be deleted", async () => {
     authMocks.user = { billingPlan: "family", email: "a@example.com", id: "user_1" };
     apiMocks.deleteSharedRecipe.mockRejectedValue(new Error("offline"));

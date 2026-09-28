@@ -365,14 +365,18 @@ export const updateNotes = (id: string, notes: string | null) =>
 
 /**
  * Deletes the local recipe (the household copy, if any, is the caller's job). Resolves with the
- * recipe as it was deleted, scans included, for Undo (`undefined` when it was already gone).
+ * recipe as it was deleted, scans included, for Undo (`undefined` when it was already gone or
+ * could not be read). With `snapshot: false` (no Undo) nothing is read and it resolves `undefined`.
  */
-export async function removeSavedRecipe(id: string): Promise<WebSavedRecipe | undefined> {
+export async function removeSavedRecipe(
+  id: string,
+  options?: { snapshot?: boolean }
+): Promise<WebSavedRecipe | undefined> {
   const previous = libraryResource.getSnapshot().data;
   libraryResource.update((current) => current.filter((recipe) => recipe.id !== id));
 
   try {
-    return await deleteSavedRecipe(id);
+    return await deleteSavedRecipe(id, options);
   } catch (error) {
     libraryResource.update(() => previous);
     throw error;

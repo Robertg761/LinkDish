@@ -22,6 +22,7 @@ import type {
   WebSavedRecipe,
   WebSavedRecipeMetadataKey
 } from "./saved-recipe-types";
+import type { LinkDishTransaction } from "../../storage/idb-transaction";
 import type {
   ExtractRecipeImage,
   FetchMode,
@@ -1085,28 +1086,65 @@ export async function syncRecipeToHousehold(recipe: WebSavedRecipe): Promise<Web
   }
 }
 
+/** The stores a recipe's delete clears: the recipe, its scans and any in-progress cook session. */
+const RECIPE_DELETE_STORES = [STORE_NAME, IMAGES_STORE_NAME, COOK_SESSIONS_STORE_NAME] as const;
+
+const deleteRecipeRecords = (tx: LinkDishTransaction<"readwrite">, id: string) =>
+  Promise.all(RECIPE_DELETE_STORES.map((name) => tx.objectStore(name).delete(id)));
+
+/** Deletes the recipe, its scans and any cook session, in one transaction, reading none of them. */
+const deleteRecipeUnread = (id: string): Promise<undefined> =>
+  runLinkDishTransaction(RECIPE_DELETE_STORES, "readwrite", async (tx) => {
+    await deleteRecipeRecords(tx, id);
+    return undefined;
+  });
+
+/** The read of what a delete removes failed; the delete itself did not. */
+class DeletedRecipeReadError extends Error {}
+
+/**
+ * Deletes the recipe and hands back what it removed, read in the same transaction. When that read
+ * fails (Chrome can lose the file behind a large stored value, and then the scans can never be
+ * read again: `NotReadableError`), the failed request aborts the transaction, so the recipe is
+ * deleted again without the read and there is nothing to hand back.
+ */
+const deleteReadingSnapshot = async (id: string): Promise<WebSavedRecipe | undefined> => {
+  try {
+    return await runLinkDishTransaction(RECIPE_DELETE_STORES, "readwrite", async (tx) => {
+      // Requests in a transaction run in order: the reads see the recipe the deletes remove.
+      const read = (async () =>
+        readRecipeWithScans(tx.objectStore(STORE_NAME), tx.objectStore(IMAGES_STORE_NAME), id))();
+      const [[stored, images]] = await Promise.all([
+        read.catch((error: unknown) => {
+          throw new DeletedRecipeReadError("The recipe to delete could not be read.", {
+            cause: error
+          });
+        }),
+        deleteRecipeRecords(tx, id)
+      ]);
+      return hydrateStoredRecipe(stored, images);
+    });
+  } catch (error) {
+    if (!(error instanceof DeletedRecipeReadError)) {
+      throw error;
+    }
+  }
+
+  return deleteRecipeUnread(id);
+};
+
 /**
  * Deletes a recipe together with its stored source images and any in-progress cook session, in
  * one transaction. Resolves with the recipe as it was when deleted (scans included, read in that
- * same transaction), for Undo to put back exactly that, or `undefined` when there was none.
+ * same transaction), for Undo to put back exactly that, or `undefined` when there was none or it
+ * could not be read. Pass `snapshot: false` when nothing will be put back: the recipe and its
+ * (possibly large) scans are then not read at all.
  */
-export async function deleteSavedRecipe(id: string): Promise<WebSavedRecipe | undefined> {
-  const removed = await runLinkDishTransaction(
-    [STORE_NAME, IMAGES_STORE_NAME, COOK_SESSIONS_STORE_NAME],
-    "readwrite",
-    async (tx) => {
-      const recipes = tx.objectStore(STORE_NAME);
-      const imagesStore = tx.objectStore(IMAGES_STORE_NAME);
-      // Requests in a transaction run in order: the reads see the recipe the deletes remove.
-      const [[stored, images]] = await Promise.all([
-        readRecipeWithScans(recipes, imagesStore, id),
-        recipes.delete(id),
-        imagesStore.delete(id),
-        tx.objectStore(COOK_SESSIONS_STORE_NAME).delete(id)
-      ]);
-      return hydrateStoredRecipe(stored, images);
-    }
-  );
+export async function deleteSavedRecipe(
+  id: string,
+  { snapshot = true }: { snapshot?: boolean } = {}
+): Promise<WebSavedRecipe | undefined> {
+  const removed = snapshot ? await deleteReadingSnapshot(id) : await deleteRecipeUnread(id);
 
   emitDataChange({ topic: "savedRecipes", deletedIds: [id] });
   emitDataChange({ topic: "cookSessions", deletedIds: [id] });
