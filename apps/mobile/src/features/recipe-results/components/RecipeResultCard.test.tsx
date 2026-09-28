@@ -23,6 +23,10 @@ const animatedTimingMocks = vi.hoisted(() => ({
   pending: [] as Array<() => void>
 }));
 
+const uiRenderCounts = vi.hoisted(() => ({
+  appText: 0
+}));
+
 vi.mock("../../../analytics/client", () => ({
   trackMobileEvent: analyticsMocks.trackMobileEvent
 }));
@@ -204,7 +208,10 @@ vi.mock("@linkdish/ui", () => ({
     italic?: boolean;
     style?: unknown;
     tone?: string;
-  }) => React.createElement("text", { italic, style, tone }, children)
+  }) => {
+    uiRenderCounts.appText += 1;
+    return React.createElement("text", { italic, style, tone }, children);
+  }
 }));
 
 vi.mock("@react-native-async-storage/async-storage", () => ({
@@ -249,7 +256,11 @@ vi.mock("react-native-safe-area-context", () => ({
 
 import { COOK_MODE_FINALE_TITLE } from "../../../theme/flavorCopy";
 
-import { RecipeResultCard, getTimerRemainingSeconds } from "./RecipeResultCard";
+import {
+  RecipeResultCard,
+  formatTimerRemaining,
+  getTimerRemainingSeconds
+} from "./RecipeResultCard";
 
 import type { ReactTestInstance } from "react-test-renderer";
 
@@ -366,7 +377,8 @@ describe("RecipeResultCard", () => {
     expect(output).not.toContain("Check the seasoning.");
     expect(output).toContain("390 kcal");
     expect(output).toContain("Grandma’s Soup");
-    expect(output).toContain("Webpage · 4 servings · Prep 10 min · Cook 20 min");
+    // formatServings + getRecipeTimes: "4&nbsp;servings" reads as "Serves 4", with a total.
+    expect(output).toContain("Webpage · Serves 4 · Prep 10 min · Cook 20 min · Total 30 min");
     expect(output).toContain("1 ½ onions");
     expect(output).toContain("Don’t boil.");
     expect(output).toContain("Ingredients");
@@ -1714,5 +1726,139 @@ describe("RecipeResultCard", () => {
     dateNow.mockReturnValue(1_000 + 4 * 60 * 1000 + 250);
 
     expect(getTimerRemainingSeconds(deadlineMs, Date.now())).toBe(360);
+  });
+
+  it("formats long timers as hours instead of '90:00'", () => {
+    expect(formatTimerRemaining(5400)).toBe("1:30:00");
+    expect(formatTimerRemaining(3661)).toBe("1:01:01");
+    expect(formatTimerRemaining(65)).toBe("1:05");
+    expect(formatTimerRemaining(0)).toBe("0:00");
+  });
+
+  const buildRecipe = (
+    overrides: Partial<React.ComponentProps<typeof RecipeResultCard>["recipe"]>
+  ) => ({
+    title: "Cake",
+    sourceUrl: "https://example.com/cake",
+    sourceType: "article" as const,
+    ingredients: [{ text: "2 cups flour" }, { text: "1 cup milk" }],
+    steps: [{ index: 1, text: "Bake at 350°F for 30 minutes." }],
+    servings: null,
+    prepTimeMinutes: null,
+    cookTimeMinutes: null,
+    nutrition: null,
+    confidence: {
+      score: 0.8,
+      summary: "Confident extraction.",
+      missingFields: [],
+      notes: [],
+      fieldProvenance: {
+        title: "visible-text" as const,
+        ingredients: "visible-text" as const,
+        steps: "visible-text" as const,
+        servings: null,
+        prepTimeMinutes: null,
+        cookTimeMinutes: null,
+        nutrition: null
+      }
+    },
+    ...overrides
+  });
+
+  it("switches ingredients and oven temperatures between original, US and metric units", () => {
+    let renderer: ReturnType<typeof create>;
+    const onAddIngredientsToShoppingList = vi.fn();
+
+    act(() => {
+      renderer = create(
+        <RecipeResultCard
+          onAddIngredientsToShoppingList={onAddIngredientsToShoppingList}
+          recipe={buildRecipe({})}
+        />
+      );
+    });
+
+    const unitButton = (label: string) =>
+      renderer!.root.findByProps({ accessibilityLabel: `Show ${label} ingredient units` });
+
+    expect(unitButton("original").props.accessibilityState).toEqual({ selected: true });
+    expect(unitButton("US")).toBeDefined();
+
+    act(() => {
+      getProps<PressableProps>(unitButton("metric")).onPress?.();
+    });
+
+    const output = JSON.stringify(renderer!.toJSON());
+    expect(output).toContain("240 g flour");
+    expect(output).not.toContain("2 cups flour");
+    expect(output).toContain("°C");
+    expect(output).not.toContain("350°F");
+    expect(output).toContain("Some converted amounts are approximate.");
+
+    act(() => {
+      getProps<PressableProps>(unitButton("original")).onPress?.();
+    });
+
+    const originalOutput = JSON.stringify(renderer!.toJSON());
+    expect(originalOutput).toContain("2 cups flour");
+    expect(originalOutput).toContain("Bake at 350°F for 30 minutes.");
+  });
+
+  it("hides the unit switch when no line would change", () => {
+    let renderer: ReturnType<typeof create>;
+
+    act(() => {
+      renderer = create(
+        <RecipeResultCard
+          recipe={buildRecipe({ ingredients: [{ text: "2 potatoes" }, { text: "Salt" }] })}
+        />
+      );
+    });
+
+    expect(
+      renderer!.root.findAllByProps({ accessibilityLabel: "Show metric ingredient units" })
+    ).toHaveLength(0);
+  });
+
+  it("ticks cook-mode timers without re-rendering the step card", async () => {
+    vi.useFakeTimers();
+    let renderer: ReturnType<typeof create>;
+
+    act(() => {
+      renderer = create(
+        <RecipeResultCard
+          recipe={buildRecipe({ steps: [{ index: 1, text: "Simmer for 10 minutes." }] })}
+        />
+      );
+    });
+
+    act(() => {
+      getProps<PressableProps>(
+        renderer!.root.findByProps({ accessibilityLabel: "Open step-by-step cooking mode" })
+      ).onPress?.();
+    });
+
+    act(() => {
+      getProps<PressableProps>(
+        renderer!.root.findAllByProps({ accessibilityLabel: "Start 10 minutes timer" })[0]!
+      ).onPress?.();
+    });
+
+    const timerText = () =>
+      renderer!.root
+        .findAllByType("text" as React.ElementType)
+        .map((node) => getPrimitiveText(node))
+        .find((text) => /^\d+:\d\d$/u.test(text));
+
+    expect(timerText()).toBe("10:00");
+    const appTextRendersBeforeTicks = uiRenderCounts.appText;
+
+    await act(async () => {
+      vi.advanceTimersByTime(3_000);
+      await flushAsyncWork();
+    });
+
+    expect(timerText()).toBe("9:57");
+    expect(uiRenderCounts.appText).toBe(appTextRendersBeforeTicks);
   });
 });

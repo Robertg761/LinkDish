@@ -1,6 +1,6 @@
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { AppButton, AppSurface, AppText } from "@linkdish/ui";
-import { router, useLocalSearchParams } from "expo-router";
+import { Stack, router, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
 import {
   AccessibilityInfo,
@@ -31,9 +31,10 @@ import { trackMobileEvent } from "../src/analytics/client";
 import { AppDialog } from "../src/components/AppDialog";
 import { useAccount } from "../src/features/account/AccountContext";
 import { useOptionalUpgradeMoment } from "../src/features/billing/UpgradeMomentContext";
-import { triggerRecipeBookBounce } from "../src/features/navigation/recipeBookBounceEvents";
+import { requestRecipeBookBounce } from "../src/features/navigation/recipeBookBounceEvents";
 import { requestRecipeUrlReset } from "../src/features/recipe-intake/intakeResetEvents";
-import { consumePendingImageImport } from "../src/features/recipe-intake/pendingImageImports";
+import { usePendingImageImport } from "../src/features/recipe-intake/usePendingImageImport";
+import { RecipeFavoriteButton } from "../src/features/recipe-results/components/RecipeFavoriteButton";
 import {
   RecipeResultCard,
   type RecipeShoppingActionContext
@@ -173,6 +174,7 @@ export default function RecipeScreen() {
     removeRecipe,
     saveRecipe,
     saveRecipeToTargets,
+    setRecipeFavorite,
     shareRecipe,
     unshareRecipe,
     updateSharedRecipe,
@@ -187,7 +189,11 @@ export default function RecipeScreen() {
   const [isEditorSaving, setIsEditorSaving] = useState(false);
   const [isShareCardSharing, setIsShareCardSharing] = useState(false);
   const [isSaveTargetModalVisible, setIsSaveTargetModalVisible] = useState(false);
+  // Each confirmation names its own buttons; the labels used to be picked by comparing the
+  // title string, so rewording a title silently changed the buttons.
   const [removeRecipeConfirmation, setRemoveRecipeConfirmation] = useState<{
+    cancelLabel: string;
+    confirmLabel: string;
     message: string;
     onConfirm: () => void;
     title: string;
@@ -215,18 +221,8 @@ export default function RecipeScreen() {
     () => (routeSharedRecipe ? sharedRecipeToSavedRecipeRecord(routeSharedRecipe) : undefined),
     [routeSharedRecipe]
   );
-  const consumedImageImportIdRef = useRef<string | undefined>(undefined);
-  const [consumedImageImport, setConsumedImageImport] =
-    useState<ReturnType<typeof consumePendingImageImport>>();
-
-  useEffect(() => {
-    if (consumedImageImportIdRef.current === imageImportId) {
-      return;
-    }
-
-    consumedImageImportIdRef.current = imageImportId;
-    setConsumedImageImport(imageImportId ? consumePendingImageImport(imageImportId) : undefined);
-  }, [imageImportId]);
+  const { pendingImport: pendingImageImport, status: imageImportStatus } =
+    usePendingImageImport(imageImportId);
 
   const extractionSource = useMemo(() => {
     if (savedId || sharedId) {
@@ -234,19 +230,19 @@ export default function RecipeScreen() {
     }
 
     if (imageImportId) {
-      if (!consumedImageImport) {
+      if (!pendingImageImport) {
         return undefined;
       }
 
       return {
-        images: consumedImageImport.images,
-        sourceUrl: consumedImageImport.sourceUrl,
+        images: pendingImageImport.images,
+        sourceUrl: pendingImageImport.sourceUrl,
         attempt: "fallback" as const
       };
     }
 
     return url;
-  }, [consumedImageImport, imageImportId, savedId, sharedId, url]);
+  }, [imageImportId, pendingImageImport, savedId, sharedId, url]);
   const extraction = useRecipeExtraction(
     extractionSource,
     routeSharedRecipeRecord ?? routeSavedRecipe
@@ -278,13 +274,7 @@ export default function RecipeScreen() {
       : undefined;
   const isCurrentRecipeSaved = currentSavedRecipe != null;
   const isCurrentRecipeShared =
-    routeSharedRecipe != null ||
-    Boolean(currentSavedRecipe?.sharedRecipeId) ||
-    Boolean(
-      currentRecipeSourceUrl &&
-      routeSharedRecipe == null &&
-      currentSavedRecipe?.sharedRecipeId != null
-    );
+    routeSharedRecipe != null || Boolean(currentSavedRecipe?.sharedRecipeId);
   const currentSaveGate =
     extraction.state.state === "success"
       ? getSaveLimitStatus({ isExistingRecord: isCurrentRecipeSaved })
@@ -342,7 +332,9 @@ export default function RecipeScreen() {
   }, [currentSavedRecipe, displayedRecipe, savedId, sharedId]);
 
   const finishSaveSuccessFeedback = useCallback(() => {
-    triggerRecipeBookBounce();
+    // The tab bar is hidden under this screen; the Cookbook tab icon bounces once it is back
+    // in view (see recipeBookBounceEvents).
+    requestRecipeBookBounce();
     success();
   }, []);
 
@@ -539,6 +531,8 @@ export default function RecipeScreen() {
       if (isCurrentRecipeSaved) {
         if (currentSavedRecipe) {
           setRemoveRecipeConfirmation({
+            cancelLabel: "Cancel",
+            confirmLabel: "Remove",
             message: `\u201c${displayedRecipe?.title ?? currentSavedRecipe.recipe.title}\u201d will be removed from your cookbook.`,
             onConfirm: () => {
               warn();
@@ -641,6 +635,8 @@ export default function RecipeScreen() {
     }
 
     setRemoveRecipeConfirmation({
+      cancelLabel: "Keep shared",
+      confirmLabel: "Unshare",
       message: `Remove "${routeSharedRecipe.recipe.title}" from the Family recipe book?`,
       onConfirm: () => {
         void deleteSharedRecipe(routeSharedRecipe.id).then((result) => {
@@ -705,8 +701,30 @@ export default function RecipeScreen() {
     openRecipeEditor();
   }, [editableRecipe, edit, extraction.state.state]);
 
+  // Personal saved recipes get a heart in the header; Family and unsaved recipes do not.
+  const favoriteRecipeId =
+    extraction.state.state === "success" && !isSharedRecipeRoute
+      ? (currentSavedRecipe?.id ?? null)
+      : null;
+  const isFavoriteRecipe = currentSavedRecipe?.favorite === true;
+  const screenOptions = useMemo(
+    () => ({
+      headerRight: () =>
+        favoriteRecipeId ? (
+          <RecipeFavoriteButton
+            favorite={isFavoriteRecipe}
+            onToggle={(favorite) => {
+              setRecipeFavorite(favoriteRecipeId, favorite);
+            }}
+          />
+        ) : null
+    }),
+    [favoriteRecipeId, isFavoriteRecipe, setRecipeFavorite]
+  );
+
   return (
     <View style={styles.screen}>
+      <Stack.Screen options={screenOptions} />
       <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
         <View style={styles.sourceTile}>
           <Pressable
@@ -777,7 +795,7 @@ export default function RecipeScreen() {
           />
         ) : null}
 
-        {extraction.state.state === "empty" && !isSharedRecipeRequest ? (
+        {extraction.state.state === "empty" && !isSharedRecipeRequest && !imageImportId ? (
           <StatusCard
             body="Head back and paste a recipe source to keep going."
             primaryAction={{
@@ -785,6 +803,17 @@ export default function RecipeScreen() {
               onPress: () => router.replace("/")
             }}
             title="There is no link to process"
+          />
+        ) : null}
+
+        {extraction.state.state === "empty" && imageImportStatus === "missing" ? (
+          <StatusCard
+            body="LinkDish closed before it could read your photos, so the scan was not kept. Scan the recipe again to pick up where you left off."
+            primaryAction={{
+              label: "Scan again",
+              onPress: () => router.replace("/import" as never)
+            }}
+            title="Your scan needs another look"
           />
         ) : null}
 
@@ -1036,16 +1065,12 @@ export default function RecipeScreen() {
             removeRecipeConfirmation
               ? [
                   {
-                    label:
-                      removeRecipeConfirmation.title === "Unshare recipe?"
-                        ? "Keep shared"
-                        : "Cancel",
+                    label: removeRecipeConfirmation.cancelLabel,
                     onPress: () => setRemoveRecipeConfirmation(null),
                     variant: "outline"
                   },
                   {
-                    label:
-                      removeRecipeConfirmation.title === "Unshare recipe?" ? "Unshare" : "Remove",
+                    label: removeRecipeConfirmation.confirmLabel,
                     onPress: () => {
                       const action = removeRecipeConfirmation.onConfirm;
                       setRemoveRecipeConfirmation(null);
@@ -1640,7 +1665,10 @@ const MethodStepsEditor = ({
       }
     }
 
-    if (pendingFocusStepCountRef.current != null && steps.length > pendingFocusStepCountRef.current) {
+    if (
+      pendingFocusStepCountRef.current != null &&
+      steps.length > pendingFocusStepCountRef.current
+    ) {
       pendingFocusStepIdRef.current = steps[steps.length - 1]?.id ?? null;
       pendingFocusStepCountRef.current = null;
     }

@@ -1,4 +1,5 @@
 import { createExtractorApiClient } from "@linkdish/api-client";
+import { analyticsEventInputSchema } from "@linkdish/api-contracts";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Constants from "expo-constants";
 import { randomUUID } from "expo-crypto";
@@ -76,6 +77,31 @@ export const getMobileAnalyticsHeaders = async (): Promise<Record<string, string
   };
 };
 
+/**
+ * The API validates a whole batch and rejects it when one event is invalid (and the client
+ * refuses to send an invalid batch at all), so a single bad event used to block every later
+ * event until 50 newer ones pushed it out. Events are now checked one by one against the
+ * same contract schema, and invalid ones are dropped before they reach the queue.
+ */
+export const isValidAnalyticsEvent = (event: unknown): event is AnalyticsEventInput =>
+  analyticsEventInputSchema.safeParse(event).success;
+
+/** A 4xx other than timeout or rate limit means the batch itself will never be accepted. */
+const isRejectedBatchError = (error: unknown): boolean => {
+  const statusCode =
+    typeof error === "object" && error !== null
+      ? (error as { statusCode?: unknown }).statusCode
+      : undefined;
+
+  return (
+    typeof statusCode === "number" &&
+    statusCode >= 400 &&
+    statusCode < 500 &&
+    statusCode !== 408 &&
+    statusCode !== 429
+  );
+};
+
 const readQueue = async (): Promise<AnalyticsEventInput[]> => {
   const rawQueue = await AsyncStorage.getItem(QUEUE_KEY);
 
@@ -85,7 +111,8 @@ const readQueue = async (): Promise<AnalyticsEventInput[]> => {
 
   try {
     const parsed = JSON.parse(rawQueue) as unknown;
-    return Array.isArray(parsed) ? (parsed as AnalyticsEventInput[]) : [];
+    // Events queued by older builds are re-checked so an invalid one cannot block the batch.
+    return Array.isArray(parsed) ? parsed.filter(isValidAnalyticsEvent) : [];
   } catch {
     return [];
   }
@@ -114,13 +141,29 @@ const serializeQueueOperation = <Result>(operation: () => Promise<Result>): Prom
 const flushQueuedEvents = async (): Promise<void> => {
   let events = await readQueue();
 
-  if (events.length === 0 || mobileEnv.useMockApi) {
+  if (mobileEnv.useMockApi) {
+    return;
+  }
+
+  if (events.length === 0) {
+    // Clears a stored queue that held only events dropped as invalid.
+    await writeQueue(events);
     return;
   }
 
   while (events.length > 0) {
     const batch = events.slice(0, MAX_BATCH_SIZE);
-    await apiClient.sendAnalyticsEvents({ events: batch });
+
+    try {
+      await apiClient.sendAnalyticsEvents({ events: batch });
+    } catch (error) {
+      // Offline or a server hiccup: keep the batch for the next flush. A batch the API
+      // rejects outright would be rejected forever, so it is dropped instead.
+      if (!isRejectedBatchError(error)) {
+        throw error;
+      }
+    }
+
     events = events.slice(batch.length);
     await writeQueue(events);
   }
@@ -141,6 +184,10 @@ export const trackMobileEvent = (event: MobileAnalyticsEvent): void => {
       requestId: event.requestId ?? `android:${createMobileAnalyticsId()}`,
       sessionId: await getMobileAnalyticsSessionId()
     };
+
+    if (!isValidAnalyticsEvent(payload)) {
+      return;
+    }
 
     const nextQueue = [...(await readQueue()), payload].slice(-MAX_QUEUE_SIZE);
     await writeQueue(nextQueue);

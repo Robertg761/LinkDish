@@ -141,6 +141,7 @@ export default function HouseholdScreen() {
     id: string;
   } | null>(null);
   const [removingMemberId, setRemovingMemberId] = useState<string | null>(null);
+  const [isLeaveConfirmationVisible, setIsLeaveConfirmationVisible] = useState(false);
   const hasFamilyPlan = tier === "family";
   const isRestoringPurchases = purchaseStatus === "restoring";
   const client = useMemo(
@@ -284,6 +285,12 @@ export default function HouseholdScreen() {
         refreshAccountAfterward: true
       }
     );
+
+  // Leaving drops access to the shared cookbook and list at once, so it always asks first.
+  const confirmLeave = () => {
+    setIsLeaveConfirmationVisible(false);
+    void leave();
+  };
 
   const handleRestorePurchases = () => {
     void restorePurchases().catch(() => undefined);
@@ -477,7 +484,12 @@ export default function HouseholdScreen() {
 
             {household.role !== "owner" ? (
               <AppSurface style={styles.card}>
-                <AppButton disabled={isLoading} label="Leave household" onPress={leave} />
+                <AppButton
+                  disabled={isLoading}
+                  label="Leave household"
+                  onPress={() => setIsLeaveConfirmationVisible(true)}
+                  variant="outline-danger"
+                />
               </AppSurface>
             ) : null}
           </>
@@ -691,6 +703,25 @@ export default function HouseholdScreen() {
         onRequestClose={() => setInvitePendingCancellation(null)}
         title="Cancel invite?"
         visible={invitePendingCancellation != null}
+      />
+      <AppDialog
+        actions={[
+          {
+            label: "Stay",
+            onPress: () => setIsLeaveConfirmationVisible(false),
+            variant: "outline"
+          },
+          {
+            disabled: isLoading,
+            label: "Leave",
+            onPress: confirmLeave,
+            variant: "danger"
+          }
+        ]}
+        message="You will lose the shared Family cookbook and shopping list right away. You can rejoin later with a new invite."
+        onRequestClose={() => setIsLeaveConfirmationVisible(false)}
+        title="Leave this household?"
+        visible={isLeaveConfirmationVisible}
       />
     </>
   );

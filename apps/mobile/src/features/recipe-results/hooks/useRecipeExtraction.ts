@@ -137,6 +137,21 @@ const trackImportStarted = (
   });
 };
 
+/**
+ * The "one free import left" upgrade moment (analytics trigger `fourth_import_monthly`, named
+ * when Free had 5 imports) fires on the successful import that leaves exactly one of the
+ * locally metered Free allowance. It used to require `monthlyImports === 5`, which never
+ * matched the current 3-import Free plan, so the moment could not fire.
+ */
+export const shouldShowLastFreeImportPrompt = (input: {
+  planId: string;
+  remainingImportsBeforeThisImport: number;
+  usesServerBillingGate: boolean;
+}): boolean =>
+  !input.usesServerBillingGate &&
+  input.planId === "free" &&
+  input.remainingImportsBeforeThisImport === 2;
+
 export const useRecipeExtraction = (
   source: RecipeExtractionSource,
   savedRecipe?: SavedRecipeRecord,
@@ -351,11 +366,11 @@ export const useRecipeExtraction = (
         }
 
         if (response.status === "success") {
-          const shouldShowFourthImportPrompt =
-            !useServerBillingGate &&
-            plan.id === "free" &&
-            plan.limits.monthlyImports === 5 &&
-            remainingImports === 2;
+          const shouldShowFourthImportPrompt = shouldShowLastFreeImportPrompt({
+            planId: plan.id,
+            remainingImportsBeforeThisImport: remainingImports,
+            usesServerBillingGate: useServerBillingGate
+          });
 
           if (!useServerBillingGate) {
             spendImport();

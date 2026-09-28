@@ -130,4 +130,88 @@ describe("mobile analytics outbox", () => {
     ]);
     expect(mocks.storage.has("linkdish.analytics.queue.v1")).toBe(false);
   });
+
+  it("drops an invalid event instead of letting it block the queue", async () => {
+    trackMobileEvent({
+      eventName: "client_error",
+      properties: {
+        message: "x".repeat(600)
+      }
+    });
+    trackMobileEvent({
+      eventName: "import_started",
+      properties: {
+        attempt: "primary",
+        source_type: "url"
+      }
+    });
+
+    await flushMobileAnalytics();
+
+    const sentEvents: AnalyticsEventInput[] = mocks.sendAnalyticsEvents.mock.calls.flatMap(
+      ([request]) => request.events
+    );
+    expect(sentEvents.map((event) => event.eventName)).toEqual(["import_started"]);
+    expect(mocks.storage.has("linkdish.analytics.queue.v1")).toBe(false);
+  });
+
+  it("drops invalid events that older builds left in the stored queue", async () => {
+    mocks.sendAnalyticsEvents
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockRejectedValueOnce(new Error("offline"));
+    trackMobileEvent({
+      eventName: "import_started",
+      properties: {
+        attempt: "primary",
+        source_type: "url"
+      }
+    });
+    await flushMobileAnalytics().catch(() => undefined);
+
+    const stored = JSON.parse(mocks.storage.get("linkdish.analytics.queue.v1") ?? "[]") as Array<
+      Record<string, unknown>
+    >;
+    mocks.storage.set(
+      "linkdish.analytics.queue.v1",
+      JSON.stringify([{ ...stored[0], eventName: "retired_event_name" }, ...stored])
+    );
+
+    await flushMobileAnalytics();
+
+    const lastBatch: AnalyticsEventInput[] | undefined =
+      mocks.sendAnalyticsEvents.mock.calls.at(-1)?.[0].events;
+    expect(lastBatch?.map((event) => event.eventName)).toEqual(["import_started"]);
+    expect(mocks.storage.has("linkdish.analytics.queue.v1")).toBe(false);
+  });
+
+  it("drops a batch the API rejects outright rather than retrying it forever", async () => {
+    mocks.sendAnalyticsEvents
+      .mockRejectedValueOnce(Object.assign(new Error("Invalid request"), { statusCode: 400 }))
+      .mockResolvedValue({ accepted: 1 });
+
+    trackMobileEvent({
+      eventName: "import_started",
+      properties: {
+        attempt: "primary",
+        source_type: "url"
+      }
+    });
+    await flushMobileAnalytics();
+
+    expect(mocks.storage.has("linkdish.analytics.queue.v1")).toBe(false);
+
+    trackMobileEvent({
+      eventName: "import_failed",
+      properties: {
+        attempt: "primary",
+        failure_reason: "transport_error",
+        source_type: "url"
+      }
+    });
+    await flushMobileAnalytics();
+
+    const lastBatch: AnalyticsEventInput[] | undefined =
+      mocks.sendAnalyticsEvents.mock.calls.at(-1)?.[0].events;
+    expect(lastBatch?.map((event) => event.eventName)).toEqual(["import_failed"]);
+  });
 });

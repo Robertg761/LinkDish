@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const fileSystemMocks = vi.hoisted(() => ({
   createdDirectories: [] as string[],
+  deleted: [] as string[],
+  existing: new Set<string>(),
   failWritesFor: null as string | null,
   writes: [] as Array<{ content: string; encoding: string | undefined; uri: string }>
 }));
@@ -37,6 +39,15 @@ vi.mock("expo-file-system", () => {
       // no-op in tests
     }
 
+    public get exists() {
+      return fileSystemMocks.existing.has(this.uri);
+    }
+
+    public delete() {
+      fileSystemMocks.existing.delete(this.uri);
+      fileSystemMocks.deleted.push(this.uri);
+    }
+
     public write(content: string, options?: { encoding?: string }) {
       if (fileSystemMocks.failWritesFor && this.uri.includes(fileSystemMocks.failWritesFor)) {
         throw new Error("No space left on device");
@@ -59,11 +70,13 @@ vi.mock("expo-file-system", () => {
   };
 });
 
-import { persistRecipeSourceImages } from "./sourceImageFiles";
+import { deleteRecipeSourceImageFiles, persistRecipeSourceImages } from "./sourceImageFiles";
 
 describe("recipe scan image files", () => {
   beforeEach(() => {
     fileSystemMocks.createdDirectories.splice(0);
+    fileSystemMocks.deleted.splice(0);
+    fileSystemMocks.existing.clear();
     fileSystemMocks.writes.splice(0);
     fileSystemMocks.failWritesFor = null;
     vi.restoreAllMocks();
@@ -105,6 +118,17 @@ describe("recipe scan image files", () => {
     expect(images).toHaveLength(1);
     expect(images?.[0]?.uri.endsWith(".png")).toBe(true);
     expect(fileSystemMocks.writes).toHaveLength(1);
+  });
+
+  it("deletes only existing app-owned scan files", () => {
+    const owned = "file:///documents/recipe-scans/saved-1-0.jpg";
+    const gone = "file:///documents/recipe-scans/saved-1-1.jpg";
+    const elsewhere = "file:///documents/other/photo.jpg";
+    fileSystemMocks.existing.add(owned);
+    fileSystemMocks.existing.add(elsewhere);
+
+    expect(deleteRecipeSourceImageFiles([owned, gone, elsewhere, "content://media/1"])).toBe(1);
+    expect(fileSystemMocks.deleted).toEqual([owned]);
   });
 
   it("returns undefined when there is nothing to persist", () => {

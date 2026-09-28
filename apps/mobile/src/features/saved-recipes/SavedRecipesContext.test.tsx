@@ -1,10 +1,18 @@
 import { createStarterRecipeSeedRecords } from "@linkdish/recipe-domain";
 import React from "react";
 import { act, create } from "react-test-renderer";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { SavedRecipesProvider, useSavedRecipes } from "./SavedRecipesContext";
-import { createSavedRecipeRecord, starterRecipeSeedRecordToSavedRecipeRecord } from "./store";
+import {
+  SAVED_RECIPES_PERSIST_DEBOUNCE_MS,
+  SavedRecipesProvider,
+  useSavedRecipes
+} from "./SavedRecipesContext";
+import {
+  cloneSavedRecipeRecord,
+  createSavedRecipeRecord,
+  starterRecipeSeedRecordToSavedRecipeRecord
+} from "./store";
 
 import type { BillingTier } from "../billing/plans";
 import type { SuccessfulExtractionState } from "../recipe-results/types";
@@ -42,11 +50,30 @@ const analyticsMocks = vi.hoisted(() => ({
 }));
 
 const fileSystemMocks = vi.hoisted(() => ({
+  deleted: [] as string[],
+  existing: new Set<string>(),
   writes: [] as Array<{ content: string; uri: string }>
+}));
+
+const appStateMocks = vi.hoisted(() => ({
+  listeners: [] as Array<(state: string) => void>
 }));
 
 vi.mock("@react-native-async-storage/async-storage", () => ({
   default: asyncStorageMocks
+}));
+
+vi.mock("react-native", () => ({
+  AppState: {
+    addEventListener: (_event: string, listener: (state: string) => void) => {
+      appStateMocks.listeners.push(listener);
+      return {
+        remove: () => {
+          appStateMocks.listeners = appStateMocks.listeners.filter((entry) => entry !== listener);
+        }
+      };
+    }
+  }
 }));
 
 vi.mock("expo-file-system", () => {
@@ -77,6 +104,15 @@ vi.mock("expo-file-system", () => {
 
     public create() {
       // no-op in tests
+    }
+
+    public get exists() {
+      return fileSystemMocks.existing.has(this.uri);
+    }
+
+    public delete() {
+      fileSystemMocks.existing.delete(this.uri);
+      fileSystemMocks.deleted.push(this.uri);
     }
 
     public write(content: string) {
@@ -241,6 +277,17 @@ const Probe = () => {
   return null;
 };
 
+const cookbookWritesOf = () =>
+  asyncStorageMocks.setItem.mock.calls
+    .filter(([key]) => key === "linkdish.savedRecipes")
+    .map(([, value]) => String(value));
+
+const settlePersistence = async () => {
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(SAVED_RECIPES_PERSIST_DEBOUNCE_MS);
+  });
+};
+
 const flushAsyncWork = async () => {
   await Promise.resolve();
   await Promise.resolve();
@@ -275,8 +322,16 @@ const storeSavedRecipes = (records: ReturnType<typeof buildSavedRecipes>) => {
   );
 };
 
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 beforeEach(() => {
+  vi.useFakeTimers();
   latestSavedRecipes = null;
+  appStateMocks.listeners = [];
+  fileSystemMocks.deleted.splice(0);
+  fileSystemMocks.existing.clear();
   accountState.getAuthHeaders.mockReset();
   accountState.getAuthHeaders.mockResolvedValue({});
   accountState.isSignedIn = false;
@@ -323,14 +378,150 @@ describe("SavedRecipesProvider household save entitlement", () => {
 
     expect(latestSavedRecipes?.savedRecipes[0]?.timesCooked).toBe(1);
     expect(latestSavedRecipes?.incrementRecipeTimesCooked("missing-recipe")).toBe(false);
+
+    await settlePersistence();
+
+    expect(cookbookWritesOf().some((value) => value.includes('"timesCooked":1'))).toBe(true);
+  });
+
+  it("coalesces rapid small edits into one cookbook write", async () => {
+    const storedRecipe = buildSavedRecipes(1)[0]!;
+    storeSavedRecipes([storedRecipe]);
+
+    await renderProvider();
+    await settlePersistence();
+
+    // Loading an unchanged cookbook does not write it back.
+    expect(cookbookWritesOf()).toHaveLength(0);
+
+    await act(async () => {
+      latestSavedRecipes!.incrementRecipeTimesCooked(storedRecipe.id);
+      latestSavedRecipes!.incrementRecipeTimesCooked(storedRecipe.id);
+      latestSavedRecipes!.setRecipeFavorite(storedRecipe.id, true);
+      await flushAsyncWork();
+    });
+
+    expect(cookbookWritesOf()).toHaveLength(0);
+
+    await settlePersistence();
+
+    const writes = cookbookWritesOf();
+    expect(writes).toHaveLength(1);
+    expect(writes[0]).toContain('"timesCooked":2');
+    expect(writes[0]).toContain('"favorite":true');
+  });
+
+  it("writes pending edits immediately when the app goes to the background", async () => {
+    const storedRecipe = buildSavedRecipes(1)[0]!;
+    storeSavedRecipes([storedRecipe]);
+
+    await renderProvider();
+
+    await act(async () => {
+      latestSavedRecipes!.setRecipeFavorite(storedRecipe.id, true);
+      await flushAsyncWork();
+    });
+
+    await act(async () => {
+      appStateMocks.listeners.forEach((listener) => listener("background"));
+      await flushAsyncWork();
+    });
+
+    expect(cookbookWritesOf().some((value) => value.includes('"favorite":true'))).toBe(true);
+  });
+
+  it("does not write the cookbook a second time after an explicit save", async () => {
+    storeSavedRecipes(buildSavedRecipes(1));
+
+    await renderProvider();
+
+    await act(async () => {
+      await latestSavedRecipes!.saveRecipe(buildSuccessState(7));
+      await flushAsyncWork();
+    });
+    await settlePersistence();
+
+    expect(cookbookWritesOf()).toHaveLength(1);
+    expect(latestSavedRecipes?.savedRecipes).toHaveLength(2);
+  });
+
+  it("keeps the heart when a saved recipe is saved again", async () => {
+    storeSavedRecipes([]);
+
+    await renderProvider();
+
+    let firstId: string | undefined;
+
+    await act(async () => {
+      firstId = (await latestSavedRecipes!.saveRecipe(buildSuccessState(8))).recipeId;
+      await flushAsyncWork();
+    });
+    await act(async () => {
+      latestSavedRecipes!.setRecipeFavorite(firstId!, true);
+      await latestSavedRecipes!.saveRecipe(buildSuccessState(8));
+      await flushAsyncWork();
+    });
+
+    expect(latestSavedRecipes?.getSavedRecipeById(firstId!)?.favorite).toBe(true);
+  });
+
+  it("deletes a removed recipe's scan files unless a copy still uses them", async () => {
+    const shared = "file:///documents/recipe-scans/saved-a-0.jpg";
+    const ownOnly = "file:///documents/recipe-scans/saved-a-1.jpg";
+    const original = {
+      ...buildSavedRecipes(1)[0]!,
+      sourceImages: [
+        { mimeType: "image/jpeg" as const, uri: shared },
+        { mimeType: "image/jpeg" as const, uri: ownOnly }
+      ]
+    };
+    const copy = {
+      ...cloneSavedRecipeRecord([original], original, "2026-04-19T13:00:00.000Z"),
+      sourceImages: [{ mimeType: "image/jpeg" as const, uri: shared }]
+    };
+    fileSystemMocks.existing.add(shared);
+    fileSystemMocks.existing.add(ownOnly);
+    storeSavedRecipes([original, copy]);
+
+    await renderProvider();
+
+    await act(async () => {
+      latestSavedRecipes!.removeRecipe(original.id);
+      await flushAsyncWork();
+    });
+
+    expect(latestSavedRecipes?.savedRecipes.map((recipe) => recipe.id)).toEqual([copy.id]);
+    expect(fileSystemMocks.deleted).toEqual([ownOnly]);
+    // The removal is written before any file is deleted.
     expect(
-      asyncStorageMocks.setItem.mock.calls.some(
-        ([key, value]) =>
-          key === "linkdish.savedRecipes" &&
-          typeof value === "string" &&
-          value.includes('"timesCooked":1')
+      (JSON.parse(cookbookWritesOf().at(-1) ?? "[]") as Array<{ id: string }>).map(
+        (recipe) => recipe.id
       )
-    ).toBe(true);
+    ).toEqual([copy.id]);
+
+    await act(async () => {
+      latestSavedRecipes!.removeRecipe(copy.id);
+      await flushAsyncWork();
+    });
+
+    expect(fileSystemMocks.deleted).toEqual([ownOnly, shared]);
+  });
+
+  it("keeps the context value stable across unrelated re-renders", async () => {
+    storeSavedRecipes(buildSavedRecipes(2));
+    const renderer = (await renderProvider()) as unknown as ReturnType<typeof create>;
+    const firstValue = latestSavedRecipes;
+
+    await act(async () => {
+      renderer.update(
+        <SavedRecipesProvider>
+          <Probe />
+        </SavedRecipesProvider>
+      );
+      await flushAsyncWork();
+    });
+
+    expect(latestSavedRecipes).toBe(firstValue);
   });
 
   it("seeds starter recipes once for a first empty library", async () => {
@@ -550,7 +741,9 @@ describe("SavedRecipesProvider household save entitlement", () => {
           ? JSON.stringify([
               {
                 ...storedRecipe,
-                sourceImages: [{ dataUrl: "data:image/png;base64,LEGACYBYTES", mimeType: "image/png" }]
+                sourceImages: [
+                  { dataUrl: "data:image/png;base64,LEGACYBYTES", mimeType: "image/png" }
+                ]
               }
             ])
           : key === "linkdish.starterRecipesSeeded.v1"
@@ -560,6 +753,7 @@ describe("SavedRecipesProvider household save entitlement", () => {
     );
 
     await renderProvider();
+    await settlePersistence();
 
     expect(fileSystemMocks.writes).toHaveLength(1);
     expect(fileSystemMocks.writes[0]?.content).toBe("LEGACYBYTES");

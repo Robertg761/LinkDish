@@ -1,6 +1,6 @@
 import { AppButton, AppSurface, AppText } from "@linkdish/ui";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { router } from "expo-router";
+import { router, usePathname } from "expo-router";
 import React from "react";
 import { useEffect, useState } from "react";
 import { Modal, Pressable, StyleSheet, View, useWindowDimensions } from "react-native";
@@ -94,7 +94,18 @@ const OnboardingIllustration = ({
   );
 };
 
+/**
+ * Tab roots where finishing onboarding may land on the Cookbook. Anything else is a deep link
+ * the person arrived through (a share-sheet /import-progress, a /recipe, a /household or
+ * /account invite) and must be left alone. /account is excluded because invite links land there.
+ */
+const COOKBOOK_LANDING_PATHS = new Set(["/", "/import", "/shopping"]);
+
+export const shouldLandOnCookbookAfterOnboarding = (pathname: string | null | undefined): boolean =>
+  pathname == null || COOKBOOK_LANDING_PATHS.has(pathname);
+
 export const FirstRunOnboardingGate = () => {
+  const pathname = usePathname();
   const [hasLoadedOnboarding, setHasLoadedOnboarding] = useState(false);
   const [isOnboardingVisible, setIsOnboardingVisible] = useState(false);
   const [frameIndex, setFrameIndex] = useState(0);
@@ -130,7 +141,12 @@ export const FirstRunOnboardingGate = () => {
 
   const completeOnboarding = async () => {
     setIsOnboardingVisible(false);
-    router.replace("/" as never);
+
+    // A first launch from the share sheet opens straight on /import-progress; replacing it
+    // with the Cookbook used to throw the shared recipe away.
+    if (shouldLandOnCookbookAfterOnboarding(pathname)) {
+      router.replace("/" as never);
+    }
 
     try {
       await AsyncStorage.setItem(ONBOARDING_STORAGE_KEY, "true");

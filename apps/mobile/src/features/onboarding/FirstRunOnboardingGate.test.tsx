@@ -8,6 +8,7 @@ const asyncStorageMocks = vi.hoisted(() => ({
 }));
 
 const routerMocks = vi.hoisted(() => ({
+  pathname: "/",
   replace: vi.fn()
 }));
 
@@ -33,7 +34,8 @@ vi.mock("@react-native-async-storage/async-storage", () => ({
 }));
 
 vi.mock("expo-router", () => ({
-  router: routerMocks
+  router: routerMocks,
+  usePathname: () => routerMocks.pathname
 }));
 
 vi.mock("react-native", () => ({
@@ -66,7 +68,11 @@ vi.mock("../../theme/tokens", () => ({
   }
 }));
 
-import { FirstRunOnboardingGate, ONBOARDING_STORAGE_KEY } from "./FirstRunOnboardingGate";
+import {
+  FirstRunOnboardingGate,
+  ONBOARDING_STORAGE_KEY,
+  shouldLandOnCookbookAfterOnboarding
+} from "./FirstRunOnboardingGate";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -80,7 +86,41 @@ describe("FirstRunOnboardingGate", () => {
     asyncStorageMocks.getItem.mockReset();
     asyncStorageMocks.setItem.mockReset();
     asyncStorageMocks.setItem.mockResolvedValue(undefined);
+    routerMocks.pathname = "/";
     routerMocks.replace.mockReset();
+  });
+
+  it("keeps a share-sheet import open when a first-run user finishes onboarding", async () => {
+    routerMocks.pathname = "/import-progress";
+    asyncStorageMocks.getItem.mockResolvedValue(null);
+    let renderer: ReturnType<typeof create>;
+
+    await act(async () => {
+      renderer = create(<FirstRunOnboardingGate />);
+      await flushAsyncWork();
+    });
+
+    const skipProps = renderer!.root.findAllByProps({ label: "Skip" }).at(0)?.props as
+      | { onPress?: () => void }
+      | undefined;
+
+    await act(async () => {
+      skipProps?.onPress?.();
+      await flushAsyncWork();
+    });
+
+    expect(asyncStorageMocks.setItem).toHaveBeenCalledWith(ONBOARDING_STORAGE_KEY, "true");
+    expect(routerMocks.replace).not.toHaveBeenCalled();
+    expect(renderer!.toJSON()).toBeNull();
+  });
+
+  it("only lands on the Cookbook from a tab root", () => {
+    expect(shouldLandOnCookbookAfterOnboarding("/")).toBe(true);
+    expect(shouldLandOnCookbookAfterOnboarding("/shopping")).toBe(true);
+    expect(shouldLandOnCookbookAfterOnboarding("/import-progress")).toBe(false);
+    expect(shouldLandOnCookbookAfterOnboarding("/recipe")).toBe(false);
+    expect(shouldLandOnCookbookAfterOnboarding("/household")).toBe(false);
+    expect(shouldLandOnCookbookAfterOnboarding("/account")).toBe(false);
   });
 
   it("does not render after the onboarding flag is set", async () => {
