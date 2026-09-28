@@ -24,8 +24,10 @@ import type { DetectionResult } from "../types.js";
  *
  * 2026-09-28.1: LLM fallback output is no longer shared; entries written under
  * the previous version may hold it.
+ * 2026-09-28.2: route fragments (#/..., #!...) are part of the key; an older
+ * entry under a hash-routed app's page may hold one route's recipe.
  */
-export const EXTRACTOR_CACHE_VERSION = "2026-09-28.1";
+export const EXTRACTOR_CACHE_VERSION = "2026-09-28.2";
 
 const cacheKeyPrefix = "linkdish:extract-cache:v1";
 

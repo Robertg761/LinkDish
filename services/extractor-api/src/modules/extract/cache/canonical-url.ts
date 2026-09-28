@@ -8,7 +8,13 @@ import { parseYouTubeVideoId } from "../source-detection/parse-youtube-video-id.
  * same recipe shared with different tracking parameters, fragments, host
  * casing or a trailing slash maps to one entry. The canonical form is only a
  * key: pages are always fetched from the URL the user supplied.
+ *
+ * Fragments are dropped except route fragments (#/recipe/1, #!/recipe/1): a browser render
+ * keeps the fragment, so a hash-routed app renders a different recipe for each one.
  */
+const isRouteFragment = (hash: string): boolean =>
+  hash.length > 2 && (hash.startsWith("#/") || hash.startsWith("#!"));
+
 const trackingParameterNames = new Set(["fbclid", "gclid", "igshid", "mc_cid", "mc_eid", "si"]);
 
 const isTrackingParameter = (name: string): boolean => {
@@ -27,7 +33,10 @@ export const canonicalizeSourceUrl = (url: string): string => {
     }
   }
 
-  parsedUrl.hash = "";
+  if (!isRouteFragment(parsedUrl.hash)) {
+    parsedUrl.hash = "";
+  }
+
   parsedUrl.hostname = parsedUrl.hostname.toLowerCase();
 
   const trackingNames = [...new Set(parsedUrl.searchParams.keys())].filter(isTrackingParameter);

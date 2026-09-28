@@ -29,6 +29,22 @@ describe("canonicalizeSourceUrl", () => {
     );
   });
 
+  it("keeps route fragments of hash-routed apps, which render a different page each", () => {
+    expect(canonicalizeSourceUrl("https://spa.example/#/recipe/1")).toBe(
+      "https://spa.example/#/recipe/1"
+    );
+    expect(canonicalizeSourceUrl("https://spa.example/#/recipe/1")).not.toBe(
+      canonicalizeSourceUrl("https://spa.example/#/recipe/2")
+    );
+    expect(canonicalizeSourceUrl("https://SPA.example/app/?utm_source=x#!/recipe/7")).toBe(
+      "https://spa.example/app#!/recipe/7"
+    );
+    /* In-page anchors still collapse onto the page. */
+    expect(canonicalizeSourceUrl("https://example.com/soup#recipe")).toBe(
+      "https://example.com/soup"
+    );
+  });
+
   it("keeps the root path and the scheme", () => {
     expect(canonicalizeSourceUrl("http://example.com/")).toBe("http://example.com/");
     expect(canonicalizeSourceUrl("https://example.com")).not.toBe(

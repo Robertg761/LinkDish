@@ -199,7 +199,9 @@ Performance pieces in `services/extractor-api/src/modules/extract`:
 - **Result cache** (`cache/extraction-cache.ts`): a URL-keyed Upstash cache
   (`linkdish:extract-cache:v1:<EXTRACTOR_CACHE_VERSION>:<sha256(canonical URL)>`, where
   the canonical URL has tracking parameters, fragments, host case and trailing slashes
-  normalised, and YouTube URLs use their watch URL). It holds only validated
+  normalised, and YouTube URLs use their watch URL). Route fragments (`#/…`, `#!…`) are
+  kept: a browser render keeps the fragment, so a hash-routed app renders a different
+  recipe for each. It holds only validated
   deterministic successes at or above the success confidence bar. It never stores
   needs_retry, failures, quota data, image scans or LLM fallback output (strategy
   `llm-fallback` or `llm` provenance: the model reads page text anyone can post, such as
