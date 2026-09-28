@@ -9,6 +9,7 @@ import {
   claimNextQueuedImport,
   clearFinishedImports,
   enqueueImport,
+  enqueueImports,
   getImportQueue,
   getNextQueuedImport,
   ImportQueueValidationError,
@@ -89,6 +90,114 @@ describe("import-queue-store", () => {
     const text = await enqueueImport({ text: "2 eggs\nwhisk" });
     expect(text.id).not.toBe(first.id);
     expect(await getImportQueue()).toHaveLength(2);
+  });
+
+  it("queues a link once when two tabs add it at the same moment", async () => {
+    // The share sheet in one tab and a paste in another (no navigator.locks to keep them apart).
+    const [first, second] = await Promise.all([
+      enqueueImport({ source: "share_sheet", url: "https://example.com/stew" }),
+      enqueueImport({ url: "https://example.com/stew" })
+    ]);
+
+    expect(second.id).toBe(first.id);
+    expect(fakeIdb.records(IMPORT_QUEUE_STORE_NAME)).toEqual([
+      expect.objectContaining({ id: first.id, status: "queued", url: "https://example.com/stew" })
+    ]);
+  });
+
+  it("re-queues a failed link once when two tabs add it again at the same moment", async () => {
+    const first = await enqueueImport({ url: "https://example.com/stew" });
+    await markImportFailed(first.id, "nope");
+
+    const again = await Promise.all([
+      enqueueImport({ url: "https://example.com/stew" }),
+      enqueueImport({ url: "https://example.com/stew" })
+    ]);
+
+    expect(again.map((item) => [item.id, item.status])).toEqual([
+      [first.id, "queued"],
+      [first.id, "queued"]
+    ]);
+    expect(fakeIdb.records(IMPORT_QUEUE_STORE_NAME)).toHaveLength(1);
+  });
+
+  it("adds a batch of links in one go, each link once, alongside another tab's add", async () => {
+    const waiting = await enqueueImport({ url: "https://example.com/soup" });
+
+    const [batch, single] = await Promise.all([
+      enqueueImports([
+        { source: "in_app", url: "https://example.com/soup" },
+        { source: "in_app", url: "https://example.com/stew" },
+        { source: "in_app", url: "https://example.com/stew" },
+        { source: "in_app", url: "https://example.com/pie" }
+      ]),
+      enqueueImport({ url: "https://example.com/pie" })
+    ]);
+
+    expect(batch.map((item) => item.url)).toEqual([
+      "https://example.com/soup",
+      "https://example.com/stew",
+      "https://example.com/stew",
+      "https://example.com/pie"
+    ]);
+    expect(batch[0]?.id).toBe(waiting.id);
+    expect(batch[2]?.id).toBe(batch[1]?.id);
+    expect(single.id).toBe(batch[3]?.id);
+    expect(fakeIdb.records(IMPORT_QUEUE_STORE_NAME)).toHaveLength(3);
+  });
+
+  it("adds nothing from a batch with a link it can't import", async () => {
+    await expect(
+      enqueueImports([{ url: "https://example.com/soup" }, { url: "ftp://example.com/x" }])
+    ).rejects.toBeInstanceOf(ImportQueueValidationError);
+    expect(fakeIdb.records(IMPORT_QUEUE_STORE_NAME)).toEqual([]);
+  });
+
+  it("retries only a failed item, never one a tab has taken since", async () => {
+    const item = await enqueueImport({ url: "https://example.com/pie" });
+    await markImportFailed(item.id, "nope");
+    // Another tab's Retry put it back and that tab's worker claimed it; this tab still shows the
+    // failure (and its Retry button) until the change reaches it.
+    await retryImport(item.id);
+    await claimNextQueuedImport("tab-b");
+
+    expect(await retryImport(item.id)).toBeUndefined();
+    expect(fakeIdb.record(IMPORT_QUEUE_STORE_NAME, item.id)).toMatchObject({
+      claimedBy: "tab-b",
+      status: "processing"
+    });
+    expect(await claimNextQueuedImport("tab-a")).toBeUndefined();
+  });
+
+  it("keeps an item a tab is importing right now instead of removing it", async () => {
+    const item = await enqueueImport({ url: "https://example.com/pie" });
+    // This tab still shows it waiting (with Remove) when another tab's worker claims it.
+    await claimNextQueuedImport("tab-b");
+
+    expect(await removeImportQueueItem(item.id)).toBe(false);
+    expect(fakeIdb.record(IMPORT_QUEUE_STORE_NAME, item.id)).toMatchObject({
+      claimedBy: "tab-b",
+      status: "processing"
+    });
+
+    await markImportFailed(item.id, "Nothing there.", "tab-b");
+    expect(await removeImportQueueItem(item.id)).toBe(true);
+    expect(await getImportQueue()).toEqual([]);
+    // Already gone (another tab removed it): nothing left to keep.
+    expect(await removeImportQueueItem(item.id)).toBe(true);
+  });
+
+  it("clears each finished import once when two tabs clear at the same moment", async () => {
+    const soup = await enqueueImport({ url: "https://example.com/soup" });
+    const stew = await enqueueImport({ url: "https://example.com/stew" });
+    await enqueueImport({ url: "https://example.com/pie" });
+    await markImportDone(soup.id, { recipeId: "recipe-1" });
+    await markImportDone(stew.id, { recipeId: "recipe-2" });
+
+    const [first, second] = await Promise.all([clearFinishedImports(), clearFinishedImports()]);
+
+    expect(first + second).toBe(2);
+    expect((await getImportQueue()).map((item) => item.url)).toEqual(["https://example.com/pie"]);
   });
 
   it("puts stale processing items back in the queue", async () => {
@@ -222,7 +331,8 @@ describe("import-queue-store", () => {
     expect(result.current.failedCount).toBe(1);
 
     await act(async () => {
-      await removeImportQueueItem(result.current.items[0]!.id);
+      // The waiting one: an item being imported stays (see the test on removing one).
+      await removeImportQueueItem(result.current.items[1]!.id);
     });
     expect(result.current.pendingCount).toBe(1);
   });

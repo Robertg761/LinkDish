@@ -43,6 +43,7 @@ const runner = (overrides: Partial<ImportQueueRunnerState> = {}): ImportQueueRun
   paused: null,
   resume: vi.fn(),
   running: false,
+  stalled: false,
   ...overrides
 });
 
@@ -85,6 +86,24 @@ describe("ImportQueuePanel", () => {
 
     fireEvent.click(within(note).getByRole("button", { name: "Get Plus" }));
     expect(upgradeMocks.requestUpgradeSheet).toHaveBeenCalledWith("save_limit");
+  });
+
+  it("says when storage trouble stopped the queue, and tries again when tapped", async () => {
+    fakeIdb.seed(IMPORT_QUEUE_STORE_NAME, [
+      item("a", { url: "https://www.bonappetit.com/recipe/rice" })
+    ]);
+    const state = runner({ stalled: true });
+
+    renderPanel(state);
+
+    const note = (await screen.findByText(/Stopped for now · 1 link waiting\./u)).closest(
+      ".import-queue-note"
+    ) as HTMLElement;
+    expect(note).toHaveAttribute("role", "status");
+    expect(note).toHaveTextContent("We’ll try again shortly.");
+
+    fireEvent.click(within(note).getByRole("button", { name: "Try again" }));
+    expect(state.resume).toHaveBeenCalledOnce();
   });
 
   it("gives every row one anatomy: title, trailing actions, a full-width status", async () => {
@@ -135,5 +154,24 @@ describe("ImportQueuePanel", () => {
     expect(rows[2]?.querySelector(".import-queue-item-title.is-source")).toHaveTextContent(
       "bonappetit.com"
     );
+  });
+
+  it("keeps a waiting link that another tab started importing when Remove is tapped", async () => {
+    const waiting = item("waiting", { url: "https://www.bonappetit.com/recipe/rice" });
+    fakeIdb.seed(IMPORT_QUEUE_STORE_NAME, [waiting]);
+    renderPanel(runner());
+    const remove = await screen.findByRole("button", { name: "Remove bonappetit.com" });
+
+    // Another tab's worker claims it before this tab hears about it.
+    fakeIdb.seed(IMPORT_QUEUE_STORE_NAME, [
+      { ...waiting, claimedAt: new Date().toISOString(), claimedBy: "tab-b", status: "processing" }
+    ]);
+    fireEvent.click(remove);
+
+    expect(await screen.findByText("That one’s importing already.")).toBeVisible();
+    expect(fakeIdb.record(IMPORT_QUEUE_STORE_NAME, "waiting")).toMatchObject({
+      claimedBy: "tab-b",
+      status: "processing"
+    });
   });
 });

@@ -72,6 +72,17 @@ export const ImportQueuePanel: React.FC<ImportQueuePanelProps> = ({ onOpenItem, 
     void task.catch(() => showToast({ message: failure, tone: "danger" }));
   };
 
+  /** The row may be out of date: a link another tab has started importing stays. */
+  const remove = (item: ImportQueueItem) =>
+    act(
+      removeImportQueueItem(item.id).then((removed) => {
+        if (!removed) {
+          showToast({ message: "That one’s importing already." });
+        }
+      }),
+      "That couldn’t be removed."
+    );
+
   /** Only ever opened by a tap: a full cookbook pauses the queue quietly. */
   const offerUpgrade = (trigger: "save_limit" | "import_limit") => {
     if (!requestUpgradeSheet(trigger)) {
@@ -126,6 +137,16 @@ export const ImportQueuePanel: React.FC<ImportQueuePanelProps> = ({ onOpenItem, 
         <div className="import-queue-note" role="status">
           <Icon name="wifi-off" size={18} />
           <p>You’re offline. We’ll carry on as soon as you’re back.</p>
+        </div>
+      ) : runner.stalled && waiting.length > 0 ? (
+        <div className="import-queue-note" role="status">
+          <Icon name="alert-circle" size={18} />
+          <p>
+            <strong>Stopped for now · {waitingNote}.</strong> We’ll try again shortly.
+          </p>
+          <Button onClick={runner.resume} size="sm" variant="secondary">
+            Try again
+          </Button>
         </div>
       ) : null}
 
@@ -187,7 +208,7 @@ export const ImportQueuePanel: React.FC<ImportQueuePanelProps> = ({ onOpenItem, 
                   <IconButton
                     aria-label={`Remove ${label}`}
                     icon="x"
-                    onClick={() => act(removeImportQueueItem(item.id), "That couldn’t be removed.")}
+                    onClick={() => remove(item)}
                     size="sm"
                   />
                 ) : null}
