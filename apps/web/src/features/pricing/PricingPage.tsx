@@ -138,8 +138,12 @@ export const PricingPage: React.FC = () => {
   const signInPath = (plan: PaidBillingPlan) =>
     `/account?upgrade=${plan}${period === "monthly" ? "&period=monthly" : ""}`;
 
-  /** The one plan that gets the forest "Recommended" treatment: the one asked about, else Plus. */
-  const featuredPlan: PaidBillingPlan = requestedPlan ?? RECOMMENDED_PLAN;
+  /**
+   * The one plan that gets the forest card: the one asked about, else the paid plan the cook
+   * already has (a Family member isn't told Plus is "Recommended"), else Plus.
+   */
+  const featuredPlan: PaidBillingPlan =
+    requestedPlan ?? (isAuthenticated && isPaidPlan(currentPlan) ? currentPlan : RECOMMENDED_PLAN);
 
   const renderPaidAction = (plan: PaidBillingPlan): React.ReactNode => {
     const emphasize = plan === featuredPlan;

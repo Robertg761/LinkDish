@@ -311,6 +311,9 @@ describe("PricingPage", () => {
     expect(planCard("Family").getByText("Current plan")).toBeVisible();
     expect(screen.queryByRole("button", { name: "Manage billing" })).not.toBeInTheDocument();
     expect(planCard("Plus").getByText("Included in Family")).toBeVisible();
+    // Their own plan leads; a smaller plan is never "Recommended" to them.
+    expect(screen.queryByText("Recommended")).not.toBeInTheDocument();
+    expect(screen.getByRole("article", { name: "Family" })).toHaveClass("plan-card-featured");
     expect(screen.queryByText("Founding Plus")).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Manage household" })).toHaveAttribute(
       "href",
