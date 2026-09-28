@@ -1,5 +1,6 @@
 import { useCallback, useMemo } from "react";
 
+import { updateStoredRecord } from "../storage/idb-update";
 import { getLinkDishWebDb, MEAL_PLAN_STORE_NAME } from "../storage/linkdish-db";
 
 import { emitDataChange } from "./change-feed";
@@ -163,53 +164,66 @@ export async function addMealPlanEntry(input: MealPlanEntryInput): Promise<MealP
   });
 }
 
+/** Sets `key` to `value`, or removes it when `value` is empty. */
+const setOrDelete = <Key extends "note" | "recipeId" | "servings">(
+  entry: MealPlanEntry,
+  key: Key,
+  value: MealPlanEntry[Key] | undefined
+): void => {
+  if (value) {
+    entry[key] = value;
+  } else {
+    delete entry[key];
+  }
+};
+
+/**
+ * Changes only the fields in `patch` (`null` clears an optional one). The entry is read and
+ * written back in one readwrite transaction, so a change another tab (or handler) makes to the
+ * same entry meanwhile is kept instead of overwritten, and a removed entry stays removed.
+ */
 export async function updateMealPlanEntry(
   id: string,
   patch: MealPlanEntryPatch
 ): Promise<MealPlanEntry | undefined> {
-  const db = await getLinkDishWebDb();
-  const existing = (await db.get(MEAL_PLAN_STORE_NAME, id)) as MealPlanEntry | undefined;
-
-  if (!existing) {
-    return undefined;
-  }
-
-  const next: MealPlanEntry = {
-    ...existing,
+  // Validate first: the merge inside the transaction must not throw or wait.
+  const changes: Partial<MealPlanEntry> = {
     ...(patch.date !== undefined ? { date: assertDate(patch.date) } : {}),
     ...(patch.slot !== undefined ? { slot: assertSlot(patch.slot) } : {}),
-    ...(patch.title !== undefined ? { title: cleanTitle(patch.title) } : {}),
-    updatedAt: new Date().toISOString()
+    ...(patch.title !== undefined ? { title: cleanTitle(patch.title) } : {})
   };
+  const recipeId = patch.recipeId === undefined ? undefined : patch.recipeId?.trim() || "";
+  const servings = patch.servings === undefined ? undefined : (cleanServings(patch.servings) ?? 0);
+  const note = patch.note === undefined ? undefined : (cleanNote(patch.note) ?? "");
+  const updatedAt = new Date().toISOString();
 
-  if (patch.recipeId !== undefined) {
-    const recipeId = patch.recipeId?.trim();
-    if (recipeId) {
-      next.recipeId = recipeId;
-    } else {
-      delete next.recipeId;
+  const written = await updateStoredRecord<MealPlanEntry>(MEAL_PLAN_STORE_NAME, id, (existing) => {
+    if (!existing) {
+      return undefined;
     }
+
+    const next: MealPlanEntry = { ...existing, ...changes, updatedAt };
+
+    if (recipeId !== undefined) {
+      setOrDelete(next, "recipeId", recipeId);
+    }
+
+    if (servings !== undefined) {
+      setOrDelete(next, "servings", servings);
+    }
+
+    if (note !== undefined) {
+      setOrDelete(next, "note", note);
+    }
+
+    return next;
+  });
+
+  if (written) {
+    emitDataChange({ topic: "mealPlan", upserted: [written] });
   }
 
-  if (patch.servings !== undefined) {
-    const servings = cleanServings(patch.servings);
-    if (servings) {
-      next.servings = servings;
-    } else {
-      delete next.servings;
-    }
-  }
-
-  if (patch.note !== undefined) {
-    const note = cleanNote(patch.note);
-    if (note) {
-      next.note = note;
-    } else {
-      delete next.note;
-    }
-  }
-
-  return writeEntry(next);
+  return written;
 }
 
 /** Drag-and-drop helper: moves an entry to another day and/or slot. */

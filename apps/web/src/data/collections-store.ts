@@ -2,6 +2,7 @@ import { useCallback, useMemo } from "react";
 
 import { trackWebEvent } from "../analytics/client";
 import { removeCollectionFromAllRecipes } from "../features/library/saved-recipe-store";
+import { updateStoredRecord } from "../storage/idb-update";
 import { COLLECTIONS_STORE_NAME, getLinkDishWebDb } from "../storage/linkdish-db";
 
 import { emitDataChange } from "./change-feed";
@@ -92,29 +93,45 @@ const collectionsResource = createResourceStore<WebCollection[]>({
   topic: "collections"
 });
 
-const writeCollection = async (collection: WebCollection): Promise<WebCollection> => {
-  const db = await getLinkDishWebDb();
-  await db.put(COLLECTIONS_STORE_NAME, collection);
-  emitDataChange({ topic: "collections", upserted: [collection] });
-  return collection;
+/** Sets an optional text field, or removes it when `value` is empty. */
+const setOrDelete = (
+  collection: WebCollection,
+  key: "description" | "emoji",
+  value: string
+): void => {
+  if (value) {
+    collection[key] = value;
+  } else {
+    delete collection[key];
+  }
 };
 
+/**
+ * Adds a collection at the end of the order. Reading the order and writing the new collection
+ * share one readwrite transaction, so collections created in two tabs at once each get a place.
+ */
 export async function createCollection(input: CollectionInput): Promise<WebCollection> {
   const name = cleanName(input.name);
-  const existing = await getCollections();
   const now = new Date().toISOString();
   const emoji = cleanOptional(input.emoji, MAX_COLLECTION_EMOJI_LENGTH);
   const description = cleanOptional(input.description, MAX_COLLECTION_DESCRIPTION_LENGTH);
-
-  const created = await writeCollection({
+  const id = crypto.randomUUID();
+  const db = await getLinkDishWebDb();
+  const tx = db.transaction(COLLECTIONS_STORE_NAME, "readwrite");
+  const store = tx.objectStore(COLLECTIONS_STORE_NAME);
+  const existing = (await store.getAll()) as WebCollection[];
+  const created: WebCollection = {
     createdAt: now,
-    id: crypto.randomUUID(),
+    id,
     name,
     sortOrder: existing.reduce((max, collection) => Math.max(max, collection.sortOrder), -1) + 1,
     updatedAt: now,
     ...(emoji ? { emoji } : {}),
     ...(description ? { description } : {})
-  });
+  };
+
+  await Promise.all([store.put(created), tx.done]);
+  emitDataChange({ topic: "collections", upserted: [created] });
 
   trackWebEvent({
     eventName: "collection_created",
@@ -124,60 +141,80 @@ export async function createCollection(input: CollectionInput): Promise<WebColle
   return created;
 }
 
+/**
+ * Changes only the fields in `patch` (an empty emoji or description removes it). The collection is
+ * read and written back in one readwrite transaction, so a change another tab makes to it
+ * meanwhile (a rename there, a new emoji here) is kept, and a deleted collection stays deleted.
+ */
 export async function updateCollection(
   id: string,
   patch: CollectionPatch
 ): Promise<WebCollection | undefined> {
-  const db = await getLinkDishWebDb();
-  const existing = (await db.get(COLLECTIONS_STORE_NAME, id)) as WebCollection | undefined;
+  // Validate first: the merge inside the transaction must not throw or wait.
+  const name = patch.name !== undefined ? cleanName(patch.name) : undefined;
+  const sortOrder =
+    patch.sortOrder !== undefined && Number.isFinite(patch.sortOrder) ? patch.sortOrder : undefined;
+  const emoji =
+    patch.emoji !== undefined
+      ? (cleanOptional(patch.emoji, MAX_COLLECTION_EMOJI_LENGTH) ?? "")
+      : undefined;
+  const description =
+    patch.description !== undefined
+      ? (cleanOptional(patch.description, MAX_COLLECTION_DESCRIPTION_LENGTH) ?? "")
+      : undefined;
+  const updatedAt = new Date().toISOString();
 
-  if (!existing) {
-    return undefined;
-  }
+  const written = await updateStoredRecord<WebCollection>(
+    COLLECTIONS_STORE_NAME,
+    id,
+    (existing) => {
+      if (!existing) {
+        return undefined;
+      }
 
-  const next: WebCollection = {
-    ...existing,
-    ...(patch.name !== undefined ? { name: cleanName(patch.name) } : {}),
-    ...(patch.sortOrder !== undefined && Number.isFinite(patch.sortOrder)
-      ? { sortOrder: patch.sortOrder }
-      : {}),
-    updatedAt: new Date().toISOString()
-  };
+      const next: WebCollection = {
+        ...existing,
+        ...(name !== undefined ? { name } : {}),
+        ...(sortOrder !== undefined ? { sortOrder } : {}),
+        updatedAt
+      };
 
-  if (patch.emoji !== undefined) {
-    const emoji = cleanOptional(patch.emoji, MAX_COLLECTION_EMOJI_LENGTH);
-    if (emoji) {
-      next.emoji = emoji;
-    } else {
-      delete next.emoji;
+      if (emoji !== undefined) {
+        setOrDelete(next, "emoji", emoji);
+      }
+
+      if (description !== undefined) {
+        setOrDelete(next, "description", description);
+      }
+
+      return next;
     }
+  );
+
+  if (written) {
+    emitDataChange({ topic: "collections", upserted: [written] });
   }
 
-  if (patch.description !== undefined) {
-    const description = cleanOptional(patch.description, MAX_COLLECTION_DESCRIPTION_LENGTH);
-    if (description) {
-      next.description = description;
-    } else {
-      delete next.description;
-    }
-  }
-
-  return writeCollection(next);
+  return written;
 }
 
-/** Moves collections into the given order (ids not listed keep their relative order after). */
+/**
+ * Moves collections into the given order (ids not listed keep their relative order after). The
+ * collections are read and rewritten in one readwrite transaction, so a rename or new emoji
+ * another tab saves meanwhile is kept.
+ */
 export async function reorderCollections(orderedIds: readonly string[]): Promise<void> {
-  const collections = await getCollections();
   const position = new Map(orderedIds.map((id, index) => [id, index]));
+  const now = new Date().toISOString();
+  const db = await getLinkDishWebDb();
+  const tx = db.transaction(COLLECTIONS_STORE_NAME, "readwrite");
+  const store = tx.objectStore(COLLECTIONS_STORE_NAME);
+  const collections = sortCollections((await store.getAll()) as WebCollection[]);
   const reordered = [...collections].sort(
     (a, b) =>
       (position.get(a.id) ?? orderedIds.length + a.sortOrder) -
       (position.get(b.id) ?? orderedIds.length + b.sortOrder)
   );
-  const db = await getLinkDishWebDb();
-  const tx = db.transaction(COLLECTIONS_STORE_NAME, "readwrite");
-  const store = tx.objectStore(COLLECTIONS_STORE_NAME);
-  const now = new Date().toISOString();
   const changed = reordered
     .map((collection, index) => ({ collection, index }))
     .filter(({ collection, index }) => collection.sortOrder !== index)
