@@ -1,13 +1,16 @@
 import { createLinkDishBackup, SAMPLE_RECIPES } from "@linkdish/recipe-domain";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { WEB_BACKUP_EXTRAS_KEY } from "./backup-format";
-import { classifyRecipeJson, parseImportFile } from "./import-sources";
+import { DataTransferError } from "./errors";
+import { MAX_IMPORT_FILE_BYTES } from "./import-formats";
+import { classifyRecipeJson, parseImportFile, readFileBytes } from "./import-sources";
 import { isSyntheticImportUrl } from "./synthetic-url";
 import {
   buildPaprikaExport,
   buildZip,
   compressBytes,
+  fileOfSize,
   jsonBytes,
   melaRecipe,
   paprikaRecipe,
@@ -304,5 +307,62 @@ describe("parseImportFile", () => {
       [2, 3],
       [3, 3]
     ]);
+  });
+});
+
+describe("readFileBytes", () => {
+  const readingTheWholeFile = () => {
+    throw new Error("The whole file was read.");
+  };
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("turns away a file over the size limit without reading it", async () => {
+    const arrayBuffer = vi.fn(readingTheWholeFile);
+
+    await expect(
+      readFileBytes(fileOfSize("export.paprikarecipes", MAX_IMPORT_FILE_BYTES + 1, arrayBuffer))
+    ).rejects.toMatchObject({ code: "file_too_large" });
+    expect(arrayBuffer).not.toHaveBeenCalled();
+  });
+
+  it("turns it away before the FileReader fallback reads it, too", async () => {
+    const FileReaderStub = vi.fn(readingTheWholeFile);
+    vi.stubGlobal("FileReader", FileReaderStub);
+
+    await expect(
+      readFileBytes(fileOfSize("export.melarecipes", MAX_IMPORT_FILE_BYTES + 1))
+    ).rejects.toMatchObject({ code: "file_too_large" });
+    expect(FileReaderStub).not.toHaveBeenCalled();
+  });
+
+  it("says the same thing the parser's own size check says", async () => {
+    const tooManyBytes = Object.defineProperty(new Uint8Array(1), "length", {
+      value: MAX_IMPORT_FILE_BYTES + 1
+    });
+    const fromParser: unknown = await parse("backup.json", tooManyBytes).catch(
+      (error: unknown) => error
+    );
+    const fromReader: unknown = await readFileBytes(
+      fileOfSize("backup.json", MAX_IMPORT_FILE_BYTES + 1, vi.fn(readingTheWholeFile))
+    ).catch((error: unknown) => error);
+
+    expect(fromParser).toBeInstanceOf(DataTransferError);
+    expect(fromReader).toBeInstanceOf(DataTransferError);
+    expect(fromReader).toMatchObject({
+      code: (fromParser as DataTransferError).code,
+      message: (fromParser as DataTransferError).message
+    });
+  });
+
+  it("still reads a file right at the limit", async () => {
+    const bytes = jsonBytes({ "@type": "Recipe" });
+    const read = await readFileBytes(
+      fileOfSize("recipe.json", MAX_IMPORT_FILE_BYTES, () => Promise.resolve(bytes.slice().buffer))
+    );
+
+    expect(Array.from(read)).toEqual(Array.from(bytes));
   });
 });

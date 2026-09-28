@@ -570,6 +570,7 @@ export const parseImportFile = async (
     throw new DataTransferError("empty_file");
   }
 
+  // readFileBytes already turns oversized files away by size; this covers bytes from elsewhere.
   if (bytes.length > MAX_IMPORT_FILE_BYTES) {
     throw new DataTransferError("file_too_large");
   }
@@ -619,10 +620,19 @@ export const parseImportFile = async (
   return parsed;
 };
 
-/** Reads a File's bytes (FileReader fallback for browsers without Blob.arrayBuffer). */
-export const readFileBytes = (file: Blob): Promise<Uint8Array> => {
+/**
+ * Reads a File's bytes (FileReader fallback for browsers without Blob.arrayBuffer). A file over
+ * {@link MAX_IMPORT_FILE_BYTES} is turned away from its size alone, before anything is read:
+ * holding a huge export in memory can freeze or crash the tab. {@link parseImportFile} checks the
+ * byte count again, with the same error.
+ */
+export const readFileBytes = async (file: Blob): Promise<Uint8Array> => {
+  if (file.size > MAX_IMPORT_FILE_BYTES) {
+    throw new DataTransferError("file_too_large");
+  }
+
   if (typeof file.arrayBuffer === "function") {
-    return file.arrayBuffer().then((buffer) => new Uint8Array(buffer));
+    return new Uint8Array(await file.arrayBuffer());
   }
 
   return new Promise((resolve, reject) => {

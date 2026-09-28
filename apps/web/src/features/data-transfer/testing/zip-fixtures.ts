@@ -205,3 +205,19 @@ export const melaRecipe = (overrides: Record<string, unknown> = {}): Record<stri
 /** The bytes of a File-like object for tests (jsdom's File lacks arrayBuffer()). */
 export const fileFromBytes = (bytes: Uint8Array, name: string, type = ""): File =>
   new File([bytes as Uint8Array<ArrayBuffer>], name, { type });
+
+/**
+ * A File that claims to be `size` bytes long without holding them, for size checks that must run
+ * before anything is read. `arrayBuffer` replaces the File's own; leave it out to take the
+ * FileReader path older browsers use.
+ */
+export const fileOfSize = (
+  name: string,
+  size: number,
+  arrayBuffer?: () => Promise<ArrayBuffer>
+): File => {
+  const file = new File([], name);
+  Object.defineProperty(file, "size", { value: size });
+  Object.defineProperty(file, "arrayBuffer", { value: arrayBuffer });
+  return file;
+};
