@@ -111,6 +111,37 @@ const sanitizeSession = (session: CookSession): CookSession => ({
   stepIndex: Number.isInteger(session.stepIndex) && session.stepIndex >= 0 ? session.stepIndex : 0
 });
 
+/**
+ * Deletes those of `recipeIds` whose session is still expired, checking each again inside the
+ * deleting readwrite transaction: another tab may have started a fresh session under that recipe
+ * since it was read, and that one must stay. Returns the recipe ids actually deleted.
+ */
+async function deleteExpiredCookSessions(
+  recipeIds: readonly string[],
+  now: number
+): Promise<string[]> {
+  const db = await getLinkDishWebDb();
+  const tx = db.transaction(COOK_SESSIONS_STORE_NAME, "readwrite");
+  const store = tx.objectStore(COOK_SESSIONS_STORE_NAME);
+  const deleted: string[] = [];
+  const deleteIfExpired = async (recipeId: string) => {
+    const session = (await store.get(recipeId)) as CookSession | undefined;
+
+    if (session && isCookSessionExpired(session, now)) {
+      deleted.push(recipeId);
+      await store.delete(recipeId);
+    }
+  };
+
+  await Promise.all([...recipeIds.map(deleteIfExpired), tx.done]);
+
+  if (deleted.length) {
+    emitDataChange({ deletedIds: deleted, topic: "cookSessions" });
+  }
+
+  return deleted;
+}
+
 /** Deletes every expired session. Returns how many were removed. */
 export async function cleanupExpiredCookSessions(now: number = Date.now()): Promise<number> {
   const db = await getLinkDishWebDb();
@@ -121,14 +152,11 @@ export async function cleanupExpiredCookSessions(now: number = Date.now()): Prom
     return 0;
   }
 
-  const tx = db.transaction(COOK_SESSIONS_STORE_NAME, "readwrite");
-  const store = tx.objectStore(COOK_SESSIONS_STORE_NAME);
-  await Promise.all([...expired.map((session) => store.delete(session.recipeId)), tx.done]);
-  emitDataChange({
-    deletedIds: expired.map((session) => session.recipeId),
-    topic: "cookSessions"
-  });
-  return expired.length;
+  const deleted = await deleteExpiredCookSessions(
+    expired.map((session) => session.recipeId),
+    now
+  );
+  return deleted.length;
 }
 
 /** Every live session keyed by recipe id (expired ones are cleaned up first). */
@@ -152,8 +180,15 @@ export async function getCookSession(
   }
 
   if (isCookSessionExpired(session, now)) {
-    await clearCookSession(recipeId);
-    return undefined;
+    const deleted = await deleteExpiredCookSessions([recipeId], now);
+
+    if (deleted.length) {
+      return undefined;
+    }
+
+    // Another tab started a fresh session (or removed it) since the read above.
+    const current = (await db.get(COOK_SESSIONS_STORE_NAME, recipeId)) as CookSession | undefined;
+    return current && !isCookSessionExpired(current, now) ? current : undefined;
   }
 
   return session;
@@ -170,15 +205,66 @@ export async function saveCookSession(
   return next;
 }
 
-/** Merges `patch` into the recipe's live session, starting a fresh one when there is none. */
+/**
+ * Merges `patch` into the recipe's live session, starting a fresh one when there is none (or it
+ * has expired). The read and the write share one readwrite transaction, so IndexedDB serializes
+ * them with other tabs' writes instead of letting one overwrite the other. `patch` must be
+ * synchronous: awaiting anything else inside the transaction would let it commit early.
+ */
 export async function updateCookSession(
   recipeId: string,
   patch: CookSessionPatch | ((session: CookSession) => CookSessionPatch),
   now: number = Date.now()
 ): Promise<CookSession> {
-  const current = (await getCookSession(recipeId, now)) ?? createEmptyCookSession(recipeId, now);
+  const db = await getLinkDishWebDb();
+  const tx = db.transaction(COOK_SESSIONS_STORE_NAME, "readwrite");
+  const store = tx.objectStore(COOK_SESSIONS_STORE_NAME);
+  const stored = (await store.get(recipeId)) as CookSession | undefined;
+  const current =
+    stored && !isCookSessionExpired(stored, now) ? stored : createEmptyCookSession(recipeId, now);
   const changes = typeof patch === "function" ? patch(current) : patch;
-  return saveCookSession({ ...current, ...changes, recipeId }, now);
+  const next = sanitizeSession({
+    ...current,
+    ...changes,
+    recipeId,
+    updatedAt: new Date(now).toISOString()
+  });
+
+  await Promise.all([store.put(next), tx.done]);
+  emitDataChange({ topic: "cookSessions", upserted: [next] });
+  return next;
+}
+
+/**
+ * Ends a cook for the recipe: forgets the step and ticked ingredients, but keeps the session
+ * while timers are still running so they survive a reload. One transaction, like
+ * {@link updateCookSession}, so a timer another tab starts meanwhile is never deleted.
+ */
+export async function endCookSession(recipeId: string, now: number = Date.now()): Promise<void> {
+  const db = await getLinkDishWebDb();
+  const tx = db.transaction(COOK_SESSIONS_STORE_NAME, "readwrite");
+  const store = tx.objectStore(COOK_SESSIONS_STORE_NAME);
+  const stored = (await store.get(recipeId)) as CookSession | undefined;
+
+  if (!stored) {
+    await tx.done;
+    return;
+  }
+
+  if (!isCookSessionExpired(stored, now) && stored.timers.length > 0) {
+    const next = sanitizeSession({
+      ...stored,
+      checkedIngredients: [],
+      stepIndex: 0,
+      updatedAt: new Date(now).toISOString()
+    });
+    await Promise.all([store.put(next), tx.done]);
+    emitDataChange({ topic: "cookSessions", upserted: [next] });
+    return;
+  }
+
+  await Promise.all([store.delete(recipeId), tx.done]);
+  emitDataChange({ deletedIds: [recipeId], topic: "cookSessions" });
 }
 
 export async function clearCookSession(recipeId: string): Promise<void> {
