@@ -116,7 +116,7 @@ interface ExtractionContext {
   correlationId: string | undefined;
   cacheMode: NonNullable<ExtractRecipeOptions["cacheMode"]>;
   /** Starts `task` and lets it finish after the response. Never rejects. */
-  afterResponse(task: () => Promise<void>): Promise<void>;
+  afterResponse(task: () => Promise<void>, failureEvent?: string): Promise<void>;
   /**
    * Starts `task` and waits at most `maxWaitMs` for it; a slower task finishes after the
    * response, like `afterResponse` work. Never rejects: a failed task reads as "settled".
@@ -223,8 +223,8 @@ const createExtractionContext = (
       authorization: options.authorization ?? Promise.resolve(true),
       correlationId: options.correlationId,
       cacheMode: options.cacheMode ?? "default",
-      afterResponse: async (task) => {
-        const guardedTask = task().catch(logTaskFailure("extract_post_response_task_failed"));
+      afterResponse: async (task, failureEvent = "extract_post_response_task_failed") => {
+        const guardedTask = task().catch(logTaskFailure(failureEvent));
 
         if (!keepAlive(guardedTask)) {
           await guardedTask;
@@ -907,8 +907,10 @@ const scheduleCacheWrite = (
 /*
  * Stores the hand-off before the needs_retry answer goes out (bounded by
  * FALLBACK_HANDOFF_MAX_WAIT_MS and the request deadline), so a fallback attempt sent the moment
- * that answer arrives finds it. With the fallback provider switched off the fallback attempt
- * never reads one, so nothing is stored or waited for.
+ * that answer arrives finds it. While this instance reads the fallback provider as switched off
+ * the write still runs, only after the response: that reading can be up to 30 s stale (see
+ * RuntimeManagedFallbackExtractor), and the fallback attempt may land on an instance that already
+ * reads the provider as on.
  */
 const persistFallbackHandoff = async (
   context: ExtractionContext,
@@ -925,34 +927,38 @@ const persistFallbackHandoff = async (
   if (
     !store ||
     !correlationId ||
-    !context.runtime.fallbackExtractor.available ||
     sourceDocument.kind === "image" ||
     sourceDocument.kind === "text"
   ) {
     return;
   }
 
-  const maxWaitMs = context.deadline.budgetMs(FALLBACK_HANDOFF_MAX_WAIT_MS);
-  const outcome = await context.beforeResponse(
-    async () => {
-      const sourceSummary =
-        sourceDocument.kind === "html"
-          ? (await loadFallbackInputBuilder()).buildHtmlSourceSummary(sourceDocument.html)
-          : null;
-      const handoff: FallbackHandoff = {
-        url: requestUrl,
-        detection,
-        fetchMode,
-        candidate,
-        sourceDocument: toHandoffSourceDocument(sourceDocument),
-        sourceSummary,
-        ...(sourceUrl === requestUrl ? {} : { sourceUrl })
-      };
+  const writeHandoff = async () => {
+    const sourceSummary =
+      sourceDocument.kind === "html"
+        ? (await loadFallbackInputBuilder()).buildHtmlSourceSummary(sourceDocument.html)
+        : null;
+    const handoff: FallbackHandoff = {
+      url: requestUrl,
+      detection,
+      fetchMode,
+      candidate,
+      sourceDocument: toHandoffSourceDocument(sourceDocument),
+      sourceSummary,
+      ...(sourceUrl === requestUrl ? {} : { sourceUrl })
+    };
 
-      await store.write(correlationId, requestUrl, handoff);
-    },
-    { maxWaitMs, failureEvent: "extract_handoff_write_failed" }
-  );
+    await store.write(correlationId, requestUrl, handoff);
+  };
+  const failureEvent = "extract_handoff_write_failed";
+
+  if (!context.runtime.fallbackExtractor.available) {
+    await context.afterResponse(writeHandoff, failureEvent);
+    return;
+  }
+
+  const maxWaitMs = context.deadline.budgetMs(FALLBACK_HANDOFF_MAX_WAIT_MS);
+  const outcome = await context.beforeResponse(writeHandoff, { maxWaitMs, failureEvent });
 
   if (outcome === "timed_out") {
     console.warn(

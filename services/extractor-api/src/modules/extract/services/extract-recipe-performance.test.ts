@@ -436,18 +436,72 @@ describe("primary to fallback hand-off", () => {
     }
   });
 
-  it("stores no hand-off while the fallback provider is switched off", async () => {
+  it("does not wait for the hand-off while the fallback provider reads as off, but still stores it", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const { runtime } = createTestRuntime({ fallbackAvailable: false });
-    const write = withHandoffWrite(runtime, (store, ...args) => store.write(...args));
+    let releaseWrite: (() => void) | undefined;
+    const writeGate = new Promise<void>((resolve) => {
+      releaseWrite = resolve;
+    });
+    const write = withHandoffWrite(runtime, async (store, ...args) => {
+      await writeGate;
+      return store.write(...args);
+    });
+    const { scheduled, schedule } = collectScheduled();
+    const url = "https://fixtures.linkdish.test/article-weak";
+
+    try {
+      const primary = await extractRecipe({ attempt: "primary", url, correlationId }, runtime, {
+        correlationId,
+        schedule
+      });
+
+      expect(primary.response.status).toBe("needs_retry");
+      expect(write).toHaveBeenCalledTimes(1);
+      /* No pre-response wait ran out, because none was started. */
+      expect(warn).not.toHaveBeenCalledWith(expect.stringContaining("extract_handoff_write_slow"));
+
+      releaseWrite?.();
+      await Promise.all(scheduled);
+      await expect(runtime.fallbackHandoffStore!.read(correlationId, url)).resolves.toMatchObject({
+        url
+      });
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  /*
+   * Each instance caches the admin provider switch for up to 30 s (and keeps the env default
+   * after a failed load), while the needs_retry answer always offers the fallback. A primary
+   * instance that still reads the provider as off must leave a hand-off for a fallback attempt
+   * that lands on an instance which already reads it as on.
+   */
+  it("leaves a hand-off for a fallback served by an instance with fresher provider settings", async () => {
+    const primaryInstance = createTestRuntime({ fallbackAvailable: false });
+    const fallbackInstance = createTestRuntime();
+    fallbackInstance.runtime.fallbackHandoffStore = primaryInstance.runtime.fallbackHandoffStore!;
+    const { scheduled, schedule } = collectScheduled();
+    const url = "https://fixtures.linkdish.test/article-weak";
 
     const primary = await extractRecipe(
-      { attempt: "primary", url: "https://fixtures.linkdish.test/article-weak", correlationId },
-      runtime,
-      { correlationId, schedule: () => undefined }
+      { attempt: "primary", url, correlationId },
+      primaryInstance.runtime,
+      { correlationId, schedule }
     );
+    await Promise.all(scheduled);
+    const fallback = await extractRecipe(
+      { attempt: "fallback", url, correlationId },
+      fallbackInstance.runtime,
+      { correlationId, schedule }
+    );
+    await Promise.all(scheduled);
 
     expect(primary.response.status).toBe("needs_retry");
-    expect(write).not.toHaveBeenCalled();
+    expect(fallback.response.status).toBe("success");
+    expect(fallback.logContext.fallbackHandoff).toBe("used");
+    expect(primaryInstance.fetchHtmlDocument).toHaveBeenCalledTimes(1);
+    expect(fallbackInstance.fetchHtmlDocument).not.toHaveBeenCalled();
   });
 
   it("keeps cache writes after the response", async () => {
