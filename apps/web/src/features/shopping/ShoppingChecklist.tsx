@@ -34,9 +34,30 @@ interface ShoppingChecklistProps {
   onSelectNone: () => void;
   includeStaples: boolean;
   onIncludeStaplesChange: (include: boolean) => void;
-  /** Hide the staples switch when the list has none. */
-  stapleCount: number;
+  /** The staples in this list ("water", "table salt"); the switch hides when there are none. */
+  stapleNames: readonly string[];
 }
+
+const capitalize = (text: string) => `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
+
+/** "Water is left off: you probably have it." / "Salt, pepper and 2 more are left off: …" */
+export const describeStaples = (names: readonly string[]): string => {
+  const unique = [...new Set(names.map((name) => name.trim().toLowerCase()).filter(Boolean))];
+
+  if (unique.length === 0) {
+    return "";
+  }
+
+  if (unique.length === 1) {
+    return `${capitalize(unique[0] ?? "")} is left off: you probably have it.`;
+  }
+
+  const shown = unique.slice(0, 2);
+  const more = unique.length - shown.length;
+  const list =
+    more > 0 ? `${shown.join(", ")} and ${more} more` : `${shown[0] ?? ""} and ${shown[1] ?? ""}`;
+  return `${capitalize(list)} are left off: you probably have them.`;
+};
 
 /**
  * The pick-what-to-add list used before anything lands on the shopping list: grouped rows with
@@ -50,9 +71,13 @@ export const ShoppingChecklist: React.FC<ShoppingChecklistProps> = ({
   onSelectNone,
   includeStaples,
   onIncludeStaplesChange,
-  stapleCount
+  stapleNames
 }) => {
   const total = groups.reduce((sum, group) => sum + group.rows.length, 0);
+  const onListCount = groups.reduce(
+    (sum, group) => sum + group.rows.filter((row) => row.onList).length,
+    0
+  );
 
   return (
     <div className="shopping-checklist">
@@ -84,14 +109,25 @@ export const ShoppingChecklist: React.FC<ShoppingChecklistProps> = ({
         </div>
       </div>
 
-      {stapleCount > 0 ? (
+      {stapleNames.length > 0 ? (
         <Switch
           checked={includeStaples}
           className="shopping-checklist-staples"
-          description={`Salt, pepper, water and friends (${stapleCount}) usually live in the cupboard.`}
+          description={describeStaples(stapleNames)}
           label="Include pantry staples"
           onChange={onIncludeStaplesChange}
         />
+      ) : null}
+
+      {/* One summary instead of an "On your list" badge on every row. */}
+      {onListCount > 0 ? (
+        <p className="shopping-checklist-onlist">
+          <Icon name="list-checks" size={16} />
+          <span>
+            <strong className="num">{onListCount}</strong> {onListCount === 1 ? "is" : "are"}{" "}
+            already on your list. Adding merges the amounts.
+          </span>
+        </p>
       ) : null}
 
       {groups.map((group) => (
@@ -131,12 +167,12 @@ export const ShoppingChecklist: React.FC<ShoppingChecklistProps> = ({
                       {row.detail || row.onList || row.staple ? (
                         <span className="shopping-checklist-meta">
                           {row.onList ? (
-                            <span className="shopping-checklist-tag is-on-list">
-                              <Icon name="list-checks" size={12} /> On your list
+                            <span className="shopping-checklist-mark">
+                              <Icon name="check" size={12} strokeWidth={2.6} /> On your list
                             </span>
                           ) : null}
                           {row.staple ? (
-                            <span className="shopping-checklist-tag">Pantry staple</span>
+                            <span className="shopping-checklist-mark">Pantry staple</span>
                           ) : null}
                           {row.detail ? (
                             <span className="shopping-checklist-detail">{row.detail}</span>

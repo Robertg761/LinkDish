@@ -1,10 +1,11 @@
-import { parseServings } from "@linkdish/recipe-domain";
+import { inferRecipeTags, parseServings } from "@linkdish/recipe-domain";
 
 import { addDaysToDateKey, getDateKeyRange, getWeekStartDateKey } from "../../data/date-keys";
 
 import type { IconName } from "../../components/Icon";
 import type { MealPlanEntry, MealPlanSlot } from "../../data/meal-plan-store";
 import type { WebSavedRecipe } from "../library/saved-recipe-types";
+import type { Recipe, RecipeCourse } from "@linkdish/recipe-domain";
 
 /** Calendar helpers, labels and ranking for the planner. Pure; dates are "YYYY-MM-DD" keys. */
 
@@ -147,13 +148,63 @@ const timeOf = (value: string | undefined): number => {
   return Number.isFinite(time) ? time : 0;
 };
 
+const COURSES: readonly RecipeCourse[] = [
+  "breakfast",
+  "lunch",
+  "dinner",
+  "dessert",
+  "snack",
+  "side",
+  "drink",
+  "baking"
+];
+const courseCache = new WeakMap<Recipe, RecipeCourse | null>();
+
+/** The recipe's course: the cook's own tag wins ("Breakfast"), else the domain's inference. */
+export const recipeCourseFor = (recipe: WebSavedRecipe): RecipeCourse | null => {
+  const tags = new Set((recipe.tags ?? []).map((tag) => tag.toLowerCase()));
+  const tagged = COURSES.find((course) => tags.has(course));
+
+  if (tagged) {
+    return tagged;
+  }
+
+  const cached = courseCache.get(recipe.recipe);
+
+  if (cached !== undefined) {
+    return cached;
+  }
+
+  const course = inferRecipeTags(recipe.recipe).course?.value ?? null;
+  courseCache.set(recipe.recipe, course);
+  return course;
+};
+
+/** How well a course suits a meal: 2 made for it, 0 unknown or fine, negative a poor fit. */
+const SLOT_FIT: Record<MealPlanSlot, Partial<Record<RecipeCourse, number>>> = {
+  breakfast: { baking: 0, breakfast: 2, dessert: -1, dinner: -1, drink: 0, lunch: -1, side: -1 },
+  dinner: { baking: -2, breakfast: -2, dessert: -2, dinner: 2, drink: -2, lunch: 1, snack: -1 },
+  lunch: { baking: -1, breakfast: -1, dessert: -2, dinner: 1, drink: -1, lunch: 2 },
+  snack: { baking: 1, breakfast: 0, dessert: 1, dinner: -1, lunch: -1, snack: 2 }
+};
+
+export const slotFit = (recipe: WebSavedRecipe, slot: MealPlanSlot): number => {
+  const course = recipeCourseFor(recipe);
+  return course ? (SLOT_FIT[slot][course] ?? 0) : 0;
+};
+
 /**
- * Picker order: favorites first, then recently and often cooked, then recently opened, then
- * everything else by title.
+ * Picker order: with a meal in mind, what suits it first (no cookies for breakfast, no pancakes
+ * for dinner); within that, favorites, then recently and often cooked, then recently opened,
+ * then everything else by title.
  */
-export const rankRecipesForPlanning = (recipes: readonly WebSavedRecipe[]): WebSavedRecipe[] =>
+export const rankRecipesForPlanning = (
+  recipes: readonly WebSavedRecipe[],
+  slot?: MealPlanSlot  
+): WebSavedRecipe[] =>
   recipes
     .map((recipe) => ({
+      fit: slot ? Math.sign(slotFit(recipe, slot)) : 0,
       recipe,
       score:
         (recipe.favorite ? 1_000 : 0) +
@@ -163,10 +214,24 @@ export const rankRecipesForPlanning = (recipes: readonly WebSavedRecipe[]): WebS
           : 0) +
         (recipe.lastOpenedAt ? 20 : 0)
     }))
-    .sort((a, b) => b.score - a.score || a.recipe.recipe.title.localeCompare(b.recipe.recipe.title))
+    .sort(
+      (a, b) =>
+        b.fit - a.fit ||
+        b.score - a.score ||
+        a.recipe.recipe.title.localeCompare(b.recipe.recipe.title)
+    )
     .map((entry) => entry.recipe);
 
-/** Short context for a picker row: "Favorite · cooked 3×". */
+/** Quick-start dinners: recipes that suit dinner (or might), never desserts or breakfasts. */
+export const pickDinnerSuggestions = (
+  recipes: readonly WebSavedRecipe[],
+  limit: number
+): WebSavedRecipe[] =>
+  rankRecipesForPlanning(recipes, "dinner")
+    .filter((recipe) => slotFit(recipe, "dinner") >= 0)
+    .slice(0, limit);
+
+/** Short context for a picker row: "Cooked 3× · 1 hr 20 min" (favorites get a heart icon). */
 export const describeRecipeForPicker = (recipe: WebSavedRecipe): string => {
   const parts: string[] = [];
   const cooked = recipe.timesCooked ?? 0;

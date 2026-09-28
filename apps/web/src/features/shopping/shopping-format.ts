@@ -57,27 +57,36 @@ export const ADDED_BY_YOU_GROUP_ID = "added-by-you";
  * Items by the first recipe they came from (in the order recipes first appear), with items added
  * by hand last.
  */
+/**
+ * Items grouped under each recipe they are for. A merged item (butter for the cookies and the
+ * banana bread) shows under every one of its recipes, so each group lists all its ingredients.
+ */
 export const groupItemsByRecipe = (items: readonly WebShoppingItem[]): ShoppingRecipeGroup[] => {
   const groups = new Map<string, ShoppingRecipeGroup>();
   const loose: WebShoppingItem[] = [];
 
   for (const item of items) {
-    const title = getItemRecipeTitles(item)[0];
+    const titles = getItemRecipeTitles(item);
+    const ids = getItemRecipeIds(item);
 
-    if (!title) {
+    if (titles.length === 0) {
       loose.push(item);
       continue;
     }
 
-    const recipeId = getItemRecipeIds(item)[0];
-    const key = `${recipeId ?? ""}::${title}`;
-    const group = groups.get(key);
+    titles.forEach((title, index) => {
+      const recipeId = ids[index];
+      const key = `${recipeId ?? ""}::${title}`;
+      const group = groups.get(key);
 
-    if (group) {
-      group.items.push(item);
-    } else {
-      groups.set(key, { id: key, items: [item], kind: "recipe", label: title, recipeId });
-    }
+      if (group) {
+        if (!group.items.includes(item)) {
+          group.items.push(item);
+        }
+      } else {
+        groups.set(key, { id: key, items: [item], kind: "recipe", label: title, recipeId });
+      }
+    });
   }
 
   const result = Array.from(groups.values());
@@ -257,6 +266,9 @@ export const getShoppingSuggestions = (
 
   return results;
 };
+
+/** True once the cook has checked things off before ("Buy again" is only honest then). */
+export const hasShoppingHistory = (): boolean => readHistory().length > 0;
 
 /** Canonical keys of the items still to buy (for suggestion filtering). */
 export const openItemKeys = (items: readonly WebShoppingItem[]): Set<string> =>

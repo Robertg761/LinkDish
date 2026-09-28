@@ -57,7 +57,7 @@ describe("shopping-format", () => {
     expect(groups[0]?.items.map((entry) => entry.text)).toEqual(["onion", "garlic"]);
   });
 
-  it("groups by the first recipe and puts hand-added items last", () => {
+  it("groups under every recipe an item is for and puts hand-added items last", () => {
     const groups = groupItemsByRecipe([
       item({ text: "paper towels" }),
       item({ recipeId: "a", recipeTitle: "Chili", text: "beans" }),
@@ -65,8 +65,9 @@ describe("shopping-format", () => {
       item({ recipeId: "a", recipeTitle: "Chili", text: "cumin" })
     ]);
 
+    // The onion is for both, so it shows under Tacos and under Chili.
     expect(groups.map((group) => [group.label, group.items.length])).toEqual([
-      ["Chili", 2],
+      ["Chili", 3],
       ["Tacos", 1],
       ["Added by you", 1]
     ]);

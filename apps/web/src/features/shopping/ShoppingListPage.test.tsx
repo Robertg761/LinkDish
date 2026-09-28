@@ -109,7 +109,8 @@ describe("ShoppingListPage", () => {
     const baking = screen.getByRole("region", { name: /baking/i });
     expect(produce.compareDocumentPosition(baking) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(within(baking).getByRole("checkbox", { name: "⅔ cup brown sugar" })).toBeInTheDocument();
-    expect(within(baking).getByText("Cookies")).toBeInTheDocument();
+    // One quiet source line instead of a chip heavier than the item.
+    expect(within(baking).getByText("For Cookies")).toBeInTheDocument();
     expect(screen.getByText("2 to buy")).toBeInTheDocument();
   });
 
@@ -153,6 +154,30 @@ describe("ShoppingListPage", () => {
         false
       )
     );
+  });
+
+  it("keeps keyboard focus in the list when an item moves to the cart or is removed", async () => {
+    await addShoppingItems([{ text: "1 onion" }, { text: "2 lemons" }, { text: "bread" }], {
+      canSync: false
+    });
+    renderPage();
+
+    const onion = await screen.findByRole("checkbox", { name: "1 onion" });
+    onion.focus();
+    fireEvent.click(onion);
+
+    // The row leaves for the collapsed cart; focus lands on the next item, not <body>.
+    await waitFor(() => expect(onion.isConnected).toBe(false));
+    expect(document.activeElement).toBe(screen.getByRole("checkbox", { name: "2 lemons" }));
+    expect(screen.getByText("1 onion moved to the cart")).toHaveAttribute("aria-live", "polite");
+
+    const remove = screen.getByRole("button", { name: "Remove 2 lemons" });
+    remove.focus();
+    fireEvent.click(remove);
+    await waitFor(() =>
+      expect(screen.queryByRole("checkbox", { name: "2 lemons" })).not.toBeInTheDocument()
+    );
+    expect(document.activeElement).toBe(screen.getByRole("checkbox", { name: "bread" }));
   });
 
   it("checks items off into the cart", async () => {
@@ -262,6 +287,26 @@ describe("ShoppingListPage", () => {
 
     expect(await screen.findByRole("heading", { name: /Chili/ })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /Added by you/ })).toBeInTheDocument();
+  });
+
+  it("lists a shared item under every recipe it's for, saying where else it's used", async () => {
+    await addShoppingItems(
+      [
+        { recipeId: "r1", recipeTitle: "Cookies", text: "1 cup butter" },
+        { recipeId: "r2", recipeTitle: "Banana Bread", text: "1/2 cup butter" }
+      ],
+      { canSync: false }
+    );
+    window.localStorage.setItem("linkdish:web:shopping-view:v1", "recipe");
+    renderPage();
+
+    const cookies = await screen.findByRole("region", { name: /Cookies/ });
+    const bread = screen.getByRole("region", { name: /Banana Bread/ });
+    expect(within(cookies).getByRole("checkbox", { name: /butter/ })).toBeInTheDocument();
+    expect(within(bread).getByRole("checkbox", { name: /butter/ })).toBeInTheDocument();
+    // Inside a recipe's group the row never names another recipe as if it were its own.
+    expect(within(cookies).getByText("Also in Banana Bread")).toBeInTheDocument();
+    expect(within(bread).getByText("Also in Cookies")).toBeInTheDocument();
   });
 
   it("edits an item in a sheet", async () => {

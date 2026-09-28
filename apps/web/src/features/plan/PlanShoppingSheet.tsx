@@ -118,7 +118,11 @@ export const PlanShoppingSheet: React.FC<PlanShoppingSheetProps> = ({
               id,
               label,
               rows: bucket.map(({ id: rowId, item }) => ({
-                detail: item.recipeTitles.join(" · "),
+                // One line: "Jo Mama's World Famous Spaghetti +1".
+                detail:
+                  item.recipeTitles.length > 1
+                    ? `${item.recipeTitles[0] ?? ""} +${item.recipeTitles.length - 1}`
+                    : item.recipeTitles[0],
                 id: rowId,
                 label: formatShoppingItemText(item),
                 onList: openKeys.has(item.key),
@@ -268,7 +272,9 @@ export const PlanShoppingSheet: React.FC<PlanShoppingSheetProps> = ({
           onSelectNone={() => setSelected(new Set())}
           onToggle={toggle}
           selected={selected}
-          stapleCount={stapleIds.length}
+          stapleNames={planned.items
+            .filter((item) => isPantryStaple(item.text))
+            .map((item) => item.text)}
         />
       )}
     </Sheet>
