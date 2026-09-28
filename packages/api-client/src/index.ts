@@ -253,7 +253,10 @@ export interface CreateExtractorApiClientOptions {
   baseUrl: string;
   fetchImplementation?: FetchLike;
   getHeaders?: () => Promise<Record<string, string>> | Record<string, string>;
-  /** Per-request timeout in milliseconds. Pass 0 (or a negative value) to disable. */
+  /**
+   * Per-request timeout in milliseconds, covering `getHeaders` as well as the fetch. Pass 0 (or a
+   * negative value) to disable.
+   */
   timeoutMs?: number;
   /** Timeout for extraction requests specifically. Defaults to {@link DEFAULT_EXTRACT_TIMEOUT_MS}. */
   extractTimeoutMs?: number;
@@ -333,6 +336,43 @@ const createRequestSignal = (
   };
 };
 
+/*
+ * Settles like `task()` unless `signal` aborts first, in which case it rejects straight away and
+ * the task's eventual outcome is ignored. A synchronous throw from `task` becomes a rejection.
+ */
+const settleUnlessAborted = async <Value>(
+  task: () => Promise<Value> | Value,
+  signal: AbortSignal | undefined
+): Promise<Value> => {
+  const pending = new Promise<Value>((resolve) => {
+    resolve(task());
+  });
+
+  if (!signal) {
+    return pending;
+  }
+
+  let onAbort: () => void = () => undefined;
+  const aborted = new Promise<never>((_resolve, reject) => {
+    onAbort = () => {
+      reject(createAbortError());
+    };
+  });
+
+  if (signal.aborted) {
+    onAbort();
+  } else {
+    signal.addEventListener("abort", onAbort, { once: true });
+  }
+
+  try {
+    // race() subscribes to both, so the loser settling later is never an unhandled rejection.
+    return await Promise.race([pending, aborted]);
+  } finally {
+    signal.removeEventListener("abort", onAbort);
+  }
+};
+
 const describeTransportError = (error: unknown, fallback: string): string =>
   error instanceof Error && error.message.trim().length > 0 ? error.message : fallback;
 
@@ -385,25 +425,10 @@ export const createExtractorApiClient = (
       throw callerAbortReason(callerSignal);
     }
 
-    const headers = {
-      ...(request.body === undefined ? {} : { "content-type": "application/json" }),
-      ...(getHeaders ? await getHeaders() : {})
-    };
+    // Created before the headers are fetched, so a slow token provider (Clerk's getToken() while
+    // a session refreshes) is bounded by the timeout and can be cancelled like the fetch itself.
     const requestSignal = createRequestSignal(request.timeoutMs ?? timeoutMs, callerSignal);
-
-    let response: Awaited<ReturnType<FetchLike>>;
-    let rawBody: string;
-
-    try {
-      response = await fetchImplementation(`${normalizedBaseUrl}${path}`, {
-        method: request.method ?? "GET",
-        headers,
-        ...(request.body === undefined ? {} : { body: JSON.stringify(request.body) }),
-        ...(requestSignal.signal === undefined ? {} : { signal: requestSignal.signal })
-      });
-
-      rawBody = await response.text();
-    } catch (error) {
+    const throwIfCancelled = (cause: unknown): void => {
       if (callerSignal?.aborted) {
         throw callerAbortReason(callerSignal);
       }
@@ -411,18 +436,53 @@ export const createExtractorApiClient = (
       if (requestSignal.timedOut()) {
         throw new ExtractorApiError("Extractor API request timed out.", 0, undefined, {
           kind: "timeout",
-          cause: error
+          cause
         });
       }
+    };
 
-      // The original message is kept ("Network request failed", "Failed to fetch"): callers
-      // already match on it.
-      throw new ExtractorApiError(
-        describeTransportError(error, "Extractor API request failed to send."),
-        0,
-        undefined,
-        { kind: "network", cause: error }
-      );
+    let response: Awaited<ReturnType<FetchLike>>;
+    let rawBody: string;
+
+    try {
+      let providedHeaders: Record<string, string> = {};
+
+      if (getHeaders) {
+        try {
+          providedHeaders = await settleUnlessAborted(getHeaders, requestSignal.signal);
+        } catch (error) {
+          throwIfCancelled(error);
+          // The provider's own failure is surfaced unchanged, as it always was.
+          throw error;
+        }
+      }
+
+      const headers = {
+        ...(request.body === undefined ? {} : { "content-type": "application/json" }),
+        ...providedHeaders
+      };
+
+      try {
+        response = await fetchImplementation(`${normalizedBaseUrl}${path}`, {
+          method: request.method ?? "GET",
+          headers,
+          ...(request.body === undefined ? {} : { body: JSON.stringify(request.body) }),
+          ...(requestSignal.signal === undefined ? {} : { signal: requestSignal.signal })
+        });
+
+        rawBody = await response.text();
+      } catch (error) {
+        throwIfCancelled(error);
+
+        // The original message is kept ("Network request failed", "Failed to fetch"): callers
+        // already match on it.
+        throw new ExtractorApiError(
+          describeTransportError(error, "Extractor API request failed to send."),
+          0,
+          undefined,
+          { kind: "network", cause: error }
+        );
+      }
     } finally {
       requestSignal.dispose();
     }

@@ -268,6 +268,169 @@ describe("caller abort signals", () => {
   });
 });
 
+describe("header acquisition is bounded and cancellable", () => {
+  /* Like Clerk's getToken() while the session is still refreshing: it never settles. */
+  const hangingHeaders = () => new Promise<Record<string, string>>(() => undefined);
+
+  const createClientWithHeaders = (
+    getHeaders: () => Promise<Record<string, string>> | Record<string, string>,
+    fetchImplementation: FetchSignature = vi.fn<FetchSignature>(() =>
+      Promise.resolve(jsonResponse({ authenticated: false }))
+    ),
+    timeoutMs?: number
+  ) =>
+    createExtractorApiClient({
+      baseUrl: "https://api.test",
+      fetchImplementation: fetchImplementation as unknown as typeof fetch,
+      getHeaders,
+      ...(timeoutMs === undefined ? {} : { timeoutMs })
+    });
+
+  it("times out while the header provider hangs", async () => {
+    const fetchImplementation = vi.fn<FetchSignature>();
+    const client = createClientWithHeaders(hangingHeaders, fetchImplementation, 15);
+
+    const error = (await captureRejection(client.getSession())) as ExtractorApiError;
+
+    expect(error).toBeInstanceOf(ExtractorApiError);
+    expect(error.kind).toBe("timeout");
+    expect(error.statusCode).toBe(0);
+    expect(fetchImplementation).not.toHaveBeenCalled();
+  });
+
+  it("uses the extraction timeout while waiting for headers on extract calls", async () => {
+    const fetchImplementation = vi.fn<FetchSignature>();
+    const client = createExtractorApiClient({
+      baseUrl: "https://api.test",
+      fetchImplementation: fetchImplementation as unknown as typeof fetch,
+      getHeaders: hangingHeaders,
+      extractTimeoutMs: 15
+    });
+
+    const error = (await captureRejection(
+      client.extractRecipe({ url: "https://example.com/soup", attempt: "primary" })
+    )) as ExtractorApiError;
+
+    expect(error.kind).toBe("timeout");
+    expect(fetchImplementation).not.toHaveBeenCalled();
+  });
+
+  it("rejects with the caller's reason when aborted during header acquisition", async () => {
+    const fetchImplementation = vi.fn<FetchSignature>();
+    const controller = new AbortController();
+    const client = createClientWithHeaders(hangingHeaders, fetchImplementation, 10_000);
+    const pending = client.extractRecipe(
+      { url: "https://example.com/soup", attempt: "primary" },
+      { signal: controller.signal }
+    );
+    const reason = new Error("user cancelled the import");
+
+    await Promise.resolve();
+    controller.abort(reason);
+
+    await expect(pending).rejects.toBe(reason);
+    expect(fetchImplementation).not.toHaveBeenCalled();
+  });
+
+  it("does not send the request when headers arrive after the caller aborted", async () => {
+    const fetchImplementation = vi.fn<FetchSignature>();
+    const controller = new AbortController();
+    let releaseHeaders: (headers: Record<string, string>) => void = () => undefined;
+    const client = createClientWithHeaders(
+      () =>
+        new Promise<Record<string, string>>((resolve) => {
+          releaseHeaders = resolve;
+        }),
+      fetchImplementation,
+      10_000
+    );
+    const pending = captureRejection(client.getSession({ signal: controller.signal }));
+
+    await Promise.resolve();
+    controller.abort();
+    releaseHeaders({ authorization: "Bearer late" });
+
+    const error = await pending;
+    expect((error as Error).name).toBe("AbortError");
+    expect(isExtractorApiError(error)).toBe(false);
+    expect(fetchImplementation).not.toHaveBeenCalled();
+  });
+
+  it("ignores a header provider that fails after the request already timed out", async () => {
+    let failHeaders: (error: Error) => void = () => undefined;
+    const client = createClientWithHeaders(
+      () =>
+        new Promise<Record<string, string>>((_resolve, reject) => {
+          failHeaders = reject;
+        }),
+      vi.fn<FetchSignature>(),
+      15
+    );
+
+    const error = (await captureRejection(client.getSession())) as ExtractorApiError;
+    failHeaders(new Error("token refresh failed"));
+    await Promise.resolve();
+
+    expect(error.kind).toBe("timeout");
+  });
+
+  it("keeps surfacing a header provider's own failure unchanged", async () => {
+    const client = createClientWithHeaders(
+      () => Promise.reject(new Error("no token")),
+      vi.fn<FetchSignature>(),
+      10_000
+    );
+
+    await expect(client.getSession()).rejects.toThrow("no token");
+  });
+
+  it("clears the timer and caller listener on every path", async () => {
+    vi.useFakeTimers();
+
+    try {
+      const controller = new AbortController();
+      const addListener = vi.spyOn(controller.signal, "addEventListener");
+      const removeListener = vi.spyOn(controller.signal, "removeEventListener");
+      const cases: Array<() => Promise<unknown>> = [
+        // Headers and fetch both succeed.
+        () =>
+          createClientWithHeaders(async () =>
+            Promise.resolve({ authorization: "Bearer ok" })
+          ).getSession({ signal: controller.signal }),
+        // The header provider fails.
+        () =>
+          captureRejection(
+            createClientWithHeaders(() => {
+              throw new Error("no token");
+            }).getSession({ signal: controller.signal })
+          ),
+        // fetch fails.
+        () =>
+          captureRejection(
+            createClientWithHeaders(
+              () => ({}),
+              () => Promise.reject(new TypeError("Failed to fetch"))
+            ).getSession({ signal: controller.signal })
+          )
+      ];
+
+      for (const run of cases) {
+        addListener.mockClear();
+        removeListener.mockClear();
+        await run();
+
+        expect(vi.getTimerCount()).toBe(0);
+        expect(addListener).toHaveBeenCalled();
+        expect(removeListener.mock.calls.map(([type, listener]) => [type, listener])).toEqual(
+          addListener.mock.calls.map(([type, listener]) => [type, listener])
+        );
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe("new endpoints", () => {
   it("posts pasted text to /extract and returns the success with its quota", async () => {
     const fetchImplementation = vi.fn<FetchSignature>(() =>
