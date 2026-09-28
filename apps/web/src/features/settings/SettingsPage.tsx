@@ -7,6 +7,7 @@ import { SegmentedControl } from "../../components/SegmentedControl";
 import { Switch } from "../../components/Switch";
 import { useMediaQuery } from "../../lib/use-media-query";
 import { setPreference, usePreferences } from "../../preferences/preferences-store";
+import { COOK_TEXT_SIZE_OPTIONS } from "../cook-mode/cook-text-size";
 
 import { isSettingsSectionId, settingsSectionElementId } from "./settings-sections";
 import { scrollToSettingsSection, SettingsToc } from "./SettingsToc";
@@ -16,7 +17,6 @@ import type { SettingsSectionId } from "./settings-sections";
 import type { IconName } from "../../components/Icon";
 import type { SegmentedOption } from "../../components/SegmentedControl";
 import type {
-  CookTextSize,
   ThemePreference,
   UnitsPreference,
   WeekStartsOn
@@ -37,12 +37,6 @@ const UNIT_OPTIONS: ReadonlyArray<SegmentedOption<UnitsPreference>> = [
   { value: "original", label: "Original" },
   { value: "us", label: "US" },
   { value: "metric", label: "Metric" }
-];
-
-const TEXT_SIZE_OPTIONS: ReadonlyArray<SegmentedOption<CookTextSize>> = [
-  { value: "md", label: "Regular" },
-  { value: "lg", label: "Large" },
-  { value: "xl", label: "Largest" }
 ];
 
 const WEEK_START_OPTIONS: ReadonlyArray<SegmentedOption<WeekStartsOn>> = [
@@ -185,7 +179,7 @@ export const SettingsPage: React.FC = () => {
               aria-label="Cook mode text size"
               fullWidth
               onChange={(value) => setPreference("cookTextSize", value)}
-              options={TEXT_SIZE_OPTIONS}
+              options={COOK_TEXT_SIZE_OPTIONS}
               value={preferences.cookTextSize}
             />
           </SettingsRow>
