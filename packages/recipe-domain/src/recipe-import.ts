@@ -7,7 +7,7 @@
  * when the source lacks what LinkDish requires (a title, ingredients and steps); `meta` carries
  * the personal data (favorite, rating, notes, tags, photo) the app stores beside the recipe.
  */
-import { decodeHtmlEntities } from "../../utils/src/index.js";
+import { decodeHtmlEntities, removeTagOpeners } from "../../utils/src/index.js";
 
 import { parseDuration } from "./durations.js";
 import {
@@ -75,8 +75,15 @@ export type SchemaOrgImportOptions = {
 const DEFAULT_MAX_PHOTO_CHARS = 1_500_000;
 const MAX_TAGS = 50;
 const MAX_TAG_LENGTH = 60;
-const HTML_TAG_PATTERN = /<[^>]*>/gu;
+/**
+ * A tag: "<", then a letter, "/", "!" or "?" (what makes HTML read "<" as markup), then anything
+ * but angle brackets up to ">". "cook to < 165°F, then > 5 min" is text, and stopping at the
+ * next "<" keeps each attempt short, so a long run of "<" scans in linear time.
+ */
+const HTML_TAG_PATTERN = /<[!/?A-Za-z][^<>]*>/gu;
 const BREAK_TAG_PATTERN = /<br\s*\/?>|<\/p>|<\/li>/giu;
+/** Tags that only appear once others are gone ("<scr<b>ipt>") need another pass; see stripMarkup. */
+const MAX_MARKUP_PASSES = 4;
 const LINE_SPLIT_PATTERN = /\r\n|\r|\n/u;
 const INLINE_SPACE_PATTERN = /[ \t\u00a0]+/gu;
 const WHITESPACE_PATTERN = /\s+/gu;
@@ -110,9 +117,34 @@ const asText = (value: unknown): string =>
       ? String(value)
       : "";
 
-/** Decodes entities, turns block tags into line breaks, strips remaining tags. */
+/**
+ * Turns block tags into line breaks and drops the other tags, passing again while a pass
+ * exposes a new tag, then drops any "<" that could still open one (an unclosed "<script", or
+ * nesting deeper than MAX_MARKUP_PASSES, which only hostile input has). The pass limit keeps
+ * the work linear; removeTagOpeners makes the result complete anyway.
+ */
+const stripMarkup = (text: string): string => {
+  let stripped = text;
+
+  for (let pass = 0; pass < MAX_MARKUP_PASSES; pass += 1) {
+    const next = stripped.replace(BREAK_TAG_PATTERN, "\n").replace(HTML_TAG_PATTERN, "");
+
+    if (next === stripped) {
+      break;
+    }
+
+    stripped = next;
+  }
+
+  return removeTagOpeners(stripped);
+};
+
+/**
+ * Plain text from an export field: markup stripped, entities decoded, and markup stripped
+ * again, since some exports entity-encode their tags ("&lt;p&gt;Mix&lt;/p&gt;").
+ */
 const cleanText = (value: unknown): string =>
-  decodeHtmlEntities(asText(value).replace(BREAK_TAG_PATTERN, "\n").replace(HTML_TAG_PATTERN, ""))
+  stripMarkup(decodeHtmlEntities(stripMarkup(asText(value))))
     .split(LINE_SPLIT_PATTERN)
     .map((line) => line.replace(INLINE_SPACE_PATTERN, " ").trim())
     .join("\n")

@@ -236,6 +236,47 @@ export const decodeHtmlEntities = (value: string): string =>
     return namedHtmlEntityMap[token] ?? namedHtmlEntityMap[token.toLowerCase()] ?? entity;
   });
 
+/** What makes a preceding "<" open markup in HTML: a tag name letter, "/", "!" or "?". */
+const TAG_OPENER_CHARACTER = /^[!/?A-Za-z]$/u;
+
+/**
+ * Drops every "<" that would still open markup after a tag stripper has run: one followed by
+ * an ASCII letter, "/", "!" or "?", which HTML's tokenizer reads as the start of a tag, an end
+ * tag, a comment or a declaration. However the input nested or split its tags
+ * ("<scr<b>ipt>", an unclosed "<script"), the result never contains "<script", "</p" or "<!--",
+ * while text such as "cook to < 165°F", "<3" or "<- stir" is kept. A run of "<" in front of
+ * such a character goes as a whole ("<<b" → "b"), so no removal leaves another "<" in front
+ * of the letter. Linear: each "<" is looked at once.
+ */
+export const removeTagOpeners = (value: string): string => {
+  let index = value.indexOf("<");
+
+  if (index === -1) {
+    return value;
+  }
+
+  const parts: string[] = [];
+  let copied = 0;
+
+  while (index !== -1) {
+    let runEnd = index + 1;
+
+    while (value[runEnd] === "<") {
+      runEnd += 1;
+    }
+
+    if (TAG_OPENER_CHARACTER.test(value[runEnd] ?? "")) {
+      parts.push(value.slice(copied, index));
+      copied = runEnd;
+    }
+
+    index = value.indexOf("<", runEnd);
+  }
+
+  parts.push(value.slice(copied));
+  return parts.join("");
+};
+
 export const assertNever = (value: never): never => {
   throw new Error(`Unhandled value: ${String(value)}`);
 };

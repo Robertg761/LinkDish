@@ -7,7 +7,8 @@ import {
   paprikaRecipeToRecipe,
   parseIngredientQuantity,
   parseServings,
-  parseStepDurations
+  parseStepDurations,
+  schemaOrgRecipeToRecipe
 } from "./index.js";
 
 /*
@@ -141,5 +142,55 @@ describe("recipe import on hostile input", () => {
       paprikaRecipeToRecipe(paprika, { syntheticSourceBase: "https://linkdish.ca/imported///" })
         .meta.sourceUrl
     ).toMatch(/^https:\/\/linkdish\.ca\/imported\/soup-[0-9a-z]+$/u);
+  });
+});
+
+/*
+ * CodeQL incomplete multi-character sanitization: one pass of the tag pattern could leave a tag
+ * that nesting rebuilt ("<scr<b>ipt>"), an unclosed "<script", or entity-encoded markup that
+ * only became a tag after decoding.
+ */
+describe("recipe import markup", () => {
+  const TAG_OPENER = /<[!/?A-Za-z]/u;
+  const importDescription = (description: string): string | null =>
+    schemaOrgRecipeToRecipe({
+      "@type": "Recipe",
+      name: "Soup",
+      description,
+      recipeIngredient: ["1 cup water"],
+      recipeInstructions: "Boil."
+    }).recipe?.description ?? null;
+
+  it("strips tags that nesting or entity-encoding would rebuild", () => {
+    expect(importDescription("<scr<b>ipt>alert(1)</scr</b>ipt> Soft &amp; tender")).toBe(
+      "alert(1) Soft & tender"
+    );
+    expect(importDescription("&lt;p&gt;Serve warm.&lt;/p&gt;")).toBe("Serve warm.");
+    expect(importDescription("&lt;scr&lt;b&gt;ipt&gt;alert(1)")).toBe("alert(1)");
+    expect(importDescription("Mix well <script src=x")).toBe("Mix well script src=x");
+    expect(importDescription("Line one<br>Line two</p>Line three")).toBe(
+      "Line one\nLine two\nLine three"
+    );
+  });
+
+  it("keeps comparisons that only look like markup", () => {
+    expect(importDescription("Cook to < 165°F, then rest > 5 min")).toBe(
+      "Cook to < 165°F, then rest > 5 min"
+    );
+    expect(importDescription("Cook to &lt; 165&deg;F &lt;3")).toBe("Cook to < 165°F <3");
+  });
+
+  it("strips markup in linear time and leaves no tag opener, however deep the nesting", () => {
+    const inputs = [
+      "<".repeat(HOSTILE),
+      "<a".repeat(HOSTILE / 2),
+      `${"<a".repeat(HOSTILE / 4)}${">".repeat(HOSTILE / 4)}`,
+      `${"&lt;a".repeat(HOSTILE / 8)}${"&gt;".repeat(HOSTILE / 8)}`
+    ];
+
+    for (const input of inputs) {
+      expect(TAG_OPENER.test(importDescription(input) ?? "")).toBe(false);
+      expect(fastestMilliseconds(() => importDescription(input))).toBeLessThan(MAX_MILLISECONDS);
+    }
   });
 });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { decodeHtmlEntities, toTrimmedOrNull } from "./index.js";
+import { decodeHtmlEntities, removeTagOpeners, toTrimmedOrNull } from "./index.js";
 
 // String.prototype.isWellFormed is ES2024; this package targets ES2022, so detect lone
 // surrogates directly.
@@ -131,5 +131,66 @@ describe("decodeHtmlEntities recipe vocabulary (bug 1)", () => {
 
   it("decodes once so a double-encoded entity keeps its literal text", () => {
     expect(decodeHtmlEntities("&amp;rsquo;")).toBe("&rsquo;");
+  });
+});
+
+describe("removeTagOpeners", () => {
+  const TAG_OPENER = /<[!/?A-Za-z]/u;
+
+  it("drops each '<' that would open a tag, end tag, comment or declaration", () => {
+    expect(removeTagOpeners("<script>alert(1)")).toBe("script>alert(1)");
+    expect(removeTagOpeners("Mix well</p")).toBe("Mix well/p");
+    expect(removeTagOpeners("<!-- note")).toBe("!-- note");
+    expect(removeTagOpeners("<?xml")).toBe("?xml");
+    expect(removeTagOpeners("Serve <em")).toBe("Serve em");
+  });
+
+  it("drops a whole run of '<' so no removal rebuilds an opener", () => {
+    expect(removeTagOpeners("<<script")).toBe("script");
+    expect(removeTagOpeners("a <<< b <<<b")).toBe("a <<< b b");
+  });
+
+  it("keeps '<' that HTML reads as text", () => {
+    for (const text of ["cook to < 165°F", "<3", "<- stir", "1 <= 2", "a < b > c", "x<", "<"]) {
+      expect(removeTagOpeners(text)).toBe(text);
+    }
+  });
+
+  it("never leaves an opener and only ever removes '<'", () => {
+    let seed = 11;
+    const next = (): number => {
+      seed = (seed * 16_807) % 2_147_483_647;
+      return seed / 2_147_483_647;
+    };
+    const alphabet = ["<", "<", "a", "Z", "/", "!", "?", " ", "1", ">", "-"];
+
+    for (let run = 0; run < 3_000; run += 1) {
+      const input = Array.from(
+        { length: Math.floor(next() * 16) },
+        () => alphabet[Math.floor(next() * alphabet.length)] ?? ""
+      ).join("");
+      const output = removeTagOpeners(input);
+
+      expect(TAG_OPENER.test(output), JSON.stringify(input)).toBe(false);
+      expect(output.replaceAll("<", ""), JSON.stringify(input)).toBe(input.replaceAll("<", ""));
+    }
+  });
+
+  it("runs in linear time on long runs of '<'", () => {
+    const fastestMilliseconds = (input: string): number =>
+      Math.min(
+        ...[0, 1, 2].map(() => {
+          const started = performance.now();
+          removeTagOpeners(input);
+          return performance.now() - started;
+        })
+      );
+
+    expect(removeTagOpeners(`${"<".repeat(100_000)}a`)).toBe("a");
+    expect(removeTagOpeners("<a".repeat(50_000))).toBe("a".repeat(50_000));
+
+    for (const input of [`${"<".repeat(100_000)}a`, "<a".repeat(50_000), "<".repeat(100_000)]) {
+      expect(fastestMilliseconds(input)).toBeLessThan(50);
+    }
   });
 });
