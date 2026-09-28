@@ -1,9 +1,10 @@
 /**
  * Writes an import in ONE IndexedDB transaction across saved recipes, their scans, collections
  * and the meal plan, so a restore either lands completely or not at all. The plan is rebuilt
- * inside the transaction from freshly read state, so the free limit, id collisions and which
- * starters may be replaced are checked against what is really stored (another tab may have saved
- * something, or made a starter its own, since the preview).
+ * inside the transaction from freshly read state, so the free limit, id collisions, duplicates,
+ * which starters may be replaced and which collections a skipped duplicate still has to join are
+ * checked against what is really stored (another tab may have saved a recipe, made a starter its
+ * own or taken a recipe out of a collection since the preview).
  */
 import { emitDataChange } from "../../data/change-feed";
 import {
@@ -16,7 +17,12 @@ import {
 import { toSavedRecipeListRecord } from "../library/saved-recipe-store";
 
 import { DataTransferError, isStorageFullError } from "./errors";
-import { buildImportPlan, isUntouchedStarter } from "./import-plan";
+import {
+  buildImportPlan,
+  collectionIdsByRecipe,
+  isUntouchedStarter,
+  recipeIdsToRecheck
+} from "./import-plan";
 
 import type { DuplicateMode, ImportAnalysis, ImportPlan } from "./import-plan";
 import type { ImportProgress } from "./import-sources";
@@ -85,23 +91,25 @@ export async function commitImport(
     const existingRecipeIds = new Set(keys);
     const existingCollections = (await collectionsStore.getAll()) as WebCollection[];
     const existingMealPlan = (await mealPlanStore.getAll()) as MealPlanEntry[];
-    // The starters in the file as stored now: one someone made their own is kept.
-    const starterIds = new Set(
-      analysis.items.flatMap((item) =>
-        item.starterId && existingRecipeIds.has(item.starterId) ? [item.starterId] : []
+    // The recipes the plan looks at, as stored now: a starter someone made their own is kept, a
+    // duplicate taken out of a collection joins it again, one saved since the preview is skipped.
+    const rechecked = (
+      await Promise.all(
+        recipeIdsToRecheck(analysis, keys).map(
+          (id) => recipesStore.get(id) as Promise<WebSavedRecipe | undefined>
+        )
       )
-    );
-    const storedStarters = await Promise.all(
-      Array.from(starterIds, (id) => recipesStore.get(id) as Promise<WebSavedRecipe | undefined>)
-    );
+    ).filter((recipe): recipe is WebSavedRecipe => recipe !== undefined);
 
     plan = buildImportPlan(analysis, {
       duplicateMode: options.duplicateMode,
       isPremium: options.isPremium,
       existingRecipeIds,
       quotaUsed: keys.filter((key) => !key.startsWith(STARTER_ID_PREFIX)).length,
-      untouchedStarterIds: new Set(
-        storedStarters.filter(isUntouchedStarter).map((recipe) => recipe.id)
+      untouchedStarterIds: new Set(rechecked.filter(isUntouchedStarter).map((recipe) => recipe.id)),
+      existingCollectionIds: collectionIdsByRecipe(rechecked),
+      recipesSavedSinceAnalysis: rechecked.filter(
+        (recipe) => !analysis.analyzedRecipeIds.has(recipe.id)
       ),
       existingCollections,
       existingMealPlan,
