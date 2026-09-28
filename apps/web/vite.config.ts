@@ -105,6 +105,48 @@ const preloadLandingRoute = (routeModule: string): Plugin => ({
   }
 });
 
+/** The API origin when VITE_LINKDISH_API_BASE_URL is unset; mirrors src/api/base-url.ts. */
+const DEFAULT_API_BASE_URL = "https://api.linkdish.ca";
+
+/**
+ * Recipe photos come through the API's image proxy, and a returning cook's first screen is
+ * photos: index.html opens the connection to the API while the scripts download, so the first
+ * photos (and the first API call) don't also wait for DNS, TCP and TLS. Two hints, because image
+ * requests (credentialed) and the API client's fetches (CORS, no credentials) use separate
+ * connections.
+ */
+const preconnectApi = (): Plugin => {
+  let origin: string | null = null;
+
+  return {
+    name: "linkdish:preconnect-api",
+    configResolved(config) {
+      const base =
+        (config.env.VITE_LINKDISH_API_BASE_URL as string | undefined) || DEFAULT_API_BASE_URL;
+
+      try {
+        origin = new URL(base).origin;
+      } catch {
+        origin = null;
+      }
+    },
+    transformIndexHtml() {
+      if (!origin) {
+        return [];
+      }
+
+      return [
+        { attrs: { href: origin, rel: "preconnect" }, injectTo: "head", tag: "link" },
+        {
+          attrs: { crossorigin: "", href: origin, rel: "preconnect" },
+          injectTo: "head",
+          tag: "link"
+        }
+      ];
+    }
+  };
+};
+
 /** Shared building blocks of the pages: components, stores, storage and helpers. */
 const APP_SHARED_PATTERN =
   /\/apps\/web\/src\/(?:components|data|storage|api|platform|preferences)\/|\/apps\/web\/src\/features\/library\/saved-recipe-(?:store|types)\.ts$|\/node_modules\/idb\//u;
@@ -226,6 +268,7 @@ export default defineConfig({
   },
   plugins: [
     react(),
+    preconnectApi(),
     preloadLandingRoute(LANDING_ROUTE_MODULE),
     VitePWA({
       // A new version waits until the reader says "Reload" (or navigates after ignoring the

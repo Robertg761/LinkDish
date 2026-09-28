@@ -35,6 +35,19 @@ describe("RecipeImage", () => {
 
     expect(container.querySelector("img")).toHaveAttribute("loading", "eager");
     expect(container.querySelector("img")).toHaveAttribute("fetchpriority", "high");
+    expect(container.querySelector("img")).toHaveAttribute("decoding", "async");
+    // Shown as soon as it is decoded: a fade from transparent would hold back its paint.
+    expect(container.querySelector("img")).not.toHaveClass("fade-image");
+  });
+
+  it("fades in the photos further down once they have loaded", () => {
+    const { container } = render(<RecipeImage image={image} title="Banana Bread" />);
+    const img = container.querySelector("img") as HTMLImageElement;
+
+    expect(img).toHaveClass("fade-image");
+    expect(img).not.toHaveClass("is-loaded");
+    fireEvent.load(img);
+    expect(img).toHaveClass("fade-image", "is-loaded");
   });
 
   it("falls back to a course-aware cover (never a lone letter) without a photo or on error", async () => {
@@ -94,6 +107,26 @@ describe("RecipeCard", () => {
 
     expect(container.querySelector(".recipe-card-list")).not.toBeNull();
     expect(container.querySelector("img")).toHaveAttribute("sizes", "72px");
+  });
+
+  it("asks phones for the 480 rendition of a grid card's photo, and takes a shelf's width", () => {
+    const { container, rerender } = render(
+      <MemoryRouter>
+        <RecipeCard image={image} title="Soup" to="/recipes/soup" />
+      </MemoryRouter>
+    );
+    const img = () => container.querySelector("img");
+
+    expect(img()?.getAttribute("srcset")).toMatch(/w=480 480w, .*w=1200 1200w/);
+    // A half-width phone card at 3x picks 480 (160 × 3), not 1200.
+    expect(img()?.getAttribute("sizes")).toMatch(/, 160px$/);
+
+    rerender(
+      <MemoryRouter>
+        <RecipeCard imageSizes="156px" image={image} title="Soup" to="/recipes/soup" />
+      </MemoryRouter>
+    );
+    expect(img()).toHaveAttribute("sizes", "156px");
   });
 });
 

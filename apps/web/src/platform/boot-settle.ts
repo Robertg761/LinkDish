@@ -5,22 +5,22 @@ import type { FC } from "react";
 /*
  * Boot work the first screen doesn't need (the service worker, the kitchen timer dock, the
  * import queue count, the rest of the icon set, the API contracts, the analytics contract, the
- * search engine) waits until the page's main content is on screen, the page has loaded and the
- * browser is idle. On a slow phone it would otherwise download and run in the middle of the first
- * meaningful paint and push it back.
+ * search engine) waits until the page's main content is on screen, the page and its first photos
+ * have loaded and the browser is idle. On a slow phone it would otherwise download and run in the
+ * middle of the first meaningful paint and push it back.
  *
  * main.tsx arms the gate before the first render. It opens once the route's page has rendered
  * and no page holds it (the Cookbook holds it until the recipes are read from storage), then
- * waits for the load event (up to LOAD_WAIT_CAP_MS), the next paint and an idle period. It opens
- * after SETTLE_CAP_MS whatever happens. Unarmed (unit tests), deferred work runs on the next
- * task and everything counts as settled.
+ * waits for the load event and the page's fetchpriority=high images (up to LOAD_WAIT_CAP_MS),
+ * the next paint and an idle period. It opens after SETTLE_CAP_MS whatever happens. Unarmed
+ * (unit tests), deferred work runs on the next task and everything counts as settled.
  */
 
 type Task = () => void;
 
 /** Opens the gate even if a page never releases it (storage that never answers, say). */
 export const SETTLE_CAP_MS = 6000;
-/** How long the settled content waits for the load event (slow images, say). */
+/** How long the settled content waits for the load event and its first photos. */
 export const LOAD_WAIT_CAP_MS = 3000;
 const IDLE_TIMEOUT_MS = 1500;
 
@@ -88,23 +88,64 @@ export const afterNextPaint = (callback: () => void): (() => void) => {
   };
 };
 
-const afterLoad = (callback: () => void) => {
-  if (document.readyState === "complete") {
-    callback();
-    return;
-  }
+/** An image the page asked to fetch first (a recipe hero, the first cards) still loading. */
+const isLoadingPriorityImage = (image: HTMLImageElement): boolean =>
+  image.getAttribute("fetchpriority") === "high" && !image.complete;
 
+/**
+ * Once the page has loaded and so have the images it put first (added by script after the load
+ * event, they don't hold it back themselves): a returning cook's first screen is their photos,
+ * and deferred downloads would share the connection with them. Waits LOAD_WAIT_CAP_MS at most.
+ */
+const afterFirstScreenLoaded = (callback: () => void) => {
   let done = false;
+  let pending = 0;
+  const cleanups: Array<() => void> = [];
   const finish = () => {
     if (!done) {
       done = true;
-      window.removeEventListener("load", finish);
+      cleanups.forEach((cleanup) => cleanup());
       callback();
     }
   };
+  const settleOne = () => {
+    pending -= 1;
 
-  window.addEventListener("load", finish);
-  window.setTimeout(finish, LOAD_WAIT_CAP_MS);
+    if (pending === 0) {
+      finish();
+    }
+  };
+  const watch = (target: EventTarget, events: readonly string[]) => {
+    pending += 1;
+    let counted = false;
+    const onDone = () => {
+      if (!counted) {
+        counted = true;
+        settleOne();
+      }
+    };
+
+    events.forEach((event) => target.addEventListener(event, onDone));
+    cleanups.push(() => events.forEach((event) => target.removeEventListener(event, onDone)));
+  };
+
+  if (document.readyState !== "complete") {
+    watch(window, ["load"]);
+  }
+
+  Array.from(document.images)
+    .filter(isLoadingPriorityImage)
+    .forEach((image) => {
+      watch(image, ["load", "error"]);
+    });
+
+  if (pending === 0) {
+    finish();
+    return;
+  }
+
+  const timer = window.setTimeout(finish, LOAD_WAIT_CAP_MS);
+  cleanups.push(() => window.clearTimeout(timer));
 };
 
 const maybeOpen = () => {
@@ -113,7 +154,7 @@ const maybeOpen = () => {
   }
 
   opening = true;
-  afterLoad(() => {
+  afterFirstScreenLoaded(() => {
     afterNextPaint(() => {
       whenIdle(settle);
     });

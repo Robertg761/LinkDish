@@ -78,7 +78,7 @@ import {
   LibraryToolbar,
   pluralize
 } from "./components/LibraryResultsParts";
-import { LibraryShelf } from "./components/LibraryShelf";
+import { LIBRARY_SHELF_CARD_SIZES, LibraryShelf } from "./components/LibraryShelf";
 import { LibraryWelcome, loadWelcomeSamples } from "./components/LibraryWelcome";
 import { CompactRecipeMeta } from "./components/RecipeMeta";
 import {
@@ -113,7 +113,12 @@ import type { RecipeSearchFields } from "@linkdish/recipe-domain";
 
 import "./LibraryPage.css";
 
-const PRIORITY_CARD_COUNT = 6;
+/**
+ * Photos fetched first (and shown without a fade): the grid's opening rows (two on a phone), or
+ * the first shelf's first cards when shelves lead the page. Fewer of them arrive sooner.
+ */
+const PRIORITY_CARD_COUNT = 4;
+const PRIORITY_SHELF_CARD_COUNT = 3;
 /** Keeps the subtitle's line while the count is unknown, so nothing jumps when it arrives. */
 const BLANK_SUBTITLE = "\u00a0";
 
@@ -733,9 +738,10 @@ export const LibraryPage: React.FC = () => {
               <li key={recipe.id}>
                 <RecipeCard
                   className="library-shelf-card"
+                  imageSizes={LIBRARY_SHELF_CARD_SIZES}
                   image={recipe.recipe.image}
                   meta={<CompactRecipeMeta recipe={recipe.recipe} />}
-                  priority={shelfIndex === 0 && index < 3}
+                  priority={shelfIndex === 0 && index < PRIORITY_SHELF_CARD_COUNT}
                   title={recipe.recipe.title}
                   to={`/recipes/${recipe.id}`}
                 />

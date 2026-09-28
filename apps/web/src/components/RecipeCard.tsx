@@ -26,14 +26,22 @@ export interface RecipeCardProps {
   mediaBadges?: React.ReactNode;
   /** Eager-load the image (first cards above the fold). */
   priority?: boolean | undefined;
+  /** The image's `sizes` when the card is not in a page grid (a shelf's fixed-width track). */
+  imageSizes?: string | undefined;
   /** Router state passed with the link. */
   state?: unknown;
   onNavigate?: (() => void) | undefined;
   className?: string | undefined;
 }
 
+/**
+ * A grid card's photo width: 4 columns from 1280px (at most 240px wide), 3 from 600px (beside the
+ * 248px side rail from 1024px) and 2 on phones. Phones say 160px, a little under the ~175px a
+ * card really is: the proxy's 480 rendition is sharp there even at 3x (it is scaled up under
+ * 10%), and at 3x the true width would pick the 1200 one, about four times the bytes.
+ */
 const GRID_SIZES =
-  "(min-width: 1280px) 260px, (min-width: 1024px) 22vw, (min-width: 640px) 31vw, 46vw";
+  "(min-width: 1280px) 240px, (min-width: 1024px) calc(33vw - 120px), (min-width: 600px) calc(33vw - 24px), 160px";
 
 /**
  * Recipe tile for grids and lists. The whole card is one link (stretched over the
@@ -51,6 +59,7 @@ const RecipeCardComponent: React.FC<RecipeCardProps> = ({
   actionsSlot,
   mediaBadges,
   priority = false,
+  imageSizes,
   state,
   onNavigate,
   className = ""
@@ -73,7 +82,7 @@ const RecipeCardComponent: React.FC<RecipeCardProps> = ({
           aspectRatio={isList ? "1" : "4 / 3"}
           image={image}
           priority={priority}
-          sizes={isList ? "72px" : GRID_SIZES}
+          sizes={isList ? "72px" : (imageSizes ?? GRID_SIZES)}
           title={title}
           widths={isList ? [96, 480] : [480, 1200]}
         />

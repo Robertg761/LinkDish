@@ -7,7 +7,7 @@ import { RecipeCard } from "../../../components/RecipeCard";
 import { afterNextPaint } from "../../../platform/boot-settle";
 import { importWithRetry } from "../../../platform/lazy";
 
-import { LibraryShelf } from "./LibraryShelf";
+import { LIBRARY_SHELF_CARD_SIZES, LibraryShelf } from "./LibraryShelf";
 import { PasteLinkForm } from "./PasteLinkForm";
 import { CompactRecipeMeta } from "./RecipeMeta";
 
@@ -150,6 +150,7 @@ const DiscoverShelf: React.FC = () => {
             <li key={featured.slug}>
               <RecipeCard
                 className="library-shelf-card"
+                imageSizes={LIBRARY_SHELF_CARD_SIZES}
                 image={featured.recipe.image}
                 mediaBadges={
                   <Badge className="library-media-badge" icon="sparkles" tone="butter">
