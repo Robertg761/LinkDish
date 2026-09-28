@@ -465,7 +465,8 @@ const syncWithHousehold = async (): Promise<boolean> => {
   await syncShoppingItems({
     canSync: true,
     householdId,
-    isCurrent: () => state.userId === userId && state.householdId === householdId
+    isCurrent: () => state.userId === userId && state.householdId === householdId,
+    ...(userId ? { userId } : {})
   });
   return true;
 };

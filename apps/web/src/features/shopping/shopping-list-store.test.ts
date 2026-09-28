@@ -327,7 +327,7 @@ describe("shopping-list-store", () => {
       Promise.resolve({ items: sent.flatMap((request) => request.items) })
     );
 
-    await syncShoppingItems({ canSync: true });
+    await syncShoppingItems({ canSync: true, userId: "user-1" });
 
     expect(sent).toHaveLength(1);
     const long = sent[0]?.items.find((item) => item.id === "long");
@@ -358,7 +358,7 @@ describe("shopping-list-store", () => {
       Promise.resolve({ items: [...(kept ? [kept] : []), ...pushed] })
     );
 
-    await syncShoppingItems({ canSync: true });
+    await syncShoppingItems({ canSync: true, userId: "user-1" });
 
     const items = await live();
     expect(items.map((item) => item.id).sort()).toEqual(["kept", "new"]);
@@ -411,7 +411,7 @@ describe("shopping-list-store", () => {
       Promise.resolve({ items: [...server.values()] })
     );
 
-    await syncShoppingItems({ canSync: true, householdId: "h2" });
+    await syncShoppingItems({ canSync: true, householdId: "h2", userId: "user-1" });
 
     expect([...server.keys()].sort()).toEqual(["mine", "mine-2"]);
     expect(deleted).toEqual(["mine-gone"]);
@@ -427,7 +427,7 @@ describe("shopping-list-store", () => {
     // Nothing is left that would be refused again.
     apiMocks.upsertShoppingItems.mockClear();
     apiMocks.deleteShoppingItems.mockClear();
-    await syncShoppingItems({ canSync: true, householdId: "h2" });
+    await syncShoppingItems({ canSync: true, householdId: "h2", userId: "user-1" });
     expect(apiMocks.upsertShoppingItems).not.toHaveBeenCalled();
     expect(apiMocks.deleteShoppingItems).not.toHaveBeenCalled();
   });
@@ -446,8 +446,8 @@ describe("shopping-list-store", () => {
     apiMocks.getShoppingList.mockResolvedValue({ items: [] });
 
     await Promise.all([
-      syncShoppingItems({ canSync: true, householdId: "h2" }),
-      syncShoppingItems({ canSync: true, householdId: "h2" })
+      syncShoppingItems({ canSync: true, householdId: "h2", userId: "user-1" }),
+      syncShoppingItems({ canSync: true, householdId: "h2", userId: "user-1" })
     ]);
 
     const all = await getShoppingItems({ includeDeleted: true });
@@ -458,7 +458,12 @@ describe("shopping-list-store", () => {
   it("keeps another household's unsent changes on this device and out of the sync", async () => {
     const deletedAt = new Date().toISOString();
     await putShoppingItems([
-      makeItem({ id: "h1-edit", sync: { householdId: "h1", status: "dirty" }, text: "cream" }),
+      makeItem({
+        id: "h1-edit",
+        sync: { householdId: "h1", status: "dirty" },
+        text: "cream",
+        updatedAt: deletedAt
+      }),
       makeItem({
         deletedAt,
         id: "h1-gone",
@@ -479,8 +484,8 @@ describe("shopping-list-store", () => {
 
     // Two tabs sync with h2 at once.
     await Promise.all([
-      syncShoppingItems({ canSync: true, householdId: "h2" }),
-      syncShoppingItems({ canSync: true, householdId: "h2" })
+      syncShoppingItems({ canSync: true, householdId: "h2", userId: "user-1" }),
+      syncShoppingItems({ canSync: true, householdId: "h2", userId: "user-1" })
     ]);
 
     expect([...server.keys()]).toEqual(["mine"]);
@@ -493,9 +498,121 @@ describe("shopping-list-store", () => {
     ]);
   });
 
+  it("drops unsent changes kept for another household once they are 30 days old", async () => {
+    const daysAgo = (days: number) => new Date(Date.now() - days * 86_400_000).toISOString();
+    await putShoppingItems([
+      makeItem({
+        id: "h1-stale",
+        sync: { householdId: "h1", status: "dirty" },
+        text: "cream",
+        updatedAt: daysAgo(31)
+      }),
+      makeItem({
+        id: "h1-stale-refused",
+        sync: { householdId: "h1", lastError: "Refused", status: "sync_failed" },
+        text: "salt",
+        updatedAt: daysAgo(45)
+      }),
+      makeItem({
+        id: "h1-recent",
+        sync: { householdId: "h1", status: "dirty" },
+        text: "eggs",
+        updatedAt: daysAgo(29)
+      }),
+      makeItem({
+        id: "h2-stale",
+        sync: { householdId: "h2", status: "dirty" },
+        text: "jam",
+        updatedAt: daysAgo(31)
+      }),
+      makeItem({
+        id: "local-stale",
+        sync: { status: "local_only" },
+        text: "basil",
+        updatedAt: daysAgo(90)
+      })
+    ]);
+    const server = new Map<string, UpsertShoppingItemsRequest["items"][number]>();
+    apiMocks.upsertShoppingItems.mockImplementation((input: UpsertShoppingItemsRequest) => {
+      input.items.forEach((item) => server.set(item.id, item));
+      return Promise.resolve({ ignored: [], items: input.items });
+    });
+    apiMocks.getShoppingList.mockImplementation(() =>
+      Promise.resolve({ items: [...server.values()] })
+    );
+
+    await syncShoppingItems({ canSync: true, householdId: "h2", userId: "user-1" });
+
+    expect([...server.keys()]).toEqual(["h2-stale"]);
+    const all = await getShoppingItems({ includeDeleted: true, includeOtherHouseholds: true });
+    expect(all.map((item) => [item.id, item.sync.status, item.sync.householdId])).toEqual([
+      ["h1-recent", "dirty", "h1"],
+      ["h2-stale", "synced", "h2"],
+      ["local-stale", "local_only", undefined]
+    ]);
+  });
+
+  it("never sends another account's unsent item that names no household", async () => {
+    const stale = new Date(Date.now() - 90 * 86_400_000).toISOString();
+    // Written before changes recorded their household: u9 added figs and never sent them, and
+    // removed its salt.
+    await putShoppingItems([
+      makeItem({ addedBy: "u9", id: "figs", text: "figs", updatedAt: stale }),
+      makeItem({
+        addedBy: "u9",
+        deletedAt: new Date().toISOString(),
+        id: "salt",
+        isDeleted: true,
+        text: "salt"
+      }),
+      makeItem({ addedBy: "u1", id: "jam", text: "jam" }),
+      makeItem({ addedBy: "local", id: "basil", text: "basil" })
+    ]);
+    const server = new Map<string, UpsertShoppingItemsRequest["items"][number]>();
+    apiMocks.upsertShoppingItems.mockImplementation((input: UpsertShoppingItemsRequest) => {
+      input.items.forEach((item) => server.set(item.id, item));
+      return Promise.resolve({ ignored: [], items: input.items });
+    });
+    apiMocks.getShoppingList.mockImplementation(() =>
+      Promise.resolve({ items: [...server.values()] })
+    );
+
+    // Even when the claim didn't run first (another tab wrote them meanwhile).
+    await syncShoppingItems({ canSync: true, householdId: "h2", userId: "u1" });
+
+    expect([...server.keys()].sort()).toEqual(["basil", "jam"]);
+    expect(apiMocks.deleteShoppingItems).not.toHaveBeenCalled();
+    // Kept (not expired, and not pruned by h2's list) for u9, whose household isn't known here.
+    expect(fakeIdb.record<WebShoppingItem>("shoppingItems", "salt")).toMatchObject({
+      isDeleted: true,
+      sync: { status: "dirty" }
+    });
+    expect(fakeIdb.record<WebShoppingItem>("shoppingItems", "figs")).toMatchObject({
+      sync: { status: "dirty" },
+      text: "figs"
+    });
+    expect(fakeIdb.record<WebShoppingItem>("shoppingItems", "figs")?.sync.householdId).toBe(
+      undefined
+    );
+  });
+
   it("records a confirmed household on unsent changes that don't name one", async () => {
     await putShoppingItems([
-      makeItem({ id: "unknown", sync: { status: "dirty" }, text: "jam" }),
+      makeItem({ addedBy: "u1", id: "unknown", sync: { status: "dirty" }, text: "jam" }),
+      makeItem({
+        addedBy: "local",
+        id: "added-signed-out",
+        sync: { status: "dirty" },
+        text: "oil"
+      }),
+      // Added by another account before changes named their household: maybe never sent.
+      makeItem({ addedBy: "u3", id: "theirs-unsent", sync: { status: "dirty" }, text: "figs" }),
+      makeItem({
+        addedBy: "u3",
+        id: "theirs-changed-by-me",
+        sync: { changedBy: "u1", status: "dirty" },
+        text: "rice"
+      }),
       makeItem({ id: "synced", sync: { status: "synced" }, text: "bread" }),
       makeItem({ id: "local", sync: { status: "local_only" }, text: "basil" }),
       makeItem({ id: "other", sync: { householdId: "h3", status: "sync_failed" }, text: "salt" }),
@@ -520,17 +637,23 @@ describe("shopping-list-store", () => {
       );
 
     // u1's household is h2: its own changes for h1 (it has moved) can only go to h2 now. Another
-    // account's, and ones made signed out, stay with h1.
+    // account's, and ones made signed out, stay with h1; another account's item that names no
+    // household waits for that account.
     await claimShoppingChanges("h2", { userId: "u1" });
     expect(await households()).toEqual({
+      "added-signed-out": "h2",
       local: undefined,
       "old-home": "h2",
       other: "h3",
       "signed-out": "h1",
       synced: undefined,
       theirs: "h1",
+      "theirs-changed-by-me": "h2",
+      "theirs-unsent": undefined,
       unknown: "h2"
     });
+    await claimShoppingChanges("h9", { userId: "u3" });
+    expect((await households())["theirs-unsent"]).toBe("h9");
     expect(fakeIdb.record<WebShoppingItem>("shoppingItems", "old-home")).toMatchObject({
       sync: { changedBy: "u1", householdId: "h2", status: "dirty" },
       text: "eggs"
@@ -624,7 +747,9 @@ describe("shopping-list-store", () => {
     );
     apiMocks.upsertShoppingItems.mockRejectedValue(refused);
 
-    await expect(syncShoppingItems({ canSync: true, householdId: "h1" })).rejects.toBe(refused);
+    await expect(
+      syncShoppingItems({ canSync: true, householdId: "h1", userId: "user-1" })
+    ).rejects.toBe(refused);
 
     expect(apiMocks.upsertShoppingItems).toHaveBeenCalledTimes(1);
     expect(await getShoppingItems()).toEqual([
@@ -660,7 +785,7 @@ describe("shopping-list-store", () => {
       return Promise.resolve({ ignored: [], items: input.items });
     });
     apiMocks.getShoppingList.mockImplementation(() => Promise.resolve({ items: server }));
-    await syncShoppingItems({ canSync: true, householdId: "h1" });
+    await syncShoppingItems({ canSync: true, householdId: "h1", userId: "user-1" });
     await loadShoppingList();
 
     const db = await getLinkDishWebDb();
@@ -669,7 +794,7 @@ describe("shopping-list-store", () => {
     postMessage.mockClear();
 
     // The 30-second poll: nothing to push, and the server returns exactly what we have.
-    await syncShoppingItems({ canSync: true, householdId: "h1" });
+    await syncShoppingItems({ canSync: true, householdId: "h1", userId: "user-1" });
 
     expect(put).not.toHaveBeenCalled();
     expect(postMessage).not.toHaveBeenCalled();

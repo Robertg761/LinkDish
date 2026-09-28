@@ -13,6 +13,7 @@ import {
   getShoppingItems,
   getShoppingListSnapshot,
   loadShoppingList,
+  putShoppingItems,
   resetShoppingListStoreForTests,
   setShoppingItemChecked,
   updateShoppingItemFromLine
@@ -533,6 +534,62 @@ describe("shopping-sync", () => {
     expect(
       [...server.records.values()].map((record) => [record.householdId, record.item.text])
     ).toEqual([["h1", "limes"]]);
+  });
+
+  it("leaves an item another account never sent, from before households were recorded, for it", async () => {
+    const server = createHouseholdServer();
+    server.seed("h2", householdItem("bread", "bread", { addedBy: "u7" }));
+    // Written before changes recorded their household: u1 added limes but never sent them, and
+    // h2's bread was checked off offline.
+    await putShoppingItems([
+      {
+        addedBy: "u1",
+        checked: false,
+        checkedBy: null,
+        createdAt: "2026-07-04T09:00:00.000Z",
+        id: "limes",
+        sync: { status: "dirty" },
+        text: "limes",
+        updatedAt: "2026-07-04T09:00:00.000Z"
+      },
+      {
+        addedBy: "u7",
+        checked: true,
+        checkedBy: "u2",
+        createdAt: "2026-07-04T10:00:00.000Z",
+        id: "bread",
+        sync: { status: "dirty" },
+        text: "bread",
+        updatedAt: "2026-07-04T11:00:00.000Z"
+      }
+    ]);
+
+    server.use("h2");
+    await signIn("u2");
+    await syncShoppingNow();
+
+    // u1's limes never reach u2's household...
+    expect(getShoppingSyncState().phase).toBe("synced");
+    expect(server.pushedIds).not.toContain("limes");
+    expect(householdRecords(server, "h2")).toEqual([["bread", undefined]]);
+    // ...but the check-off of h2's own bread does, once h2's list shows it is h2's.
+    await syncShoppingNow();
+    expect(server.records.get("bread")).toMatchObject({
+      householdId: "h2",
+      item: { checked: true }
+    });
+
+    // u1 comes back: the limes go to u1's household.
+    signOut();
+    server.use("h1");
+    await signIn("u1");
+    await syncShoppingNow();
+
+    expect(server.pushedIds.filter((id) => id === "limes")).toEqual(["limes"]);
+    expect(server.records.get("limes")).toMatchObject({
+      householdId: "h1",
+      item: { text: "limes" }
+    });
   });
 
   it("stops a sync when another account signs in while it runs", async () => {
