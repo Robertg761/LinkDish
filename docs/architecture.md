@@ -11,6 +11,53 @@
 - `pnpm check:site` validates local references, metadata, sitemap coverage,
   social artwork, and the support form contract.
 
+## Web App
+
+`apps/web` is a React 19 + Vite PWA served from its own Vercel project
+(`app.linkdish.ca`).
+
+- **Design system.** Semantic CSS custom properties in
+  `src/styles/tokens.css` for light and dark themes (System/Light/Dark
+  preference, applied before first paint by an inline script whose CSP hash is
+  pinned in `preferences/theme-boot-script.test.ts`, `apps/web/vercel.json` and
+  the root `vercel.json`). Feature CSS uses only tokens. Icons are vendored
+  Lucide SVG data behind a typed `<Icon name>` (no icon font or CDN). Shared
+  components live in `src/components` (Sheet, Menu, Toast, RecipeCard,
+  RecipeImage, SegmentedControl, Stepper, EmptyState and others).
+- **Shell.** Phones get a bottom tab bar (Cookbook, Plan, Add, Shopping, You),
+  hidden on recipe and featured pages; from 1024px the same navigation is a
+  side rail. Route metadata (`components/app-route-meta.ts`) drives titles,
+  the back button and the tab bar. A ⌘K command palette, keyboard shortcuts,
+  an offline banner, route announcements and an app-update toast
+  (`vite-plugin-pwa` in prompt mode) live at shell level.
+- **Loading.** Every route is its own chunk (`lazyWithRetry`, self-healing
+  after deploys). The Cookbook chunk is modulepreloaded from `index.html`, and
+  Clerk loads through a lazy sibling bridge (`auth/ClerkBridge.tsx`) only when a
+  Clerk session hint exists or sign-in starts. `pnpm --filter @linkdish/web
+  size` checks the budgets after a build (entry ≤ 115 KB gzip, landing JS ≤
+  150 KB, landing CSS ≤ 24 KB).
+- **Local data.** IndexedDB `linkdish-web` v4 (`storage/linkdish-db.ts`)
+  holds `savedRecipes`, `recipeSourceImages` (scan images, kept out of list
+  reads), `shoppingItems`, `collections`, `mealPlan`, `importQueue` and
+  `cookSessions`. Upgrades are additive and run inside the versionchange
+  transaction; a blocked or outdated tab surfaces a retry state instead of
+  hanging. Reactive stores in `src/data` (`useSavedRecipes`, collections, meal
+  plan, import queue, cook sessions) use `useSyncExternalStore`, optimistic
+  writes with rollback, and a BroadcastChannel change feed across tabs.
+  Personal metadata (favorites, tags, collections, ratings, cook log) stays on
+  the device and is never part of the household sync payload.
+- **Features.** Cookbook (ranked search, filters, collections, tags, shelves),
+  recipe view (servings scaling, Original/US/Metric units, tap-to-check,
+  editor), cook mode (resumable sessions, global timer dock, notifications
+  through the service worker), importer (link, pasted text, photos downscaled
+  on the device, cancellable progress, duplicate check, background queue),
+  meal planner, aisle-grouped shopping list with household sync, backups and
+  Paprika/Mela/JSON-LD import in Settings, pricing, household and account.
+- **Analytics.** First-party events are queued and sent in batches (beacon on
+  page hide). Event names are the closed enum in `packages/api-contracts`;
+  the API drops unknown events individually, so deploy the API before clients
+  that send new names.
+
 ## Mobile
 
 - Expo Router drives navigation between the intake screen and a result preview screen.
@@ -18,6 +65,11 @@
 - Mock mode lives in the mobile service layer so the UI can ship ahead of the extractor implementation.
 - The result flow is a typed state machine: `success`, `needs_retry`, and `failure`.
 - Retryable responses trigger an explicit fallback request instead of silently escalating to AI.
+- The Cookbook renders with a FlatList; saved-recipes and shopping state are split into
+  state and action contexts, and AsyncStorage writes go through a debounced writer that
+  flushes when the app goes to the background.
+- Search, shopping aggregation (aisle grouping, clean fractions), US/metric conversion and
+  servings/time formatting come from `@linkdish/recipe-domain`, the same code the web uses.
 
 ## Backend
 
@@ -204,6 +256,14 @@ If production `/extract` skips browser fetch or fallback retry, it is a deployme
 ## Shared Packages
 
 - Domain models and API contracts stay outside both apps to avoid drift.
+- `@linkdish/recipe-domain` is the shared, pure recipe engine: ingredient parsing and
+  scaling (mixed numbers, alternates, package sizes, noun agreement), quantity formatting,
+  US↔metric conversion (with a density table for baking staples and oven temperatures),
+  servings and duration parsing, shopping aggregation with aisle categories, ranked search,
+  conservative auto-tagging, URL canonicalization and duplicate detection, meal-plan
+  helpers, and interop (versioned LinkDish backups, Paprika/Mela/schema.org importers,
+  text/Markdown/JSON-LD export). Zod schemas live in separate modules so screens that only
+  need helpers don't load the schema library.
 - `@linkdish/api-client` methods are async and always reject rather than throw. Every
   method takes an optional `{ signal }` that is combined with the client timeout (a caller
   abort rejects with the signal's reason). Failures are `ExtractorApiError`s with a
@@ -216,4 +276,7 @@ If production `/extract` skips browser fetch or fallback retry, it is a deployme
 ## Quality Gates
 
 - Fixture-backed unit and integration tests stay deterministic and run in CI.
+- `pnpm validate` runs lint, every typecheck, all package tests, the Vercel handler tests
+  and the site check. The web bundle budget (`pnpm --filter @linkdish/web size`) needs a
+  build first, so it is not part of `validate`.
 - The live canary manifest is intentionally separate from PR-blocking CI so real-world regressions can be measured without making the pipeline flaky.
