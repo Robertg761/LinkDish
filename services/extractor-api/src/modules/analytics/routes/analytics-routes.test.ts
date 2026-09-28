@@ -111,6 +111,24 @@ describe("POST /analytics/events with a sendBeacon (text/plain) body", () => {
     expect(mocks.writeAnalyticsEvents).not.toHaveBeenCalled();
   });
 
+  it("matches the text/plain media type the way Fastify does (case, parameters, spacing)", async () => {
+    const app = buildApp({ runtime: stubRuntime });
+
+    try {
+      const response = await app.inject({
+        headers: { "content-type": " TEXT/Plain ; charset=utf-8", origin: webOrigin },
+        method: "POST",
+        payload: JSON.stringify(eventBatch),
+        url: "/analytics/events"
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({ accepted: 1, dropped: 0 });
+    } finally {
+      await app.close();
+    }
+  });
+
   it("still accepts an application/json batch", async () => {
     const app = buildApp({ runtime: stubRuntime });
 
@@ -124,6 +142,27 @@ describe("POST /analytics/events with a sendBeacon (text/plain) body", () => {
 
       expect(response.statusCode).toBe(200);
       expect(response.json()).toEqual({ accepted: 1, dropped: 0 });
+    } finally {
+      await app.close();
+    }
+  });
+
+  /* Only a text/plain body is JSON text still to parse. An application/json body that parses to
+   * a string is a string, not a batch, as it is in the Vercel adapter (`request.json()`). */
+  it("answers 400 without writing for a double-encoded application/json batch", async () => {
+    const app = buildApp({ runtime: stubRuntime });
+
+    try {
+      const response = await app.inject({
+        headers: { "content-type": "application/json", origin: webOrigin },
+        method: "POST",
+        payload: JSON.stringify(JSON.stringify(eventBatch)),
+        url: "/analytics/events"
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json()).toMatchObject({ message: "Invalid analytics event batch." });
+      expect(mocks.writeAnalyticsEvents).not.toHaveBeenCalled();
     } finally {
       await app.close();
     }
