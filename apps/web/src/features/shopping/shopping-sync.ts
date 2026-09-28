@@ -24,6 +24,7 @@ import type { ShoppingWriteOptions } from "./shopping-list-store";
  * - Syncs are coalesced: a burst of check-offs becomes one push + pull, and a sync requested while
  *   one is running runs once more afterwards.
  * - One focus / visibility / online listener and a gentle poll while a list is on screen.
+ * - Tabs share the household cache: a tab takes in an answer another tab wrote for its account.
  */
 
 export type ShoppingMode = "local" | "household";
@@ -102,14 +103,21 @@ let syncWhenReady = false;
 let householdCheckError: unknown = null;
 /** Household ids being recorded on unsent changes (claimShoppingChanges), one after another. */
 let claims: Promise<void> = Promise.resolve();
+/** When the household answer this tab's state holds was checked (0: none yet). */
+let householdAnsweredAt = 0;
+let listeningToOtherTabs = false;
 
 const setState = (patch: Partial<ShoppingSyncState>) => {
-  const previousHouseholdId = state.householdId;
+  const previous = state;
   state = { ...state, ...patch };
 
-  if (state.householdId !== previousHouseholdId) {
-    // The list shows this household's items; other households' changes wait out of sight.
-    setShoppingListHousehold(state.householdId);
+  if (
+    state.householdId !== previous.householdId ||
+    (state.userId === null) !== (previous.userId === null)
+  ) {
+    // The list shows this household's items (signed in without a known one, none of any
+    // household's); other households' changes wait out of sight.
+    setShoppingListHousehold(state.householdId, { signedIn: state.userId !== null });
   }
 
   listeners.forEach((listener) => {
@@ -171,12 +179,94 @@ export const getShoppingWriteOptions = (): ShoppingWriteOptions => ({
   ...(state.userId ? { userId: state.userId } : {})
 });
 
+/**
+ * Takes in what a household check for `userId` (the signed-in account) answered, in this tab or
+ * another: records the household on the unsent changes that are for it, and shows its list.
+ * Returns true when the account joined a household or moved to another, so the list should sync.
+ */
+const applyHouseholdAnswer = (
+  userId: string,
+  householdId: string | null,
+  checkedAt: number
+): boolean => {
+  householdAnsweredAt = checkedAt;
+
+  if (householdId) {
+    // Unsent changes that don't know their household yet are this account's; and if the
+    // account moved household, its own changes for the old one can only go to this one now.
+    claims = claims
+      .then(() => claimShoppingChanges(householdId, { userId }))
+      .catch(() => undefined);
+  }
+
+  const household = householdId !== null;
+  const householdChanged =
+    household &&
+    (state.mode !== "household" ||
+      (state.householdId !== null && state.householdId !== householdId));
+  setState({ householdId, mode: household ? "household" : "local", modeResolved: true });
+  return householdChanged;
+};
+
+/**
+ * Takes in a newer answer another tab wrote to the shared household cache for this account, so no
+ * tab keeps showing, stamping or syncing a household another tab has already seen it leave.
+ * Returns true when the list should sync (see applyHouseholdAnswer).
+ */
+const adoptHouseholdCache = (): boolean => {
+  const userId = state.userId;
+  const cache = readHouseholdCache();
+
+  if (
+    !userId ||
+    cache?.userId !== userId ||
+    cache.checkedAt < householdAnsweredAt ||
+    (cache.household && !cache.householdId)
+  ) {
+    return false;
+  }
+
+  const { householdId, mode } = cachedHouseholdState(cache);
+
+  if (state.modeResolved && state.householdId === householdId && state.mode === mode) {
+    householdAnsweredAt = cache.checkedAt;
+    return false;
+  }
+
+  return applyHouseholdAnswer(userId, householdId, cache.checkedAt);
+};
+
+const onOtherTabStorage = (event: StorageEvent) => {
+  if (event.key !== null && event.key !== SHOPPING_HOUSEHOLD_CACHE_KEY) {
+    return;
+  }
+
+  // Until auth settles the account is only assumed; settling reads the cache again.
+  if (!credentialsPending && adoptHouseholdCache() && lifecycleUsers > 0) {
+    void syncShoppingNow();
+  }
+};
+
+const listenToOtherTabs = () => {
+  if (listeningToOtherTabs || typeof window === "undefined") {
+    return;
+  }
+
+  listeningToOtherTabs = true;
+  window.addEventListener("storage", onOtherTabStorage);
+};
+
 /** Checks (in the background) whether the signed-in account shares a household list. */
 export function refreshShoppingHousehold(options: { force?: boolean } = {}): Promise<void> {
   const userId = state.userId;
 
   if (!userId || credentialsPending) {
     return Promise.resolve();
+  }
+
+  // Another tab may have checked since this one did.
+  if (adoptHouseholdCache() && lifecycleUsers > 0) {
+    void syncShoppingNow();
   }
 
   const cache = readHouseholdCache();
@@ -208,33 +298,17 @@ export function refreshShoppingHousehold(options: { force?: boolean } = {}): Pro
         }
 
         const householdId = response.household?.id ?? null;
-        const household = householdId !== null;
+        const checkedAt = Date.now();
         householdCheckError = null;
-
-        if (householdId) {
-          // Unsent changes that don't know their household yet are this account's; and if the
-          // account moved household, its changes for the old one can only go to this one now.
-          const from =
-            state.householdId && state.householdId !== householdId ? state.householdId : undefined;
-          claims = claims
-            .then(() => claimShoppingChanges(householdId, { from }))
-            .catch(() => undefined);
-        }
-
         writeHouseholdCache({
-          checkedAt: Date.now(),
-          household,
+          checkedAt,
+          household: householdId !== null,
           ...(householdId ? { householdId } : {}),
           userId
         });
-        // Joined one, or moved to another: sync now so the list follows the new household.
-        const householdChanged =
-          household &&
-          (state.mode !== "household" ||
-            (state.householdId !== null && state.householdId !== householdId));
-        setState({ householdId, mode: household ? "household" : "local", modeResolved: true });
 
-        if (householdChanged && lifecycleUsers > 0) {
+        // Joined one, or moved to another: sync now so the list follows the new household.
+        if (applyHouseholdAnswer(userId, householdId, checkedAt) && lifecycleUsers > 0) {
           void syncShoppingNow();
         }
       },
@@ -266,6 +340,7 @@ export function setShoppingAccount(account: ShoppingAccount): void {
   // Until auth settles, and a signed-in session's credentials can be read, a household check or
   // sync would be refused and not retried until the next focus: hold them until then.
   credentialsPending = account.loading || credentialsKey === null;
+  listenToOtherTabs();
 
   if (credentialsPending) {
     if (!accountConfigured) {
@@ -274,6 +349,7 @@ export function setShoppingAccount(account: ShoppingAccount): void {
       accountConfigured = true;
 
       if (cache) {
+        householdAnsweredAt = cache.checkedAt;
         setState({ ...cachedHouseholdState(cache), modeResolved: false, userId: cache.userId });
       }
     }
@@ -286,6 +362,7 @@ export function setShoppingAccount(account: ShoppingAccount): void {
 
   if (!userId) {
     syncWhenReady = false;
+    householdAnsweredAt = 0;
 
     if (state.userId !== null || !state.modeResolved || state.mode !== "local") {
       setState({
@@ -314,6 +391,7 @@ export function setShoppingAccount(account: ShoppingAccount): void {
     const cached = cache?.userId === userId ? cache : null;
 
     if (state.userId !== userId) {
+      householdAnsweredAt = cached?.checkedAt ?? 0;
       setState({
         error: null,
         householdId: null,
@@ -325,6 +403,7 @@ export function setShoppingAccount(account: ShoppingAccount): void {
         userId
       });
     } else if (cached && !state.modeResolved) {
+      householdAnsweredAt = cached.checkedAt;
       setState({ ...cachedHouseholdState(cached), modeResolved: true });
     }
 
@@ -360,7 +439,10 @@ const classifyError = (error: unknown): ShoppingSyncPhase => {
  * household they belong to. Resolves false when the account turned out not to be in one.
  */
 const syncWithHousehold = async (): Promise<boolean> => {
-  if (!state.householdId) {
+  // Another tab may have seen this account move, or leave, since this one checked.
+  adoptHouseholdCache();
+
+  if (state.mode === "household" && !state.householdId) {
     await refreshShoppingHousehold({ force: true });
   }
 
@@ -582,7 +664,14 @@ export function resetShoppingSyncForTests(): void {
   syncWhenReady = false;
   householdCheckError = null;
   claims = Promise.resolve();
+  householdAnsweredAt = 0;
   accountConfigured = false;
+
+  if (listeningToOtherTabs) {
+    window.removeEventListener("storage", onOtherTabStorage);
+    listeningToOtherTabs = false;
+  }
+
   state = initialState;
   listeners.forEach((listener) => {
     listener();

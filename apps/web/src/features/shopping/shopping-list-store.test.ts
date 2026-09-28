@@ -498,8 +498,18 @@ describe("shopping-list-store", () => {
       makeItem({ id: "unknown", sync: { status: "dirty" }, text: "jam" }),
       makeItem({ id: "synced", sync: { status: "synced" }, text: "bread" }),
       makeItem({ id: "local", sync: { status: "local_only" }, text: "basil" }),
-      makeItem({ id: "old-home", sync: { householdId: "h1", status: "dirty" }, text: "eggs" }),
-      makeItem({ id: "other", sync: { householdId: "h3", status: "sync_failed" }, text: "salt" })
+      makeItem({ id: "other", sync: { householdId: "h3", status: "sync_failed" }, text: "salt" }),
+      makeItem({
+        id: "old-home",
+        sync: { changedBy: "u1", householdId: "h1", status: "dirty" },
+        text: "eggs"
+      }),
+      makeItem({
+        id: "theirs",
+        sync: { changedBy: "u3", householdId: "h1", status: "dirty" },
+        text: "cream"
+      }),
+      makeItem({ id: "signed-out", sync: { householdId: "h1", status: "dirty" }, text: "limes" })
     ]);
     const households = async () =>
       Object.fromEntries(
@@ -509,18 +519,40 @@ describe("shopping-list-store", () => {
         ])
       );
 
-    await claimShoppingChanges("h2");
+    // u1's household is h2: its own changes for h1 (it has moved) can only go to h2 now. Another
+    // account's, and ones made signed out, stay with h1.
+    await claimShoppingChanges("h2", { userId: "u1" });
     expect(await households()).toEqual({
       local: undefined,
-      "old-home": "h1",
+      "old-home": "h2",
       other: "h3",
+      "signed-out": "h1",
       synced: undefined,
+      theirs: "h1",
       unknown: "h2"
     });
+    expect(fakeIdb.record<WebShoppingItem>("shoppingItems", "old-home")).toMatchObject({
+      sync: { changedBy: "u1", householdId: "h2", status: "dirty" },
+      text: "eggs"
+    });
+  });
 
-    // This account moved from h1 to h2: its changes for h1 can only go to h2 now.
-    await claimShoppingChanges("h2", { from: "h1" });
-    expect(await households()).toMatchObject({ "old-home": "h2", other: "h3" });
+  it("keeps a change made while a household was being recorded on the list", async () => {
+    await putShoppingItems([
+      makeItem({ id: "bread", sync: { changedBy: "u1", status: "dirty" }, text: "bread" })
+    ]);
+    // The check-off lands after the claim has read the list, before it writes.
+    fakeIdb.afterNextGetAll("shoppingItems", async () => {
+      await setShoppingItemChecked("bread", true, { canSync: true, userId: "u1" });
+    });
+
+    await claimShoppingChanges("h1", { userId: "u1" });
+
+    expect(fakeIdb.record<WebShoppingItem>("shoppingItems", "bread")).toMatchObject({
+      checked: true,
+      checkedBy: "u1",
+      sync: { householdId: "h1", status: "dirty" }
+    });
   });
 
   it("leaves records kept for another household out of the list, merges and edits", async () => {
@@ -548,7 +580,7 @@ describe("shopping-list-store", () => {
     expect(await deleteShoppingItems(["eggs-h1"], h2)).toEqual([]);
 
     expect((await getShoppingItems()).map((item) => [item.text, item.qty, item.sync])).toEqual([
-      ["milk", 2, { householdId: "h2", status: "dirty" }]
+      ["milk", 2, { changedBy: "u2", householdId: "h2", status: "dirty" }]
     ]);
     expect(getShoppingListSnapshot().items.map((item) => item.text)).toEqual(["milk"]);
     const all = await getShoppingItems({ includeDeleted: true, includeOtherHouseholds: true });
@@ -567,9 +599,19 @@ describe("shopping-list-store", () => {
     );
     expect([...merged.changedIds]).toEqual(["more-milk"]);
 
+    // Signed in without a known household (none, or not checked yet): no household's records.
+    setShoppingListHousehold(null, { signedIn: true });
+    await waitFor(() => expect(getShoppingListSnapshot().items).toEqual([]));
+    const u3 = { canSync: false, userId: "u3" };
+    await addShoppingItems([{ text: "1 cup milk" }], u3);
+    expect(await setShoppingItemChecked("milk-h1", true, u3)).toBeUndefined();
+    expect((await getShoppingItems()).map((item) => [item.text, item.qty, item.sync])).toEqual([
+      ["milk", 1, { status: "local_only" }]
+    ]);
+
     // Signed out, the whole list on this device shows again.
     setShoppingListHousehold(null);
-    await waitFor(() => expect(getShoppingListSnapshot().items).toHaveLength(3));
+    await waitFor(() => expect(getShoppingListSnapshot().items).toHaveLength(4));
   });
 
   it("keeps failing the sync, and every change, when the whole household is refused", async () => {
@@ -593,9 +635,10 @@ describe("shopping-list-store", () => {
   it("records the household an item belongs to without sending it", async () => {
     await addShoppingItems([{ text: "jam" }], { canSync: true, householdId: "h1", userId: "u1" });
     const [jam] = await getShoppingItems();
-    expect(jam?.sync).toEqual({ householdId: "h1", status: "dirty" });
+    expect(jam?.sync).toEqual({ changedBy: "u1", householdId: "h1", status: "dirty" });
 
-    // Signed out: still h1's change, never re-homed by a local edit.
+    // Signed out: still h1's change, never re-homed by a local edit, and no longer only u1's (so
+    // it doesn't follow u1 to another household).
     const edited = await updateShoppingItemFromLine(jam?.id ?? "", "2 jars jam", {
       canSync: false
     });

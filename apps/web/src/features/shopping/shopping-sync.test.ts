@@ -6,12 +6,15 @@ import { resetLinkDishWebDbForTests } from "../../storage/linkdish-db";
 import { fakeIdb } from "../../storage/testing/fake-idb";
 
 import {
+  addParsedShoppingItems,
   addShoppingItems,
+  applyRemoteShoppingItems,
   deleteShoppingItems,
   getShoppingItems,
   getShoppingListSnapshot,
   loadShoppingList,
   resetShoppingListStoreForTests,
+  setShoppingItemChecked,
   updateShoppingItemFromLine
 } from "./shopping-list-store";
 import {
@@ -26,6 +29,7 @@ import {
   useShoppingSync
 } from "./shopping-sync";
 
+import type { ShoppingMode } from "./shopping-sync";
 import type {
   DeleteShoppingItemsRequest,
   UpsertShoppingItemsRequest
@@ -64,6 +68,15 @@ const cacheHousehold = (household: boolean, ageMs = 0) => {
   );
 };
 
+/* What the API answers an account that isn't in a household. */
+const noHouseholdError = () =>
+  new ExtractorApiError(
+    "Extractor API request failed.",
+    404,
+    { message: "This account does not belong to an active household." },
+    { kind: "http", serverMessage: "This account does not belong to an active household." }
+  );
+
 /* What the API answers when a batch holds an item stored in another household. */
 const otherHouseholdItemError = () =>
   new ExtractorApiError(
@@ -89,11 +102,12 @@ const householdItem = (
 /**
  * The household shopping API as the server implements it: item ids are global, each record
  * belongs to one household, and a batch touching another household's item is refused whole.
+ * `use(null)`: the signed-in account isn't in a household.
  */
 const createHouseholdServer = () => {
   const records = new Map<string, { householdId: string; item: ShoppingItem }>();
   const pushedIds: string[] = [];
-  let householdId = "h1";
+  let householdId: string | null = "h1";
   const list = () =>
     [...records.values()]
       .filter((record) => record.householdId === householdId)
@@ -105,10 +119,18 @@ const createHouseholdServer = () => {
     });
 
   apiMocks.getHousehold.mockImplementation(() =>
-    Promise.resolve({ household: { id: householdId } })
+    Promise.resolve({ household: householdId ? { id: householdId } : null })
   );
-  apiMocks.getShoppingList.mockImplementation(() => Promise.resolve({ items: list() }));
+  apiMocks.getShoppingList.mockImplementation(() =>
+    householdId ? Promise.resolve({ items: list() }) : Promise.reject(noHouseholdError())
+  );
   apiMocks.upsertShoppingItems.mockImplementation((input: UpsertShoppingItemsRequest) => {
+    const current = householdId;
+
+    if (!current) {
+      return Promise.reject(noHouseholdError());
+    }
+
     pushedIds.push(...input.items.map((item) => item.id));
 
     if (touchesOtherHousehold(input.items.map((item) => item.id))) {
@@ -116,12 +138,16 @@ const createHouseholdServer = () => {
     }
 
     for (const item of input.items) {
-      records.set(item.id, { householdId, item });
+      records.set(item.id, { householdId: current, item });
     }
 
     return Promise.resolve({ ignored: [], items: list() });
   });
   apiMocks.deleteShoppingItems.mockImplementation((input: DeleteShoppingItemsRequest) => {
+    if (!householdId) {
+      return Promise.reject(noHouseholdError());
+    }
+
     if (touchesOtherHousehold(input.items.map((item) => item.id))) {
       return Promise.reject(otherHouseholdItemError());
     }
@@ -140,18 +166,36 @@ const createHouseholdServer = () => {
     seed(inHousehold: string, item: ShoppingItem) {
       records.set(item.id, { householdId: inHousehold, item });
     },
-    use(nextHouseholdId: string) {
+    use(nextHouseholdId: string | null) {
       householdId = nextHouseholdId;
     }
   };
 };
 
-const signIn = async (userId: string) => {
+const signIn = async (userId: string, mode: ShoppingMode = "household") => {
   setShoppingAccount({ isAuthenticated: true, loading: false, userId });
   await waitFor(() =>
-    expect(getShoppingSyncState()).toMatchObject({ mode: "household", modeResolved: true, userId })
+    expect(getShoppingSyncState()).toMatchObject({ mode, modeResolved: true, userId })
   );
 };
+
+/** What another tab wrote after checking this account's household. */
+const cacheFromOtherTab = (householdId: string | null, userId = "u1") => {
+  window.localStorage.setItem(
+    SHOPPING_HOUSEHOLD_CACHE_KEY,
+    JSON.stringify({
+      checkedAt: Date.now(),
+      household: householdId !== null,
+      ...(householdId ? { householdId } : {}),
+      userId
+    })
+  );
+};
+
+const householdRecords = (server: ReturnType<typeof createHouseholdServer>, householdId: string) =>
+  [...server.records.values()]
+    .filter((record) => record.householdId === householdId)
+    .map((record) => [record.item.text, record.item.qty]);
 
 const signOut = () => {
   setShoppingAccount({ isAuthenticated: false, loading: false });
@@ -628,6 +672,200 @@ describe("shopping-sync", () => {
     expect(apiMocks.upsertShoppingItems).not.toHaveBeenCalled();
     expect(apiMocks.getShoppingList).not.toHaveBeenCalled();
     expect((await getShoppingItems())[0]?.sync.status).toBe("dirty");
+  });
+
+  it("sends an account's unsent changes to its next household after it left one", async () => {
+    const server = createHouseholdServer();
+    server.seed("h1", householdItem("limes", "limes", { addedBy: "u1" }));
+    server.seed("h1", householdItem("bread", "bread", { addedBy: "u9" }));
+
+    await signIn("u1");
+    await syncShoppingNow();
+
+    // u1 leaves h1 on another device (the server drops what u1 added there). Before this
+    // device notices, u1 asks for 3 limes here.
+    server.use(null);
+    server.records.delete("limes");
+    await updateShoppingItemFromLine("limes", "3 limes", getShoppingWriteOptions());
+
+    await refreshShoppingHousehold({ force: true });
+    expect(getShoppingSyncState()).toMatchObject({ householdId: null, mode: "local" });
+    // h1's list isn't this account's any more.
+    expect(await getShoppingItems()).toEqual([]);
+    expect(await setShoppingItemChecked("bread", true, getShoppingWriteOptions())).toBeUndefined();
+
+    // u1 starts a household of their own: the change goes there.
+    server.use("h2");
+    await refreshShoppingHousehold({ force: true });
+    await syncShoppingNow();
+
+    expect(getShoppingSyncState().phase).toBe("synced");
+    expect(server.records.get("limes")).toMatchObject({ householdId: "h2", item: { qty: 3 } });
+    expect(server.records.get("bread")).toMatchObject({
+      householdId: "h1",
+      item: { checked: false }
+    });
+    expect((await getShoppingItems()).map((item) => [item.text, item.qty, item.sync])).toEqual([
+      ["limes", 3, expect.objectContaining({ householdId: "h2", status: "synced" })]
+    ]);
+  });
+
+  it("sends an account's unsent changes to its new household after another account used the device", async () => {
+    const server = createHouseholdServer();
+    server.seed("h1", householdItem("limes", "limes", { addedBy: "u1" }));
+
+    await signIn("u1");
+    await syncShoppingNow();
+    // Offline in the shop: 3 limes, not sent yet.
+    apiMocks.upsertShoppingItems.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    await updateShoppingItemFromLine("limes", "3 limes", getShoppingWriteOptions());
+    await syncShoppingNow();
+    expect(getShoppingSyncState().phase).toBe("offline");
+    signOut();
+
+    // u2 (in h2) uses this device, so the household cache is u2's now.
+    server.use("h2");
+    await signIn("u2");
+    await syncShoppingNow();
+    signOut();
+    expect(server.pushedIds).not.toContain("limes");
+
+    // Meanwhile u1 moved to h3 (leaving h1 dropped u1's limes there).
+    server.records.delete("limes");
+    server.use("h3");
+    await signIn("u1");
+    await syncShoppingNow();
+
+    expect(getShoppingSyncState().phase).toBe("synced");
+    expect(server.records.get("limes")).toMatchObject({ householdId: "h3", item: { qty: 3 } });
+  });
+
+  it("doesn't let an account without a household change the last account's items", async () => {
+    const server = createHouseholdServer();
+    server.seed("h1", householdItem("milk-h1", "milk", { addedBy: "u1", qty: 1, unit: "cup" }));
+
+    await signIn("u1");
+    await syncShoppingNow();
+    signOut();
+    // Signed out, this device shows everything on it.
+    expect((await getShoppingItems()).map((item) => item.text)).toEqual(["milk"]);
+
+    // u2, who isn't in a household, signs in on the same device and adds milk.
+    server.use(null);
+    await signIn("u2", "local");
+    expect(await getShoppingItems()).toEqual([]);
+    expect(
+      await setShoppingItemChecked("milk-h1", true, getShoppingWriteOptions())
+    ).toBeUndefined();
+    await addShoppingItems([{ text: "2 cups milk" }], getShoppingWriteOptions());
+    expect((await getShoppingItems()).map((item) => [item.text, item.qty])).toEqual([["milk", 2]]);
+
+    // u2 starts a household of their own.
+    server.use("h2");
+    await refreshShoppingHousehold({ force: true });
+    await syncShoppingNow();
+    expect(getShoppingSyncState().phase).toBe("synced");
+    expect((await getShoppingItems()).map((item) => [item.text, item.qty])).toEqual([["milk", 2]]);
+
+    // u1's household never gets u2's milk.
+    signOut();
+    server.use("h1");
+    await signIn("u1");
+    await syncShoppingNow();
+    expect(server.records.get("milk-h1")?.item).toMatchObject({ checked: false, qty: 1 });
+  });
+
+  it("keeps the last account's items off the list while the next account's check is out", async () => {
+    const server = createHouseholdServer();
+    server.seed("h1", householdItem("milk-h1", "milk", { addedBy: "u1", qty: 1, unit: "cup" }));
+
+    await signIn("u1");
+    await syncShoppingNow();
+    signOut();
+
+    server.use("h2");
+    const household = deferred<{ household: { id: string } }>();
+    apiMocks.getHousehold.mockReturnValueOnce(household.promise);
+    setShoppingAccount({ isAuthenticated: true, loading: false, userId: "u2" });
+    await loadShoppingList({ force: true });
+    await waitFor(() => expect(getShoppingListSnapshot().items).toEqual([]));
+
+    // A recipe goes on the list before the check answers.
+    await addShoppingItems(
+      [{ recipeId: "r1", recipeTitle: "Pancakes", text: "2 cups milk" }],
+      getShoppingWriteOptions()
+    );
+    household.resolve({ household: { id: "h2" } });
+    await waitFor(() => expect(getShoppingSyncState().householdId).toBe("h2"));
+    await syncShoppingNow();
+
+    expect(getShoppingSyncState().phase).toBe("synced");
+    expect((await getShoppingItems()).map((item) => [item.text, item.qty])).toEqual([["milk", 2]]);
+    expect(server.records.get("milk-h1")?.item).toMatchObject({ qty: 1 });
+  });
+
+  it("follows a household another tab has just confirmed for this account", async () => {
+    const server = createHouseholdServer();
+    const milk = householdItem("milk-h2", "milk", { addedBy: "u7", qty: 1, unit: "cup" });
+    server.seed("h2", milk);
+    // This tab checked a moment ago: u1 is in h1.
+    cacheHousehold(true);
+    setShoppingAccount({ isAuthenticated: true, loading: false, userId: "u1" });
+    expect(getShoppingSyncState().householdId).toBe("h1");
+
+    // u1 has moved to h2. Another tab checked, wrote the shared cache and pulled h2's list.
+    server.use("h2");
+    cacheFromOtherTab("h2");
+    await applyRemoteShoppingItems([milk], { householdId: "h2", prune: true });
+
+    // This tab comes back into view: the cache is fresh, so it doesn't check itself...
+    await refreshShoppingHousehold();
+    expect(apiMocks.getHousehold).not.toHaveBeenCalled();
+    // ...and shows h2's list, so milk from the plan adds up with h2's milk.
+    expect(getShoppingSyncState().householdId).toBe("h2");
+    await addParsedShoppingItems(
+      [{ qty: 2, text: "milk", unit: "cup" }],
+      getShoppingWriteOptions()
+    );
+    await syncShoppingNow();
+
+    expect(householdRecords(server, "h2")).toEqual([["milk", 3]]);
+    expect(
+      (await getShoppingItems({ includeOtherHouseholds: true })).map((item) => [
+        item.id,
+        item.qty,
+        item.sync.householdId
+      ])
+    ).toEqual([["milk-h2", 3, "h2"]]);
+  });
+
+  it("syncs with the household another tab confirmed, and follows it as soon as it's written", async () => {
+    const server = createHouseholdServer();
+    server.seed("h2", householdItem("bread", "bread", { addedBy: "u7" }));
+    cacheHousehold(true);
+    setShoppingAccount({ isAuthenticated: true, loading: false, userId: "u1" });
+
+    // Another tab learned that u1 moved to h2; this tab syncs before hearing of it.
+    server.use("h2");
+    cacheFromOtherTab("h2");
+    await syncShoppingNow();
+
+    expect(getShoppingSyncState()).toMatchObject({ householdId: "h2", phase: "synced" });
+    expect(apiMocks.getHousehold).not.toHaveBeenCalled();
+    expect((await getShoppingItems()).map((item) => [item.text, item.sync.householdId])).toEqual([
+      ["bread", "h2"]
+    ]);
+
+    // Another account's answer is not this account's.
+    cacheFromOtherTab("h9", "u2");
+    window.dispatchEvent(new StorageEvent("storage", { key: SHOPPING_HOUSEHOLD_CACHE_KEY }));
+    expect(getShoppingSyncState().householdId).toBe("h2");
+
+    // Another tab sees u1 leave: this tab follows as soon as the cache changes.
+    cacheFromOtherTab(null);
+    window.dispatchEvent(new StorageEvent("storage", { key: SHOPPING_HOUSEHOLD_CACHE_KEY }));
+    expect(getShoppingSyncState()).toMatchObject({ householdId: null, mode: "local" });
+    await waitFor(async () => expect(await getShoppingItems()).toEqual([]));
   });
 
   it("tells offline apart from other failures and keeps local changes", async () => {

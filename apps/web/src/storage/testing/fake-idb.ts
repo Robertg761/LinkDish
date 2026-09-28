@@ -20,6 +20,8 @@ interface FakeOpenCall {
 }
 
 interface FakeIdbState {
+  /** Runs once, after the next `getAll` on a store has read it and before it answers. */
+  afterGetAll: Map<string, () => Promise<void> | void>;
   blockedOnce: boolean;
   callbacks: FakeOpenCallbacks | null;
   failPuts: Map<string, Error>;
@@ -33,6 +35,7 @@ interface FakeIdbState {
 }
 
 const state: FakeIdbState = {
+  afterGetAll: new Map(),
   blockedOnce: false,
   callbacks: null,
   failPuts: new Map(),
@@ -116,7 +119,21 @@ const createStoreApi = (name: string, track: <T>(promise: Promise<T>) => Promise
         })
       ),
     get: (key: string) => track(tick(() => clone(requireStore(name).records.get(String(key))))),
-    getAll: () => track(tick(() => Array.from(requireStore(name).records.values()).map(clone))),
+    getAll: () =>
+      track(
+        tick(() => Array.from(requireStore(name).records.values()).map(clone)).then(
+          async (records) => {
+            const afterGetAll = state.afterGetAll.get(name);
+
+            if (afterGetAll) {
+              state.afterGetAll.delete(name);
+              await afterGetAll();
+            }
+
+            return records;
+          }
+        )
+      ),
     getAllKeys: () => track(tick(() => Array.from(requireStore(name).records.keys()))),
     index: indexApi,
     put: (value: unknown) =>
@@ -330,6 +347,7 @@ export const fakeIdb = {
 
   /** Clears every store and definition. `version` is the database version already on disk. */
   reset(version = 0): void {
+    state.afterGetAll = new Map();
     state.definitions = new Map();
     state.records = new Map();
     state.oldVersion = version;
@@ -393,6 +411,15 @@ export const fakeIdb = {
 
   blockNextOpen(): void {
     state.blockedOnce = true;
+  },
+
+  /**
+   * The next `getAll` on `storeName` (in any transaction) runs `callback`, and waits for it,
+   * after reading the store and before answering: another write landing between a read and the
+   * writes based on it.
+   */
+  afterNextGetAll(storeName: string, callback: () => Promise<void> | void): void {
+    state.afterGetAll.set(storeName, callback);
   },
 
   /** The next `put` into `storeName` (in any transaction) throws `error`. */

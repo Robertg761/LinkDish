@@ -48,6 +48,12 @@ export interface WebShoppingItem extends ShoppingItem {
   recipeTitles?: string[] | undefined;
   sync: {
     /**
+     * Local only (never sent): the signed-in account that made the unsent change (none when it
+     * was made signed out). If that account moves household, its changes go with it
+     * (claimShoppingChanges); other accounts' changes stay with their household.
+     */
+    changedBy?: string | undefined;
+    /**
      * Local only (never sent): the household this record's sync state belongs to. Set when the
      * item is written in, or confirmed by, a household; changes are only ever sent to that one.
      * Changes made before it existed, or before the household was known, get the household the
@@ -309,16 +315,36 @@ export const hasShoppingQuantityRange = (item: WebShoppingItem): boolean =>
 const needsPush = (item: WebShoppingItem) =>
   item.sync.status === "dirty" || item.sync.status === "sync_failed";
 
+/** Whose list a read or write is for. */
+interface ShoppingScope {
+  /** The signed-in account's household, once known. */
+  householdId?: string | null | undefined;
+  /**
+   * Signed in, only its household's records are the account's: none while that household is
+   * unknown or it has none. Signed out, every record on this device is shown.
+   */
+  signedIn?: boolean | undefined;
+}
+
 /**
- * True for a record kept for a household other than `householdId` (see `sync.householdId`): it
- * came from, or was changed in, another household (another account used this device, or this one
+ * True for a record kept for a household that isn't `scope`'s (see `sync.householdId`): it came
+ * from, or was changed in, another household (another account used this device, or this one
  * moved). Such records stay stored for that household but are left out of this one's list.
  */
 const belongsToOtherHousehold = (
   item: Pick<WebShoppingItem, "sync">,
-  householdId: string | null | undefined
+  scope: ShoppingScope
 ): boolean =>
-  Boolean(householdId && item.sync.householdId && item.sync.householdId !== householdId);
+  Boolean(item.sync.householdId) &&
+  (scope.householdId ? item.sync.householdId !== scope.householdId : Boolean(scope.signedIn));
+
+/** The scope of a write: the account making it (if signed in) and its household. */
+const writeScope = (
+  options: Pick<ShoppingWriteOptions, "householdId" | "userId">
+): ShoppingScope => ({
+  householdId: options.householdId,
+  signedIn: Boolean(options.userId)
+});
 
 /* ------------------------------------------------------------------------------------------ */
 /* Reactive cache                                                                              */
@@ -366,11 +392,12 @@ let channelFactory: ShoppingChannelFactory = defaultChannelFactory;
 let channel: ShoppingChannel | null | undefined;
 let remoteReloadTimer: ReturnType<typeof setTimeout> | null = null;
 /**
- * The household whose list this device shows: the signed-in account's once it is known (null
- * signed out, outside a household, or until then). Records that belong to another household are
- * left out of the list, and so out of merges and edits, until it is theirs again.
+ * Whose list this device shows: the signed-in account's household once it is known (signed in
+ * without one, or until then, no household's), or everything on the device when signed out.
+ * Records that belong to another household are left out of the list, and so out of merges and
+ * edits, until it is theirs again.
  */
-let listHouseholdId: string | null = null;
+let listScope: ShoppingScope = { householdId: null, signedIn: false };
 
 const emit = (next: Partial<ShoppingListSnapshot>) => {
   snapshot = { ...snapshot, ...next };
@@ -428,7 +455,7 @@ const commitToCache = (
   }
 
   for (const record of upserted) {
-    if (record.isDeleted || belongsToOtherHousehold(record, listHouseholdId)) {
+    if (record.isDeleted || belongsToOtherHousehold(record, listScope)) {
       byId.delete(record.id);
     } else {
       byId.set(record.id, record);
@@ -440,13 +467,21 @@ const commitToCache = (
 
 export const getShoppingListSnapshot = (): ShoppingListSnapshot => snapshot;
 
-/** Which household's list to show (kept current by the shopping sync layer). */
-export function setShoppingListHousehold(householdId: string | null): void {
-  if (householdId === listHouseholdId) {
+/**
+ * Which household's list to show (kept current by the shopping sync layer). `signedIn` without a
+ * household (not in one, or not known yet): no household's records.
+ */
+export function setShoppingListHousehold(
+  householdId: string | null,
+  options: { signedIn?: boolean | undefined } = {}
+): void {
+  const signedIn = Boolean(options.signedIn);
+
+  if (householdId === listScope.householdId && signedIn === listScope.signedIn) {
     return;
   }
 
-  listHouseholdId = householdId;
+  listScope = { householdId, signedIn };
 
   if (snapshot.status !== "idle") {
     void loadShoppingList({ force: true });
@@ -539,7 +574,7 @@ export function resetShoppingListStoreForTests(): void {
   }
 
   setShoppingChannelFactoryForTests(() => null);
-  listHouseholdId = null;
+  listScope = { householdId: null, signedIn: false };
   snapshot = initialSnapshot;
   listeners.forEach((listener) => {
     listener();
@@ -564,7 +599,7 @@ export async function getShoppingItems(
     items.filter(
       (item) =>
         (options.includeDeleted || !item.isDeleted) &&
-        (options.includeOtherHouseholds || !belongsToOtherHousehold(item, listHouseholdId))
+        (options.includeOtherHouseholds || !belongsToOtherHousehold(item, listScope))
     )
   );
 }
@@ -595,19 +630,25 @@ export async function putShoppingItems(items: WebShoppingItem[]): Promise<void> 
   commitToCache(items);
 }
 
-/** `sync.householdId` of a record, spread into a new sync state (nothing when it has none). */
-const householdOf = (
+/**
+ * Whose unsent change a record holds (`sync.householdId` and `sync.changedBy`), spread into a new
+ * sync state (nothing it doesn't have).
+ */
+const pendingSyncOf = (
   item: Pick<WebShoppingItem, "sync">
-): Pick<WebShoppingItem["sync"], "householdId"> =>
-  item.sync.householdId ? { householdId: item.sync.householdId } : {};
+): Pick<WebShoppingItem["sync"], "changedBy" | "householdId"> => ({
+  ...(item.sync.changedBy ? { changedBy: item.sync.changedBy } : {}),
+  ...(item.sync.householdId ? { householdId: item.sync.householdId } : {})
+});
 
 /**
  * Sync state after a local write. A household record stays dirty for the household it belongs
  * to, even when written signed out, so the change can only ever go back there; a new or
- * local-only item joins the current household when there is one.
+ * local-only item joins the current household when there is one. The change is the signed-in
+ * account's, if any.
  */
 const syncStateFor = (
-  options: Pick<ShoppingWriteOptions, "canSync" | "householdId">,
+  options: Pick<ShoppingWriteOptions, "canSync" | "householdId" | "userId">,
   existing?: WebShoppingItem
 ): WebShoppingItem["sync"] => {
   const householdId =
@@ -618,7 +659,11 @@ const syncStateFor = (
         : undefined;
 
   return (existing && existing.sync.status !== "local_only") || options.canSync
-    ? { status: "dirty", ...(householdId ? { householdId } : {}) }
+    ? {
+        status: "dirty",
+        ...(options.userId ? { changedBy: options.userId } : {}),
+        ...(householdId ? { householdId } : {})
+      }
     : { status: "local_only" };
 };
 
@@ -698,7 +743,8 @@ const applyAmount = (
  * adds up on the open item ("2 tsp" + "1 Tbsp" sugar → "1 ⅔ Tbsp"); if the only match is already
  * in the cart, it comes back out with just the new amount; otherwise the item is appended.
  * Every contributing recipe is kept. Items kept for a household other than `options.householdId`
- * are not on this list, so nothing merges into them. Returns the full list plus the changed ids.
+ * (any household, for a signed-in account whose household isn't known) are not on this list, so
+ * nothing merges into them. Returns the full list plus the changed ids.
  */
 export const mergeIncomingShoppingItems = (
   existingItems: readonly WebShoppingItem[],
@@ -710,7 +756,7 @@ export const mergeIncomingShoppingItems = (
 
   for (const incoming of incomingItems) {
     const onList = items.filter(
-      (item) => !item.isDeleted && !belongsToOtherHousehold(item, options.householdId)
+      (item) => !item.isDeleted && !belongsToOtherHousehold(item, writeScope(options))
     );
     const open = onList.filter((item) => !item.checked);
     const captured: { record?: WebShoppingItem } = {};
@@ -841,7 +887,7 @@ export async function setShoppingItemChecked(
   const db = await getLinkDishWebDb();
   const existing = (await db.get(STORE_NAME, id)) as WebShoppingItem | undefined;
 
-  if (!existing || existing.isDeleted || belongsToOtherHousehold(existing, options.householdId)) {
+  if (!existing || existing.isDeleted || belongsToOtherHousehold(existing, writeScope(options))) {
     return undefined;
   }
 
@@ -873,7 +919,7 @@ export async function updateShoppingItem(
   const db = await getLinkDishWebDb();
   const existing = (await db.get(STORE_NAME, id)) as WebShoppingItem | undefined;
 
-  if (!existing || existing.isDeleted || belongsToOtherHousehold(existing, options.householdId)) {
+  if (!existing || existing.isDeleted || belongsToOtherHousehold(existing, writeScope(options))) {
     return undefined;
   }
 
@@ -928,7 +974,7 @@ export async function updateShoppingItemFromLine(
  */
 export async function deleteShoppingItems(
   ids: readonly string[],
-  options: Pick<ShoppingWriteOptions, "canSync" | "householdId">
+  options: Pick<ShoppingWriteOptions, "canSync" | "householdId" | "userId">
 ): Promise<WebShoppingItem[]> {
   const db = await getLinkDishWebDb();
   const existingItems = (
@@ -937,7 +983,7 @@ export async function deleteShoppingItems(
     )
   ).filter(
     (item): item is WebShoppingItem =>
-      item !== undefined && !item.isDeleted && !belongsToOtherHousehold(item, options.householdId)
+      item !== undefined && !item.isDeleted && !belongsToOtherHousehold(item, writeScope(options))
   );
   const timestamp = nowIso();
   const deletedIds: string[] = [];
@@ -977,7 +1023,7 @@ export async function restoreShoppingItems(
       sync:
         item.sync.status === "local_only"
           ? { status: "local_only" }
-          : { status: "dirty", ...householdOf(item) },
+          : { status: "dirty", ...pendingSyncOf(item) },
       updatedAt: timestamp
     };
     delete record.isDeleted;
@@ -992,7 +1038,7 @@ export async function restoreShoppingItems(
 
 /** Removes everything in the cart. Returns the removed records for Undo. */
 export async function clearCheckedShoppingItems(
-  options: Pick<ShoppingWriteOptions, "canSync" | "householdId">
+  options: Pick<ShoppingWriteOptions, "canSync" | "householdId" | "userId">
 ): Promise<WebShoppingItem[]> {
   const items = await getShoppingItems();
   return deleteShoppingItems(
@@ -1003,7 +1049,7 @@ export async function clearCheckedShoppingItems(
 
 /** Removes every item. Returns the removed records for Undo. */
 export async function clearAllShoppingItems(
-  options: Pick<ShoppingWriteOptions, "canSync" | "householdId">
+  options: Pick<ShoppingWriteOptions, "canSync" | "householdId" | "userId">
 ): Promise<WebShoppingItem[]> {
   const items = await getShoppingItems();
   return deleteShoppingItems(
@@ -1122,7 +1168,7 @@ export async function applyRemoteShoppingItems(
     for (const localItem of localItems) {
       if (
         remoteIds.has(localItem.id) ||
-        (needsPush(localItem) && belongsToOtherHousehold(localItem, householdId))
+        (needsPush(localItem) && belongsToOtherHousehold(localItem, { householdId }))
       ) {
         continue;
       }
@@ -1161,7 +1207,7 @@ export async function handleUpsertShoppingSyncResult(
     if (localItem) {
       conflicts.push({
         ...localItem,
-        sync: { ...householdOf(localItem), lastError: CONFLICT_MESSAGE, status: "sync_failed" }
+        sync: { ...pendingSyncOf(localItem), lastError: CONFLICT_MESSAGE, status: "sync_failed" }
       });
     }
   }
@@ -1182,7 +1228,7 @@ export async function handleDeleteShoppingSyncResult(
     if (localItem) {
       conflicts.push({
         ...localItem,
-        sync: { ...householdOf(localItem), lastError: CONFLICT_MESSAGE, status: "sync_failed" }
+        sync: { ...pendingSyncOf(localItem), lastError: CONFLICT_MESSAGE, status: "sync_failed" }
       });
     }
   }
@@ -1220,28 +1266,48 @@ export async function pullShoppingItemsFromApi(
 }
 
 /**
- * Records household `householdId` (the signed-in account's, just confirmed) on unsent changes that
- * don't name one yet: made before the household was known here, or before items recorded it.
- * With `from`, this account has moved from that household, so its changes for it can only go to
- * the new one now. Other households' changes are left alone.
+ * Records household `householdId` (the signed-in account `userId`'s, just confirmed) on the unsent
+ * changes that are for it: ones that don't name a household yet (made before the household was
+ * known here, or before items recorded it), and this account's own changes for a household it
+ * has since left, which can only go to its new one now. Other accounts' changes, and ones made
+ * signed out, stay with their household.
+ *
+ * Each record is read and restamped in one transaction, so a check-off or edit written meanwhile
+ * (in this tab or another) is kept.
  */
 export async function claimShoppingChanges(
   householdId: string,
-  options: { from?: string | undefined } = {}
+  options: { userId?: string | undefined } = {}
 ): Promise<void> {
-  const claimed = (await getShoppingItems({ includeDeleted: true, includeOtherHouseholds: true }))
-    .filter(
-      (item) =>
-        needsPush(item) &&
-        (!item.sync.householdId || (options.from && item.sync.householdId === options.from))
-    )
-    .map((item): WebShoppingItem => ({ ...item, sync: { ...item.sync, householdId } }));
+  const isClaimable = (item: WebShoppingItem | undefined): item is WebShoppingItem =>
+    item !== undefined &&
+    needsPush(item) &&
+    item.sync.householdId !== householdId &&
+    (!item.sync.householdId || Boolean(options.userId && item.sync.changedBy === options.userId));
 
-  if (claimed.length === 0) {
+  const db = await getLinkDishWebDb();
+  const tx = db.transaction(STORE_NAME, "readwrite");
+  const store = tx.objectStore(STORE_NAME);
+  const candidates = ((await store.getAll()) as WebShoppingItem[])
+    .filter(isClaimable)
+    .map((item) => item.id);
+  let claimed = 0;
+
+  for (const id of candidates) {
+    const current = (await store.get(id)) as WebShoppingItem | undefined;
+
+    if (isClaimable(current)) {
+      await store.put({ ...current, sync: { ...current.sync, householdId } });
+      claimed += 1;
+    }
+  }
+
+  await tx.done;
+
+  if (claimed === 0) {
     return;
   }
 
-  await writeShoppingRecords(claimed);
   notifyOtherTabs();
 
   // Reloaded rather than patched: a reload for the household change may still be reading.
@@ -1405,7 +1471,7 @@ export async function syncShoppingItems(options: {
   };
   const pending = (
     await getShoppingItems({ includeDeleted: true, includeOtherHouseholds: true })
-  ).filter((item) => needsPush(item) && !belongsToOtherHousehold(item, householdId));
+  ).filter((item) => needsPush(item) && !belongsToOtherHousehold(item, { householdId }));
   const unsendable: WebShoppingItem[] = [];
   const payload: ShoppingItem[] = [];
 
@@ -1418,7 +1484,7 @@ export async function syncShoppingItems(options: {
       unsendable.push({
         ...item,
         sync: {
-          ...householdOf(item),
+          ...pendingSyncOf(item),
           lastError: "This item can't be shared with your household.",
           status: "sync_failed"
         }
