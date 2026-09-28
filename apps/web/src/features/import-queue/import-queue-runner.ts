@@ -115,7 +115,11 @@ const extract = (
         { signal }
       );
 
-/** Processes one queued item, claimed for `context.owner`. Never throws. */
+/**
+ * Processes one queued item, claimed for `context.owner`. Throws only on storage trouble while
+ * nothing has been spent (e.g. the cookbook can't be read before the import starts); the caller
+ * then lets the item go.
+ */
 export async function processImportQueueItem(
   item: ImportQueueItem,
   context: QueueRunnerContext
@@ -125,7 +129,16 @@ export async function processImportQueueItem(
   // 1. Already saved? Nothing to import, nothing spent.
   if (item.url) {
     await loadSavedRecipes();
-    const existing = findSavedDuplicate(item.url, getSavedRecipesSnapshot().data);
+    const cookbook = getSavedRecipesSnapshot();
+
+    if (cookbook.status !== "ready") {
+      // Unreadable (the load never rejects): importing now could spend one on a recipe we have.
+      throw cookbook.error instanceof Error || cookbook.error instanceof DOMException
+        ? cookbook.error
+        : new Error("The cookbook couldn't be read.", { cause: cookbook.error });
+    }
+
+    const existing = findSavedDuplicate(item.url, cookbook.data);
 
     if (existing) {
       await markImportDone(item.id, { recipeId: existing.id }, owner);
@@ -133,14 +146,17 @@ export async function processImportQueueItem(
     }
   }
 
-  // 2. Room in the cookbook, before an import is spent on a recipe that can't be kept.
+  // 2. Room in the cookbook, before an import is spent on a recipe that can't be kept. Only a
+  // full cookbook pauses the queue; anything else (storage that can't be read) stops the run.
   try {
     await assertCanAddSavedRecipe({ isPremiumUser: isPaid(tier) });
   } catch (error) {
-    if (error instanceof SavedRecipeLimitError) {
-      await retryImport(item.id, owner);
-      return { reason: "save_limit", status: "paused" };
+    if (!(error instanceof SavedRecipeLimitError)) {
+      throw error;
     }
+
+    await retryImport(item.id, owner);
+    return { reason: "save_limit", status: "paused" };
   }
 
   // 3. The signed-out allowance (signed-in imports are metered by the API).
@@ -380,7 +396,8 @@ export async function runImportQueue(context: QueueRunnerContext): Promise<Queue
     try {
       outcome = await processImportQueueItem(next, itemContext);
     } catch (error) {
-      // Storage trouble before the import started: let the item go for the next run.
+      // Storage trouble before the import started (nothing spent): let the item go for the next
+      // run, and stop this one.
       await retryImport(next.id, owner).catch(() => undefined);
       throw error;
     } finally {

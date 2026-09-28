@@ -1,8 +1,13 @@
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { resetDataChangeFeedForTests, setDataChannelFactoryForTests } from "../../data/change-feed";
-import { enqueueImport, resetImportQueueStoreForTests } from "../../data/import-queue-store";
+import {
+  claimNextQueuedImport,
+  enqueueImport,
+  resetImportQueueStoreForTests,
+  retryImport
+} from "../../data/import-queue-store";
 import { resetLinkDishWebDbForTests } from "../../storage/linkdish-db";
 import { fakeIdb } from "../../storage/testing/fake-idb";
 
@@ -91,5 +96,37 @@ describe("useImportQueueRunner", () => {
     renderHook(() => useImportQueueRunner());
 
     await waitFor(() => expect(runnerMocks.runImportQueue).toHaveBeenCalledOnce());
+  });
+
+  it("waits for the queue to change after storage trouble, not for the item it let go", async () => {
+    runnerMocks.runImportQueue.mockImplementation(async () => {
+      // As the runner does when the cookbook can't be read: claim, let the item go, stop.
+      const item = await claimNextQueuedImport("this-tab");
+
+      if (item) {
+        await retryImport(item.id, "this-tab");
+      }
+
+      throw new DOMException("The disk is unreadable.", "UnknownError");
+    });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    try {
+      const { result } = renderHook(() => useImportQueueRunner());
+
+      await waitFor(() => expect(runnerMocks.runImportQueue).toHaveBeenCalledOnce());
+      await waitFor(() => expect(result.current.running).toBe(false));
+      await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+      expect(runnerMocks.runImportQueue).toHaveBeenCalledOnce();
+      expect(warn).toHaveBeenCalledOnce();
+
+      // Something new to import: worth another try.
+      await act(async () => {
+        await enqueueImport({ url: "https://example.com/stew" });
+      });
+      await waitFor(() => expect(runnerMocks.runImportQueue).toHaveBeenCalledTimes(2));
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

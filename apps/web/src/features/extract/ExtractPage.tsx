@@ -11,7 +11,7 @@ import { LoadingState } from "../../components/LoadingState";
 import { SegmentedControl } from "../../components/SegmentedControl";
 import { useToast } from "../../components/Toast";
 import {
-  enqueueImport,
+  enqueueImports,
   removeImportQueueItem,
   type ImportQueueItem
 } from "../../data/import-queue-store";
@@ -439,7 +439,7 @@ export const ExtractPage: React.FC = () => {
 
   const importMany = async (urls: string[]) => {
     try {
-      const items = await Promise.all(urls.map((url) => enqueueImport({ source: "in_app", url })));
+      const items = await enqueueImports(urls.map((url) => ({ source: "in_app", url })));
 
       if (!isOnline()) {
         trackWebEvent({
@@ -467,8 +467,18 @@ export const ExtractPage: React.FC = () => {
     }
 
     const url = item.url;
-    void removeImportQueueItem(item.id).catch(() => undefined);
-    void session.startUrl(url);
+    // Out of the queue first: should another tab have retried it and be importing it by now, the
+    // queue keeps it, and opening it here too would import (and spend) it twice.
+    void removeImportQueueItem(item.id).then(
+      (removed) => {
+        if (removed) {
+          void session.startUrl(url);
+        } else {
+          showToast({ message: "That one’s importing already." });
+        }
+      },
+      () => showToast({ message: "That couldn’t be opened.", tone: "danger" })
+    );
   };
 
   const startOver = () => {

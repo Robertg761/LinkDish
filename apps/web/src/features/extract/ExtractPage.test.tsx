@@ -5,7 +5,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { trackWebEvent, trackWebV2AnalyticsEvent } from "../../analytics/client";
 import { resetDataChangeFeedForTests, setDataChannelFactoryForTests } from "../../data/change-feed";
-import { enqueueImport, resetImportQueueStoreForTests } from "../../data/import-queue-store";
+import {
+  enqueueImport,
+  markImportFailed,
+  resetImportQueueStoreForTests
+} from "../../data/import-queue-store";
 import { resetLibraryStoreForTests } from "../../data/library-store";
 import {
   getLinkDishWebDb,
@@ -663,5 +667,70 @@ describe("ExtractPage", () => {
     );
     expect(apiMocks.extractRecipe).not.toHaveBeenCalled();
     expect(await screen.findByRole("heading", { name: "Import queue" })).toBeVisible();
+  });
+
+  it("adds each pasted link once, also when another tab queues one of them meanwhile", async () => {
+    networkMocks.online = false;
+    renderPage();
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Recipe link" }), {
+      target: { value: "https://a.com/one\nhttps://b.com/two" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Queue 2 recipes for later" }));
+    // The share sheet in another tab, at the same moment.
+    await enqueueImport({ source: "share_sheet", url: "https://b.com/two" });
+
+    await waitFor(() =>
+      expect(fakeIdb.records(IMPORT_QUEUE_STORE_NAME).length).toBeGreaterThanOrEqual(2)
+    );
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(
+      fakeIdb
+        .records<ImportQueueItem>(IMPORT_QUEUE_STORE_NAME)
+        .map((item) => item.url)
+        .sort()
+    ).toEqual(["https://a.com/one", "https://b.com/two"]);
+  });
+
+  it("opens a failed queued link in the importer", async () => {
+    apiMocks.extractRecipe.mockResolvedValue(success());
+    const item = await enqueueImport({ url: "https://example.com/rice" });
+    await markImportFailed(item.id, "This one needs AI help. Open it to try.");
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Open" }));
+
+    await screen.findByRole("heading", { level: 1, name: "Weeknight Rice" });
+    expect(apiMocks.extractRecipe).toHaveBeenCalledOnce();
+    expect(fakeIdb.records(IMPORT_QUEUE_STORE_NAME)).toEqual([]);
+  });
+
+  it("doesn't open a failed link that another tab is importing again by now", async () => {
+    apiMocks.extractRecipe.mockResolvedValue(success());
+    const item = await enqueueImport({ url: "https://example.com/rice" });
+    await markImportFailed(item.id, "This one needs AI help. Open it to try.");
+    renderPage();
+    const open = await screen.findByRole("button", { name: "Open" });
+
+    // Another tab retried it and its worker is importing it; this tab hasn't heard yet.
+    const failed = fakeIdb.record<ImportQueueItem>(IMPORT_QUEUE_STORE_NAME, item.id)!;
+    fakeIdb.seed(IMPORT_QUEUE_STORE_NAME, [
+      {
+        ...failed,
+        claimedAt: new Date().toISOString(),
+        claimedBy: "tab-b",
+        error: undefined,
+        status: "processing"
+      }
+    ]);
+    fireEvent.click(open);
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+
+    expect(apiMocks.extractRecipe).not.toHaveBeenCalled();
+    expect(screen.queryByRole("heading", { level: 1, name: "Weeknight Rice" })).toBeNull();
+    expect(fakeIdb.record(IMPORT_QUEUE_STORE_NAME, item.id)).toMatchObject({
+      claimedBy: "tab-b",
+      status: "processing"
+    });
   });
 });

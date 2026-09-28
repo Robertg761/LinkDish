@@ -146,16 +146,10 @@ const importQueueResource = createResourceStore<ImportQueueItem[]>({
   topic: "importQueue"
 });
 
-const writeItem = async (item: ImportQueueItem): Promise<ImportQueueItem> => {
-  const db = await getLinkDishWebDb();
-  await db.put(IMPORT_QUEUE_STORE_NAME, item);
-  emitDataChange({ topic: "importQueue", upserted: [item] });
-  return item;
-};
-
 /** The reads a queue transaction makes before it writes. */
 interface ImportQueueReader {
   get(id: string): Promise<unknown>;
+  getAll(): Promise<unknown[]>;
   index(name: "status"): { getAll(status: ImportQueueStatus): Promise<unknown[]> };
 }
 
@@ -181,32 +175,58 @@ const updateInTransaction = async (
   return written;
 };
 
+/** Like {@link updateInTransaction}, but deletes the items `pick` returns. Returns those. */
+const deleteInTransaction = async (
+  read: (store: ImportQueueReader) => Promise<ImportQueueItem[]>,
+  pick: (items: ImportQueueItem[]) => ImportQueueItem[]
+): Promise<ImportQueueItem[]> => {
+  const db = await getLinkDishWebDb();
+  const tx = db.transaction(IMPORT_QUEUE_STORE_NAME, "readwrite");
+  const deleted = pick(await read(tx.store));
+  await Promise.all([...deleted.map((item) => tx.store.delete(item.id)), tx.done]);
+
+  if (deleted.length) {
+    emitDataChange({ deletedIds: deleted.map((item) => item.id), topic: "importQueue" });
+  }
+
+  return deleted;
+};
+
 const readItem = async (store: ImportQueueReader, id: string): Promise<ImportQueueItem[]> => {
   const item = (await store.get(id)) as ImportQueueItem | undefined;
   return item ? [item] : [];
 };
 
+/** Whether a change still applies to the item as it is when the change runs. */
+type ItemGuard = (item: ImportQueueItem) => boolean;
+
 /**
- * Changes one item. With `owner`, only while that tab still holds the item's claim: a worker
- * never writes over an item another tab claimed (or that was finished or removed) while it worked.
+ * With `owner`, only while that tab still holds the item's claim: a worker never writes over an
+ * item another tab claimed (or that was finished or removed) while it worked. Any item otherwise.
+ */
+const heldOnlyBy =
+  (owner: string | undefined): ItemGuard =>
+  (item) =>
+    owner === undefined || isClaimedBy(item, owner);
+
+/**
+ * Changes one item if `applies` to it: both are decided in the transaction that writes it.
+ * Undefined when the item is gone or the change no longer applies.
  */
 const patchItem = async (
   id: string,
   patch: (item: ImportQueueItem) => ImportQueueItem,
-  owner?: string
+  applies: ItemGuard
 ): Promise<ImportQueueItem | undefined> => {
   const [written] = await updateInTransaction(
     (store) => readItem(store, id),
-    (items) => items.filter((item) => owner === undefined || isClaimedBy(item, owner)).map(patch)
+    (items) => items.filter(applies).map(patch)
   );
   return written;
 };
 
-/**
- * Adds a link and/or text to the queue. Re-adding a link that is still waiting (or failed)
- * returns the existing item — a failed one goes back in the queue.
- */
-export async function enqueueImport(input: ImportQueueInput): Promise<ImportQueueItem> {
+/** A checked, trimmed {@link ImportQueueInput}. Throws {@link ImportQueueValidationError}. */
+const toEntry = (input: ImportQueueInput): ImportQueueInput => {
   const url = normalizeUrl(input.url);
   const text = input.text?.trim().slice(0, MAX_TEXT_LENGTH) || undefined;
 
@@ -214,27 +234,83 @@ export async function enqueueImport(input: ImportQueueInput): Promise<ImportQueu
     throw new ImportQueueValidationError("Add a recipe link or some recipe text.");
   }
 
-  if (url) {
-    const active = (await getImportQueue()).find(
-      (item) => item.url === url && item.status !== "done"
-    );
-
-    if (active) {
-      return active.status === "failed" ? ((await retryImport(active.id)) ?? active) : active;
-    }
-  }
-
-  const now = new Date().toISOString();
-  return writeItem({
-    attempts: 0,
-    createdAt: now,
-    id: crypto.randomUUID(),
-    status: "queued",
-    updatedAt: now,
+  return {
     ...(url ? { url } : {}),
     ...(text ? { text } : {}),
     ...(input.source ? { source: input.source } : {})
-  });
+  };
+};
+
+/**
+ * Adds links and/or text to the queue, all or nothing (one invalid entry adds none). Re-adding a
+ * link that is still waiting (or failed) returns the existing item — a failed one goes back in the
+ * queue. The duplicate lookup and the writes are one readwrite transaction, so two tabs adding the
+ * same link at once still queue it once (and a batch never queues a link twice).
+ * Returns one item per input, in order.
+ */
+export async function enqueueImports(
+  inputs: readonly ImportQueueInput[]
+): Promise<ImportQueueItem[]> {
+  const entries = inputs.map(toEntry);
+
+  if (!entries.length) {
+    return [];
+  }
+
+  const now = new Date().toISOString();
+  let items: ImportQueueItem[] = [];
+  const written = await updateInTransaction(
+    async (store) =>
+      entries.some((entry) => entry.url)
+        ? sortByCreatedAt((await store.getAll()) as ImportQueueItem[])
+        : [],
+    (queue) => {
+      // The oldest unfinished item for each link, as it will be once this transaction commits.
+      const byUrl = new Map<string, ImportQueueItem>();
+      const changed = new Map<string, ImportQueueItem>();
+
+      for (const item of queue) {
+        if (item.url && item.status !== "done" && !byUrl.has(item.url)) {
+          byUrl.set(item.url, item);
+        }
+      }
+
+      items = entries.map((entry) => {
+        const active = entry.url ? byUrl.get(entry.url) : undefined;
+        const item: ImportQueueItem =
+          active?.status === "failed"
+            ? { ...withoutClaim(withoutError(active)), status: "queued" }
+            : (active ?? {
+                attempts: 0,
+                createdAt: now,
+                id: crypto.randomUUID(),
+                status: "queued",
+                updatedAt: now,
+                ...entry
+              });
+
+        if (item !== active) {
+          changed.set(item.id, item);
+
+          if (item.url) {
+            byUrl.set(item.url, item);
+          }
+        }
+
+        return item;
+      });
+
+      return [...changed.values()];
+    }
+  );
+  const saved = new Map(written.map((item) => [item.id, item]));
+  return items.map((item) => saved.get(item.id) ?? item);
+}
+
+/** Adds a link and/or text to the queue (see {@link enqueueImports}). */
+export async function enqueueImport(input: ImportQueueInput): Promise<ImportQueueItem> {
+  const [item] = await enqueueImports([input]);
+  return item!;
 }
 
 /*
@@ -248,7 +324,7 @@ export const markImportProcessing = (id: string, owner?: string) =>
     id,
     (item) =>
       heldBy({ ...withoutError(item), attempts: item.attempts + 1, status: "processing" }, owner),
-    owner
+    heldOnlyBy(owner)
   );
 
 export const markImportFailed = (id: string, error: string, owner?: string) =>
@@ -259,7 +335,7 @@ export const markImportFailed = (id: string, error: string, owner?: string) =>
       error: error.trim().slice(0, MAX_ERROR_LENGTH) || "This import didn't work.",
       status: "failed"
     }),
-    owner
+    heldOnlyBy(owner)
   );
 
 export const markImportDone = (
@@ -274,12 +350,21 @@ export const markImportDone = (
       status: "done",
       ...(result.recipeId ? { recipeId: result.recipeId } : {})
     }),
-    owner
+    heldOnlyBy(owner)
   );
 
-/** Puts an item back in the queue (a failed one, or one its worker let go of). */
+/**
+ * Puts an item back in the queue: one its worker (`owner`) lets go of, or — without `owner`, as
+ * the Retry button does — a failed one. Undefined when the item is no longer failed by the time
+ * this runs (another tab retried it and may be importing it already), so it never takes an item
+ * away from the tab working on it.
+ */
 export const retryImport = (id: string, owner?: string) =>
-  patchItem(id, (item) => ({ ...withoutClaim(withoutError(item)), status: "queued" }), owner);
+  patchItem(
+    id,
+    (item) => ({ ...withoutClaim(withoutError(item)), status: "queued" }),
+    owner === undefined ? (item) => item.status === "failed" : heldOnlyBy(owner)
+  );
 
 /**
  * Takes the oldest waiting item for `owner` (this tab's id): one readwrite transaction finds it
@@ -305,28 +390,32 @@ export async function claimNextQueuedImport(
  * nobody else has claimed it). Undefined once another tab has it, or it is finished or removed.
  */
 export const renewImportClaim = (id: string, owner: string, now: number = Date.now()) =>
-  patchItem(id, (item) => heldBy(item, owner, now), owner);
+  patchItem(id, (item) => heldBy(item, owner, now), heldOnlyBy(owner));
 
-export async function removeImportQueueItem(id: string): Promise<void> {
-  const db = await getLinkDishWebDb();
-  await db.delete(IMPORT_QUEUE_STORE_NAME, id);
-  emitDataChange({ deletedIds: [id], topic: "importQueue" });
+/**
+ * Removes an item unless a tab is importing it right now. Its status is read in the transaction
+ * that deletes it, so a row that still showed it waiting or failed never pulls an import out from
+ * under the tab working on it. False when the item was kept for that reason; true once it is gone.
+ */
+export async function removeImportQueueItem(id: string): Promise<boolean> {
+  let kept = false;
+  await deleteInTransaction(
+    (store) => readItem(store, id),
+    (items) => {
+      kept = items.some((item) => item.status === "processing");
+      return kept ? [] : items;
+    }
+  );
+  return !kept;
 }
 
 /** Deletes every finished (`done`) item. Returns how many were removed. */
 export async function clearFinishedImports(): Promise<number> {
-  const finished = (await getImportQueue()).filter((item) => item.status === "done");
-
-  if (!finished.length) {
-    return 0;
-  }
-
-  const db = await getLinkDishWebDb();
-  const tx = db.transaction(IMPORT_QUEUE_STORE_NAME, "readwrite");
-  const store = tx.objectStore(IMPORT_QUEUE_STORE_NAME);
-  await Promise.all([...finished.map((item) => store.delete(item.id)), tx.done]);
-  emitDataChange({ deletedIds: finished.map((item) => item.id), topic: "importQueue" });
-  return finished.length;
+  const cleared = await deleteInTransaction(
+    async (store) => (await store.index("status").getAll("done")) as ImportQueueItem[],
+    (items) => items
+  );
+  return cleared.length;
 }
 
 /** The oldest item still waiting, if any. */

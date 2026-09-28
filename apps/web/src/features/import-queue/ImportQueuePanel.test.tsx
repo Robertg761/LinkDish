@@ -136,4 +136,23 @@ describe("ImportQueuePanel", () => {
       "bonappetit.com"
     );
   });
+
+  it("keeps a waiting link that another tab started importing when Remove is tapped", async () => {
+    const waiting = item("waiting", { url: "https://www.bonappetit.com/recipe/rice" });
+    fakeIdb.seed(IMPORT_QUEUE_STORE_NAME, [waiting]);
+    renderPanel(runner());
+    const remove = await screen.findByRole("button", { name: "Remove bonappetit.com" });
+
+    // Another tab's worker claims it before this tab hears about it.
+    fakeIdb.seed(IMPORT_QUEUE_STORE_NAME, [
+      { ...waiting, claimedAt: new Date().toISOString(), claimedBy: "tab-b", status: "processing" }
+    ]);
+    fireEvent.click(remove);
+
+    expect(await screen.findByText("That one’s importing already.")).toBeVisible();
+    expect(fakeIdb.record(IMPORT_QUEUE_STORE_NAME, "waiting")).toMatchObject({
+      claimedBy: "tab-b",
+      status: "processing"
+    });
+  });
 });

@@ -1,14 +1,26 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useAuth } from "../../auth/AuthProvider";
-import { recoverStaleImports, useImportQueue } from "../../data/import-queue-store";
+import {
+  getImportQueueSnapshot,
+  recoverStaleImports,
+  useImportQueue
+} from "../../data/import-queue-store";
 import { addNetworkListeners, isOnline } from "../../platform/detect-network";
 import { getWebBillingTier } from "../billing/web-billing";
 
 import type { QueuePauseReason } from "./import-queue-runner";
+import type { ImportQueueItem } from "../../data/import-queue-store";
 
 /** Only one tab works through the queue at a time. */
 export const IMPORT_QUEUE_LOCK_NAME = "linkdish:import-queue";
+
+/** The waiting items, as they are now: changes whenever one is added, retried or let go of. */
+const queuedKeyOf = (items: readonly ImportQueueItem[]): string =>
+  items
+    .filter((item) => item.status === "queued")
+    .map((item) => `${item.id}:${item.updatedAt}`)
+    .join("|");
 
 export interface ImportQueueRunnerState {
   running: boolean;
@@ -56,14 +68,7 @@ export function useImportQueueRunner(enabled = true): ImportQueueRunnerState {
   const [paused, setPaused] = useState<QueuePauseReason | null>(null);
   const controllerRef = useRef<AbortController | null>(null);
   const tier = getWebBillingTier(user);
-  const queuedKey = useMemo(
-    () =>
-      queue.items
-        .filter((item) => item.status === "queued")
-        .map((item) => `${item.id}:${item.updatedAt}`)
-        .join("|"),
-    [queue.items]
-  );
+  const queuedKey = useMemo(() => queuedKeyOf(queue.items), [queue.items]);
   const hasQueued = queuedKey.length > 0;
   /** The queue as it was when a run found nothing to do; don't spin on it again. */
   const idleKeyRef = useRef<string | null>(null);
@@ -127,8 +132,9 @@ export function useImportQueueRunner(enabled = true): ImportQueueRunnerState {
         }
       })
       .catch((error: unknown) => {
-        // Storage trouble: don't spin; try again when the queue changes.
-        idleKeyRef.current = queuedKey;
+        // Storage trouble: don't spin; try again when the queue changes. The queue as the run
+        // left it, so the item it let go of (a fresh `updatedAt`) doesn't count as a change.
+        idleKeyRef.current = queuedKeyOf(getImportQueueSnapshot().data);
         console.warn("The import queue stopped.", error);
       })
       .finally(() => {

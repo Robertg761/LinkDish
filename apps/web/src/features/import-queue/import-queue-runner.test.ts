@@ -145,6 +145,20 @@ const statuses = async () =>
 const v2Events = (name: string) =>
   vi.mocked(trackWebV2AnalyticsEvent).mock.calls.filter(([event]) => event.name === name);
 
+/** Storage that opened but can't read one store any more (`method` rejects for it). */
+const failReads = async (storeName: string, method: "getAll" | "getAllKeys") => {
+  const db = (await getLinkDishWebDb()) as unknown as Record<
+    typeof method,
+    (name: string) => Promise<unknown>
+  >;
+  const read = db[method].bind(db);
+  vi.spyOn(db, method).mockImplementation((name) =>
+    name === storeName
+      ? Promise.reject(new DOMException("The disk is unreadable.", "UnknownError"))
+      : read(name)
+  );
+};
+
 describe("import queue runner", () => {
   beforeEach(async () => {
     fakeIdb.reset();
@@ -422,6 +436,45 @@ describe("import queue runner", () => {
     });
     expect(apiMocks.extractRecipe).not.toHaveBeenCalled();
     expect((await getImportQueue())[0]?.status).toBe("queued");
+  });
+
+  it("lets the link go without spending an import when the cookbook can't be read", async () => {
+    await enqueueImport({ url: "https://a.com/soup" });
+    await enqueueImport({ url: "https://b.com/stew" });
+    await failReads(SAVED_RECIPES_STORE_NAME, "getAllKeys");
+    apiMocks.extractRecipe.mockResolvedValue(success("Soup", "https://a.com/soup"));
+
+    // Not a full cookbook: storage trouble. Nothing is imported and the run stops.
+    await expect(
+      runImportQueue(context({ isAuthenticated: false, owner: "tab-a", tier: "free" }))
+    ).rejects.toThrow("The disk is unreadable.");
+
+    expect(apiMocks.extractRecipe).not.toHaveBeenCalled();
+    expect(readWebBillingUsage()).toMatchObject({ imports: 0 });
+    const queue = await getImportQueue();
+    expect(queue.map((item) => [item.url, item.status, item.attempts])).toEqual([
+      ["https://a.com/soup", "queued", 0],
+      ["https://b.com/stew", "queued", 0]
+    ]);
+    // Back in the queue for any tab, not held by this one.
+    expect(queue[0]).not.toHaveProperty("claimedBy");
+    expect(v2Events("import_failed")).toHaveLength(0);
+  });
+
+  it("doesn't import a link it couldn't check against the cookbook", async () => {
+    fakeIdb.seed(SAVED_RECIPES_STORE_NAME, [saved("existing", "https://www.a.com/soup")]);
+    await enqueueImport({ url: "https://a.com/soup" });
+    await failReads(SAVED_RECIPES_STORE_NAME, "getAll");
+    apiMocks.extractRecipe.mockResolvedValue(success("Soup", "https://a.com/soup"));
+
+    // A paid plan never counts the cookbook, so only the duplicate check reads it.
+    await expect(runImportQueue(context({ owner: "tab-a" }))).rejects.toThrow(
+      "The disk is unreadable."
+    );
+
+    expect(apiMocks.extractRecipe).not.toHaveBeenCalled();
+    expect((await getImportQueue())[0]).toMatchObject({ attempts: 0, status: "queued" });
+    expect((await getImportQueue())[0]).not.toHaveProperty("claimedBy");
   });
 
   it("puts a link back in the queue when the connection drops mid-import", async () => {
