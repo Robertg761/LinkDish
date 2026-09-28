@@ -86,6 +86,8 @@ interface IngredientListProps {
   checked?: ReadonlySet<string> | undefined;
   /** Lines to emphasize (the ones the current cook-mode step uses). */
   highlighted?: ReadonlySet<string> | undefined;
+  /** Says why lines are emphasized ("Used in step 2"); shown above the list when any are. */
+  highlightLabel?: string | undefined;
   /** Omit for a read-only list (no tick boxes). */
   onToggle?: ((key: string) => void) | undefined;
   className?: string | undefined;
@@ -99,14 +101,25 @@ export const IngredientList: React.FC<IngredientListProps> = ({
   displayIngredient,
   checked,
   highlighted,
+  highlightLabel,
   onToggle,
   className = "",
   sectionHeadingLevel = 3
 }) => {
   const SectionHeading = sectionHeadingLevel === 3 ? "h3" : "h4";
+  const hasHighlights =
+    highlighted != null &&
+    highlighted.size > 0 &&
+    groups.some((group) => group.items.some((item) => highlighted.has(item.key)));
 
   return (
     <div className={["ingredient-list", className].filter(Boolean).join(" ")}>
+      {hasHighlights && highlightLabel ? (
+        <p className="ingredient-list-legend">
+          <span aria-hidden="true" className="ingredient-list-legend-swatch" />
+          {highlightLabel}
+        </p>
+      ) : null}
       {groups.map((group) => (
         <div className="ingredient-group" key={group.key}>
           {group.section ? (

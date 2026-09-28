@@ -1,4 +1,4 @@
-import React, { useId, useState } from "react";
+import React, { useEffect, useId, useRef, useState } from "react";
 
 import { Button } from "../../components/Button";
 import { Icon } from "../../components/Icon";
@@ -17,6 +17,8 @@ interface CookFinishProps {
   onRate?: ((rating: RecipeRating | null) => void) | undefined;
   onLogCook?: ((entry: { note?: string | undefined }) => Promise<void>) | undefined;
   onAddIngredientsToShoppingList?: (() => void | Promise<void>) | undefined;
+  /** "Back to steps": the last step again (the footer is hidden on this screen). */
+  onBack?: (() => void) | undefined;
   onDone: () => void;
 }
 
@@ -27,12 +29,19 @@ export const CookFinish: React.FC<CookFinishProps> = ({
   onRate,
   onLogCook,
   onAddIngredientsToShoppingList,
+  onBack,
   onDone
 }) => {
   const noteId = useId();
+  const titleRef = useRef<HTMLHeadingElement>(null);
   const [note, setNote] = useState("");
   const [logging, setLogging] = useState(false);
   const [error, setError] = useState("");
+
+  // The Finish button that got us here is gone; land on the title so a screen reader reads it.
+  useEffect(() => {
+    titleRef.current?.focus({ preventScroll: true });
+  }, []);
 
   const logCook = async () => {
     if (!onLogCook) {
@@ -53,19 +62,33 @@ export const CookFinish: React.FC<CookFinishProps> = ({
 
   return (
     <div className="cook-finish">
+      {onBack ? (
+        <button className="cook-finish-back" onClick={onBack} type="button">
+          <Icon name="arrow-left" size={16} />
+          Back to steps
+        </button>
+      ) : null}
       <div aria-hidden="true" className="cook-finish-burst">
         <span className="cook-finish-confetti" />
         <span className="cook-finish-icon">
           <Icon name="party-popper" size={34} strokeWidth={1.8} />
         </span>
       </div>
-      <h2 className="cook-finish-title">{COOK_MODE_FINALE_TITLE}</h2>
+      <h2 className="cook-finish-title" ref={titleRef} tabIndex={-1}>
+        {COOK_MODE_FINALE_TITLE}
+      </h2>
       <p className="cook-finish-message">{getCookModeFinaleMessage(recipeTitle)}</p>
 
       {onRate ? (
         <div className="cook-finish-rating">
           <span className="cook-finish-label">How did it turn out?</span>
-          <RatingStars label="Rate this recipe" onChange={onRate} size={30} value={rating} />
+          <RatingStars
+            className="cook-finish-stars"
+            label="Rate this recipe"
+            onChange={onRate}
+            size={30}
+            value={rating}
+          />
         </div>
       ) : null}
 

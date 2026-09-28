@@ -1,10 +1,21 @@
-/* Floating kitchen timers: above the tab bar on phones, bottom-right on larger screens. */
+/*
+ * Floating kitchen timers: above the tab bar on phones (clear of the raised Add button), above a
+ * page's own action bar (--timer-dock-lift), bottom-right on larger screens. One card shows the
+ * next timer; "+N more" expands the rest.
+ */
 .timer-dock {
   position: fixed;
   right: 12px;
-  bottom: calc(var(--app-bottom-inset) + 12px + var(--timer-dock-lift, 0px));
+  bottom: calc(
+    var(--app-bottom-inset) + 12px + var(--app-fab-clearance) + var(--timer-dock-lift, 0px)
+  );
   left: 12px;
   z-index: calc(var(--z-immersive) + 1);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  max-width: 560px;
+  margin: 0 auto;
   pointer-events: none;
   transition: bottom var(--transition-normal);
 }
@@ -16,6 +27,39 @@
 /* While cooking, the dock clears cook mode's footer instead of the tab bar. */
 :root.cook-mode-open .timer-dock {
   bottom: calc(env(safe-area-inset-bottom, 0px) + var(--cook-mode-footer-height, 96px) + 10px);
+}
+
+/* "+1 more": a small tab on the card's top edge. */
+.timer-dock-more {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-end;
+  gap: 4px;
+  min-height: 30px;
+  margin: 0 14px -10px 0;
+  padding: 0 10px 0 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface-raised);
+  box-shadow: var(--shadow-sm);
+  color: var(--color-ink);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--text-caption);
+  font-weight: 750;
+  pointer-events: auto;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.timer-dock-more:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.timer-dock.is-expanded .timer-dock-more {
+  margin-bottom: 6px;
 }
 
 .timer-dock-list {
@@ -30,6 +74,18 @@
   list-style: none;
   pointer-events: auto;
   scrollbar-width: none;
+}
+
+.timer-dock-more + .timer-dock-list {
+  margin-top: -4px;
+}
+
+/* Collapsed with more timers: a second card peeks out underneath. */
+.timer-dock-list.is-stacked .timer-dock-item {
+  box-shadow:
+    0 5px 0 -1px var(--color-surface-sunken),
+    0 5px 0 0 var(--color-border),
+    var(--shadow-md);
 }
 
 .timer-dock-item {
@@ -149,8 +205,10 @@ a.timer-dock-recipe:hover {
   transition: background-color var(--transition-fast);
 }
 
-.timer-dock-add:hover {
-  background: var(--color-state-pressed);
+@media (hover: hover) {
+  .timer-dock-add:hover {
+    background: var(--color-state-pressed);
+  }
 }
 
 .timer-dock-add:focus-visible {
@@ -179,7 +237,7 @@ a.timer-dock-recipe:hover {
 
 .timer-dock-item.is-done .timer-dock-meta,
 .timer-dock-item.is-done .timer-dock-label {
-  color: color-mix(in srgb, var(--color-on-tomato) 88%, transparent);
+  color: var(--color-on-tomato);
 }
 
 .timer-dock-item.is-done .timer-dock-ring {
@@ -195,9 +253,20 @@ a.timer-dock-recipe:hover {
   stroke: var(--color-on-tomato);
 }
 
+/* Ringing: solid on-tomato text (≥ 4.5:1); "+1 min" becomes an outlined snooze beside the
+   filled Dismiss, instead of a washed-out fill its label couldn't be read on. */
 .timer-dock-item.is-done .timer-dock-add {
-  background: color-mix(in srgb, var(--color-on-tomato) 18%, transparent);
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--color-on-tomato);
   color: var(--color-on-tomato);
+}
+
+.timer-dock-item.is-done .timer-dock-add:hover {
+  background: color-mix(in srgb, var(--color-on-tomato) 14%, transparent);
+}
+
+.timer-dock-item.is-done .timer-dock-add:focus-visible {
+  outline-color: var(--color-on-tomato);
 }
 
 .timer-dock-item.is-done .icon-btn-filled {
@@ -228,6 +297,7 @@ a.timer-dock-recipe:hover {
     right: 24px;
     left: auto;
     width: 380px;
+    margin: 0;
   }
 }
 
