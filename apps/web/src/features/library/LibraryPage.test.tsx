@@ -66,7 +66,12 @@ const authMocks = vi.hoisted(() => ({
 }));
 
 vi.mock("../../auth/AuthProvider", () => ({
-  useAuth: () => ({ isAuthenticated: Boolean(authMocks.user), user: authMocks.user })
+  useAuth: () => ({
+    credentialsKey: `session:${authMocks.user?.id ?? ""}`,
+    credentialsReady: true,
+    isAuthenticated: Boolean(authMocks.user),
+    user: authMocks.user
+  })
 }));
 
 const upgradeMocks = vi.hoisted(() => ({ requestUpgradeSheet: vi.fn(() => true) }));

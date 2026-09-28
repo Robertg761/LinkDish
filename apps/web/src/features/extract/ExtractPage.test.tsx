@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { trackWebEvent, trackWebV2AnalyticsEvent } from "../../analytics/client";
 import { resetDataChangeFeedForTests, setDataChannelFactoryForTests } from "../../data/change-feed";
-import { resetImportQueueStoreForTests } from "../../data/import-queue-store";
+import { enqueueImport, resetImportQueueStoreForTests } from "../../data/import-queue-store";
 import { resetLibraryStoreForTests } from "../../data/library-store";
 import {
   getLinkDishWebDb,
@@ -73,21 +73,51 @@ vi.mock("../../analytics/client", () => ({
   trackWebV2AnalyticsEvent: vi.fn()
 }));
 
-const authMocks = vi.hoisted(() => ({
-  user: { billingPlan: "free", email: "cook@example.com", id: "user_1" } as {
-    billingPlan?: "free" | "plus" | "family";
-    email: string;
-    id: string;
-  } | null
-}));
+const authMocks = vi.hoisted(() => {
+  const listeners = new Set<() => void>();
 
-vi.mock("../../auth/AuthProvider", () => ({
-  useAuth: () => ({
-    isAuthenticated: Boolean(authMocks.user),
-    loading: false,
-    user: authMocks.user
-  })
-}));
+  return {
+    /** False while a cached Clerk user's session is still loading. */
+    credentialsReady: true,
+    listeners,
+    subscribe: (listener: () => void) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    user: { billingPlan: "free", email: "cook@example.com", id: "user_1" } as {
+      billingPlan?: "free" | "plus" | "family";
+      email: string;
+      id: string;
+    } | null,
+    version: 0
+  };
+});
+
+const setCredentialsReady = (ready: boolean) => {
+  authMocks.credentialsReady = ready;
+  authMocks.version += 1;
+  authMocks.listeners.forEach((listener) => listener());
+};
+
+vi.mock("../../auth/AuthProvider", async () => {
+  const { useSyncExternalStore } = await import("react");
+
+  return {
+    useAuth: () => {
+      useSyncExternalStore(authMocks.subscribe, () => authMocks.version);
+
+      return {
+        credentialsKey: authMocks.credentialsReady ? `session:${authMocks.user?.id ?? ""}` : null,
+        credentialsReady: authMocks.credentialsReady,
+        isAuthenticated: Boolean(authMocks.user),
+        loading: false,
+        user: authMocks.user
+      };
+    }
+  };
+});
 
 const upgradeMocks = vi.hoisted(() => ({ requestUpgradeSheet: vi.fn(() => true) }));
 
@@ -228,6 +258,7 @@ describe("ExtractPage", () => {
     await getLinkDishWebDb();
 
     authMocks.user = { billingPlan: "free", email: "cook@example.com", id: "user_1" };
+    authMocks.credentialsReady = true;
     networkMocks.online = true;
     upgradeMocks.requestUpgradeSheet.mockClear();
     vi.mocked(trackWebEvent).mockClear();
@@ -459,6 +490,49 @@ describe("ExtractPage", () => {
       source: "share_sheet",
       source_type: "share_target"
     });
+  });
+
+  it("waits for the account's credentials before starting a shared link", async () => {
+    // Cold start from the share sheet with a cached Clerk user whose session is still loading.
+    authMocks.user = { billingPlan: "plus", email: "cook@example.com", id: "user_1" };
+    authMocks.credentialsReady = false;
+    apiMocks.extractRecipe.mockResolvedValue(success());
+    renderPage(`/import?url=${encodeURIComponent("https://example.com/rice")}`);
+
+    await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent(/^\/import$/u));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    // Nothing goes out anonymously (it would be billed to the device, not the Plus account).
+    expect(apiMocks.extractRecipe).not.toHaveBeenCalled();
+    expect(apiMocks.getBillingUsage).not.toHaveBeenCalled();
+
+    act(() => {
+      setCredentialsReady(true);
+    });
+
+    await screen.findByRole("heading", { level: 1, name: "Weeknight Rice" });
+    expect(apiMocks.extractRecipe).toHaveBeenCalledOnce();
+    expect(apiMocks.getBillingUsage).toHaveBeenCalled();
+  });
+
+  it("holds the import queue until the account's credentials are ready", async () => {
+    authMocks.credentialsReady = false;
+    apiMocks.extractRecipe.mockResolvedValue(success());
+    await enqueueImport({ source: "share_sheet", url: "https://example.com/rice" });
+    renderPage();
+
+    expect(await screen.findByRole("heading", { name: "Import queue" })).toBeVisible();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(apiMocks.extractRecipe).not.toHaveBeenCalled();
+
+    act(() => {
+      setCredentialsReady(true);
+    });
+
+    await waitFor(() => expect(apiMocks.extractRecipe).toHaveBeenCalledOnce());
   });
 
   it("imports pasted text through AI help", async () => {

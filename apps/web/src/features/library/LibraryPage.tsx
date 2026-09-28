@@ -157,12 +157,12 @@ interface ShoppingSheetState {
 
 export const LibraryPage: React.FC = () => {
   const navigate = useNavigate();
-  const { isAuthenticated, user } = useAuth();
+  const { credentialsKey, isAuthenticated, user } = useAuth();
   const { requestUpgradeSheet } = useUpgradeSheet();
   const { showToast } = useToast();
   const library = useSavedRecipes();
   const { collections } = useCollections();
-  const shared = useSharedRecipes(isAuthenticated, user?.id);
+  const shared = useSharedRecipes(isAuthenticated, user?.id, credentialsKey);
   const showShortcutHint = useMediaQuery("(hover: hover) and (pointer: fine)");
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const [initialSession] = useState(getLibrarySessionState);

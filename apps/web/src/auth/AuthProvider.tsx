@@ -14,6 +14,9 @@ import { isExtractorApiError } from "../api/errors";
 
 import {
   clearCachedAuthUser,
+  clearClerkSignOutPending,
+  isClerkSignOutPending,
+  markClerkSignOutPending,
   readCachedAuthConfig,
   readCachedAuthUser,
   writeCachedAuthConfig,
@@ -29,9 +32,12 @@ import {
   getClerkBridgeSnapshot,
   getClerkControls,
   isClerkConfigured,
+  isClerkSessionPending,
   loadClerk,
+  mayHaveClerkSession,
   requestClerk,
-  useClerkBridge
+  useClerkBridge,
+  waitForClerkSettled
 } from "./clerk-bridge";
 import { hasClerkSessionHint } from "./clerk-session-hint";
 
@@ -52,6 +58,17 @@ interface AuthContextType {
   clerkReady: boolean;
   hasClerkPublishableKey: boolean;
   loading: boolean;
+  /**
+   * API requests now carry the right credentials: auth has settled and, when a Clerk session may
+   * exist, Clerk has loaded (or the wait for it ran out). A cached Clerk user is shown (and
+   * `loading` is false) before this, so anything that must not run anonymous waits for it.
+   */
+  credentialsReady: boolean;
+  /**
+   * Identifies the credentials API requests carry; null until they are ready. It changes when they
+   * do (e.g. Clerk finishes signing in late), so account-scoped fetches key on it.
+   */
+  credentialsKey: string | null;
   // Legacy email-code actions
   requestLoginCode: (email: string) => Promise<void>;
   verifyLoginCode: (email: string, code: string) => Promise<void>;
@@ -148,6 +165,38 @@ async function fetchSession(): Promise<SessionResult> {
 
 const isBrowserOffline = () => typeof navigator !== "undefined" && navigator.onLine === false;
 
+let clerkSignOutInFlight: Promise<void> | null = null;
+
+/**
+ * Ends a Clerk session the user already signed out of here (see `markClerkSignOutPending`). Does
+ * nothing until Clerk has loaded; safe to call repeatedly. The intent is kept if Clerk refuses, so
+ * the next load tries again.
+ */
+const finishPendingClerkSignOut = (): Promise<void> => {
+  const snapshot = getClerkBridgeSnapshot();
+  const controls = getClerkControls();
+
+  if (!snapshot.isLoaded || !controls) {
+    return Promise.resolve();
+  }
+
+  if (!snapshot.isSignedIn) {
+    clearClerkSignOutPending();
+    return Promise.resolve();
+  }
+
+  clerkSignOutInFlight ??= controls
+    .signOut()
+    .then(clearClerkSignOutPending, (error: unknown) => {
+      console.warn("Clerk sign-out failed:", error);
+    })
+    .finally(() => {
+      clerkSignOutInFlight = null;
+    });
+
+  return clerkSignOutInFlight;
+};
+
 interface InitialAuthState {
   config: AuthConfigResponse | null;
   loading: boolean;
@@ -203,6 +252,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // "Google sign-in can start": Clerk has loaded, or can be loaded on demand and has not failed.
   const clerkReady = clerkAvailable && !clerkFailed && (clerkLoaded ? clerk.signInReady : true);
   const transport = getAuthTransport(config, clerkAvailable);
+  // Someone may be signed in with Clerk but its token is not readable yet (until the wait runs out).
+  const clerkCredentialsPending =
+    transport !== "legacy" && !clerkWaitExpired && isClerkSessionPending(clerk);
+  const credentialsReady = !loading && !clerkCredentialsPending;
+  const credentialsKey = credentialsReady
+    ? `${transport !== "legacy" && clerkSignedIn ? "clerk" : "session"}:${user?.id ?? ""}`
+    : null;
 
   // Latest values for stable callbacks and the token bridge.
   const transportRef = useRef(transport);
@@ -226,9 +282,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   /** Token bridge for every API request (registered once, reads the latest auth state). */
   const getSessionToken = useCallback(async (): Promise<string | null> => {
+    const signingOut = isClerkSignOutPending();
+
+    if (transportRef.current !== "legacy" && !signingOut && isClerkSessionPending()) {
+      // A Clerk session may exist and Clerk is still loading: wait for its token instead of
+      // sending the request without one (the API would treat it as anonymous). The wait is shared
+      // and bounded by CLERK_LOAD_TIMEOUT_MS, like the auth state's own wait below.
+      await waitForClerkSettled(CLERK_LOAD_TIMEOUT_MS);
+    }
+
     const controls = getClerkControls();
 
-    if (transportRef.current !== "legacy" && controls && getClerkBridgeSnapshot().isSignedIn) {
+    if (
+      transportRef.current !== "legacy" &&
+      !signingOut &&
+      controls &&
+      getClerkBridgeSnapshot().isSignedIn
+    ) {
       // Clerk beta keeps legacy email-code sessions valid only until Clerk signs in.
       removeLegacySessionToken();
 
@@ -298,21 +368,33 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   // Give up waiting for Clerk after a while (blocked script, flaky network) so pages that wait
-  // on `loading` are not stuck; a cached user is never demoted by this.
+  // on `loading` are not stuck; a cached user is never demoted by this. It is the same wait the
+  // token bridge shares, so requests stop waiting at the same moment.
   useEffect(() => {
     if (!clerkMounted || clerkLoaded || clerkWaitExpired) {
       return;
     }
 
-    const timer = setTimeout(
-      () => {
+    let cancelled = false;
+    const expire = () => {
+      if (!cancelled && !getClerkBridgeSnapshot().isLoaded) {
         setClerkWaitExpired(true);
-      },
-      isBrowserOffline() || clerk.status === "failed" ? 0 : CLERK_LOAD_TIMEOUT_MS
-    );
+      }
+    };
+
+    if (isBrowserOffline() || clerk.status === "failed") {
+      const timer = setTimeout(expire, 0);
+
+      return () => {
+        cancelled = true;
+        clearTimeout(timer);
+      };
+    }
+
+    void waitForClerkSettled(CLERK_LOAD_TIMEOUT_MS).then(expire);
 
     return () => {
-      clearTimeout(timer);
+      cancelled = true;
     };
   }, [clerk.status, clerkLoaded, clerkMounted, clerkWaitExpired]);
 
@@ -371,6 +453,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return;
       }
 
+      if (clerkSignedIn && isClerkSignOutPending()) {
+        // Signed out here before Clerk had loaded: finish that sign-out instead of signing back in.
+        void finishPendingClerkSignOut();
+
+        if (getLegacySessionToken()) {
+          void resolveWith("legacy");
+        } else {
+          setUser(null);
+          finish();
+        }
+
+        return;
+      }
+
       if (clerkSignedIn) {
         removeLegacySessionToken();
 
@@ -381,6 +477,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         void resolveWith("clerk");
         return;
       }
+
+      // Clerk has no session, so no sign-out is left to finish.
+      clearClerkSignOutPending();
 
       if (getLegacySessionToken()) {
         void resolveWith("legacy");
@@ -456,6 +555,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         throw new Error("Google sign-in is not configured for this web app build.");
       }
 
+      // Signing in again replaces an earlier sign-out that had not reached Clerk yet.
+      clearClerkSignOutPending();
       // Sign-in starting is one of the moments the lazy Clerk bridge mounts.
       const controls = await loadClerk(CLERK_LOAD_TIMEOUT_MS);
 
@@ -502,6 +603,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const logout = useCallback(async () => {
+    // Clerk may hold a session before it has loaded (a cached Clerk user, its cookie). Keep the
+    // sign-out on record until Clerk confirms it, so Clerk loading later (on this visit or the
+    // next) cannot sign the user back in; requests stop carrying the Clerk token right away.
+    const endClerkSession = mayHaveClerkSession();
+
+    if (endClerkSession) {
+      markClerkSignOutPending();
+    }
+
     try {
       await apiClient.logout();
     } catch {
@@ -510,14 +620,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     // Clear legacy token
     removeLegacySessionToken();
+    setUser(null);
 
-    // Clear Clerk if it is loaded (it is mounted whenever a Clerk session may exist)
-    const controls = getClerkControls();
-    if (controls && getClerkBridgeSnapshot().isLoaded) {
-      await controls.signOut();
+    if (endClerkSession) {
+      requestClerk("session_hint");
+      await waitForClerkSettled(CLERK_LOAD_TIMEOUT_MS);
+      await finishPendingClerkSignOut();
     }
 
-    setUser(null);
     trackWebEvent({
       eventName: "web_sign_out_completed",
       routeOrScreen: "/account",
@@ -543,6 +653,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       clerkReady,
       hasClerkPublishableKey,
       loading,
+      credentialsReady,
+      credentialsKey,
       requestLoginCode,
       verifyLoginCode,
       loginWithGoogle,
@@ -554,6 +666,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     [
       clerkReady,
       config,
+      credentialsKey,
+      credentialsReady,
       deleteAccount,
       hasClerkPublishableKey,
       loading,

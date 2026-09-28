@@ -224,11 +224,13 @@ type SharedState =
   | { status: "ready"; shared: SharedRecipe | null };
 
 const SharedRecipeRoute: React.FC<{ sharedId: string }> = ({ sharedId }) => {
-  const { isAuthenticated, loading: authLoading } = useAuth();
+  const { credentialsKey, isAuthenticated, loading: authLoading } = useAuth();
   const [state, setState] = useState<SharedState>({ status: "loading" });
   const [reloadToken, setReloadToken] = useState(0);
   const openedRef = useRef(false);
 
+  // Keyed on the credentials: waits for a cached Clerk user's session (instead of a 401) and
+  // loads again once Clerk signs in.
   useEffect(() => {
     if (authLoading) {
       return;
@@ -236,6 +238,10 @@ const SharedRecipeRoute: React.FC<{ sharedId: string }> = ({ sharedId }) => {
 
     if (!isAuthenticated) {
       setState({ status: "signed-out" });
+      return;
+    }
+
+    if (credentialsKey === null) {
       return;
     }
 
@@ -261,7 +267,7 @@ const SharedRecipeRoute: React.FC<{ sharedId: string }> = ({ sharedId }) => {
     return () => {
       cancelled = true;
     };
-  }, [authLoading, isAuthenticated, reloadToken, sharedId]);
+  }, [authLoading, credentialsKey, isAuthenticated, reloadToken, sharedId]);
 
   const shared = state.status === "ready" ? state.shared : null;
 

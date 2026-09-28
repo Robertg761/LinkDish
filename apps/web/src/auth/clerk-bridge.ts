@@ -248,8 +248,78 @@ export const loadClerk = (timeoutMs: number): Promise<ClerkBridgeControls> => {
   });
 };
 
+/** Why the bridge was requested when someone may already be signed in (not just signing in). */
+const SESSION_REASONS: ReadonlySet<ClerkRequestReason> = new Set<ClerkRequestReason>([
+  "cached_user",
+  "session_hint",
+  "sso_callback"
+]);
+
+const requestedForSession = (current: ClerkBridgeSnapshot): boolean =>
+  current.reason !== null && SESSION_REASONS.has(current.reason);
+
+/**
+ * Someone may be signed in with Clerk but Clerk has not loaded yet, so their token cannot be read
+ * yet. Requests sent now would go out without credentials.
+ */
+export const isClerkSessionPending = (
+  current: ClerkBridgeSnapshot = getClerkBridgeSnapshot()
+): boolean =>
+  current.requested &&
+  !current.isLoaded &&
+  current.status !== "failed" &&
+  requestedForSession(current);
+
+/** Whether a Clerk session may exist: Clerk's answer once loaded, the boot hints until then. */
+export const mayHaveClerkSession = (
+  current: ClerkBridgeSnapshot = getClerkBridgeSnapshot()
+): boolean =>
+  current.isLoaded
+    ? current.isSignedIn
+    : isClerkConfigured() && (requestedForSession(current) || hasClerkSessionHint());
+
+const isClerkSettled = (current: ClerkBridgeSnapshot): boolean =>
+  !current.requested || current.isLoaded || current.status === "failed";
+
+let settleWait: { attempt: number; promise: Promise<void> } | null = null;
+
+/**
+ * Resolves once Clerk has loaded or failed to load, or after `timeoutMs`. Callers share one wait
+ * per load attempt, and once that wait has run out later calls resolve at once, so a Clerk script
+ * that never arrives delays requests only once. Never rejects.
+ */
+export const waitForClerkSettled = (timeoutMs: number): Promise<void> => {
+  const current = getClerkBridgeSnapshot();
+
+  if (isClerkSettled(current)) {
+    return Promise.resolve();
+  }
+
+  if (settleWait?.attempt === current.attempt) {
+    return settleWait.promise;
+  }
+
+  const promise = new Promise<void>((resolve) => {
+    const unsubscribe = subscribeClerkBridge(() => {
+      if (isClerkSettled(getClerkBridgeSnapshot())) {
+        done();
+      }
+    });
+    const timer = setTimeout(done, timeoutMs);
+
+    function done() {
+      clearTimeout(timer);
+      unsubscribe();
+      resolve();
+    }
+  });
+  settleWait = { attempt: current.attempt, promise };
+  return promise;
+};
+
 export const resetClerkBridgeForTests = (): void => {
   snapshot = null;
   controls = null;
+  settleWait = null;
   listeners.clear();
 };

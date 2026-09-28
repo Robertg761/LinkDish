@@ -3,9 +3,14 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { AUTH_CONFIG_CACHE_KEY, AUTH_USER_CACHE_KEY, readCachedAuthUser } from "./auth-cache";
+import {
+  AUTH_CONFIG_CACHE_KEY,
+  AUTH_USER_CACHE_KEY,
+  CLERK_SIGN_OUT_PENDING_KEY,
+  readCachedAuthUser
+} from "./auth-cache";
 import { setLegacySessionToken } from "./auth-storage";
-import { AuthProvider, useAuth } from "./AuthProvider";
+import { AuthProvider, CLERK_LOAD_TIMEOUT_MS, useAuth } from "./AuthProvider";
 import {
   getClerkBridgeSnapshot,
   publishClerkState,
@@ -305,6 +310,166 @@ describe("AuthProvider boot", () => {
     );
 
     expect(seen.at(-1)).toBe(before);
+  });
+
+  /** The token provider AuthProvider registered with the API client. */
+  const registeredTokenProvider = (): (() => Promise<string | null>) => {
+    const provider = apiClientMocks.registerAuthTokenProvider.mock.calls.at(-1)?.[0] as
+      | (() => Promise<string | null>)
+      | undefined;
+
+    if (!provider) {
+      throw new Error("No token provider was registered.");
+    }
+
+    return provider;
+  };
+
+  it("waits for Clerk before handing out credentials for a cached Clerk user", async () => {
+    cacheConfig(clerkConfig);
+    cacheUser("clerk");
+    // The bridge mounts at boot for the cached Clerk user, but Clerk has not loaded yet.
+    clerkMocks.present = false;
+    apiClientMocks.getAuthConfig.mockResolvedValue(clerkConfig);
+    apiClientMocks.getSession.mockResolvedValue({ authenticated: true, user });
+
+    renderAuth();
+
+    expect(authText()).toBe("user:cook@example.com");
+    expect(getClerkBridgeSnapshot()).toMatchObject({ isLoaded: false, requested: true });
+    expect(seen.at(-1)?.credentialsReady).toBe(false);
+    expect(seen.at(-1)?.credentialsKey).toBeNull();
+
+    let token: string | null | undefined;
+    void registeredTokenProvider()().then((value) => {
+      token = value;
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    // Not "no token": the request waits for Clerk instead of going out anonymous.
+    expect(token).toBeUndefined();
+
+    clerkMocks.present = true;
+    clerkMocks.auth.isSignedIn = true;
+    act(() => {
+      syncClerk();
+    });
+
+    await waitFor(() => expect(token).toBe("clerk_jwt"));
+    await waitFor(() => expect(seen.at(-1)?.credentialsReady).toBe(true));
+    expect(seen.at(-1)?.credentialsKey).toBe("clerk:user_1");
+  });
+
+  it("stops waiting for Clerk credentials after the load timeout, then refreshes them", async () => {
+    vi.useFakeTimers();
+    cacheConfig(clerkConfig);
+    cacheUser("clerk");
+    clerkMocks.present = false;
+    apiClientMocks.getAuthConfig.mockResolvedValue(clerkConfig);
+    apiClientMocks.getSession.mockResolvedValue({ authenticated: true, user });
+
+    renderAuth();
+
+    let token: string | null | undefined;
+    void registeredTokenProvider()().then((value) => {
+      token = value;
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(CLERK_LOAD_TIMEOUT_MS - 100);
+    });
+    expect(token).toBeUndefined();
+    expect(seen.at(-1)?.credentialsReady).toBe(false);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(200);
+    });
+    expect(token).toBeNull();
+    expect(authText()).toBe("user:cook@example.com");
+    expect(seen.at(-1)?.credentialsReady).toBe(true);
+    const keyWithoutClerk = seen.at(-1)?.credentialsKey;
+    expect(keyWithoutClerk).not.toBeNull();
+
+    // Later requests do not wait again for a Clerk script that is not coming.
+    await expect(registeredTokenProvider()()).resolves.toBeNull();
+
+    // Clerk loads after all: the credentials change, so account-scoped fetches run again.
+    clerkMocks.present = true;
+    clerkMocks.auth.isSignedIn = true;
+    await act(async () => {
+      syncClerk();
+      await vi.advanceTimersByTimeAsync(10);
+    });
+    expect(seen.at(-1)?.credentialsKey).toBe("clerk:user_1");
+    expect(seen.at(-1)?.credentialsKey).not.toBe(keyWithoutClerk);
+    await expect(registeredTokenProvider()()).resolves.toBe("clerk_jwt");
+  });
+
+  it("keeps a sign-out made before Clerk loaded when Clerk loads later", async () => {
+    setClerkSessionCookie("1790000000");
+    cacheConfig(clerkConfig);
+    cacheUser("clerk");
+    clerkMocks.present = false;
+    apiClientMocks.getAuthConfig.mockResolvedValue(clerkConfig);
+    apiClientMocks.getSession.mockResolvedValue({ authenticated: true, user });
+
+    renderAuth();
+    expect(authText()).toBe("user:cook@example.com");
+
+    let loggedOut = false;
+    await act(async () => {
+      void seen
+        .at(-1)
+        ?.logout()
+        .then(() => {
+          loggedOut = true;
+        });
+      await Promise.resolve();
+    });
+    expect(authText()).toBe("anonymous");
+    expect(localStorage.getItem(AUTH_USER_CACHE_KEY)).toBeNull();
+
+    // Clerk finishes loading with the session it still has.
+    clerkMocks.present = true;
+    clerkMocks.auth.isSignedIn = true;
+    clerkMocks.auth.signOut.mockImplementation(() => {
+      clerkMocks.auth.isSignedIn = false;
+      syncClerk();
+      return Promise.resolve();
+    });
+    await act(async () => {
+      syncClerk();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(loggedOut).toBe(true));
+    expect(clerkMocks.auth.signOut).toHaveBeenCalledTimes(1);
+    expect(authText()).toBe("anonymous");
+    expect(localStorage.getItem(AUTH_USER_CACHE_KEY)).toBeNull();
+    expect(localStorage.getItem(CLERK_SIGN_OUT_PENDING_KEY)).toBeNull();
+    expect(apiClientMocks.getSession).not.toHaveBeenCalled();
+  });
+
+  it("finishes a sign-out that could not reach Clerk on the next visit", async () => {
+    setClerkSessionCookie("1790000000");
+    cacheConfig(clerkConfig);
+    localStorage.setItem(CLERK_SIGN_OUT_PENDING_KEY, "2026-09-28T00:00:00.000Z");
+    clerkMocks.auth.isSignedIn = true;
+    clerkMocks.auth.signOut.mockImplementation(() => {
+      clerkMocks.auth.isSignedIn = false;
+      syncClerk();
+      return Promise.resolve();
+    });
+    apiClientMocks.getAuthConfig.mockResolvedValue(clerkConfig);
+    apiClientMocks.getSession.mockResolvedValue({ authenticated: true, user });
+
+    renderAuth();
+
+    await waitFor(() => expect(clerkMocks.auth.signOut).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(authText()).toBe("anonymous"));
+    // No Clerk token for requests while the sign-out is still on its way.
+    expect(apiClientMocks.getSession).not.toHaveBeenCalled();
+    expect(localStorage.getItem(CLERK_SIGN_OUT_PENDING_KEY)).toBeNull();
   });
 
   it("clears the cached user on logout", async () => {

@@ -57,6 +57,8 @@ const authMocks = vi.hoisted(() => ({
 
 vi.mock("../../auth/AuthProvider", () => ({
   useAuth: () => ({
+    credentialsKey: `session:${authMocks.user?.id ?? ""}`,
+    credentialsReady: true,
     isAuthenticated: Boolean(authMocks.user),
     loading: false,
     user: authMocks.user
@@ -260,9 +262,7 @@ describe("RecipePage saved route", () => {
     expect(screen.queryByText("Recipe not found")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
-    expect(
-      await screen.findByRole("heading", { level: 1, name: "Weeknight Chili" })
-    ).toBeVisible();
+    expect(await screen.findByRole("heading", { level: 1, name: "Weeknight Chili" })).toBeVisible();
   });
 
   it("keeps ticked ingredients in the cook session so cook mode sees them", async () => {

@@ -50,11 +50,14 @@ export interface SharedRecipesState {
 
 /** Remembers the last list per account so returning to the Cookbook shows it instantly. */
 let cache: { userId: string; recipes: SharedRecipe[] } | null = null;
-/** One request at a time per account, however many screens ask. */
-let inflight: { userId: string | undefined; promise: Promise<SharedRecipe[]> } | null = null;
+/**
+ * One request at a time per account and credentials, however many screens ask (a request made
+ * before Clerk signed in is not reused for the one after).
+ */
+let inflight: { key: string; promise: Promise<SharedRecipe[]> } | null = null;
 
-const fetchSharedRecipes = (userId: string | undefined): Promise<SharedRecipe[]> => {
-  if (inflight && inflight.userId === userId) {
+const fetchSharedRecipes = (key: string): Promise<SharedRecipe[]> => {
+  if (inflight && inflight.key === key) {
     return inflight.promise;
   }
 
@@ -66,7 +69,7 @@ const fetchSharedRecipes = (userId: string | undefined): Promise<SharedRecipe[]>
         inflight = null;
       }
     });
-  inflight = { promise, userId };
+  inflight = { key, promise };
   return promise;
 };
 
@@ -77,11 +80,15 @@ export const resetSharedRecipesCacheForTests = (): void => {
 
 /**
  * The Family cookbook for a signed-in account, loaded when the Cookbook opens (so the Family tab
- * knows whether it is locked) and cached for the rest of the session.
+ * knows whether it is locked) and cached for the rest of the session. It waits while the request
+ * would not carry the account yet (`credentialsKey` is null, e.g. a cached Clerk user's session is
+ * still loading) and loads again when the credentials change (Clerk signing in late).
  */
 export function useSharedRecipes(
   isAuthenticated: boolean,
-  userId: string | undefined
+  userId: string | undefined,
+  /** `useAuth().credentialsKey`. */
+  credentialsKey: string | null
 ): SharedRecipesState {
   const cached = isAuthenticated && userId && cache?.userId === userId ? cache.recipes : null;
   const [recipes, setRecipes] = useState<SharedRecipe[]>(cached ?? []);
@@ -103,8 +110,13 @@ export function useSharedRecipes(
       return;
     }
 
+    if (credentialsKey === null) {
+      // Signed in, but the request would go out without the account yet: wait for it.
+      return;
+    }
+
     try {
-      const list = await fetchSharedRecipes(userId);
+      const list = await fetchSharedRecipes(`${credentialsKey}|${userId ?? ""}`);
 
       if (request !== requestRef.current) {
         return;
@@ -135,7 +147,7 @@ export function useSharedRecipes(
       setAccessBlocked(blocked);
       setError(blocked ? FAMILY_ACCESS_MESSAGE : FAMILY_LOAD_ERROR_MESSAGE);
     }
-  }, [isAuthenticated, userId]);
+  }, [credentialsKey, isAuthenticated, userId]);
 
   useEffect(() => {
     void reload();
