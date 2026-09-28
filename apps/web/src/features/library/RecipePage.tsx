@@ -25,14 +25,14 @@ import {
   setRating,
   toggleFavorite,
   updateNotes,
-  useSavedRecipe
+  useSavedRecipes
 } from "../../data/library-store";
 import { useLinkDishDbStatus } from "../../data/storage-status";
 import { buildRecipeImageUrl } from "../../lib/recipe-image";
 import { createShareCardBlob } from "../../lib/share-card";
 import { useDocumentTitle } from "../../lib/use-document-title";
 import { RAIL_MEDIA_QUERY, useMediaQuery } from "../../lib/use-media-query";
-import { CookMode } from "../cook-mode/CookMode";
+import { LazyCookMode, preloadCookMode } from "../cook-mode/LazyCookMode";
 import { useRecipeMenuExtras } from "../recipe-view/recipe-menu-extras";
 import { useRecipeScaling } from "../recipe-view/recipe-scaling";
 import { getRecipeSourceInfo } from "../recipe-view/recipe-source";
@@ -152,7 +152,8 @@ const RecipeNotFound: React.FC<{ shared?: boolean }> = ({ shared = false }) => (
 );
 
 const SavedRecipeRoute: React.FC<{ id: string }> = ({ id }) => {
-  const { recipe, status } = useSavedRecipe(id);
+  const { recipes, retry, status } = useSavedRecipes();
+  const recipe = useMemo(() => recipes.find((entry) => entry.id === id), [id, recipes]);
   const [sourceImages, setSourceImages] = useState<ExtractRecipeImage[] | undefined>();
   const openedRef = useRef<string | null>(null);
   const imageCount = recipe?.sourceImageCount ?? 0;
@@ -196,6 +197,18 @@ const SavedRecipeRoute: React.FC<{ id: string }> = ({ id }) => {
   if (!recipe) {
     if (status === "loading") {
       return <LoadingState message="Warming up the recipe…" variant="recipe" />;
+    }
+
+    if (status === "error") {
+      return (
+        <RecipePageShell className="is-empty">
+          <ErrorState
+            message="Your cookbook on this device couldn’t be opened. Your recipes are still there."
+            onRetry={retry}
+            title="This recipe didn’t load"
+          />
+        </RecipePageShell>
+      );
     }
 
     return <RecipeNotFound />;
@@ -788,6 +801,8 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
       className="recipe-start-cooking"
       icon="chef-hat"
       onClick={() => setCookOpen(true)}
+      onFocus={preloadCookMode}
+      onPointerEnter={preloadCookMode}
       size="lg"
       variant="primary"
     >
@@ -884,7 +899,7 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
         </RecipeActionBar>
       ) : null}
 
-      <CookMode
+      <LazyCookMode
         onAddIngredientsToShoppingList={openShoppingSheet}
         onClose={() => setCookOpen(false)}
         onLogCook={

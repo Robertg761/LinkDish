@@ -250,6 +250,21 @@ describe("RecipePage saved route", () => {
     );
   });
 
+  it("offers a retry instead of 'not found' when storage fails to open", async () => {
+    await seed([savedRecipe()]);
+    resetLinkDishWebDbForTests();
+    fakeIdb.failNextOpen(new DOMException("blocked", "UnknownError"));
+    renderAt("/recipes/recipe_local");
+
+    expect(await screen.findByText("This recipe didn’t load")).toBeInTheDocument();
+    expect(screen.queryByText("Recipe not found")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Weeknight Chili" })
+    ).toBeVisible();
+  });
+
   it("keeps ticked ingredients in the cook session so cook mode sees them", async () => {
     await seed([savedRecipe()]);
     renderAt("/recipes/recipe_local");
@@ -266,7 +281,7 @@ describe("RecipePage saved route", () => {
     });
 
     fireEvent.click(screen.getAllByRole("button", { name: "Start cooking" })[0]!);
-    fireEvent.click(screen.getByRole("button", { name: "Show all ingredients" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Show all ingredients" }));
     const sheet = screen.getByRole("dialog", { name: "Ingredients" });
     expect(within(sheet).getByRole("checkbox", { name: "2 cups flour" })).toHaveAttribute(
       "aria-checked",

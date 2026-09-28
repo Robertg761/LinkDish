@@ -1,7 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
-import { AppTopBarActions } from "../../components/AppShell";
 import { Button, ButtonLink } from "../../components/Button";
 import { ConfirmationDialog } from "../../components/ConfirmationDialog";
 import { EmptyState } from "../../components/EmptyState";
@@ -9,7 +8,7 @@ import { Icon } from "../../components/Icon";
 import { IconButton } from "../../components/IconButton";
 import { useDocumentTitle } from "../../lib/use-document-title";
 import { RAIL_MEDIA_QUERY, useMediaQuery } from "../../lib/use-media-query";
-import { CookMode } from "../cook-mode/CookMode";
+import { LazyCookMode, preloadCookMode } from "../cook-mode/LazyCookMode";
 import { useRecipeScaling } from "../recipe-view/recipe-scaling";
 import { getRecipeSourceInfo } from "../recipe-view/recipe-source";
 import { RecipeActionBar } from "../recipe-view/RecipeActionBar";
@@ -136,16 +135,6 @@ const FeaturedRecipeScreen: React.FC<{ featured: FeaturedRecipe }> = ({ featured
 
   return (
     <div className={`featured-page page-enter${isDesktop ? " is-desktop" : ""}`}>
-      {isDesktop ? (
-        <AppTopBarActions>
-          <IconButton
-            aria-label="Start cooking"
-            icon="chef-hat"
-            onClick={() => setCookOpen(true)}
-          />
-        </AppTopBarActions>
-      ) : null}
-
       <RecipeView
         banner={banner}
         checks={checks}
@@ -167,6 +156,7 @@ const FeaturedRecipeScreen: React.FC<{ featured: FeaturedRecipe }> = ({ featured
               <Button
                 icon="chef-hat"
                 onClick={() => setCookOpen(true)}
+                onPointerEnter={preloadCookMode}
                 size="lg"
                 variant="secondary"
               >
@@ -198,7 +188,7 @@ const FeaturedRecipeScreen: React.FC<{ featured: FeaturedRecipe }> = ({ featured
         </RecipeActionBar>
       ) : null}
 
-      <CookMode
+      <LazyCookMode
         onClose={() => setCookOpen(false)}
         open={cookOpen}
         recipe={recipe}

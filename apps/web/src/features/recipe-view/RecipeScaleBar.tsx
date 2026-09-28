@@ -105,7 +105,7 @@ export const RecipeScaleBar: React.FC<RecipeScaleBarProps> = ({
                 id={customId}
                 inputMode="decimal"
                 onChange={(event) => scaling.setCustomFactor(event.target.value)}
-                placeholder="1.5"
+                placeholder="Custom"
                 type="text"
                 value={isPreset ? "" : state.customFactor}
               />

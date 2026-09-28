@@ -60,15 +60,15 @@ export const parseScaleFactor = (value: string): number | null => {
 
   const vulgar: Record<string, number> = { "¼": 0.25, "½": 0.5, "¾": 0.75, "⅓": 1 / 3, "⅔": 2 / 3 };
   const fraction = trimmed.match(/^(\d+)\s*\/\s*(\d+)$/u);
-  const value_ =
+  const factor =
     vulgar[trimmed] ??
     (fraction ? Number(fraction[1]) / Number(fraction[2]) : Number.parseFloat(trimmed));
 
-  if (!Number.isFinite(value_) || value_ <= 0 || !/^[\d.¼½¾⅓⅔/\s]+$/u.test(trimmed)) {
+  if (!Number.isFinite(factor) || factor <= 0 || !/^[\d.¼½¾⅓⅔/\s]+$/u.test(trimmed)) {
     return null;
   }
 
-  return clampFactor(value_);
+  return clampFactor(factor);
 };
 
 /** "½×", "1×", "1.5×", "2×" */
