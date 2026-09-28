@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -119,9 +119,17 @@ describe("ImportLinkPanel", () => {
     const { onImport, onImportMany } = renderPanel();
 
     fireEvent.change(field(), {
-      target: { value: "https://a.com/one\nb.com/two\nhttps://a.com/one" }
+      target: { value: "https://a.com/one\nb.com/two\nhttps://c.com/three\nhttps://a.com/one" }
     });
-    expect(screen.getByText(/2 links from a\.com, b\.com/u)).toBeInTheDocument();
+    // The parsed links are listed as rows (site + path), each removable.
+    const rows = within(screen.getByRole("list", { name: "Links to import" }));
+    expect(rows.getAllByRole("listitem").map((row) => row.textContent)).toEqual([
+      "a.com/one",
+      "b.com/two",
+      "c.com/three"
+    ]);
+    fireEvent.click(rows.getByRole("button", { name: "Remove c.com/three" }));
+    expect(field()).toHaveValue("https://a.com/one\nhttps://b.com/two");
     fireEvent.click(screen.getByRole("button", { name: "Import 2 recipes" }));
 
     expect(onImportMany).toHaveBeenCalledWith(["https://a.com/one", "https://b.com/two"]);

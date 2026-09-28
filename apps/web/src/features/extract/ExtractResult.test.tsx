@@ -188,7 +188,8 @@ describe("ExtractResult", () => {
   it("labels pasted text instead of linking to a made-up page", () => {
     renderResult({ sourceUrl: "https://linkdish.app/text-imports/abc123" });
 
-    expect(screen.getByText("From your text")).toBeInTheDocument();
+    // The same words the recipe page uses once it's saved.
+    expect(screen.getByText("From pasted text")).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /linkdish\.app/u })).not.toBeInTheDocument();
   });
 
@@ -231,7 +232,10 @@ describe("ExtractResult", () => {
     expect(screen.getAllByRole("button", { name: "Start cooking" }).length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: "Add to shopping list" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "More actions" })).toBeInTheDocument();
-    expect(screen.getByText("In your cookbook")).toBeInTheDocument();
+    // One "Import another" (the card's), and no chip repeating the card.
+    expect(screen.queryByText("In your cookbook")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Import another" })).toHaveLength(1);
+    expect(within(banner).getByRole("button", { name: "Import another" })).toBeInTheDocument();
 
     fireEvent.click(within(banner).getByRole("button", { name: "Open recipe" }));
     expect(await screen.findByText("Saved recipe page")).toBeInTheDocument();

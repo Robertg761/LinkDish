@@ -18,16 +18,28 @@ import type { ExtractRecipeNeedsRetry } from "@linkdish/api-contracts";
 
 interface ImportProblemCardProps {
   problem: ImportProblem;
+  /** The link that failed, named on the card ("nytimes.com"). */
+  url?: string | null | undefined;
   onAction: (action: ImportActionId) => void;
   onStartOver: () => void;
 }
 
+/**
+ * One primary next step, at most one more alternative, and one quiet way back. "Try another
+ * link" and "Start over" both led to the empty importer, so only one of them is offered.
+ */
 export const ImportProblemCard: React.FC<ImportProblemCardProps> = ({
   problem,
+  url,
   onAction,
   onStartOver
 }) => {
-  const [primary, ...secondary] = problem.actions;
+  const quietAction: ImportActionId | null = problem.actions.includes("another_link")
+    ? "another_link"
+    : null;
+  const [primary, ...rest] = problem.actions.filter((action) => action !== quietAction);
+  const secondary = rest.slice(0, 1);
+  const host = url ? getImportHost(url) : null;
   const tone = problem.isPlanLimit ? "is-limit" : problem.kind === "capacity" ? "is-calm" : "";
 
   return (
@@ -39,6 +51,11 @@ export const ImportProblemCard: React.FC<ImportProblemCardProps> = ({
       <span aria-hidden="true" className="import-outcome-icon">
         <Icon name={problem.icon} size={24} />
       </span>
+      {host ? (
+        <p className="import-outcome-eyebrow">
+          <Icon name="globe" size={14} /> {host}
+        </p>
+      ) : null}
       <h2 className="import-outcome-title" id="import-problem-title">
         {problem.title}
       </h2>
@@ -71,9 +88,15 @@ export const ImportProblemCard: React.FC<ImportProblemCardProps> = ({
             {IMPORT_ACTION_LABELS[action]}
           </Button>
         ))}
-        <Button onClick={onStartOver} size="lg" variant="ghost">
-          {problem.isPlanLimit ? "Maybe later" : "Start over"}
-        </Button>
+        {quietAction ? (
+          <Button onClick={() => onAction(quietAction)} size="lg" variant="ghost">
+            {IMPORT_ACTION_LABELS[quietAction]}
+          </Button>
+        ) : (
+          <Button onClick={onStartOver} size="lg" variant="ghost">
+            {problem.isPlanLimit ? "Maybe later" : "Start over"}
+          </Button>
+        )}
       </div>
     </section>
   );

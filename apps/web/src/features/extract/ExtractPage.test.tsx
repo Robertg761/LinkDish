@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import React from "react";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { trackWebEvent, trackWebV2AnalyticsEvent } from "../../analytics/client";
@@ -178,7 +178,17 @@ const LocationProbe: React.FC = () => {
   return <p data-testid="location">{`${location.pathname}${location.search}`}</p>;
 };
 
-const renderPage = (path = "/import") =>
+/** Stands in for the command palette and onboarding: in-app links to the importer. */
+const InAppLink: React.FC<{ to: string }> = ({ to }) => {
+  const navigate = useNavigate();
+  return (
+    <button onClick={() => void navigate(to)} type="button">
+      {`Go to ${to}`}
+    </button>
+  );
+};
+
+const renderPage = (path = "/import", inAppLinks: readonly string[] = []) =>
   render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
@@ -186,6 +196,9 @@ const renderPage = (path = "/import") =>
           element={
             <>
               <LocationProbe />
+              {inAppLinks.map((to) => (
+                <InAppLink key={to} to={to} />
+              ))}
               <ExtractPage />
             </>
           }
@@ -200,7 +213,9 @@ const pasteLink = (url: string) => {
   fireEvent.change(screen.getByRole("textbox", { name: "Recipe link" }), {
     target: { value: url }
   });
-  fireEvent.click(screen.getByRole("button", { name: "Get the recipe" }));
+  fireEvent.click(
+    screen.getByRole("button", { name: /^(Get the recipe|Save for when you’re online)$/u })
+  );
 };
 
 const v2Events = (name: string) =>
@@ -461,11 +476,61 @@ describe("ExtractPage", () => {
     });
   });
 
+  it("imports a link from an in-app link while the importer is already open", async () => {
+    apiMocks.extractRecipe.mockResolvedValue(success());
+    const link = `/import?url=${encodeURIComponent("https://example.com/rice")}`;
+    renderPage("/import", [link]);
+
+    // The command palette ("Import this recipe") and onboarding navigate /import → /import?url=.
+    fireEvent.click(screen.getByRole("button", { name: `Go to ${link}` }));
+
+    await screen.findByRole("heading", { level: 1, name: "Weeknight Rice" });
+    expect(apiMocks.extractRecipe).toHaveBeenCalledOnce();
+    expect(apiMocks.extractRecipe.mock.calls[0]?.[0]).toMatchObject({
+      url: "https://example.com/rice"
+    });
+    expect(startedEvents()[0]?.[0].properties).toMatchObject({ source: "in_app" });
+    await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent(/^\/import$/u));
+  });
+
+  it("opens the text and photo tabs from ?tab= links, also when already on /import", async () => {
+    renderPage("/import?tab=text", ["/import?tab=photos"]);
+
+    expect(screen.getByRole("radio", { name: "Text" })).toHaveAttribute("aria-checked", "true");
+    await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent(/^\/import$/u));
+
+    fireEvent.click(screen.getByRole("button", { name: "Go to /import?tab=photos" }));
+    await waitFor(() =>
+      expect(screen.getByRole("radio", { name: "Photos" })).toHaveAttribute("aria-checked", "true")
+    );
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Snap the page.");
+  });
+
+  it("names the site that failed and offers one way back, not two", async () => {
+    apiMocks.extractRecipe.mockResolvedValue({
+      reason: "source_blocked",
+      status: "failure",
+      userMessage: "Blocked."
+    });
+    renderPage();
+    pasteLink("https://www.nytimes.com/recipe/soup");
+
+    const card = await screen.findByRole("alert");
+    expect(card).toHaveTextContent("nytimes.com");
+    expect(Array.from(card.querySelectorAll("button")).map((button) => button.textContent)).toEqual(
+      ["Paste the recipe text", "Scan a photo instead", "Try another link"]
+    );
+    expect(screen.queryByRole("button", { name: "Start over" })).not.toBeInTheDocument();
+  });
+
   it("imports pasted text through AI help", async () => {
     apiMocks.extractRecipeFromText.mockResolvedValue(success());
     renderPage();
 
-    fireEvent.click(screen.getByRole("radio", { name: "Paste text" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Text" }));
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(
+      "Paste the recipe. We'll tidy it up."
+    );
     const field = screen.getByRole("textbox", { name: "Recipe text" });
     fireEvent.change(field, { target: { value: "too short" } });
     fireEvent.click(screen.getByRole("button", { name: "Get the recipe" }));
@@ -516,7 +581,8 @@ describe("ExtractPage", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Recipe link" }), {
       target: { value: "https://a.com/one\nb.com/two\nhttps://c.com/three" }
     });
-    fireEvent.click(screen.getByRole("button", { name: "Import 3 recipes" }));
+    // Offline, the button says what will happen.
+    fireEvent.click(screen.getByRole("button", { name: "Queue 3 recipes for later" }));
 
     await waitFor(() =>
       expect(fakeIdb.records<ImportQueueItem>(IMPORT_QUEUE_STORE_NAME)).toHaveLength(3)

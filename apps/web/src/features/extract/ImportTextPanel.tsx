@@ -120,9 +120,7 @@ export const ImportTextPanel: React.FC<ImportTextPanelProps> = ({
           value={value}
         />
         <div className="import-text-meta">
-          <span className="import-text-tip">
-            <Icon name="sparkles" size={15} /> Read with AI help
-          </span>
+          <span className="import-text-tip">Read with AI help</span>
           <span
             aria-live="polite"
             className={`import-text-counter num${problem === "too_long" ? " is-over" : ""}`}

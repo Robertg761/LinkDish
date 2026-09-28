@@ -1,7 +1,7 @@
 import React, { useMemo } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 
-import { Button, ButtonLink } from "../../components/Button";
+import { Button } from "../../components/Button";
 import { Icon } from "../../components/Icon";
 import { IconButton } from "../../components/IconButton";
 import { useToast } from "../../components/Toast";
@@ -14,6 +14,7 @@ import {
 } from "../../data/import-queue-store";
 import { useSavedRecipes } from "../../data/library-store";
 import { getImportHost } from "../extract/import-input";
+import { useUpgradeSheet } from "../upgrade/UpgradeSheet";
 
 import type { ImportQueueRunnerState } from "./use-import-queue-runner";
 import type { IconName } from "../../components/Icon";
@@ -48,6 +49,8 @@ export const ImportQueuePanel: React.FC<ImportQueuePanelProps> = ({ onOpenItem, 
   const { items } = useImportQueue();
   const { recipes } = useSavedRecipes();
   const { showToast } = useToast();
+  const { requestUpgradeSheet } = useUpgradeSheet();
+  const navigate = useNavigate();
   const titles = useMemo(
     () => new Map(recipes.map((recipe) => [recipe.id, recipe.recipe.title])),
     [recipes]
@@ -68,6 +71,14 @@ export const ImportQueuePanel: React.FC<ImportQueuePanelProps> = ({ onOpenItem, 
   const act = (task: Promise<unknown>, failure: string) => {
     void task.catch(() => showToast({ message: failure, tone: "danger" }));
   };
+
+  /** Only ever opened by a tap: a full cookbook pauses the queue quietly. */
+  const offerUpgrade = (trigger: "save_limit" | "import_limit") => {
+    if (!requestUpgradeSheet(trigger)) {
+      void navigate("/pricing?upgrade=plus");
+    }
+  };
+  const waitingNote = `${waiting.length} ${waiting.length === 1 ? "link" : "links"} waiting`;
 
   return (
     <section aria-labelledby="import-queue-title" className="import-queue">
@@ -95,21 +106,21 @@ export const ImportQueuePanel: React.FC<ImportQueuePanelProps> = ({ onOpenItem, 
         <div className="import-queue-note is-limit" role="status">
           <Icon name="bookmark-check" size={18} />
           <p>
-            <strong>Your cookbook is full.</strong> The rest will wait here until there’s room.
+            <strong>Cookbook full · {waitingNote}.</strong> They’ll wait here until there’s room.
           </p>
-          <ButtonLink size="sm" to="/pricing" variant="primary">
-            See plans
-          </ButtonLink>
+          <Button onClick={() => offerUpgrade("save_limit")} size="sm" variant="primary">
+            Get Plus
+          </Button>
         </div>
       ) : runner.paused === "import_limit" ? (
         <div className="import-queue-note is-limit" role="status">
           <Icon name="sparkles" size={18} />
           <p>
-            <strong>You’ve used your imports.</strong> These links will wait here for you.
+            <strong>Imports used up · {waitingNote}.</strong> They’ll wait here for you.
           </p>
-          <ButtonLink size="sm" to="/pricing" variant="primary">
-            See plans
-          </ButtonLink>
+          <Button onClick={() => offerUpgrade("import_limit")} size="sm" variant="primary">
+            Get Plus
+          </Button>
         </div>
       ) : !runner.online && waiting.length > 0 ? (
         <div className="import-queue-note" role="status">
@@ -123,6 +134,8 @@ export const ImportQueuePanel: React.FC<ImportQueuePanelProps> = ({ onOpenItem, 
           const label = item.url ? (getImportHost(item.url) ?? item.url) : textPreview(item.text);
           const savedTitle = item.recipeId ? titles.get(item.recipeId) : undefined;
 
+          // One row anatomy: a title (the saved recipe, or the site in muted text while it's
+          // pending), trailing actions, and a status line that runs the full width underneath.
           return (
             <li className={`import-queue-item is-${item.status}`} key={item.id}>
               <span aria-hidden="true" className="import-queue-item-icon">
@@ -133,30 +146,33 @@ export const ImportQueuePanel: React.FC<ImportQueuePanelProps> = ({ onOpenItem, 
                   strokeWidth={item.status === "done" ? 2.8 : 2}
                 />
               </span>
-              <div className="import-queue-item-copy">
-                <p className="import-queue-item-title">
-                  {item.status === "done" && savedTitle ? savedTitle : label}
-                </p>
-                <p className="import-queue-item-status">
-                  {item.status === "queued"
-                    ? "Waiting"
-                    : item.status === "processing"
-                      ? "Importing…"
-                      : item.status === "done"
-                        ? `Saved${savedTitle ? ` · ${label}` : ""}`
-                        : (item.error ?? "This import didn’t work.")}
-                </p>
-              </div>
-              <div className="import-queue-item-actions">
+              <p className={`import-queue-item-title${savedTitle ? "" : " is-source"}`}>
                 {item.status === "done" && item.recipeId ? (
-                  <Link className="import-queue-open" to={`/recipes/${item.recipeId}`}>
-                    Open
+                  <Link className="import-queue-item-link" to={`/recipes/${item.recipeId}`}>
+                    {savedTitle ?? label}
                   </Link>
-                ) : null}
+                ) : (
+                  label
+                )}
+              </p>
+              <p className="import-queue-item-status">
+                {item.status === "queued"
+                  ? "Waiting"
+                  : item.status === "processing"
+                    ? "Importing…"
+                    : item.status === "done"
+                      ? `Saved${savedTitle ? ` · ${label}` : ""}`
+                      : (item.error ?? "This import didn’t work.")}
+              </p>
+              <div className="import-queue-item-actions">
                 {item.status === "failed" && item.url && onOpenItem ? (
-                  <Button onClick={() => onOpenItem(item)} size="sm" variant="secondary">
+                  <button
+                    className="import-queue-open"
+                    onClick={() => onOpenItem(item)}
+                    type="button"
+                  >
                     Open
-                  </Button>
+                  </button>
                 ) : null}
                 {item.status === "failed" ? (
                   <IconButton
