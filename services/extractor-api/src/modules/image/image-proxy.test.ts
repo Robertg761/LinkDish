@@ -1,12 +1,15 @@
+import Fastify from "fastify";
 import { describe, expect, it, vi } from "vitest";
 
 import {
   assertPublicImageUrl,
   getProxiedImage,
   ImageProxyError,
-  parseImageProxyQuery
+  parseImageProxyQuery,
+  registerImageRoute
 } from "./image-proxy";
 
+import type { ImageProxyDependencies } from "./image-proxy";
 import type { ResolveHostname } from "../extract/source-url-safety";
 
 const resolverFor =
@@ -133,5 +136,45 @@ describe("getProxiedImage", () => {
       reason: "redirect_limit"
     });
     expect(fetchImplementation).toHaveBeenCalledTimes(4);
+  });
+});
+
+describe("registerImageRoute", () => {
+  it("lets browsers keep the WebP and has the shared CDN copy revalidated daily", async () => {
+    const pngSignature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
+    const fetchImplementation = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        new Response(pngSignature, { headers: { "content-type": "image/png" }, status: 200 })
+      );
+    const pipeline = {
+      resize: () => pipeline,
+      rotate: () => pipeline,
+      toBuffer: () => Promise.resolve(Buffer.from("webp-bytes")),
+      webp: () => pipeline
+    };
+    const loadSharp: NonNullable<ImageProxyDependencies["loadSharp"]> = () =>
+      Promise.resolve(() => pipeline);
+    const app = Fastify();
+    registerImageRoute(app, {
+      fetchImplementation,
+      loadSharp,
+      resolveHostname: resolverFor({})
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/image?url=https%3A%2F%2Fimages.example.com%2Frecipe.png&w=480"
+    });
+    await app.close();
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["content-type"]).toBe("image/webp");
+    expect(response.headers["cache-control"]).toBe("public, max-age=31536000, immutable");
+    // The cache key is only the source URL and width, and sites replace images at the same URL.
+    expect(response.headers["cdn-cache-control"]).toBe(
+      "public, s-maxage=86400, stale-while-revalidate=604800"
+    );
+    expect(response.body).toBe("webp-bytes");
   });
 });

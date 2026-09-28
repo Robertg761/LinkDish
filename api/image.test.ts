@@ -62,7 +62,7 @@ describe("Vercel image adapter", () => {
     });
   });
 
-  it("returns WebP bytes with the immutable browser and CDN cache policies", async () => {
+  it("returns WebP bytes with the browser cache policy and a CDN copy revalidated daily", async () => {
     imageMocks.parseImageProxyQuery.mockReturnValue({
       sourceUrl: new URL("https://img.test/food.jpg"),
       width: 480
@@ -76,7 +76,7 @@ describe("Vercel image adapter", () => {
     expect(response.headers.get("content-type")).toBe("image/webp");
     expect(response.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
     expect(response.headers.get("cdn-cache-control")).toBe(
-      "public, s-maxage=31536000, stale-while-revalidate=86400"
+      "public, s-maxage=86400, stale-while-revalidate=604800"
     );
     expect(response.headers.get("access-control-allow-origin")).toBe("https://app.linkdish.ca");
     expect(Buffer.from(await response.arrayBuffer()).toString("utf8")).toBe("webp-bytes");

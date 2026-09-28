@@ -351,11 +351,15 @@ export const registerImageRoute = (app: FastifyInstance, dependencies?: ImagePro
       const { sourceUrl, width } = parseImageProxyQuery(request.query);
       const image = await getProxiedImage(sourceUrl, width, dependencies);
 
-      return reply
-        .header("cache-control", "public, max-age=31536000, immutable")
-        .header("cdn-cache-control", "public, s-maxage=31536000, stale-while-revalidate=86400")
-        .type("image/webp")
-        .send(image);
+      return (
+        reply
+          .header("cache-control", "public, max-age=31536000, immutable")
+          // The shared CDN copy is revalidated after a day: the cache key is only the source URL and
+          // width, and recipe sites do replace images at the same URL.
+          .header("cdn-cache-control", "public, s-maxage=86400, stale-while-revalidate=604800")
+          .type("image/webp")
+          .send(image)
+      );
     } catch (error) {
       if (error instanceof ImageProxyError) {
         return reply.status(error.statusCode).send({
