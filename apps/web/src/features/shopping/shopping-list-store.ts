@@ -634,6 +634,16 @@ export async function getShoppingItems(
   );
 }
 
+/**
+ * True when this device holds list items the list leaves out: kept for another household, or for
+ * any while the signed-in account's household isn't known yet (see setShoppingListHousehold).
+ */
+export async function hasShoppingItemsOutOfView(): Promise<boolean> {
+  const db = await getLinkDishWebDb();
+  const items = (await db.getAll(STORE_NAME)) as WebShoppingItem[];
+  return items.some((item) => !item.isDeleted && belongsToOtherHousehold(item, listScope));
+}
+
 /** Writes records and removes ids in one transaction. */
 async function writeShoppingRecords(
   records: readonly WebShoppingItem[],

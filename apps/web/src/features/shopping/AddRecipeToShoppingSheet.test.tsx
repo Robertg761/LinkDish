@@ -12,17 +12,19 @@ import { AddRecipeToShoppingSheet } from "./AddRecipeToShoppingSheet";
 import {
   addShoppingItems,
   getShoppingItems,
+  putShoppingItems,
   resetShoppingListStoreForTests
 } from "./shopping-list-store";
 import {
   getShoppingSyncState,
   resetShoppingSyncForTests,
   setShoppingAccount,
+  SHOPPING_HOUSEHOLD_CACHE_KEY,
   syncShoppingNow
 } from "./shopping-sync";
 
 import type { UpsertShoppingItemsRequest } from "@linkdish/api-contracts";
-import type { Recipe } from "@linkdish/recipe-domain";
+import type { Recipe, ShoppingItem } from "@linkdish/recipe-domain";
 
 const analyticsMocks = vi.hoisted(() => ({ trackWebEvent: vi.fn() }));
 const apiMocks = vi.hoisted(() => ({
@@ -75,6 +77,7 @@ const renderSheet = (
 describe("AddRecipeToShoppingSheet", () => {
   beforeEach(() => {
     window.localStorage.clear();
+    window.sessionStorage.clear();
     fakeIdb.reset();
     resetLinkDishWebDbForTests();
     resetShoppingListStoreForTests();
@@ -146,6 +149,80 @@ describe("AddRecipeToShoppingSheet", () => {
         eventName: "shopping_item_added",
         properties: { count: 4, method: "recipe_sheet", source: "recipe" }
       })
+    );
+  });
+
+  it("waits for the household check so the recipe adds up with that household's list", async () => {
+    // u1 (household h1) used this device: h1's cheese is on it, and the cache is u1's.
+    window.localStorage.setItem(
+      SHOPPING_HOUSEHOLD_CACHE_KEY,
+      JSON.stringify({ checkedAt: Date.now(), household: true, householdId: "h1", userId: "u1" })
+    );
+    await putShoppingItems([
+      {
+        addedBy: "u1",
+        checked: false,
+        checkedBy: null,
+        createdAt: "2026-07-04T10:00:00.000Z",
+        id: "cheese-h1",
+        qty: 1,
+        sync: { householdId: "h1", lastSyncedAt: "2026-07-04T10:00:00.000Z", status: "synced" },
+        text: "cheese",
+        unit: "cup",
+        updatedAt: "2026-07-04T10:00:00.000Z"
+      }
+    ]);
+    const server = new Map<string, ShoppingItem>([
+      [
+        "cheese-h1",
+        {
+          addedBy: "u1",
+          checked: false,
+          id: "cheese-h1",
+          qty: 1,
+          text: "cheese",
+          unit: "cup",
+          updatedAt: "2026-07-04T10:00:00.000Z"
+        }
+      ]
+    ]);
+    apiMocks.upsertShoppingItems.mockImplementation((input: UpsertShoppingItemsRequest) => {
+      input.items.forEach((item) => server.set(item.id, item));
+      return Promise.resolve({ ignored: [], items: input.items });
+    });
+    apiMocks.getShoppingList.mockImplementation(() =>
+      Promise.resolve({ items: [...server.values()] })
+    );
+    let answerHousehold: (value: { household: { id: string } }) => void = () => undefined;
+    apiMocks.getHousehold.mockReturnValue(
+      new Promise((resolve) => {
+        answerHousehold = resolve;
+      })
+    );
+
+    // u2, also in h1, signs in here for the first time. The page knows u2 shares a list; the
+    // sync layer's own check is still out.
+    setShoppingAccount({ isAuthenticated: true, loading: false, userId: "u2" });
+    const { onClose } = renderSheet({ canSync: true, userId: "u2" });
+    fireEvent.click(screen.getByRole("button", { name: "Add 4 items" }));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(onClose).not.toHaveBeenCalled();
+
+    answerHousehold({ household: { id: "h1" } });
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+
+    // The cheese adds up with h1's instead of going on the list twice.
+    await waitFor(async () =>
+      expect(
+        (await getShoppingItems())
+          .filter((item) => item.text === "cheese")
+          .map((item) => [item.id, item.qty, item.sync.householdId])
+      ).toEqual([["cheese-h1", 3, "h1"]])
+    );
+    await waitFor(() =>
+      expect([...server.values()].filter((item) => item.text === "cheese")).toEqual([
+        expect.objectContaining({ id: "cheese-h1", qty: 3 })
+      ])
     );
   });
 

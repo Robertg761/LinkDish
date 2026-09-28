@@ -8,6 +8,7 @@ import { safeGetItem, safeSetItem } from "../../platform/safe-storage";
 
 import {
   claimShoppingChanges,
+  hasShoppingItemsOutOfView,
   loadShoppingList,
   setShoppingListHousehold,
   ShoppingSyncCancelledError,
@@ -15,12 +16,14 @@ import {
 } from "./shopping-list-store";
 
 import type { ShoppingWriteOptions } from "./shopping-list-store";
+import type { WebStorageKind } from "../../platform/safe-storage";
 
 /**
  * Household sync for the shopping list, kept off the critical path:
  *
  * - Household mode (is this account in a household?) is cached per account and refreshed in the
- *   background, so the list renders from IndexedDB immediately.
+ *   background, so the list renders from IndexedDB immediately (members who share a device each
+ *   get theirs at once).
  * - Syncs are coalesced: a burst of check-offs becomes one push + pull, and a sync requested while
  *   one is running runs once more afterwards.
  * - One focus / visibility / online listener and a gentle poll while a list is on screen.
@@ -63,13 +66,30 @@ export const SHOPPING_SYNC_DELAY_MS = 800;
 const WAKE_THROTTLE_MS = 2_000;
 const POLL_INTERVAL_MS = 30_000;
 
-interface HouseholdCache {
+/** What a household check answered for an account. */
+interface HouseholdAnswer {
   checkedAt: number;
   household: boolean;
   /** Added later: caches written before it make the next sync check the household first. */
   householdId?: string | undefined;
+}
+
+interface HouseholdCache extends HouseholdAnswer {
   userId: string;
 }
+
+/**
+ * The stored cache: the last answer on this device (the account sign-in assumes while auth
+ * loads), plus, added later, the last answer for each account that checked here (`accounts`), so
+ * members who share a device each see their household's list as soon as they sign in.
+ */
+interface StoredHouseholdCache extends HouseholdCache {
+  accounts?: Record<string, HouseholdAnswer> | undefined;
+}
+
+const MAX_CACHED_ACCOUNTS = 8;
+/** How long adding a recipe waits for a household check, so it adds up with that list. */
+const HOUSEHOLD_WAIT_MS = 3_000;
 
 const initialState: ShoppingSyncState = {
   error: null,
@@ -105,6 +125,15 @@ let householdCheckError: unknown = null;
 let claims: Promise<void> = Promise.resolve();
 /** When the household answer this tab's state holds was checked (0: none yet). */
 let householdAnsweredAt = 0;
+/**
+ * False while the household this tab's state holds is only remembered from an earlier sign-in of
+ * the account (another account has checked on this device since). The list shows it and takes
+ * changes, but nothing is sent until this sign-in's check confirms it: the account may have
+ * moved, and the unsent changes on this device (other members' too) must only reach theirs.
+ */
+let householdConfirmed = false;
+/** Answers this tab's checks got, for when storage can't be written (or read). */
+const answersInMemory = new Map<string, HouseholdCache>();
 let listeningToOtherTabs = false;
 
 const setState = (patch: Partial<ShoppingSyncState>) => {
@@ -125,35 +154,100 @@ const setState = (patch: Partial<ShoppingSyncState>) => {
   });
 };
 
-const readHouseholdCache = (): HouseholdCache | null => {
-  try {
-    const raw = safeGetItem(SHOPPING_HOUSEHOLD_CACHE_KEY);
-    const parsed = raw ? (JSON.parse(raw) as Partial<HouseholdCache>) : null;
+const parseAnswer = (userId: unknown, value: unknown): HouseholdCache | null => {
+  const { checkedAt, household, householdId } = (value ?? {}) as Partial<HouseholdAnswer>;
 
-    if (
-      parsed &&
-      typeof parsed.userId === "string" &&
-      typeof parsed.household === "boolean" &&
-      typeof parsed.checkedAt === "number"
-    ) {
-      const { checkedAt, household, householdId, userId } = parsed;
-      return {
-        checkedAt,
-        household,
-        userId,
-        ...(household && typeof householdId === "string" && householdId ? { householdId } : {})
-      };
-    }
-  } catch {
-    // A corrupt cache only costs one network check.
+  if (
+    typeof userId !== "string" ||
+    !userId ||
+    typeof household !== "boolean" ||
+    typeof checkedAt !== "number"
+  ) {
+    return null;
   }
 
-  return null;
+  return {
+    checkedAt,
+    household,
+    userId,
+    ...(household && typeof householdId === "string" && householdId ? { householdId } : {})
+  };
+};
+
+/** The stored answers: the last one on this device, and each account's. */
+const readStoredCache = (
+  kind: WebStorageKind
+): { accounts: HouseholdCache[]; last: HouseholdCache | null } => {
+  try {
+    const raw = safeGetItem(SHOPPING_HOUSEHOLD_CACHE_KEY, kind);
+    const parsed = raw ? (JSON.parse(raw) as Partial<StoredHouseholdCache> | null) : null;
+    const last = parsed ? parseAnswer(parsed.userId, parsed) : null;
+    const accounts =
+      parsed && typeof parsed.accounts === "object" && parsed.accounts !== null
+        ? Object.entries(parsed.accounts)
+            .map(([userId, answer]) => parseAnswer(userId, answer))
+            .filter((answer): answer is HouseholdCache => answer !== null)
+        : [];
+
+    return { accounts, last };
+  } catch {
+    // A corrupt cache only costs one network check.
+    return { accounts: [], last: null };
+  }
+};
+
+const newest = (answers: ReadonlyArray<HouseholdCache | null | undefined>): HouseholdCache | null =>
+  answers.reduce<HouseholdCache | null>(
+    (best, answer) => (answer && (!best || answer.checkedAt > best.checkedAt) ? answer : best),
+    null
+  );
+
+/**
+ * The last answer on this device, for whichever account (session storage holds it when local
+ * storage can't be written).
+ */
+const readHouseholdCache = (): HouseholdCache | null =>
+  newest([readStoredCache("local").last, readStoredCache("session").last]);
+
+/** The newest answer this device has for `userId`. */
+const readAccountHousehold = (userId: string): HouseholdCache | null => {
+  const stored = [readStoredCache("local"), readStoredCache("session")].flatMap(
+    ({ accounts, last }) => [last, ...accounts]
+  );
+
+  return newest(
+    [...stored, answersInMemory.get(userId)].filter((answer) => answer?.userId === userId)
+  );
 };
 
 const writeHouseholdCache = (cache: HouseholdCache) => {
-  safeSetItem(SHOPPING_HOUSEHOLD_CACHE_KEY, JSON.stringify(cache));
+  answersInMemory.set(cache.userId, cache);
+
+  const serialize = (kind: WebStorageKind) => {
+    const accounts = [
+      cache,
+      ...readStoredCache(kind).accounts.filter((answer) => answer.userId !== cache.userId)
+    ]
+      .sort((a, b) => b.checkedAt - a.checkedAt)
+      .slice(0, MAX_CACHED_ACCOUNTS);
+    const stored: StoredHouseholdCache = {
+      ...cache,
+      accounts: Object.fromEntries(accounts.map(({ userId, ...answer }) => [userId, answer]))
+    };
+    return JSON.stringify(stored);
+  };
+
+  if (!safeSetItem(SHOPPING_HOUSEHOLD_CACHE_KEY, serialize("local"))) {
+    // Local storage is full or blocked: this tab keeps it across reloads at least.
+    safeSetItem(SHOPPING_HOUSEHOLD_CACHE_KEY, serialize("session"), "session");
+  }
 };
+
+/**
+ * Whether an answer remembered for `userId` can be used without checking first, as it always
+ * could: it is the last one on this device, so no other account has checked since.
+ */
+const isLastAnswerFor = (userId: string): boolean => readHouseholdCache()?.userId === userId;
 
 /** Mode and household from a cache entry for this account. */
 const cachedHouseholdState = (
@@ -190,6 +284,7 @@ const applyHouseholdAnswer = (
   checkedAt: number
 ): boolean => {
   householdAnsweredAt = checkedAt;
+  householdConfirmed = true;
 
   if (householdId) {
     // Unsent changes that don't know their household yet are this account's; and if the
@@ -215,11 +310,11 @@ const applyHouseholdAnswer = (
  */
 const adoptHouseholdCache = (): boolean => {
   const userId = state.userId;
-  const cache = readHouseholdCache();
+  const cache = userId ? readAccountHousehold(userId) : null;
 
   if (
     !userId ||
-    cache?.userId !== userId ||
+    !cache ||
     cache.checkedAt < householdAnsweredAt ||
     (cache.household && !cache.householdId)
   ) {
@@ -229,6 +324,11 @@ const adoptHouseholdCache = (): boolean => {
   const { householdId, mode } = cachedHouseholdState(cache);
 
   if (state.modeResolved && state.householdId === householdId && state.mode === mode) {
+    if (cache.checkedAt > householdAnsweredAt) {
+      // Checked again since the answer this tab holds (in another tab): that confirms it.
+      householdConfirmed = true;
+    }
+
     householdAnsweredAt = cache.checkedAt;
     return false;
   }
@@ -350,6 +450,7 @@ export function setShoppingAccount(account: ShoppingAccount): void {
 
       if (cache) {
         householdAnsweredAt = cache.checkedAt;
+        householdConfirmed = true;
         setState({ ...cachedHouseholdState(cache), modeResolved: false, userId: cache.userId });
       }
     }
@@ -363,6 +464,7 @@ export function setShoppingAccount(account: ShoppingAccount): void {
   if (!userId) {
     syncWhenReady = false;
     householdAnsweredAt = 0;
+    householdConfirmed = false;
 
     if (state.userId !== null || !state.modeResolved || state.mode !== "local") {
       setState({
@@ -387,11 +489,13 @@ export function setShoppingAccount(account: ShoppingAccount): void {
     previousKey !== credentialsKey;
 
   if (state.userId !== userId || !state.modeResolved) {
-    const cache = readHouseholdCache();
-    const cached = cache?.userId === userId ? cache : null;
+    // This account's last answer here, even when another account has checked since (it is then
+    // shown at once but only confirmed by the check below).
+    const cached = readAccountHousehold(userId);
 
     if (state.userId !== userId) {
       householdAnsweredAt = cached?.checkedAt ?? 0;
+      householdConfirmed = isLastAnswerFor(userId);
       setState({
         error: null,
         householdId: null,
@@ -404,6 +508,7 @@ export function setShoppingAccount(account: ShoppingAccount): void {
       });
     } else if (cached && !state.modeResolved) {
       householdAnsweredAt = cached.checkedAt;
+      householdConfirmed = isLastAnswerFor(userId);
       setState({ ...cachedHouseholdState(cached), modeResolved: true });
     }
 
@@ -435,14 +540,15 @@ const classifyError = (error: unknown): ShoppingSyncPhase => {
 
 /**
  * One sync with the household this device is in. Which household that is gets checked first
- * when it isn't known yet (a cache from before household ids), since changes must only go to the
- * household they belong to. Resolves false when the account turned out not to be in one.
+ * when it isn't known yet (a cache from before household ids) or only remembered from an earlier
+ * sign-in (see householdConfirmed), since changes must only go to the household they belong to.
+ * Resolves false when the account turned out not to be in one.
  */
 const syncWithHousehold = async (): Promise<boolean> => {
   // Another tab may have seen this account move, or leave, since this one checked.
   adoptHouseholdCache();
 
-  if (state.mode === "household" && !state.householdId) {
+  if (state.mode === "household" && (!state.householdId || !householdConfirmed)) {
     await refreshShoppingHousehold({ force: true });
   }
 
@@ -454,7 +560,7 @@ const syncWithHousehold = async (): Promise<boolean> => {
 
   const { householdId, userId } = state;
 
-  if (!householdId) {
+  if (!householdId || !householdConfirmed) {
     // Reported like the check's own failure (offline, timeout...) so the status reads right.
     throw householdCheckError instanceof Error
       ? householdCheckError
@@ -525,6 +631,36 @@ export function syncShoppingNow(): Promise<void> {
 
   syncInflight = run;
   return run;
+}
+
+/**
+ * Before adding items while the signed-in account's household isn't known yet: asks for it now,
+ * so the items record their household (and can only ever go there) as soon as it answers. When
+ * this device holds household items the list leaves out until then (it may be this account's
+ * household, e.g. another member used the device last), it also waits for the answer, up to
+ * `timeoutMs`, so the new items add up with that list instead of going on next to it. Never
+ * rejects.
+ */
+export async function waitForShoppingHousehold(timeoutMs = HOUSEHOLD_WAIT_MS): Promise<void> {
+  if (!state.userId || credentialsPending || state.householdId) {
+    return;
+  }
+
+  const answered = refreshShoppingHousehold({ force: true });
+  const hidden = await hasShoppingItemsOutOfView().catch(() => false);
+
+  if (!hidden) {
+    return;
+  }
+
+  await new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, timeoutMs);
+
+    void answered.finally(() => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
 }
 
 /**
@@ -666,6 +802,8 @@ export function resetShoppingSyncForTests(): void {
   householdCheckError = null;
   claims = Promise.resolve();
   householdAnsweredAt = 0;
+  householdConfirmed = false;
+  answersInMemory.clear();
   accountConfigured = false;
 
   if (listeningToOtherTabs) {

@@ -28,8 +28,8 @@ import {
 } from "./shopping-list-store";
 import {
   getShoppingWriteOptions,
-  refreshShoppingHousehold,
-  requestShoppingSync
+  requestShoppingSync,
+  waitForShoppingHousehold
 } from "./shopping-sync";
 import { ShoppingChecklist } from "./ShoppingChecklist";
 
@@ -204,6 +204,15 @@ export const AddRecipeToShoppingSheet: React.FC<AddRecipeToShoppingSheetProps> =
     setError("");
 
     try {
+      const known = getShoppingWriteOptions();
+
+      if ((canSync ?? known.canSync) && !known.householdId) {
+        // The page knows this account shares a list, but the sync layer doesn't know which one
+        // yet (just signed in here): ask it now, and wait briefly if that household's items are
+        // out of the list until it answers, so these add up with them.
+        await waitForShoppingHousehold();
+      }
+
       const defaults = getShoppingWriteOptions();
       const writeOptions = {
         canSync: canSync ?? defaults.canSync,
@@ -211,12 +220,6 @@ export const AddRecipeToShoppingSheet: React.FC<AddRecipeToShoppingSheetProps> =
         ...((userId ?? defaults.userId) ? { userId: userId ?? defaults.userId } : {})
       };
       await addShoppingItems(selectedInputs, writeOptions);
-
-      if (writeOptions.canSync && !writeOptions.householdId) {
-        // The sync layer hasn't confirmed this account's household yet: ask it now, so these
-        // items record their household (and can only ever go there) as soon as it answers.
-        void refreshShoppingHousehold({ force: true });
-      }
 
       if (writeOptions.canSync) {
         requestShoppingSync({ delayMs: 0 });

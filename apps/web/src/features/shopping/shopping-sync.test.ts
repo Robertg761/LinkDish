@@ -213,6 +213,7 @@ const deferred = <T>() => {
 describe("shopping-sync", () => {
   beforeEach(() => {
     window.localStorage.clear();
+    window.sessionStorage.clear();
     fakeIdb.reset();
     resetLinkDishWebDbForTests();
     resetShoppingListStoreForTests();
@@ -859,6 +860,148 @@ describe("shopping-sync", () => {
     expect(getShoppingSyncState().phase).toBe("synced");
     expect((await getShoppingItems()).map((item) => [item.text, item.qty])).toEqual([["milk", 2]]);
     expect(server.records.get("milk-h1")?.item).toMatchObject({ qty: 1 });
+  });
+
+  it("shows each member's household list at once on a device they share", async () => {
+    const server = createHouseholdServer();
+    server.seed("h1", householdItem("milk-h1", "milk", { addedBy: "u1", qty: 1, unit: "cup" }));
+
+    // u1 and u2, both in h1, take turns on one device.
+    await signIn("u1");
+    await syncShoppingNow();
+    signOut();
+    await signIn("u2");
+    await syncShoppingNow();
+    signOut();
+
+    // u1 again, with this sign-in's household check still out.
+    const household = deferred<{ household: { id: string } }>();
+    apiMocks.getHousehold.mockReturnValueOnce(household.promise);
+    setShoppingAccount({ isAuthenticated: true, loading: false, userId: "u1" });
+    expect(getShoppingSyncState()).toMatchObject({
+      householdId: "h1",
+      mode: "household",
+      modeResolved: true
+    });
+    await loadShoppingList({ force: true });
+    expect(getShoppingListSnapshot().items.map((item) => item.text)).toEqual(["milk"]);
+
+    // Milk from the plan adds up with h1's milk, and it can be checked off.
+    await addParsedShoppingItems(
+      [{ qty: 2, text: "milk", unit: "cup" }],
+      getShoppingWriteOptions()
+    );
+    expect(await setShoppingItemChecked("milk-h1", true, getShoppingWriteOptions())).toBeDefined();
+
+    // Nothing is sent before this sign-in's check confirms the household.
+    const syncing = syncShoppingNow();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(server.pushedIds).toEqual([]);
+
+    household.resolve({ household: { id: "h1" } });
+    await syncing;
+
+    expect(getShoppingSyncState()).toMatchObject({ householdId: "h1", phase: "synced" });
+    expect(server.records.get("milk-h1")?.item).toMatchObject({ checked: true, qty: 3 });
+    expect((await getShoppingItems()).map((item) => [item.id, item.qty, item.sync.status])).toEqual(
+      [["milk-h1", 3, "synced"]]
+    );
+  });
+
+  it("sends nothing to an account's remembered household until this sign-in's check confirms it", async () => {
+    const server = createHouseholdServer();
+    server.seed("h1", householdItem("milk-h1", "milk", { addedBy: "u1" }));
+
+    await signIn("u1");
+    await syncShoppingNow();
+    signOut();
+
+    // u7, also in h1, adds limes offline and signs out.
+    await signIn("u7");
+    apiMocks.upsertShoppingItems.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    await addShoppingItems([{ text: "limes" }], getShoppingWriteOptions());
+    await syncShoppingNow();
+    expect(getShoppingSyncState().phase).toBe("offline");
+    signOut();
+
+    // Meanwhile u1 moved to h2 on another device. Here, u1's last answer still says h1: the
+    // list shows it, but nothing is sent until the check answers, and the limes stay h1's.
+    server.use("h2");
+    apiMocks.getHousehold
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    setShoppingAccount({ isAuthenticated: true, loading: false, userId: "u1" });
+    expect(getShoppingSyncState().householdId).toBe("h1");
+    await loadShoppingList({ force: true });
+    expect(getShoppingListSnapshot().items.map((item) => item.text)).toEqual(["milk", "limes"]);
+    await syncShoppingNow();
+
+    expect(getShoppingSyncState().phase).toBe("offline");
+    expect(apiMocks.getShoppingList).toHaveBeenCalledTimes(1);
+    expect(server.pushedIds).toEqual([]);
+
+    await refreshShoppingHousehold({ force: true });
+    await syncShoppingNow();
+
+    expect(getShoppingSyncState()).toMatchObject({ householdId: "h2", phase: "synced" });
+    expect(server.pushedIds).toEqual([]);
+    expect(householdRecords(server, "h2")).toEqual([]);
+  });
+
+  it("remembers an account's household across sign-ins when storage can't be written", async () => {
+    const server = createHouseholdServer();
+    server.seed("h1", householdItem("milk-h1", "milk", { addedBy: "u1" }));
+    const setItem = vi.spyOn(window.localStorage, "setItem").mockImplementation(() => {
+      throw new DOMException("The quota has been exceeded.", "QuotaExceededError");
+    });
+    const setSessionItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("The quota has been exceeded.", "QuotaExceededError");
+    });
+
+    try {
+      await signIn("u1");
+      await syncShoppingNow();
+      signOut();
+
+      // Offline when u1 signs in again: the list is still h1's, and can be checked off.
+      apiMocks.getHousehold.mockRejectedValue(new TypeError("Failed to fetch"));
+      setShoppingAccount({ isAuthenticated: true, loading: false, userId: "u1" });
+      expect(getShoppingSyncState()).toMatchObject({ householdId: "h1", mode: "household" });
+      await loadShoppingList({ force: true });
+      expect(getShoppingListSnapshot().items.map((item) => item.text)).toEqual(["milk"]);
+      expect(
+        await setShoppingItemChecked("milk-h1", true, getShoppingWriteOptions())
+      ).toBeDefined();
+    } finally {
+      setItem.mockRestore();
+      setSessionItem.mockRestore();
+    }
+  });
+
+  it("remembers an account's household across a reload when only session storage can be written", async () => {
+    const server = createHouseholdServer();
+    server.seed("h1", householdItem("milk-h1", "milk", { addedBy: "u1" }));
+    const setItem = vi.spyOn(window.localStorage, "setItem").mockImplementation(() => {
+      throw new DOMException("The quota has been exceeded.", "QuotaExceededError");
+    });
+
+    try {
+      await signIn("u1");
+      await syncShoppingNow();
+
+      // Reload, offline.
+      resetShoppingSyncForTests();
+      resetShoppingListStoreForTests();
+      resetLinkDishWebDbForTests();
+      apiMocks.getHousehold.mockRejectedValue(new TypeError("Failed to fetch"));
+      setShoppingAccount({ isAuthenticated: true, loading: false, userId: "u1" });
+
+      expect(getShoppingSyncState()).toMatchObject({ householdId: "h1", mode: "household" });
+      await loadShoppingList();
+      expect(getShoppingListSnapshot().items.map((item) => item.text)).toEqual(["milk"]);
+    } finally {
+      setItem.mockRestore();
+    }
   });
 
   it("follows a household another tab has just confirmed for this account", async () => {
