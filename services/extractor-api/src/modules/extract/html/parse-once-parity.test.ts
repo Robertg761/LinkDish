@@ -114,6 +114,18 @@ describe("single-parse extraction parity", () => {
     });
   }
 
+  it("keeps the fixtures free of remote scripts, which would load without an integrity check", () => {
+    for (const fixture of Object.keys(snapshot)) {
+      const $ = load(loadFixture(fixture));
+      const remoteScripts = $("script[src]")
+        .map((_, element) => $(element).attr("src") ?? "")
+        .get()
+        .filter((source) => /^(?:[a-z]+:)?\/\//iu.test(source));
+
+      expect(remoteScripts, fixture).toEqual([]);
+    }
+  });
+
   it("parses each fetched document once and never mutates the shared parse", () => {
     const html = loadFixture("recipe-graph-wprm.html");
     const document = buildHtmlSourceDocument({
