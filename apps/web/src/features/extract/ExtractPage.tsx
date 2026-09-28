@@ -5,6 +5,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { trackWebEvent, trackWebV2AnalyticsEvent } from "../../analytics/client";
 import { createWebAnalyticsId } from "../../analytics/session";
 import { apiClient, ExtractorApiError, type ExtractRecipeResponse } from "../../api/client";
+import { getApiErrorKind } from "../../api/errors";
 import { useAuth } from "../../auth/AuthProvider";
 import { Button, ButtonLink } from "../../components/Button";
 import { Card } from "../../components/Card";
@@ -448,20 +449,24 @@ export const ExtractPage: React.FC = () => {
     }
 
     activeImportRef.current.terminal = true;
+    // api-client v2 reports dropped connections and timeouts as ExtractorApiError (status 0).
+    const apiErrorKind = getApiErrorKind(err);
+    const isApiResponseError =
+      err instanceof ExtractorApiError && apiErrorKind !== "network" && apiErrorKind !== "timeout";
     trackWebV2AnalyticsEvent({
       name: "import_failed",
       correlationId,
       routeOrScreen: "/",
       properties: {
         ...importProperties,
-        failure_reason: err instanceof ExtractorApiError ? "api_error" : "network_error",
-        ...(err instanceof ExtractorApiError ? { status_code: err.statusCode } : {})
+        failure_reason: isApiResponseError ? "api_error" : "network_error",
+        ...(isApiResponseError ? { status_code: err.statusCode } : {})
       }
     });
     setState("failure");
     setErrorTitle(extractionErrorTitle);
 
-    if (err instanceof ExtractorApiError) {
+    if (isApiResponseError) {
       const quota = getQuotaFromUnknown(err.details);
       setErrorMessage(
         formatMonthlyQuotaCopy(quota, err.message || "The extraction server returned an error.")

@@ -9,6 +9,11 @@ import {
   isOffline,
   isTimeoutError
 } from "./error-message";
+import {
+  ExtractorApiError as WebExtractorApiError,
+  getApiErrorKind,
+  toWebApiError
+} from "./errors";
 
 const apiError = (status: number, details?: unknown) =>
   new ExtractorApiError("Extractor API request failed.", status, details);
@@ -125,5 +130,29 @@ describe("error classification helpers", () => {
     expect(getServerErrorMessage(apiError(400, { message: "  Please   add a link.  " }))).toBe(
       "Please add a link."
     );
+  });
+});
+
+describe("getFriendlyErrorMessage with api-client v2 error kinds", () => {
+  it("uses connection copy for network and timeout kinds instead of the raw message", () => {
+    const network = new ExtractorApiError("Failed to fetch", 0, undefined, { kind: "network" });
+    const timeout = new ExtractorApiError("Request timed out", 0, undefined, { kind: "timeout" });
+
+    expect(getFriendlyErrorMessage(network, "extract")).toMatch(/couldn't reach LinkDish/);
+    expect(getFriendlyErrorMessage(timeout, "extract")).toMatch(/took too long/);
+  });
+
+  it("keeps the kind when converting the package error class", () => {
+    const packageError = Object.assign(new Error("Failed to fetch"), {
+      name: "ExtractorApiError",
+      statusCode: 0,
+      kind: "network",
+      serverMessage: undefined
+    });
+    const converted = toWebApiError(packageError);
+
+    expect(converted).toBeInstanceOf(WebExtractorApiError);
+    expect(getApiErrorKind(converted)).toBe("network");
+    expect(getFriendlyErrorMessage(converted)).toMatch(/couldn't reach LinkDish/);
   });
 });

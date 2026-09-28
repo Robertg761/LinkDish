@@ -1,4 +1,4 @@
-import { isExtractorApiError } from "./errors";
+import { getApiErrorKind, isExtractorApiError } from "./errors";
 
 /**
  * Plain-language copy for anything a request can throw: API errors (using the server's own
@@ -175,6 +175,25 @@ export function getFriendlyErrorMessage(
   }
 
   if (isExtractorApiError(error)) {
+    const kind = getApiErrorKind(error);
+
+    // api-client v2 reports transport failures as ExtractorApiError with statusCode 0.
+    if (kind === "network") {
+      return NETWORK_MESSAGE;
+    }
+
+    if (kind === "timeout") {
+      return TIMEOUT_MESSAGE;
+    }
+
+    if (kind === "validation") {
+      return contextFallbacks[context];
+    }
+
+    if (kind === "contract") {
+      return UNEXPECTED_RESPONSE_MESSAGE;
+    }
+
     const serverMessage = getServerErrorMessage(error);
 
     // Auth and server failures get our own wording; other 4xx answers can speak for themselves.
