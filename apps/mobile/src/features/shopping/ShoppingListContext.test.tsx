@@ -546,6 +546,8 @@ describe("ShoppingListProvider across accounts on one device", () => {
 
   beforeEach(() => {
     vi.useFakeTimers();
+    // Shortly after the stored changes below were made (other households' changes expire).
+    vi.setSystemTime(new Date("2026-07-04T13:00:00.000Z"));
     latestShoppingList = null;
     appStateMocks.listeners = [];
     accountState.getAuthHeaders.mockReset();
@@ -851,6 +853,123 @@ describe("ShoppingListProvider across accounts on one device", () => {
     ]);
   });
 
+  it("leaves another account's older unsent items to that account, or to a household that has them", async () => {
+    const later = "2026-07-04T12:30:00.000Z";
+    // Stored by the first cook before changes recorded their household: jam was never sent, and
+    // milk (on household_2's list: the first cook is a member too) was checked off offline.
+    asyncStorageMocks.getItem.mockImplementation((key: string) =>
+      Promise.resolve(
+        key === "linkdish.shoppingItems.v1"
+          ? JSON.stringify([
+              {
+                addedBy: "user_1",
+                checked: false,
+                createdAt: updatedAt,
+                id: "jam",
+                sync: { status: "dirty" },
+                text: "jam",
+                updatedAt
+              },
+              {
+                ...milk,
+                checked: true,
+                checkedBy: "user_1",
+                createdAt: updatedAt,
+                sync: { status: "sync_failed" },
+                updatedAt: later
+              }
+            ])
+          : null
+      )
+    );
+    const server = createHouseholdServer([
+      { householdId: "household_2", item: milk },
+      { householdId: "household_2", item: bread }
+    ]);
+    server.session.householdId = "household_2";
+    accountState.user = nextCook;
+    apiMocks.createExtractorApiClient.mockReturnValue(server.client);
+
+    const renderer = await renderProvider();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+      await flushAsyncWork();
+    });
+
+    // The next cook's household gets the milk it has, not the jam no household has.
+    expect(idsSentTo(server, "household_2")).toEqual(["milk"]);
+    expect(householdItems(server, "household_2")).toEqual([
+      ["milk", null, true],
+      ["bread", null, false]
+    ]);
+    expect(latestShoppingList?.shoppingError).toBeNull();
+    expect((await storedItems()).find((item) => item.id === "jam")?.sync).toEqual({
+      status: "dirty"
+    });
+
+    await act(async () => {
+      await latestShoppingList!.refreshShoppingList();
+    });
+    expect(idsSentTo(server, "household_2")).toEqual(["milk"]);
+
+    // The jam goes to the first cook's household when they sign in here again.
+    await signInTo(renderer, server, firstCook, "household_1");
+    expect(idsSentTo(server, "household_1")).toEqual(["jam"]);
+    expect(householdItems(server, "household_1")).toEqual([["jam", null, false]]);
+  });
+
+  it("drops another household's unsent changes after 30 days", async () => {
+    vi.setSystemTime(new Date("2026-08-10T12:00:00.000Z"));
+    const daysAgo = (days: number) =>
+      new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+    const storedItem = (id: string, sync: MobileShoppingItem["sync"], changedAt: string) => ({
+      addedBy: "user_1",
+      checked: true,
+      checkedBy: "user_1",
+      createdAt: changedAt,
+      id,
+      sync,
+      text: id,
+      updatedAt: changedAt
+    });
+    asyncStorageMocks.getItem.mockImplementation((key: string) =>
+      Promise.resolve(
+        key === "linkdish.shoppingItems.v1"
+          ? JSON.stringify([
+              storedItem(
+                "limes",
+                { householdId: "household_1", status: "sync_failed" },
+                daysAgo(31)
+              ),
+              storedItem("eggs", { householdId: "household_1", status: "dirty" }, daysAgo(29)),
+              storedItem("jam", { householdId: "household_2", status: "sync_failed" }, daysAgo(60))
+            ])
+          : null
+      )
+    );
+    const server = createHouseholdServer([{ householdId: "household_2", item: bread }]);
+    server.session.householdId = "household_2";
+    accountState.user = nextCook;
+    apiMocks.createExtractorApiClient.mockReturnValue(server.client);
+
+    const renderer = await renderProvider();
+
+    // Household_2's own old change is still sent; household_1's month-old one is gone.
+    expect(idsSentTo(server, "household_2")).toEqual(["jam"]);
+    expect(
+      (await storedItems()).map((item) => [item.id, item.sync.householdId, item.sync.status])
+    ).toEqual(
+      expect.arrayContaining([
+        ["eggs", "household_1", "dirty"],
+        ["jam", "household_2", "synced"]
+      ])
+    );
+    expect((await storedItems()).map((item) => item.id)).not.toContain("limes");
+
+    await signInTo(renderer, server, firstCook, "household_1");
+    expect(idsSentTo(server, "household_1")).toEqual(["eggs"]);
+  });
+
   it("does not use a household answer that arrives after its account signed out", async () => {
     const storedItem = (id: string, sync: MobileShoppingItem["sync"]) => ({
       addedBy: "user_1",
@@ -866,8 +985,8 @@ describe("ShoppingListProvider across accounts on one device", () => {
         key === "linkdish.shoppingItems.v1"
           ? JSON.stringify([
               storedItem("limes", { householdId: "household_1", status: "sync_failed" }),
-              // Stored before items recorded their household.
-              storedItem("jam", { status: "dirty" })
+              // Added signed out and stored before items recorded their household.
+              { ...storedItem("jam", { status: "dirty" }), addedBy: "local" }
             ])
           : null
       )
@@ -1038,9 +1157,10 @@ describe("ShoppingListProvider across accounts on one device", () => {
 
   it("sets aside only the items the household list refuses, so the rest still sync", async () => {
     const deletedAt = "2026-07-04T11:00:00.000Z";
-    // Stored before items recorded their household: only the API can tell which are foreign.
+    // The next cook's own changes, stored before items recorded their household (e.g. before
+    // it moved household): only the API can tell which are foreign.
     const storedItem = (id: string, status: "dirty" | "sync_failed", deleted = false) => ({
-      addedBy: "user_1",
+      addedBy: "user_2",
       checked: false,
       createdAt: updatedAt,
       id,

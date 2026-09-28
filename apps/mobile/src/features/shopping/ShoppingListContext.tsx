@@ -27,6 +27,7 @@ import {
   getShoppingListItems,
   markShoppingItemsSynced,
   markShoppingItemsSyncFailed,
+  pruneStaleShoppingRecords,
   readShoppingItems,
   serializeShoppingItems,
   setAsideShoppingItems,
@@ -309,8 +310,9 @@ export const ShoppingListProvider = ({ children }: PropsWithChildren) => {
 
   /**
    * The household a pass syncs with: this account's cached answer, or a fresh check (always for
-   * a pull). Unsent changes that don't name a household yet are recorded as this one's, and if
-   * the account moved household, its changes for the old one move with it. Resolves null when
+   * a pull). Unsent changes that don't name a household yet are recorded as this one's (unless
+   * another account added the item), and if the account moved household, its changes for the old
+   * one move with it. Other households' changes older than 30 days are dropped. Resolves null when
    * the account isn't in a household or the check failed (shown as the list's error).
    */
   const resolveHousehold = useCallback(
@@ -321,11 +323,17 @@ export const ShoppingListProvider = ({ children }: PropsWithChildren) => {
       ensureCurrent: () => void
     ): Promise<string | null> => {
       const last = householdCheckRef.current?.userId === userId ? householdCheckRef.current : null;
+      const claim = (householdId: string, from?: string) =>
+        commitShoppingItems((current) =>
+          pruneStaleShoppingRecords(
+            claimShoppingChanges(current, householdId, { from, userId }),
+            householdId
+          )
+        );
 
       if (!pull && last?.id && Date.now() - last.checkedAt < HOUSEHOLD_ID_CACHE_MS) {
-        const cachedId = last.id;
-        commitShoppingItems((current) => claimShoppingChanges(current, cachedId));
-        return cachedId;
+        claim(last.id);
+        return last.id;
       }
 
       let householdId: string | null;
@@ -353,8 +361,7 @@ export const ShoppingListProvider = ({ children }: PropsWithChildren) => {
         return null;
       }
 
-      const from = last?.id && last.id !== householdId ? last.id : undefined;
-      commitShoppingItems((current) => claimShoppingChanges(current, householdId, { from }));
+      claim(householdId, last?.id && last.id !== householdId ? last.id : undefined);
       return householdId;
     },
     [commitShoppingItems]
@@ -363,22 +370,29 @@ export const ShoppingListProvider = ({ children }: PropsWithChildren) => {
   /**
    * Pushes this household's unsent changes (edits, then tombstones) and pulls when asked or when
    * needed. Another household's changes are not sent: they wait on this device, out of this
-   * list, until that household syncs here again. Items the API refuses as another household's
-   * (stored before items recorded their household) are set aside on this device instead.
+   * list, until that household syncs here again (as do another account's that name no household;
+   * `userId` is the signed-in account). Items the API refuses as another household's (stored
+   * before items recorded their household) are set aside on this device instead. Resolves true
+   * when the pull showed unsent changes that named no household are this household's.
    */
   const pushAndPull = useCallback(
     async (
       apiClient: ExtractorApiClient,
       householdId: string,
+      userId: string,
       pull: boolean,
       ensureCurrent: () => void
-    ): Promise<void> => {
-      const syncableDirtyItems = getPendingShoppingChanges(shoppingItemsRef.current, householdId);
+    ): Promise<boolean> => {
+      const syncableDirtyItems = getPendingShoppingChanges(
+        shoppingItemsRef.current,
+        householdId,
+        userId
+      );
       const dirtyUpserts = syncableDirtyItems.filter((item) => !item.isDeleted);
       const dirtyDeletes = syncableDirtyItems.filter((item) => item.isDeleted);
 
       if (!pull && syncableDirtyItems.length === 0) {
-        return;
+        return false;
       }
 
       const pushedVersions = new Map(dirtyUpserts.map((item) => [item.id, item.updatedAt]));
@@ -413,6 +427,7 @@ export const ShoppingListProvider = ({ children }: PropsWithChildren) => {
         const deletedIds = new Set(deletes.results.flatMap((result) => result.deletedItemIds));
         const refusedIds = new Set([...upserts.refusedIds, ...deletes.refusedIds]);
         const remoteAfterDeletes = remoteItems?.filter((item) => !deletedIds.has(item.id)) ?? null;
+        let adoptedChanges = false;
 
         commitShoppingItems((current) => {
           const withoutDeleted = setAsideShoppingItems(current, refusedIds, householdId).filter(
@@ -424,13 +439,24 @@ export const ShoppingListProvider = ({ children }: PropsWithChildren) => {
             syncedAt,
             householdId
           );
-          return sortShoppingItems(
-            remoteAfterDeletes
-              ? applyRemoteShoppingItems(marked, remoteAfterDeletes, householdId)
-              : marked
+
+          if (!remoteAfterDeletes) {
+            return sortShoppingItems(marked);
+          }
+
+          // Unsent changes that named no household and turn out to be this household's (it has
+          // their items) go out in a follow-up pass.
+          const unclaimedIds = new Set(
+            marked.filter((item) => !item.sync.householdId).map((item) => item.id)
           );
+          const applied = applyRemoteShoppingItems(marked, remoteAfterDeletes, householdId);
+          adoptedChanges = getPendingShoppingChanges(applied, householdId, userId).some((item) =>
+            unclaimedIds.has(item.id)
+          );
+          return sortShoppingItems(applied);
         });
         setShoppingError(null);
+        return adoptedChanges;
       } catch (syncError) {
         if (syncError instanceof ShoppingSyncCancelledError) {
           throw syncError;
@@ -443,6 +469,7 @@ export const ShoppingListProvider = ({ children }: PropsWithChildren) => {
         const message = getShoppingErrorMessage(syncError);
         commitShoppingItems((current) => markShoppingItemsSyncFailed(current, failedIds, message));
         setShoppingError(message);
+        return false;
       }
     },
     [commitShoppingItems]
@@ -453,16 +480,17 @@ export const ShoppingListProvider = ({ children }: PropsWithChildren) => {
    * pull. Passes run one at a time and each checks the household itself, so what can change under
    * a pass is the account. Once it has, the pass stops (ShoppingSyncCancelledError) before its
    * next request and before recording any answer, so nothing goes to or comes from the wrong
-   * household; the loop then runs a pass for whoever is signed in.
+   * household; the loop then runs a pass for whoever is signed in. Resolves true when its pull
+   * showed changes to send (see pushAndPull).
    */
   const runSyncPass = useCallback(
-    async (pull: boolean): Promise<void> => {
+    async (pull: boolean): Promise<boolean> => {
       const { client: apiClient, isSignedIn: signedIn, userId } = latestRef.current;
 
       if (!signedIn || !userId) {
         householdCheckRef.current = expired(householdCheckRef.current);
         setShoppingError(null);
-        return;
+        return false;
       }
 
       const ensureCurrent = () => {
@@ -477,9 +505,9 @@ export const ShoppingListProvider = ({ children }: PropsWithChildren) => {
       try {
         const householdId = await resolveHousehold(apiClient, userId, pull, ensureCurrent);
 
-        if (householdId) {
-          await pushAndPull(apiClient, householdId, pull, ensureCurrent);
-        }
+        return householdId
+          ? await pushAndPull(apiClient, householdId, userId, pull, ensureCurrent)
+          : false;
       } finally {
         syncPassGuardRef.current = null;
       }
@@ -490,7 +518,8 @@ export const ShoppingListProvider = ({ children }: PropsWithChildren) => {
   /**
    * Runs sync passes one at a time. A request that arrives while a pass is in flight is not
    * dropped: it queues exactly one follow-up pass (which pulls if any queued request asked
-   * to), so edits made during a refresh are pushed as soon as it finishes.
+   * to), so edits made during a refresh are pushed as soon as it finishes. So does a pass whose
+   * pull showed unsent changes to be the household's.
    */
   const requestSync = useCallback(
     (pull: boolean): Promise<void> => {
@@ -510,7 +539,9 @@ export const ShoppingListProvider = ({ children }: PropsWithChildren) => {
             state.pendingPull = false;
 
             try {
-              await runSyncPass(shouldPull);
+              if (await runSyncPass(shouldPull)) {
+                state.pending = true;
+              }
             } catch (error) {
               if (!(error instanceof ShoppingSyncCancelledError)) {
                 throw error;

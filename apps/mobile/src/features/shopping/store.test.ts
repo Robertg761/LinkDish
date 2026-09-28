@@ -15,6 +15,7 @@ import {
   markShoppingItemsSynced,
   parseShoppingItems,
   parseShoppingLine,
+  pruneStaleShoppingRecords,
   readShoppingItems,
   recipeIngredientsToShoppingInputs,
   serializeShoppingItems,
@@ -454,8 +455,11 @@ describe("shopping store helpers", () => {
     expect(clearCheckedShoppingItemsInList(items, household2)).toEqual(items);
 
     // Their unsent changes wait for household_1.
-    expect(getPendingShoppingChanges(items, "household_2")).toEqual([]);
-    expect(ids(getPendingShoppingChanges(items, "household_1"))).toEqual(["eggs-h1", "jam-h1"]);
+    expect(getPendingShoppingChanges(items, "household_2", "user_2")).toEqual([]);
+    expect(ids(getPendingShoppingChanges(items, "household_1", "user_1"))).toEqual([
+      "eggs-h1",
+      "jam-h1"
+    ]);
   });
 
   it("records a confirmed household on unsent changes that don't name one", () => {
@@ -469,7 +473,8 @@ describe("shopping store helpers", () => {
     const households = (list: MobileShoppingItem[]) =>
       Object.fromEntries(list.map((item) => [item.id, item.sync.householdId]));
 
-    const claimed = claimShoppingChanges(items, "household_2");
+    // Added by this account (buildItem's addedBy), so they are its changes.
+    const claimed = claimShoppingChanges(items, "household_2", { userId: "user_1" });
     expect(households(claimed)).toEqual({
       local: undefined,
       "old-home": "household_1",
@@ -479,18 +484,146 @@ describe("shopping store helpers", () => {
     });
     expect(claimed[0]?.sync).toEqual({ householdId: "household_2", status: "dirty" });
     // Nothing left to claim: the same list comes back.
-    expect(claimShoppingChanges(claimed, "household_2")).toBe(claimed);
+    expect(claimShoppingChanges(claimed, "household_2", { userId: "user_1" })).toBe(claimed);
 
     // This account moved from household_1: its changes for it can only go to household_2 now.
-    expect(households(claimShoppingChanges(items, "household_2", { from: "household_1" }))).toEqual(
-      {
-        local: undefined,
-        "old-home": "household_2",
-        other: "household_3",
-        synced: undefined,
-        unknown: "household_2"
-      }
+    expect(
+      households(
+        claimShoppingChanges(items, "household_2", { from: "household_1", userId: "user_1" })
+      )
+    ).toEqual({
+      local: undefined,
+      "old-home": "household_2",
+      other: "household_3",
+      synced: undefined,
+      unknown: "household_2"
+    });
+  });
+
+  it("leaves another account's unsent items that name no household for that account", () => {
+    // Stored before changes recorded their household, by the account that added them (or signed
+    // out): no household may have them yet, so sending one would create it wherever it goes.
+    const items = [
+      buildItem({ addedBy: "user_1", checked: true, id: "theirs", sync: { status: "dirty" } }),
+      buildItem({
+        addedBy: "user_1",
+        deletedAt: now,
+        id: "their-deletion",
+        isDeleted: true,
+        sync: { status: "sync_failed" }
+      }),
+      buildItem({ addedBy: "user_2", id: "mine", sync: { status: "dirty" } }),
+      buildItem({ addedBy: "local", id: "signed-out", sync: { status: "dirty" } }),
+      buildItem({
+        addedBy: "user_1",
+        id: "their-stamped",
+        sync: { householdId: "household_2", status: "dirty" }
+      })
+    ];
+    const households = (list: MobileShoppingItem[]) =>
+      Object.fromEntries(list.map((item) => [item.id, item.sync.householdId]));
+    const ids = (list: MobileShoppingItem[]) => list.map((item) => item.id);
+
+    // user_2 signs in to household_2 on this device.
+    const claimed = claimShoppingChanges(items, "household_2", { userId: "user_2" });
+    expect(households(claimed)).toEqual({
+      mine: "household_2",
+      "signed-out": "household_2",
+      "their-deletion": undefined,
+      "their-stamped": "household_2",
+      theirs: undefined
+    });
+    // Nor are they sent for user_2.
+    expect(ids(getPendingShoppingChanges(claimed, "household_2", "user_2"))).toEqual([
+      "mine",
+      "signed-out",
+      "their-stamped"
+    ]);
+    expect(ids(getPendingShoppingChanges(items, "household_2", "user_2"))).toEqual([
+      "mine",
+      "signed-out",
+      "their-stamped"
+    ]);
+
+    // user_1 claims them when it syncs here again.
+    expect(households(claimShoppingChanges(claimed, "household_1", { userId: "user_1" }))).toEqual({
+      mine: "household_2",
+      "signed-out": "household_2",
+      "their-deletion": "household_1",
+      "their-stamped": "household_2",
+      theirs: "household_1"
+    });
+
+    // Or household_2's list has the item after all (user_1 is a member too): the change is its.
+    const earlier = "2026-07-04T11:00:00.000Z";
+    const pulled = applyRemoteShoppingItems(
+      claimed,
+      [toApiShoppingItem({ ...items[0]!, checked: false, updatedAt: earlier })],
+      "household_2"
     );
+    expect(pulled.find((item) => item.id === "theirs")).toMatchObject({
+      checked: true,
+      sync: { householdId: "household_2", status: "dirty" }
+    });
+    expect(ids(getPendingShoppingChanges(pulled, "household_2", "user_2"))).toContain("theirs");
+    expect(pulled.find((item) => item.id === "their-deletion")?.sync.householdId).toBeUndefined();
+  });
+
+  it("drops another household's unsent changes once they are 30 days old", () => {
+    const syncedAt = Date.parse(now);
+    const daysAgo = (days: number) => new Date(syncedAt - days * 24 * 60 * 60 * 1000).toISOString();
+    const items = [
+      buildItem({
+        id: "parked-old",
+        sync: { householdId: "household_1", status: "sync_failed" },
+        updatedAt: daysAgo(31)
+      }),
+      buildItem({
+        deletedAt: daysAgo(31),
+        id: "parked-old-deletion",
+        isDeleted: true,
+        sync: { householdId: "household_1", status: "dirty" },
+        updatedAt: daysAgo(31)
+      }),
+      buildItem({
+        id: "parked-recent",
+        sync: { householdId: "household_1", status: "dirty" },
+        updatedAt: daysAgo(29)
+      }),
+      buildItem({
+        id: "synced-elsewhere",
+        sync: { householdId: "household_1", status: "synced" },
+        updatedAt: daysAgo(90)
+      }),
+      buildItem({
+        id: "current-old",
+        sync: { householdId: "household_2", status: "dirty" },
+        updatedAt: daysAgo(90)
+      }),
+      buildItem({ id: "unstamped-old", sync: { status: "dirty" }, updatedAt: daysAgo(90) }),
+      buildItem({ id: "local-old", sync: { status: "local_only" }, updatedAt: daysAgo(90) })
+    ];
+    const ids = (list: MobileShoppingItem[]) => list.map((item) => item.id);
+
+    const pruned = pruneStaleShoppingRecords(items, "household_2", syncedAt);
+    expect(ids(pruned)).toEqual([
+      "parked-recent",
+      "synced-elsewhere",
+      "current-old",
+      "unstamped-old",
+      "local-old"
+    ]);
+    // Nothing (more) to drop: the same list comes back.
+    expect(pruneStaleShoppingRecords(pruned, "household_2", syncedAt)).toBe(pruned);
+    // The current household's changes are never dropped, however old.
+    expect(ids(pruneStaleShoppingRecords(items, "household_1", syncedAt))).toEqual([
+      "parked-old",
+      "parked-old-deletion",
+      "parked-recent",
+      "synced-elsewhere",
+      "unstamped-old",
+      "local-old"
+    ]);
   });
 
   it("sets refused changes aside under one stable id", () => {

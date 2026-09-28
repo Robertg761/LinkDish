@@ -31,7 +31,9 @@ export interface MobileShoppingItem extends ShoppingItem {
      * confirmed by, a household; its changes are only ever sent back there, and while another
      * household's account is signed in it stays on this device, out of that account's list, until
      * its own household syncs again. Unsent changes stored before it existed get the household
-     * the signed-in account's next check confirms (claimShoppingChanges).
+     * the signed-in account's next check confirms (claimShoppingChanges), or, for an item another
+     * account added, that account's (or the household whose list has the item). Unsent changes
+     * kept for another household are dropped after 30 days (pruneStaleShoppingRecords).
      */
     householdId?: string | undefined;
     lastError?: string | undefined;
@@ -119,6 +121,37 @@ const createShoppingItemId = (timestamp: string, index: number): string =>
 /** A change the household list hasn't confirmed yet (an edit or a deletion). */
 const needsPush = (item: Pick<MobileShoppingItem, "sync">): boolean =>
   item.sync.status === "dirty" || item.sync.status === "sync_failed";
+
+/**
+ * Changes that may never sync are dropped after this long: unsent changes kept for another
+ * household. They are only sent when that household syncs on this device again, and by then it
+ * may well have removed the item, which the change would bring back.
+ */
+const STALE_CHANGE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+/**
+ * True for an unsent change that another account (not `userId`) left on this device without
+ * naming a household (stored before changes recorded it): the item was added by that account
+ * (`addedBy`, the account id; "local" when added signed out). It may never have been sent, so no
+ * household has it and the API would create it in whichever one it is sent to: it is neither
+ * claimed for nor sent to `userId`'s household. It waits for its own account's claim
+ * (claimShoppingChanges), or for a household whose list has the item (applyRemoteShoppingItems).
+ * An edit `userId` makes to it records `userId`'s household (syncStateAfterEdit), so it is theirs
+ * from then. (A local change clears `lastSyncedAt`, so an edit of a synced item looks the same
+ * until that list shows it.)
+ */
+const isAnotherAccountsChange = (item: MobileShoppingItem, userId: string): boolean => {
+  const addedBy = item.addedBy.trim();
+
+  return (
+    needsPush(item) &&
+    !item.sync.householdId &&
+    !item.sync.lastSyncedAt &&
+    addedBy.length > 0 &&
+    addedBy !== LOCAL_SHOPPING_USER &&
+    addedBy !== userId
+  );
+};
 
 /**
  * True when the item is kept for a household other than `householdId` (see `sync.householdId`):
@@ -412,7 +445,10 @@ export interface ShoppingAisleGroup {
 export const groupShoppingItemsByAisle = (items: MobileShoppingItem[]): ShoppingAisleGroup[] =>
   groupByShoppingCategory(items, (item) => getShoppingItemDisplayText(item));
 
-/** Applies household items (last write wins), recording `householdId` as the one they came from. */
+/**
+ * Applies household items (last write wins), recording `householdId` as the one they came from
+ * (and on unsent changes to them that don't name a household yet).
+ */
 export const applyRemoteShoppingItems = (
   localItems: MobileShoppingItem[],
   remoteItems: ShoppingItem[],
@@ -436,6 +472,12 @@ export const applyRemoteShoppingItems = (
         localItem.sync.status === "sync_failed") &&
       !isRemoteNewer(remoteItem.updatedAt, localItem.updatedAt)
     ) {
+      // An unsent change that names no household, to an item this household has, is this
+      // household's (e.g. its item checked off before changes recorded their household).
+      if (householdId && needsPush(localItem) && !localItem.sync.householdId) {
+        nextById.set(localItem.id, { ...localItem, sync: { ...localItem.sync, householdId } });
+      }
+
       continue;
     }
 
@@ -493,34 +535,62 @@ export const getShoppingListItems = (
   items.filter((item) => !item.isDeleted && !belongsToOtherHousehold(item, householdId));
 
 /**
- * Unsent changes (edits and delete tombstones) that may go to `householdId`. Another household's
- * wait on this device, untouched, until that household syncs here again.
+ * Unsent changes (edits and delete tombstones) that signed-in account `userId` may send to
+ * `householdId`. Another household's wait on this device, untouched, until that household syncs
+ * here again; so does another account's change that names no household (isAnotherAccountsChange).
  */
 export const getPendingShoppingChanges = (
   items: MobileShoppingItem[],
-  householdId: string
+  householdId: string,
+  userId: string
 ): MobileShoppingItem[] =>
-  items.filter((item) => needsPush(item) && !belongsToOtherHousehold(item, householdId));
+  items.filter(
+    (item) =>
+      needsPush(item) &&
+      !belongsToOtherHousehold(item, householdId) &&
+      !isAnotherAccountsChange(item, userId)
+  );
 
 /**
- * Records `householdId` (the signed-in account's, just confirmed) on unsent changes that don't
- * name a household yet: stored before items recorded one. With `from`, this account has moved
- * from that household, so its changes for it can only go to the new one now. Other households'
- * changes are left alone. Returns `items` itself when nothing changes.
+ * Records `householdId` (signed-in account `userId`'s, just confirmed) on unsent changes that
+ * don't name a household yet: stored before items recorded one. Another account's item that
+ * names none waits for that account (see isAnotherAccountsChange). With `from`, this account has
+ * moved from that household, so its changes for it can only go to the new one now. Other
+ * households' changes are left alone. Returns `items` itself when nothing changes.
  */
 export const claimShoppingChanges = (
   items: MobileShoppingItem[],
   householdId: string,
-  options: { from?: string | undefined } = {}
+  options: { from?: string | undefined; userId: string }
 ): MobileShoppingItem[] => {
   const claims = (item: MobileShoppingItem) =>
     needsPush(item) &&
-    (!item.sync.householdId ||
-      (options.from !== undefined && item.sync.householdId === options.from));
+    (item.sync.householdId
+      ? options.from !== undefined && item.sync.householdId === options.from
+      : !isAnotherAccountsChange(item, options.userId));
 
   return items.some(claims)
     ? items.map((item) => (claims(item) ? { ...item, sync: { ...item.sync, householdId } } : item))
     : items;
+};
+
+/**
+ * Drops unsent changes kept for a household other than `householdId` (the one syncing now) whose
+ * last change is more than 30 days old (see STALE_CHANGE_TTL_MS). The current household's
+ * changes, ones that name no household (made signed out, or not claimed yet) and synced records
+ * are never dropped. Returns `items` itself when nothing is dropped.
+ */
+export const pruneStaleShoppingRecords = (
+  items: MobileShoppingItem[],
+  householdId: string,
+  now: number = Date.now()
+): MobileShoppingItem[] => {
+  const isStale = (item: MobileShoppingItem) =>
+    needsPush(item) &&
+    belongsToOtherHousehold(item, householdId) &&
+    now - new Date(item.updatedAt).getTime() > STALE_CHANGE_TTL_MS;
+
+  return items.some(isStale) ? items.filter((item) => !isStale(item)) : items;
 };
 
 /** FNV-1a over `text` from `seed`, in base 36. */
