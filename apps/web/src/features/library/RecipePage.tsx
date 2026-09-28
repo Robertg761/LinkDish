@@ -389,6 +389,10 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
       : {}
   );
   const checks = useIngredientChecks(sessionKey);
+  const timerContext = useMemo(
+    () => ({ href: recipeHref, recipeTitle: recipe.title, sessionKey }),
+    [recipe.title, recipeHref, sessionKey]
+  );
   const canSync =
     isSaved && isAuthenticated && !record.isStarter && record.sync?.status !== "synced";
 
@@ -879,7 +883,7 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
         source={source}
         sourceImages={isSaved && props.kind === "saved" ? props.sourceImages : undefined}
         tags={record.tags}
-        timerContext={{ href: recipeHref, recipeTitle: recipe.title, sessionKey }}
+        timerContext={timerContext}
         timesCooked={record.timesCooked}
         warnings={record.extraction.warnings}
       />

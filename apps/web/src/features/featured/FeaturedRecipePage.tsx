@@ -63,6 +63,10 @@ const FeaturedRecipeScreen: React.FC<{ featured: FeaturedRecipe }> = ({ featured
   const scaling = useRecipeScaling(recipe);
   const sessionKey = `featured:${featured.slug}`;
   const checks = useIngredientChecks(sessionKey);
+  const timerContext = useMemo(
+    () => ({ href: `/featured/${featured.slug}`, recipeTitle: recipe.title, sessionKey }),
+    [featured.slug, recipe.title, sessionKey]
+  );
   const saving = useSaveFeaturedRecipe(featured);
   const isBusy = saving.status === "saving" || saving.status === "syncing";
   const isSaved = saving.status === "saved";
@@ -168,11 +172,7 @@ const FeaturedRecipeScreen: React.FC<{ featured: FeaturedRecipe }> = ({ featured
         recipe={recipe}
         scaling={scaling}
         source={source}
-        timerContext={{
-          href: `/featured/${featured.slug}`,
-          recipeTitle: recipe.title,
-          sessionKey
-        }}
+        timerContext={timerContext}
       />
 
       {!isDesktop ? (

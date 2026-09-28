@@ -729,7 +729,7 @@ export const CookMode: React.FC<CookModeProps> = ({
       </div>
 
       <footer className="cook-mode-footer">
-        {phase === "finish" || stepIndex > 0 ? (
+        {phase === "finish" || (phase === "cooking" && stepIndex > 0) ? (
           <IconButton
             aria-label="Previous step"
             className="cook-mode-prev"
