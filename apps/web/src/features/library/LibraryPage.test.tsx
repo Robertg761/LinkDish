@@ -371,7 +371,17 @@ describe("LibraryPage", () => {
       "1 of 4 recipes"
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Clear" }));
+    // Active chips lead the row (after Collections and Clear), so they never scroll out of view.
+    const row = within(screen.getByRole("group", { name: "Filter recipes" }));
+    expect(row.getAllByRole("button").map((button) => button.textContent)).toEqual([
+      "New collection",
+      "Clear (2)",
+      expect.stringContaining("Favorites"),
+      expect.stringContaining("Quick"),
+      expect.stringContaining("Not cooked yet")
+    ]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear 2 filters" }));
     await waitFor(() => expect(gridTitles()).toHaveLength(4));
 
     fireEvent.click(screen.getByRole("button", { name: /Not cooked yet/ }));

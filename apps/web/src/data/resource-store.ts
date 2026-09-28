@@ -25,6 +25,13 @@ export interface ResourceStoreOptions<T> {
   topic: DataTopic;
   /** Returns the next data for a same-tab change, or `null` to reload from storage instead. */
   applyLocalChange?: ((current: T, change: DataChange) => T | null) | undefined;
+  /**
+   * Other tabs' changes that name their records (`upsertedIds` / `deletedIds`): re-read just
+   * those and return the next data. Rejecting falls back to a full reload.
+   */
+  applyRemoteChanges?: ((current: T, changes: readonly DataChange[]) => Promise<T>) | undefined;
+  /** Merges a full reload into the data already shown (e.g. keep unchanged records' objects). */
+  reconcile?: ((previous: T, next: T) => T) | undefined;
 }
 
 export interface ResourceStore<T> {
@@ -47,6 +54,9 @@ export function createResourceStore<T>(options: ResourceStoreOptions<T>): Resour
   let reloadAfterInflight = false;
   let remoteReloadTimer: ReturnType<typeof setTimeout> | null = null;
   let unsubscribeFeed: (() => void) | null = null;
+  /** Other tabs' changes waiting for the debounce, and whether any of them needs a full reload. */
+  let pendingRemote: DataChange[] = [];
+  let pendingRemoteFull = false;
 
   const set = (next: Partial<ResourceSnapshot<T>>) => {
     snapshot = { ...snapshot, ...next };
@@ -55,14 +65,62 @@ export function createResourceStore<T>(options: ResourceStoreOptions<T>): Resour
     });
   };
 
-  const scheduleRemoteReload = () => {
+  /** Re-reads only what other tabs changed; any failure falls back to a full reload. */
+  const refreshRemote = (changes: readonly DataChange[]): Promise<void> => {
+    const apply = options.applyRemoteChanges;
+
+    if (!apply || inflight || snapshot.status !== "ready") {
+      return store.load({ force: true });
+    }
+
+    const current = ++generation;
+    const run: Promise<void> = Promise.resolve()
+      .then(() => apply(snapshot.data, changes))
+      .then(
+        (data) => {
+          if (current === generation && data !== snapshot.data) {
+            set({ data });
+          }
+        },
+        () => {
+          if (current === generation) {
+            reloadAfterInflight = true;
+          }
+        }
+      )
+      .finally(() => {
+        if (inflight === run) {
+          inflight = null;
+        }
+
+        if (reloadAfterInflight && current === generation) {
+          reloadAfterInflight = false;
+          void store.load({ force: true });
+        }
+      });
+
+    inflight = run;
+    return run;
+  };
+
+  const scheduleRemoteReload = (change: DataChange) => {
+    if (change.upsertedIds?.length || change.deletedIds?.length) {
+      pendingRemote.push(change);
+    } else {
+      pendingRemoteFull = true;
+    }
+
     if (remoteReloadTimer) {
       return;
     }
 
     remoteReloadTimer = setTimeout(() => {
       remoteReloadTimer = null;
-      void store.load({ force: true });
+      const changes = pendingRemote;
+      const full = pendingRemoteFull;
+      pendingRemote = [];
+      pendingRemoteFull = false;
+      void (full ? store.load({ force: true }) : refreshRemote(changes));
     }, REMOTE_RELOAD_DELAY_MS);
   };
 
@@ -79,7 +137,7 @@ export function createResourceStore<T>(options: ResourceStoreOptions<T>): Resour
 
     if (source === "remote" || change.reload || snapshot.status !== "ready") {
       if (source === "remote") {
-        scheduleRemoteReload();
+        scheduleRemoteReload(change);
       } else {
         void store.load({ force: true });
       }
@@ -142,7 +200,11 @@ export function createResourceStore<T>(options: ResourceStoreOptions<T>): Resour
         .then(
           (data) => {
             if (current === generation) {
-              set({ data, error: null, status: "ready" });
+              const next =
+                options.reconcile && snapshot.status === "ready"
+                  ? options.reconcile(snapshot.data, data)
+                  : data;
+              set({ data: next, error: null, status: "ready" });
             }
           },
           (error: unknown) => {
@@ -191,6 +253,8 @@ export function createResourceStore<T>(options: ResourceStoreOptions<T>): Resour
 
       unsubscribeFeed?.();
       unsubscribeFeed = null;
+      pendingRemote = [];
+      pendingRemoteFull = false;
       snapshot = { data: options.initial, error: null, status: "idle" };
       listeners.forEach((listener) => {
         listener();

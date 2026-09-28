@@ -134,6 +134,22 @@ const ACTION_ENTRIES: readonly StaticEntry[] = [
     label: "Plan this week"
   },
   {
+    action: { analytics: "paste_text", to: "/import?tab=text", type: "navigate" },
+    description: "From a caption, an email or a notes app",
+    icon: "file-text",
+    id: "action-paste-text",
+    keywords: "paste text recipe caption copy notes type add import",
+    label: "Paste a recipe's text"
+  },
+  {
+    action: { analytics: "scan_photo", to: "/import?tab=photos", type: "navigate" },
+    description: "A cookbook page or a handwritten card",
+    icon: "camera",
+    id: "action-scan-photo",
+    keywords: "photo scan camera picture cookbook page card handwritten add import",
+    label: "Scan a recipe photo"
+  },
+  {
     action: { type: "show-shortcuts" },
     icon: "keyboard",
     id: "action-shortcuts",
@@ -266,11 +282,18 @@ export const buildPaletteSections = ({
           keywords: "theme dark mode appearance night switch",
           label: "Switch to dark theme"
         };
-  const actionEntries = [
-    ACTION_ENTRIES[0],
-    ACTION_ENTRIES[1],
+  const [newImport, planWeek, pasteText, scanPhoto, shortcuts] = ACTION_ENTRIES;
+  // The empty palette stays short; the text and photo importers turn up when searched for.
+  const actionEntries = [newImport, planWeek, themeEntry, shortcuts].filter(
+    (entry): entry is StaticEntry => Boolean(entry)
+  );
+  const searchableActions = [
+    newImport,
+    pasteText,
+    scanPhoto,
+    planWeek,
     themeEntry,
-    ACTION_ENTRIES[2]
+    shortcuts
   ].filter((entry): entry is StaticEntry => Boolean(entry));
 
   if (!query) {
@@ -321,7 +344,7 @@ export const buildPaletteSections = ({
   const gotoItems = GO_TO_ENTRIES.filter((entry) => matchesEntry(entry, query)).map((entry) =>
     toItem(entry, "goto", query)
   );
-  const matchedActions = actionEntries
+  const matchedActions = searchableActions
     .filter((entry) => matchesEntry(entry, query))
     .map((entry) => toItem(entry, "actions", query));
   const shoppingText = clip(query.replace(/\s+/gu, " "), MAX_SHOPPING_TEXT);

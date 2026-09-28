@@ -134,6 +134,10 @@ const CollectionRow: React.FC<CollectionRowProps> = ({
           {collection.emoji ?? <Icon name="folder" size={18} />}
         </button>
         <div className="collection-manage-name">
+          {/* The name is editable in place; the pencil says so. */}
+          <span aria-hidden="true" className="collection-rename-icon">
+            <Icon name="pencil" size={14} />
+          </span>
           <input
             aria-label={`Name of ${collection.name}`}
             className="collection-rename-input"
@@ -169,12 +173,13 @@ const CollectionRow: React.FC<CollectionRowProps> = ({
             onClick={() => onMove(collection, 1)}
             size="sm"
           />
+          {/* Neutral until confirmed: the confirmation step carries the red. */}
           <IconButton
             aria-label={`Delete ${collection.name}`}
+            className="collection-delete"
             icon="trash"
             onClick={() => setConfirmingDelete(true)}
             size="sm"
-            variant="danger"
           />
         </div>
       </div>

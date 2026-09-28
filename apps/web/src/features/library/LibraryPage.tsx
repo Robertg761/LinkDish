@@ -77,6 +77,7 @@ import {
 import { LibraryShelf } from "./components/LibraryShelf";
 import { CompactRecipeMeta } from "./components/RecipeMeta";
 import {
+  recipeSearchKey,
   searchRecords,
   useRecipeSearchIndex,
   useSearchEngine
@@ -99,7 +100,7 @@ import type {
   LibraryView
 } from "./components/library-model";
 import type { LibraryRecipeAction } from "./components/LibraryRecipeTile";
-import type { SearchEngine } from "./components/use-library-search";
+import type { SearchIndexBuilder } from "./components/use-library-search";
 import type { WebSavedRecipe } from "./saved-recipe-types";
 import type { UpgradeSheetTrigger } from "../upgrade/UpgradeSheet";
 import type { RecipeSearchFields } from "@linkdish/recipe-domain";
@@ -119,11 +120,12 @@ const FamilyCookbook = lazyWithRetry(() =>
 );
 
 const getPersonalId = (recipe: WebSavedRecipe) => recipe.id;
+/** Text only: a favorite or a re-read from storage must not rebuild the index. */
 const getPersonalSignature = (recipe: WebSavedRecipe): readonly unknown[] => [
-  recipe.recipe,
+  recipeSearchKey(recipe.recipe),
   recipe.notes,
-  recipe.tags,
-  recipe.collectionIds
+  recipe.tags?.join("\u0001"),
+  recipe.collectionIds?.join("\u0001")
 ];
 const getPersonalFallbackText = (recipe: WebSavedRecipe): string =>
   [
@@ -262,7 +264,7 @@ export const LibraryPage: React.FC = () => {
     [collections]
   );
   const getPersonalFields = useCallback(
-    (searchEngine: SearchEngine, recipe: WebSavedRecipe): RecipeSearchFields =>
+    (searchEngine: SearchIndexBuilder, recipe: WebSavedRecipe): RecipeSearchFields =>
       searchEngine.recipeSearchFields(recipe.recipe, {
         notes: recipe.notes,
         // Collection names count as tags, so "weeknight" finds the Weeknight collection too.
@@ -274,6 +276,7 @@ export const LibraryPage: React.FC = () => {
     [collectionNames]
   );
   const personalSearch = useRecipeSearchIndex(engine, recipes, {
+    cacheKey: "personal",
     extraKey: collectionKey,
     getFields: getPersonalFields,
     getId: getPersonalId,

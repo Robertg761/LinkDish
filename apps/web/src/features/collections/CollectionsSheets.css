@@ -235,8 +235,10 @@
     transform var(--transition-fast);
 }
 
-.emoji-choice:hover {
-  background: var(--color-state-hover);
+@media (hover: hover) {
+  .emoji-choice:hover {
+    background: var(--color-state-hover);
+  }
 }
 
 .emoji-choice:active {
@@ -278,12 +280,18 @@
   transition: border-color var(--transition-fast);
 }
 
-.collection-emoji-button:hover,
 .collection-emoji-button[aria-expanded="true"] {
   border-color: var(--color-border-strong);
 }
 
+@media (hover: hover) {
+  .collection-emoji-button:hover {
+    border-color: var(--color-border-strong);
+  }
+}
+
 .collection-manage-name {
+  position: relative;
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
@@ -292,16 +300,41 @@
   margin-left: -10px;
 }
 
+/* The name reads as text but edits in place: a pencil at its end and a dotted underline say so. */
 .collection-rename-input {
   min-height: 34px;
-  padding: 0 10px;
+  padding: 0 30px 0 10px;
   border-color: transparent;
   background: transparent;
   font-weight: 650;
+  text-decoration: underline dotted var(--color-border-strong);
+  text-underline-offset: 5px;
 }
 
-.collection-rename-input:hover {
-  border-color: var(--color-border);
+.collection-rename-input:focus {
+  text-decoration: none;
+}
+
+.collection-rename-icon {
+  position: absolute;
+  top: 10px;
+  right: 8px;
+  color: var(--color-ink-subtle);
+  pointer-events: none;
+}
+
+.collection-manage-name:focus-within .collection-rename-icon {
+  color: var(--color-primary);
+}
+
+@media (hover: hover) {
+  .collection-rename-input:hover {
+    border-color: var(--color-border);
+  }
+}
+
+.collection-manage-tools .icon-btn:disabled {
+  opacity: 0.35;
 }
 
 .collection-manage-name .collection-option-count {
@@ -393,8 +426,10 @@
   cursor: pointer;
 }
 
-.tag-chip-remove:hover {
-  background: color-mix(in srgb, var(--color-on-primary-soft) 14%, transparent);
+@media (hover: hover) {
+  .tag-chip-remove:hover {
+    background: color-mix(in srgb, var(--color-on-primary-soft) 14%, transparent);
+  }
 }
 
 .tag-editor-input {
@@ -444,7 +479,10 @@
     border-color var(--transition-fast);
 }
 
-.tag-suggestion:hover {
-  border-style: solid;
-  background: var(--color-surface);
+/* Dashed means "add"; a sticky touch hover used to leave one chip solid, as if selected. */
+@media (hover: hover) {
+  .tag-suggestion:hover {
+    border-style: solid;
+    background: var(--color-surface);
+  }
 }

@@ -207,6 +207,73 @@ describe("library-store", () => {
     await waitFor(() => expect(result.current.recipes[0]?.id).toBe("from-other-tab"));
   });
 
+  it("keeps the recipe object when storage echoes a metadata write back", async () => {
+    const { result } = renderHook(() => useSavedRecipes());
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    const before = result.current.recipes[0];
+    const id = before?.id ?? "";
+    const others = result.current.recipes.slice(1);
+
+    await act(async () => {
+      await setFavorite(id, true);
+    });
+
+    const after = result.current.recipes.find((recipe) => recipe.id === id);
+    expect(after?.favorite).toBe(true);
+    // The IndexedDB echo is a structured clone; its unchanged recipe keeps the cached object, so
+    // cards, the facts cache and the search index are not rebuilt for a heart tap.
+    expect(after?.recipe).toBe(before?.recipe);
+    expect(result.current.recipes.slice(1)).toEqual(others);
+    result.current.recipes.slice(1).forEach((recipe, index) => {
+      expect(recipe).toBe(others[index]);
+    });
+  });
+
+  it("re-reads only the recipes another tab wrote, keeping every other object", async () => {
+    const { result } = renderHook(() => useSavedRecipes());
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    const [first, second, third] = result.current.recipes;
+    const db = await (await import("../storage/linkdish-db")).getLinkDishWebDb();
+    const getAll = vi.spyOn(db, "getAll");
+
+    fakeIdb.seed(SAVED_RECIPES_STORE_NAME, [
+      { ...first, lastOpenedAt: "2026-09-28T10:00:00.000Z" } as WebSavedRecipe
+    ]);
+    act(() => {
+      channel.onmessage?.({
+        data: { topic: "savedRecipes", upsertedIds: [first?.id], v: 1 }
+      } as MessageEvent);
+    });
+
+    await waitFor(() =>
+      expect(getCachedSavedRecipe(first?.id ?? "")?.lastOpenedAt).toBe("2026-09-28T10:00:00.000Z")
+    );
+    expect(getAll).not.toHaveBeenCalled();
+    const opened = result.current.recipes.find((recipe) => recipe.id === first?.id);
+    expect(opened?.recipe).toBe(first?.recipe);
+    expect(result.current.recipes).toContain(second);
+    expect(result.current.recipes).toContain(third);
+  });
+
+  it("keeps unchanged objects when another tab forces a full reload", async () => {
+    const { result } = renderHook(() => useSavedRecipes());
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    const before = result.current.recipes;
+
+    act(() => {
+      channel.onmessage?.({ data: { topic: "savedRecipes", v: 1 } } as MessageEvent);
+    });
+
+    const db = await (await import("../storage/linkdish-db")).getLinkDishWebDb();
+    const getAll = vi.spyOn(db, "getAll");
+    await waitFor(() => expect(getAll).toHaveBeenCalled());
+    await act(async () => {
+      await loadSavedRecipes();
+    });
+    // Nothing changed, so the list (and every record in it) is the same object.
+    expect(result.current.recipes).toBe(before);
+  });
+
   it("surfaces a load error and recovers on retry", async () => {
     fakeIdb.failNextOpen(new DOMException("blocked", "UnknownError"));
     const { result } = renderHook(() => useSavedRecipes());

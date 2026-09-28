@@ -1,10 +1,5 @@
-import {
-  createRecipeSearchIndex,
-  getRecipeTimes,
-  recipeSearchFields,
-  recipeSourceLabel
-} from "@linkdish/recipe-domain";
-import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { getRecipeTimes, recipeSourceLabel } from "@linkdish/recipe-domain";
+import React, { useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useLocation, useNavigate } from "react-router-dom";
 
@@ -19,6 +14,7 @@ import { useSavedRecipes } from "../../data/library-store";
 import { isMacLike } from "../../lib/shortcuts";
 import { useMediaQuery } from "../../lib/use-media-query";
 import { resolveTheme, setPreference, usePreference } from "../../preferences/preferences-store";
+import { createSavedRecipeSearch } from "../library/components/saved-recipe-search";
 
 import { buildPaletteSections, flattenSections, stepGroup } from "./palette-model";
 import { addTextToShoppingList } from "./palette-shopping";
@@ -127,21 +123,8 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
   useBodyScrollLock(true);
 
   const recipes = library.recipes;
-  const index = useMemo(
-    () =>
-      createRecipeSearchIndex(recipes, (recipe) =>
-        recipeSearchFields(recipe.recipe, { notes: recipe.notes, tags: recipe.tags })
-      ),
-    [recipes]
-  );
-  const searchRecipes = useCallback(
-    (text: string, limit: number) =>
-      index.search(text, { limit }).map((result) => ({
-        recipe: result.record,
-        titleMatch: result.matches.includes("title")
-      })),
-    [index]
-  );
+  // Built on the first typed query and shared across opens (an empty palette indexes nothing).
+  const searchRecipes = useMemo(() => createSavedRecipeSearch(recipes), [recipes]);
   const sections = useMemo(
     () =>
       buildPaletteSections({

@@ -43,12 +43,36 @@ describe("data change feed", () => {
       "local"
     );
     expect(other).not.toHaveBeenCalled();
-    // Records never cross tabs; only the topic and deleted ids do.
+    // Records never cross tabs; only the topic and the ids do (so other tabs re-read just them).
     expect(channel.postMessage).toHaveBeenCalledWith({
       deletedIds: ["gone"],
       topic: "collections",
+      upsertedIds: ["a"],
       v: 1
     });
+  });
+
+  it("passes other tabs' written ids along, and leaves them out for big or id-less writes", () => {
+    const channel = createFakeChannel();
+    setDataChannelFactoryForTests(() => channel);
+    const listener = vi.fn();
+    subscribeDataChanges("savedRecipes", listener);
+
+    channel.receive({ topic: "savedRecipes", upsertedIds: ["soup"], v: 1 });
+    channel.receive({ topic: "savedRecipes", upsertedIds: [7], v: 1 });
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(listener).toHaveBeenCalledWith(
+      { reload: true, topic: "savedRecipes", upsertedIds: ["soup"] },
+      "remote"
+    );
+
+    emitDataChange({
+      topic: "savedRecipes",
+      upserted: Array.from({ length: 60 }, (_, index) => ({ id: `r${index}` }))
+    });
+    emitDataChange({ topic: "mealPlan", upserted: [{ date: "2026-09-28" }] });
+    expect(channel.postMessage).toHaveBeenNthCalledWith(1, { topic: "savedRecipes", v: 1 });
+    expect(channel.postMessage).toHaveBeenNthCalledWith(2, { topic: "mealPlan", v: 1 });
   });
 
   it("turns messages from other tabs into reload hints and ignores junk", () => {

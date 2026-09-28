@@ -187,6 +187,22 @@ describe("palette model", () => {
     expect(stepGroup([], 0, 1)).toBe(0);
   });
 
+  it("opens the text and photo importers directly when searched for", () => {
+    const find = (query: string, id: string) =>
+      flattenSections(
+        buildPaletteSections({ query, recipes, resolvedTheme: "light", searchRecipes: noSearch })
+      ).find((item) => item.id === id);
+
+    expect(find("paste text", "action-paste-text")).toMatchObject({
+      action: { to: "/import?tab=text", type: "navigate" },
+      label: "Paste a recipe's text"
+    });
+    expect(find("scan photo", "action-scan-photo")).toMatchObject({
+      action: { to: "/import?tab=photos", type: "navigate" },
+      label: "Scan a recipe photo"
+    });
+  });
+
   it("keeps recents to five and link descriptions short", () => {
     const many = Array.from({ length: 8 }, (_, index) => recipe(`r${index}`, `Recipe ${index}`));
 

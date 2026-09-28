@@ -18,6 +18,11 @@ export interface DataChange<RecordType = unknown> {
   /** Records written in this tab. Never sent across tabs. */
   upserted?: readonly RecordType[] | undefined;
   deletedIds?: readonly string[] | undefined;
+  /**
+   * Ids of the records another tab wrote (cross-tab changes only), so a listener can re-read just
+   * those instead of the whole topic. Absent when the writer didn't say (reload everything).
+   */
+  upsertedIds?: readonly string[] | undefined;
   /** The change can't be applied incrementally; listeners should reload the topic. */
   reload?: boolean | undefined;
 }
@@ -34,9 +39,30 @@ interface BroadcastLike {
 
 interface CrossTabMessage {
   deletedIds?: string[];
+  /** Additive: tabs that don't know it ignore it and reload the whole topic, as before. */
+  upsertedIds?: string[];
   topic: DataTopic;
   v: 1;
 }
+
+/** Past this many records a cross-tab change just says "reload" (a restore, a big import). */
+const MAX_CROSS_TAB_IDS = 50;
+
+const isStringArray = (value: unknown): value is string[] =>
+  Array.isArray(value) && value.every((id) => typeof id === "string");
+
+/** The ids of written records, when every record has a string `id` and there aren't too many. */
+const upsertedIdsOf = (records: readonly unknown[] | undefined): string[] | null => {
+  if (!records?.length || records.length > MAX_CROSS_TAB_IDS) {
+    return null;
+  }
+
+  const ids = records.map((record) =>
+    typeof record === "object" && record !== null ? (record as { id?: unknown }).id : undefined
+  );
+
+  return isStringArray(ids) ? ids : null;
+};
 
 export const DATA_CHANNEL_NAME = "linkdish-data";
 
@@ -81,9 +107,8 @@ const isCrossTabMessage = (value: unknown): value is CrossTabMessage => {
     message.v === 1 &&
     typeof message.topic === "string" &&
     TOPICS.includes(message.topic) &&
-    (message.deletedIds === undefined ||
-      (Array.isArray(message.deletedIds) &&
-        message.deletedIds.every((id) => typeof id === "string")))
+    (message.deletedIds === undefined || isStringArray(message.deletedIds)) &&
+    (message.upsertedIds === undefined || isStringArray(message.upsertedIds))
   );
 };
 
@@ -121,6 +146,7 @@ const getChannel = (): BroadcastLike | null => {
       dispatch(
         {
           ...(data.deletedIds ? { deletedIds: data.deletedIds } : {}),
+          ...(data.upsertedIds ? { upsertedIds: data.upsertedIds } : {}),
           reload: true,
           topic: data.topic
         },
@@ -136,10 +162,12 @@ const getChannel = (): BroadcastLike | null => {
 export function emitDataChange<RecordType>(change: DataChange<RecordType>): void {
   dispatch(change as DataChange, "local");
 
+  const upsertedIds = change.reload ? null : upsertedIdsOf(change.upserted);
   const message: CrossTabMessage = {
     topic: change.topic,
     v: 1,
-    ...(change.deletedIds?.length ? { deletedIds: [...change.deletedIds] } : {})
+    ...(change.deletedIds?.length ? { deletedIds: [...change.deletedIds] } : {}),
+    ...(upsertedIds ? { upsertedIds } : {})
   };
 
   try {

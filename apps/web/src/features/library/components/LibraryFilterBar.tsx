@@ -18,7 +18,9 @@ interface LibraryFilterBarProps {
 
 /**
  * Smart filters, collections and top tags as one horizontally scrolling chip row.
- * Chips combine (AND); empty chips hide unless they are selected.
+ * Chips combine (AND); empty chips hide unless they are selected. Active chips move to the front
+ * (right after "Clear"), so a filter chosen at the far end never hides off-screen, and the
+ * collections manager leads the row where it can be found.
  */
 const LibraryFilterBarComponent: React.FC<LibraryFilterBarProps> = ({
   chips,
@@ -30,17 +32,30 @@ const LibraryFilterBarComponent: React.FC<LibraryFilterBarProps> = ({
 }) => {
   const selectedSet = new Set(selected);
   const visible = chips.filter((chip) => chip.count > 0 || selectedSet.has(chip.key));
+  const ordered = [
+    ...selected.flatMap((key) => visible.filter((chip) => chip.key === key)),
+    ...visible.filter((chip) => !selectedSet.has(chip.key))
+  ];
 
   return (
     <div aria-label="Filter recipes" className="library-filters" role="group">
       <div className="library-filters-track">
+        <button className="library-filters-manage" onClick={onManageCollections} type="button">
+          <Icon name={hasCollections ? "folder" : "folder-plus"} size={15} />
+          {hasCollections ? "Collections" : "New collection"}
+        </button>
         {selected.length > 0 ? (
-          <button className="library-filters-clear" onClick={onClear} type="button">
+          <button
+            aria-label={`Clear ${selected.length} ${selected.length === 1 ? "filter" : "filters"}`}
+            className="library-filters-clear"
+            onClick={onClear}
+            type="button"
+          >
             <Icon name="x" size={15} strokeWidth={2.4} />
-            Clear
+            Clear <span className="num">({selected.length})</span>
           </button>
         ) : null}
-        {visible.map((chip) => (
+        {ordered.map((chip) => (
           <FilterChip
             count={chip.count}
             icon={chip.emoji ? undefined : chip.icon}
@@ -56,10 +71,6 @@ const LibraryFilterBarComponent: React.FC<LibraryFilterBarProps> = ({
             {chip.label}
           </FilterChip>
         ))}
-        <button className="library-filters-manage" onClick={onManageCollections} type="button">
-          <Icon name={hasCollections ? "folder" : "folder-plus"} size={15} />
-          {hasCollections ? "Collections" : "New collection"}
-        </button>
       </div>
     </div>
   );

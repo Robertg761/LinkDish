@@ -3,6 +3,7 @@ import { useCallback, useMemo } from "react";
 import {
   deleteSavedRecipe,
   duplicateSavedRecipe,
+  getSavedRecipeById,
   getSavedRecipes,
   logRecipeCooked,
   markRecipeOpened,
@@ -18,6 +19,7 @@ import {
   type SavedRecipeQuotaOptions
 } from "../features/library/saved-recipe-store";
 
+import { isDeepEqual, reconcileById } from "./reconcile";
 import { createResourceStore, toViewStatus, upsertById, useResource } from "./resource-store";
 
 import type { DataChange } from "./change-feed";
@@ -46,22 +48,84 @@ export const sortSavedRecipes = (recipes: readonly WebSavedRecipe[]): WebSavedRe
     .sort((a, b) => b.time - a.time)
     .map((entry) => entry.recipe);
 
-const applySavedRecipeChange = (
+const getRecipeId = (recipe: WebSavedRecipe) => recipe.id;
+
+/**
+ * A re-read record, reusing the cached one when nothing changed, or at least its `recipe` when
+ * only personal metadata did (a favorite, a rating, "opened"). The recipe object is what card
+ * memos, the per-recipe facts cache and the search index key on.
+ */
+const reconcileRecipe = (previous: WebSavedRecipe, next: WebSavedRecipe): WebSavedRecipe => {
+  if (previous.recipe === next.recipe || !isDeepEqual(previous.recipe, next.recipe)) {
+    return isDeepEqual(previous, next) ? previous : next;
+  }
+
+  const merged = { ...next, recipe: previous.recipe };
+  return isDeepEqual(previous, merged) ? previous : merged;
+};
+
+const applyUpserts = (
   current: WebSavedRecipe[],
-  change: DataChange
+  upserted: readonly WebSavedRecipe[] | undefined,
+  deletedIds: readonly string[] | undefined
 ): WebSavedRecipe[] => {
-  const upserted = (change.upserted as WebSavedRecipe[] | undefined)?.map(toSavedRecipeListRecord);
-  const next = upsertById(current, upserted, change.deletedIds, (recipe) => recipe.id);
+  const currentById = new Map(current.map((recipe) => [recipe.id, recipe]));
+  const records = upserted?.map((record) => {
+    const before = currentById.get(record.id);
+    return before ? reconcileRecipe(before, record) : record;
+  });
+  const changed =
+    Boolean(deletedIds?.some((id) => currentById.has(id))) ||
+    Boolean(records?.some((record) => currentById.get(record.id) !== record));
+
+  if (!changed) {
+    return current;
+  }
+
+  const next = upsertById(current, records, deletedIds, getRecipeId);
   return next === current ? current : sortSavedRecipes(next);
+};
+
+const applySavedRecipeChange = (current: WebSavedRecipe[], change: DataChange): WebSavedRecipe[] =>
+  applyUpserts(
+    current,
+    (change.upserted as WebSavedRecipe[] | undefined)?.map(toSavedRecipeListRecord),
+    change.deletedIds
+  );
+
+/** Another tab wrote these recipes: re-read just them (a missing one was deleted). */
+const applyRemoteSavedRecipeChanges = async (
+  current: WebSavedRecipe[],
+  changes: readonly DataChange[]
+): Promise<WebSavedRecipe[]> => {
+  const deleted = new Set(changes.flatMap((change) => change.deletedIds ?? []));
+  const ids = [...new Set(changes.flatMap((change) => change.upsertedIds ?? []))].filter(
+    (id) => !deleted.has(id)
+  );
+  const upserted: WebSavedRecipe[] = [];
+
+  for (const id of ids) {
+    const record = await getSavedRecipeById(id);
+
+    if (record) {
+      upserted.push(toSavedRecipeListRecord(record));
+    } else {
+      deleted.add(id);
+    }
+  }
+
+  return applyUpserts(current, upserted, [...deleted]);
 };
 
 const libraryResource = createResourceStore<WebSavedRecipe[]>({
   applyLocalChange: applySavedRecipeChange,
+  applyRemoteChanges: applyRemoteSavedRecipeChanges,
   initial: [],
   async load() {
     await seedStarterRecipesIfNeeded();
     return getSavedRecipes();
   },
+  reconcile: (previous, next) => reconcileById(previous, next, getRecipeId, reconcileRecipe),
   topic: "savedRecipes"
 });
 
