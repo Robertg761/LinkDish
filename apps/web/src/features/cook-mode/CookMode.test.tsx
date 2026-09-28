@@ -240,8 +240,9 @@ describe("CookMode", () => {
     // The chip counts down with the dock instead of a static "Running".
     const chip = screen.getByRole("button", { name: "Pause 30–35 min timer" });
     expect(chip).toHaveTextContent("30:00left");
+    // Ticks land just after each whole second (like the dock's), so give the second one a moment.
     act(() => {
-      vi.advanceTimersByTime(2000);
+      vi.advanceTimersByTime(2_100);
     });
     expect(chip).toHaveTextContent("29:58left");
 
