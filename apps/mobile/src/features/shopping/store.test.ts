@@ -5,8 +5,11 @@ import {
   addShoppingItemsToList,
   applyRemoteShoppingItems,
   belongsToOtherHousehold,
+  claimShoppingChanges,
   clearCheckedShoppingItemsInList,
   deleteShoppingItemInList,
+  getPendingShoppingChanges,
+  getShoppingListItems,
   getSyncableDirtyItems,
   groupShoppingItemsByAisle,
   markShoppingItemsSynced,
@@ -15,6 +18,7 @@ import {
   readShoppingItems,
   recipeIngredientsToShoppingInputs,
   serializeShoppingItems,
+  setAsideShoppingItemId,
   setAsideShoppingItems,
   setShoppingItemCheckedInList,
   shoppingTextFromQuantity,
@@ -364,32 +368,15 @@ describe("shopping store helpers", () => {
     expect(toApiShoppingItem(eggs!)).not.toHaveProperty("sync");
     expect(JSON.stringify(toApiShoppingItem(eggs!))).not.toContain("household_1");
 
-    // Signed out, or signed in to another household: still household_1's item.
+    // Signed out, still household_1's item (the list is on this device only then).
     const [checkedSignedOut] = setShoppingItemCheckedInList([eggs!], eggs!.id, true, {
       canSync: false
     });
     expect(checkedSignedOut?.sync).toEqual({ householdId: "household_1", status: "local_only" });
-    const [checkedElsewhere] = setShoppingItemCheckedInList([eggs!], eggs!.id, true, {
-      canSync: true,
-      householdId: "household_2"
-    });
-    expect(checkedElsewhere?.sync).toEqual({ householdId: "household_1", status: "dirty" });
-    const [mergedElsewhere] = addShoppingItemsToList([eggs!], [{ text: "1 egg" }], {
-      canSync: true,
-      householdId: "household_2"
-    });
-    expect(mergedElsewhere).toMatchObject({
-      id: eggs!.id,
-      qty: 3,
-      sync: { householdId: "household_1", status: "dirty" }
-    });
-    const [deletedElsewhere] = deleteShoppingItemInList([eggs!], eggs!.id, {
-      canSync: true,
-      householdId: "household_2"
-    });
-    expect(deletedElsewhere?.sync).toEqual({ householdId: "household_1", status: "dirty" });
-    expect(belongsToOtherHousehold(checkedElsewhere!, "household_2")).toBe(true);
-    expect(belongsToOtherHousehold(checkedElsewhere!, "household_1")).toBe(false);
+    expect(belongsToOtherHousehold(eggs!, "household_2")).toBe(true);
+    expect(belongsToOtherHousehold(eggs!, "household_1")).toBe(false);
+    // Signed out there is no household to compare with: nothing is another household's.
+    expect(belongsToOtherHousehold(eggs!, null)).toBe(false);
 
     // Items without a household (stored before it was recorded, or added signed out) join the
     // household the list syncs with; synced copies record the household they came from.
@@ -409,30 +396,144 @@ describe("shopping store helpers", () => {
     ).toEqual({ householdId: "household_2", lastSyncedAt: now, status: "synced" });
   });
 
-  it("sets another household's unsent changes aside as new local-only items", () => {
+  it("keeps another household's records out of the list, its merges and its edits", () => {
     const items = [
-      buildItem({ id: "edited", sync: { householdId: "household_1", status: "sync_failed" } }),
+      buildItem({
+        id: "milk-h1",
+        qty: 1,
+        sync: { householdId: "household_1", status: "synced" },
+        text: "milk",
+        unit: "cup"
+      }),
+      buildItem({
+        checked: true,
+        id: "eggs-h1",
+        sync: { householdId: "household_1", status: "sync_failed" },
+        text: "eggs"
+      }),
       buildItem({
         deletedAt: now,
-        id: "deleted",
+        id: "jam-h1",
         isDeleted: true,
-        sync: { householdId: "household_1", status: "dirty" }
+        sync: { householdId: "household_1", status: "dirty" },
+        text: "jam"
       }),
+      buildItem({ id: "basil", sync: { status: "local_only" }, text: "basil" })
+    ];
+    const household2 = {
+      canSync: true,
+      householdId: "household_2",
+      now: "2026-07-04T12:10:00.000Z",
+      userId: "user_2"
+    };
+    const ids = (list: MobileShoppingItem[]) => list.map((item) => item.id);
+
+    expect(ids(getShoppingListItems(items, "household_2"))).toEqual(["basil"]);
+    expect(ids(getShoppingListItems(items, "household_1"))).toEqual([
+      "milk-h1",
+      "eggs-h1",
+      "basil"
+    ]);
+    // Signed out, the whole list on this device shows.
+    expect(ids(getShoppingListItems(items, null))).toEqual(["milk-h1", "eggs-h1", "basil"]);
+
+    // Milk added in household_2 is household_2's own item, not more of household_1's.
+    const added = addShoppingItemsToList(items, [{ text: "2 cups milk" }], household2);
+    expect(added).toHaveLength(5);
+    expect(added.find((item) => item.id === "milk-h1")).toBe(items[0]);
+    expect(added.find((item) => !ids(items).includes(item.id))).toMatchObject({
+      qty: 2,
+      sync: { householdId: "household_2", status: "dirty" },
+      text: "milk",
+      unit: "cup"
+    });
+
+    // And household_1's records can't be changed from household_2.
+    expect(setShoppingItemCheckedInList(items, "milk-h1", true, household2)).toEqual(items);
+    expect(deleteShoppingItemInList(items, "eggs-h1", household2)).toEqual(items);
+    expect(clearCheckedShoppingItemsInList(items, household2)).toEqual(items);
+
+    // Their unsent changes wait for household_1.
+    expect(getPendingShoppingChanges(items, "household_2")).toEqual([]);
+    expect(ids(getPendingShoppingChanges(items, "household_1"))).toEqual(["eggs-h1", "jam-h1"]);
+  });
+
+  it("records a confirmed household on unsent changes that don't name one", () => {
+    const items = [
+      buildItem({ id: "unknown", sync: { status: "dirty" } }),
+      buildItem({ id: "synced", sync: { status: "synced" } }),
+      buildItem({ id: "local", sync: { status: "local_only" } }),
+      buildItem({ id: "old-home", sync: { householdId: "household_1", status: "dirty" } }),
+      buildItem({ id: "other", sync: { householdId: "household_3", status: "sync_failed" } })
+    ];
+    const households = (list: MobileShoppingItem[]) =>
+      Object.fromEntries(list.map((item) => [item.id, item.sync.householdId]));
+
+    const claimed = claimShoppingChanges(items, "household_2");
+    expect(households(claimed)).toEqual({
+      local: undefined,
+      "old-home": "household_1",
+      other: "household_3",
+      synced: undefined,
+      unknown: "household_2"
+    });
+    expect(claimed[0]?.sync).toEqual({ householdId: "household_2", status: "dirty" });
+    // Nothing left to claim: the same list comes back.
+    expect(claimShoppingChanges(claimed, "household_2")).toBe(claimed);
+
+    // This account moved from household_1: its changes for it can only go to household_2 now.
+    expect(households(claimShoppingChanges(items, "household_2", { from: "household_1" }))).toEqual(
+      {
+        local: undefined,
+        "old-home": "household_2",
+        other: "household_3",
+        synced: undefined,
+        unknown: "household_2"
+      }
+    );
+  });
+
+  it("sets refused changes aside under one stable id", () => {
+    // Stored before items recorded their household; the household list refused them as
+    // another household's.
+    const items = [
+      buildItem({ id: "edited", sync: { status: "sync_failed" } }),
+      buildItem({ deletedAt: now, id: "deleted", isDeleted: true, sync: { status: "dirty" } }),
       buildItem({ id: "mine", sync: { householdId: "household_2", status: "dirty" } })
     ];
+    const refused = new Set(["edited", "deleted"]);
 
-    const setAside = setAsideShoppingItems(items, new Set(["edited", "deleted"]), now);
+    const setAside = setAsideShoppingItems(items, refused, "household_2");
 
-    expect(setAside).toHaveLength(2);
-    expect(setAside[0]).toEqual({
-      ...items[0],
-      id: setAside[0]?.id,
-      sync: { status: "local_only" }
-    });
-    expect(setAside[0]?.id).not.toBe("edited");
+    expect(setAside).toEqual([
+      {
+        ...items[0],
+        id: setAsideShoppingItemId("edited", "household_2"),
+        sync: { status: "local_only" }
+      },
+      items[2]
+    ]);
     expect(setAside[1]).toBe(items[2]);
     expect(getSyncableDirtyItems(setAside).map((item) => item.id)).toEqual(["mine"]);
-    expect(setAsideShoppingItems(items, new Set())).toBe(items);
+    expect(setAsideShoppingItems(items, new Set(), "household_2")).toBe(items);
+
+    // The copy's id comes from the original's: setting the same change aside again (a retry)
+    // never makes a second copy.
+    expect(setAsideShoppingItems(items, refused, "household_2")).toEqual(setAside);
+    const retried = setAsideShoppingItems([setAside[0]!, ...items], refused, "household_2");
+    expect(retried.map((item) => item.id).sort()).toEqual(
+      [setAsideShoppingItemId("edited", "household_2"), "mine"].sort()
+    );
+
+    // A valid household list id of its own, never the original's.
+    const copyId = setAsideShoppingItemId("edited", "household_2");
+    expect(copyId).not.toBe("edited");
+    expect(setAsideShoppingItemId("edited", "household_2")).toBe(copyId);
+    expect(setAsideShoppingItemId("edited", "household_3")).not.toBe(copyId);
+    expect(setAsideShoppingItemId("edited-2", "household_2")).not.toBe(copyId);
+    expect(
+      shoppingItemSchema.safeParse(toApiShoppingItem({ ...items[0]!, id: copyId })).success
+    ).toBe(true);
   });
 
   it("reads the recorded household back, and older stored items without one", () => {

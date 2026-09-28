@@ -20,10 +20,11 @@ import { useAccount } from "../account/AccountContext";
 import {
   addShoppingItemsToList,
   applyRemoteShoppingItems,
-  belongsToOtherHousehold,
+  claimShoppingChanges,
   clearCheckedShoppingItemsInList,
   deleteShoppingItemInList,
-  getSyncableDirtyItems,
+  getPendingShoppingChanges,
+  getShoppingListItems,
   markShoppingItemsSynced,
   markShoppingItemsSyncFailed,
   readShoppingItems,
@@ -36,6 +37,7 @@ import {
   type MobileShoppingItem
 } from "./store";
 
+import type { ExtractorApiClient } from "@linkdish/api-client";
 import type { ShoppingItem } from "@linkdish/recipe-domain";
 
 const SHOPPING_ITEMS_STORAGE_KEY = "linkdish.shoppingItems.v1";
@@ -52,7 +54,10 @@ export interface ShoppingListState {
   hasLoadedShoppingItems: boolean;
   isRefreshingShoppingList: boolean;
   shoppingError: string | null;
-  /** Live items (delete tombstones waiting to sync are hidden). */
+  /**
+   * Live items of the household the list syncs with (delete tombstones waiting to sync, and
+   * records kept on this device for another household, are hidden). Signed out, every item.
+   */
   shoppingItems: MobileShoppingItem[];
 }
 
@@ -141,6 +146,29 @@ const sendIsolatingOtherHouseholdItems = async <Item extends { id: string }, Res
   return { refusedIds, results };
 };
 
+/** Thrown when a sync pass stops because the account it ran for is no longer signed in. */
+class ShoppingSyncCancelledError extends Error {
+  public constructor() {
+    super("The shopping list sync stopped: the account changed.");
+    this.name = "ShoppingSyncCancelledError";
+  }
+}
+
+/** The last household check that answered: the account's household (null: none), and when. */
+interface HouseholdCheck {
+  checkedAt: number;
+  id: string | null;
+  userId: string;
+}
+
+/**
+ * The same answer, due for a fresh check on the next pass. Its household stays known: the list
+ * keeps showing it (a check failing offline doesn't change whose list this is), and a later
+ * answer can tell that the account moved.
+ */
+const expired = (check: HouseholdCheck | null): HouseholdCheck | null =>
+  check && { ...check, checkedAt: 0 };
+
 interface SyncLoopState {
   loop: Promise<void> | null;
   pending: boolean;
@@ -149,24 +177,38 @@ interface SyncLoopState {
 
 export const ShoppingListProvider = ({ children }: PropsWithChildren) => {
   const { getAuthHeaders, isSignedIn, user } = useAccount();
-  const [activeHouseholdId, setActiveHouseholdId] = useState<string | null>(null);
+  const [checkedHousehold, setCheckedHousehold] = useState<HouseholdCheck | null>(null);
   const [hasLoadedShoppingItems, setHasLoadedShoppingItems] = useState(false);
   const [isRefreshingShoppingList, setIsRefreshingShoppingList] = useState(false);
   const [shoppingError, setShoppingError] = useState<string | null>(null);
   const [shoppingItems, setShoppingItems] = useState<MobileShoppingItem[]>([]);
   const [hasUnreadableStoredItems, setHasUnreadableStoredItems] = useState(false);
   const shoppingItemsRef = useRef<MobileShoppingItem[]>([]);
-  const householdIdRef = useRef<{ fetchedAt: number; id: string | null } | null>(null);
+  const householdCheckRef = useRef<HouseholdCheck | null>(null);
+  /** Set while a sync pass runs: throws once the account it runs for is no longer signed in. */
+  const syncPassGuardRef = useRef<(() => void) | null>(null);
   const syncLoopRef = useRef<SyncLoopState>({ loop: null, pending: false, pendingPull: false });
   const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const client = useMemo(
     () =>
       createExtractorApiClient({
         baseUrl: mobileEnv.apiBaseUrl,
-        getHeaders: getAuthHeaders
+        getHeaders: async () => {
+          const headers = await getAuthHeaders();
+          // Credentials can take a moment (a token refresh). A sync pass whose account signed
+          // out meanwhile must not send its request with the next account's.
+          syncPassGuardRef.current?.();
+          return headers;
+        }
       }),
     [getAuthHeaders]
   );
+  /**
+   * The household the list syncs with and shows: the signed-in account's, once a check for that
+   * account has answered. A check that fails (offline) keeps the last answer.
+   */
+  const activeHouseholdId =
+    isSignedIn && user && checkedHousehold?.userId === user.id ? checkedHousehold.id : null;
   const canSyncShoppingList = Boolean(isSignedIn && user && activeHouseholdId);
   const latestRef = useRef({
     canSyncShoppingList,
@@ -266,60 +308,72 @@ export const ShoppingListProvider = ({ children }: PropsWithChildren) => {
   }, [hasLoadedShoppingItems, hasUnreadableStoredItems, shoppingItems, writer]);
 
   /**
-   * One pass: push dirty items (and tombstones), then pull when asked or when needed. Changes
-   * are only sent to the household they belong to: another household's (someone else signed in
-   * on this device, or the account moved) are set aside on this device instead, and so are items
-   * the API refuses as another household's.
+   * The household a pass syncs with: this account's cached answer, or a fresh check (always for
+   * a pull). Unsent changes that don't name a household yet are recorded as this one's, and if
+   * the account moved household, its changes for the old one move with it. Resolves null when
+   * the account isn't in a household or the check failed (shown as the list's error).
    */
-  const runSyncPass = useCallback(
-    async (pull: boolean): Promise<void> => {
-      const { client: apiClient, isSignedIn: signedIn, userId } = latestRef.current;
+  const resolveHousehold = useCallback(
+    async (
+      apiClient: ExtractorApiClient,
+      userId: string,
+      pull: boolean,
+      ensureCurrent: () => void
+    ): Promise<string | null> => {
+      const last = householdCheckRef.current?.userId === userId ? householdCheckRef.current : null;
 
-      if (!signedIn || !userId) {
-        householdIdRef.current = null;
-        setActiveHouseholdId(null);
-        setShoppingError(null);
-        return;
+      if (!pull && last?.id && Date.now() - last.checkedAt < HOUSEHOLD_ID_CACHE_MS) {
+        const cachedId = last.id;
+        commitShoppingItems((current) => claimShoppingChanges(current, cachedId));
+        return cachedId;
       }
 
       let householdId: string | null;
 
       try {
-        const cached = householdIdRef.current;
-
-        if (!pull && cached?.id && Date.now() - cached.fetchedAt < HOUSEHOLD_ID_CACHE_MS) {
-          householdId = cached.id;
-        } else {
-          const householdResponse = await apiClient.getHousehold();
-          householdId = householdResponse.household?.id ?? null;
-          householdIdRef.current = { fetchedAt: Date.now(), id: householdId };
-        }
+        householdId = (await apiClient.getHousehold()).household?.id ?? null;
       } catch (error) {
-        householdIdRef.current = null;
-        setActiveHouseholdId(null);
+        if (error instanceof ShoppingSyncCancelledError) {
+          throw error;
+        }
+
+        householdCheckRef.current = expired(householdCheckRef.current);
         setShoppingError(getShoppingErrorMessage(error));
-        return;
+        return null;
       }
 
-      setActiveHouseholdId(householdId);
+      // An answer that arrives after the account signed out is not the next account's.
+      ensureCurrent();
+      const check: HouseholdCheck = { checkedAt: Date.now(), id: householdId, userId };
+      householdCheckRef.current = check;
+      setCheckedHousehold(check);
 
       if (!householdId) {
         setShoppingError(null);
-        return;
+        return null;
       }
 
-      const pendingItems = getSyncableDirtyItems(shoppingItemsRef.current);
-      const otherHouseholdIds = new Set(
-        pendingItems
-          .filter((item) => belongsToOtherHousehold(item, householdId))
-          .map((item) => item.id)
-      );
+      const from = last?.id && last.id !== householdId ? last.id : undefined;
+      commitShoppingItems((current) => claimShoppingChanges(current, householdId, { from }));
+      return householdId;
+    },
+    [commitShoppingItems]
+  );
 
-      if (otherHouseholdIds.size > 0) {
-        commitShoppingItems((current) => setAsideShoppingItems(current, otherHouseholdIds));
-      }
-
-      const syncableDirtyItems = pendingItems.filter((item) => !otherHouseholdIds.has(item.id));
+  /**
+   * Pushes this household's unsent changes (edits, then tombstones) and pulls when asked or when
+   * needed. Another household's changes are not sent: they wait on this device, out of this
+   * list, until that household syncs here again. Items the API refuses as another household's
+   * (stored before items recorded their household) are set aside on this device instead.
+   */
+  const pushAndPull = useCallback(
+    async (
+      apiClient: ExtractorApiClient,
+      householdId: string,
+      pull: boolean,
+      ensureCurrent: () => void
+    ): Promise<void> => {
+      const syncableDirtyItems = getPendingShoppingChanges(shoppingItemsRef.current, householdId);
       const dirtyUpserts = syncableDirtyItems.filter((item) => !item.isDeleted);
       const dirtyDeletes = syncableDirtyItems.filter((item) => item.isDeleted);
 
@@ -331,32 +385,37 @@ export const ShoppingListProvider = ({ children }: PropsWithChildren) => {
       const failedIds = new Set(syncableDirtyItems.map((item) => item.id));
 
       try {
-        const upserts = await sendIsolatingOtherHouseholdItems(dirtyUpserts, (batch) =>
-          apiClient.upsertShoppingItems({ items: batch.map(toApiShoppingItem) })
-        );
-        const deletes = await sendIsolatingOtherHouseholdItems(dirtyDeletes, (batch) =>
-          apiClient.deleteShoppingItems({
+        const upserts = await sendIsolatingOtherHouseholdItems(dirtyUpserts, (batch) => {
+          ensureCurrent();
+          return apiClient.upsertShoppingItems({ items: batch.map(toApiShoppingItem) });
+        });
+        const deletes = await sendIsolatingOtherHouseholdItems(dirtyDeletes, (batch) => {
+          ensureCurrent();
+          return apiClient.deleteShoppingItems({
             items: batch.map((item) => ({
               id: item.id,
               updatedAt: item.updatedAt
             }))
-          })
-        );
+          });
+        });
         // Every upsert answers with the whole household list, so the last one is the newest.
         let remoteItems: ShoppingItem[] | null =
           upserts.results[upserts.results.length - 1]?.items ?? null;
 
         if (pull && remoteItems == null) {
+          ensureCurrent();
           remoteItems = (await apiClient.getShoppingList()).items;
         }
 
+        // Answers that arrive after the account signed out are not recorded as this household's.
+        ensureCurrent();
         const syncedAt = new Date().toISOString();
         const deletedIds = new Set(deletes.results.flatMap((result) => result.deletedItemIds));
         const refusedIds = new Set([...upserts.refusedIds, ...deletes.refusedIds]);
         const remoteAfterDeletes = remoteItems?.filter((item) => !deletedIds.has(item.id)) ?? null;
 
         commitShoppingItems((current) => {
-          const withoutDeleted = setAsideShoppingItems(current, refusedIds).filter(
+          const withoutDeleted = setAsideShoppingItems(current, refusedIds, householdId).filter(
             (item) => !deletedIds.has(item.id)
           );
           const marked = markShoppingItemsSynced(
@@ -373,8 +432,12 @@ export const ShoppingListProvider = ({ children }: PropsWithChildren) => {
         });
         setShoppingError(null);
       } catch (syncError) {
+        if (syncError instanceof ShoppingSyncCancelledError) {
+          throw syncError;
+        }
+
         if (isHouseholdAccessError(syncError)) {
-          householdIdRef.current = null;
+          householdCheckRef.current = expired(householdCheckRef.current);
         }
 
         const message = getShoppingErrorMessage(syncError);
@@ -383,6 +446,45 @@ export const ShoppingListProvider = ({ children }: PropsWithChildren) => {
       }
     },
     [commitShoppingItems]
+  );
+
+  /**
+   * One pass for the signed-in account: which household it is in, then that household's push and
+   * pull. Passes run one at a time and each checks the household itself, so what can change under
+   * a pass is the account. Once it has, the pass stops (ShoppingSyncCancelledError) before its
+   * next request and before recording any answer, so nothing goes to or comes from the wrong
+   * household; the loop then runs a pass for whoever is signed in.
+   */
+  const runSyncPass = useCallback(
+    async (pull: boolean): Promise<void> => {
+      const { client: apiClient, isSignedIn: signedIn, userId } = latestRef.current;
+
+      if (!signedIn || !userId) {
+        householdCheckRef.current = expired(householdCheckRef.current);
+        setShoppingError(null);
+        return;
+      }
+
+      const ensureCurrent = () => {
+        const latest = latestRef.current;
+
+        if (!latest.isSignedIn || latest.userId !== userId) {
+          throw new ShoppingSyncCancelledError();
+        }
+      };
+      syncPassGuardRef.current = ensureCurrent;
+
+      try {
+        const householdId = await resolveHousehold(apiClient, userId, pull, ensureCurrent);
+
+        if (householdId) {
+          await pushAndPull(apiClient, householdId, pull, ensureCurrent);
+        }
+      } finally {
+        syncPassGuardRef.current = null;
+      }
+    },
+    [pushAndPull, resolveHousehold]
   );
 
   /**
@@ -406,7 +508,18 @@ export const ShoppingListProvider = ({ children }: PropsWithChildren) => {
             const shouldPull = state.pendingPull;
             state.pending = false;
             state.pendingPull = false;
-            await runSyncPass(shouldPull);
+
+            try {
+              await runSyncPass(shouldPull);
+            } catch (error) {
+              if (!(error instanceof ShoppingSyncCancelledError)) {
+                throw error;
+              }
+
+              // It ran for an account that is no longer signed in: sync the one that is.
+              state.pending = true;
+              state.pendingPull = true;
+            }
           }
         } finally {
           state.loop = null;
@@ -440,8 +553,7 @@ export const ShoppingListProvider = ({ children }: PropsWithChildren) => {
     }
 
     if (!isSignedIn || !user) {
-      householdIdRef.current = null;
-      setActiveHouseholdId(null);
+      householdCheckRef.current = expired(householdCheckRef.current);
       setShoppingError(null);
       return;
     }
@@ -566,8 +678,8 @@ export const ShoppingListProvider = ({ children }: PropsWithChildren) => {
   }, [applyMutation]);
 
   const visibleShoppingItems = useMemo(
-    () => shoppingItems.filter((item) => !item.isDeleted),
-    [shoppingItems]
+    () => getShoppingListItems(shoppingItems, activeHouseholdId),
+    [activeHouseholdId, shoppingItems]
   );
 
   const state = useMemo<ShoppingListState>(
