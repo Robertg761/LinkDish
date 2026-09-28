@@ -274,13 +274,7 @@ export default function RecipeScreen() {
       : undefined;
   const isCurrentRecipeSaved = currentSavedRecipe != null;
   const isCurrentRecipeShared =
-    routeSharedRecipe != null ||
-    Boolean(currentSavedRecipe?.sharedRecipeId) ||
-    Boolean(
-      currentRecipeSourceUrl &&
-      routeSharedRecipe == null &&
-      currentSavedRecipe?.sharedRecipeId != null
-    );
+    routeSharedRecipe != null || Boolean(currentSavedRecipe?.sharedRecipeId);
   const currentSaveGate =
     extraction.state.state === "success"
       ? getSaveLimitStatus({ isExistingRecord: isCurrentRecipeSaved })
