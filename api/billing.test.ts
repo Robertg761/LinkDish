@@ -72,9 +72,58 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe("Vercel billing usage", () => {
+  it("reports that billing is off without counting anything", async () => {
+    const response = await billingApi.GET(
+      new Request("https://api.linkdish.ca/api/billing?path=usage", {
+        headers: { origin: "https://app.linkdish.ca" }
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    await expect(response.json()).resolves.toEqual({
+      billingEnabled: false,
+      plan: null,
+      quota: null
+    });
+  });
+
+  it("returns the caller's free allowance when billing is enforced", async () => {
+    vi.stubEnv("BILLING_ENFORCEMENT_ENABLED", "true");
+    vi.stubEnv("FREE_LIFETIME_IMPORT_LIMIT", "3");
+    vi.stubEnv("UPSTASH_REDIS_REST_URL", "");
+    vi.stubEnv("UPSTASH_REDIS_REST_TOKEN", "");
+    const api = await reloadBillingApi();
+
+    const response = await api.GET(
+      new Request("https://api.linkdish.ca/api/billing?path=usage", {
+        headers: { "x-linkdish-client-id": "usage-install" }
+      })
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      billingEnabled: true,
+      plan: "free",
+      quota: { limit: 3, remaining: 3, meteringMode: "free_lifetime" }
+    });
+  });
+
+  it("still 404s unknown billing routes", async () => {
+    const response = await billingApi.GET(
+      new Request("https://api.linkdish.ca/api/billing?path=nope")
+    );
+
+    expect(response.status).toBe(404);
+  });
+});
+
 describe("Vercel billing adapter", () => {
   it("reports configured web checkout availability", async () => {
-    const response = billingApi.GET(new Request("https://api.linkdish.ca/api/billing?path=config"));
+    const response = await billingApi.GET(
+      new Request("https://api.linkdish.ca/api/billing?path=config")
+    );
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
@@ -104,7 +153,9 @@ describe("Vercel billing adapter", () => {
   });
 
   it("omits the founding offer until its Web Purchase Link is configured", async () => {
-    const response = billingApi.GET(new Request("https://api.linkdish.ca/api/billing?path=config"));
+    const response = await billingApi.GET(
+      new Request("https://api.linkdish.ca/api/billing?path=config")
+    );
 
     expect(response.status).toBe(200);
     const body = (await response.json()) as Record<string, unknown>;
@@ -119,7 +170,7 @@ describe("Vercel billing adapter", () => {
     vi.stubEnv("FOUNDING_LIFETIME_PRICE_LABEL", "$19.99");
     const api = await reloadBillingApi();
 
-    const response = api.GET(new Request("https://api.linkdish.ca/api/billing?path=config"));
+    const response = await api.GET(new Request("https://api.linkdish.ca/api/billing?path=config"));
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
@@ -138,7 +189,7 @@ describe("Vercel billing adapter", () => {
     );
     const api = await reloadBillingApi();
 
-    const response = api.GET(new Request("https://api.linkdish.ca/api/billing?path=config"));
+    const response = await api.GET(new Request("https://api.linkdish.ca/api/billing?path=config"));
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
@@ -205,7 +256,7 @@ describe("Vercel billing adapter", () => {
     vi.stubEnv("REVENUECAT_WEB_PURCHASE_LINK_FAMILY_YEARLY", "https://pay.rev.cat/family-yearly");
     const api = await reloadBillingApi();
 
-    const response = api.GET(new Request("https://api.linkdish.ca/api/billing?path=config"));
+    const response = await api.GET(new Request("https://api.linkdish.ca/api/billing?path=config"));
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
@@ -255,7 +306,7 @@ describe("Vercel billing adapter", () => {
     vi.stubEnv("REVENUECAT_V2_SECRET_API_KEY", "rc_v2_test");
     const api = await reloadBillingApi();
 
-    const response = api.GET(new Request("https://api.linkdish.ca/api/billing?path=config"));
+    const response = await api.GET(new Request("https://api.linkdish.ca/api/billing?path=config"));
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({

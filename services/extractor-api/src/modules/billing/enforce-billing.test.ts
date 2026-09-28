@@ -870,6 +870,18 @@ describe("authorizeExtractionRequest", () => {
     await households.acceptHouseholdInvite(memberSession.user, getLastInviteCode(infoSpy));
 
     familyActive = false;
+    /*
+     * Paid entitlements are cached for up to 5 minutes; the RevenueCat
+     * EXPIRATION webhook drops the owner's cached entitlement.
+     */
+    const { handleVerifiedRevenueCatWebhook } = await import("./revenuecat-webhook-service.js");
+    await handleVerifiedRevenueCatWebhook({
+      app_user_id: ownerSession.user.id,
+      environment: "PRODUCTION",
+      event_timestamp_ms: Date.now(),
+      id: "event_family_expired",
+      type: "EXPIRATION"
+    });
     const memberResult = await authorizeExtractionRequest(
       {
         authorization: `Bearer ${memberSession.sessionToken}`,
@@ -888,6 +900,28 @@ describe("authorizeExtractionRequest", () => {
         householdRole: null
       }
     });
+  });
+
+  it("serves paid entitlements from the cache and looks up RevenueCat and the household together", async () => {
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const fetchMock = stubRevenueCatEntitlement("2099-01-01T00:00:00Z");
+    const { authorizeExtractionRequest } = await importBillingModule({
+      AUTH_SECRET: "test_auth_secret",
+      HOUSEHOLDS_ENABLED: "true",
+      NODE_ENV: "test"
+    });
+    const session = await createAuthenticatedUser("cached-plus@example.com", infoSpy);
+    const headers = {
+      authorization: `Bearer ${session.sessionToken}`,
+      "x-forwarded-for": "203.0.113.81"
+    };
+
+    const first = await authorizeExtractionRequest(headers, "primary");
+    const second = await authorizeExtractionRequest(headers, "primary");
+
+    expect(first.logContext.billingPlan).toBe("plus");
+    expect(second.logContext.billingPlan).toBe("plus");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("uses free limits for unauthenticated requests even when paid entitlements exist", async () => {

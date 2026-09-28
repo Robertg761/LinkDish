@@ -278,6 +278,15 @@ class RuntimeManagedFallbackExtractor implements ManagedFallbackExtractor {
     return this.delegate.extract(...args);
   }
 
+  /*
+   * `available` and `providerName` reflect the admin model switch only after
+   * the persisted settings are loaded, so the extract pipeline refreshes them
+   * before reading either (a cold instance otherwise used the env defaults).
+   */
+  public async refresh(): Promise<void> {
+    await this.refreshPersistedSettings();
+  }
+
   public async getState(): Promise<AdminModelState> {
     await this.refreshPersistedSettings();
 

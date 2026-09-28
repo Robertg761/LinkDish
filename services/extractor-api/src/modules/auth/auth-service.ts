@@ -580,10 +580,13 @@ export const getAuthenticatedUser = async (
     return null;
   }
 
-  const session = await getSessionByToken(token);
-
-  if (session || !isJwtShapedToken(token)) {
-    return session;
+  /*
+   * Legacy session tokens are base64url (never three dot-separated parts), so
+   * a JWT-shaped token can only be a Clerk session: skip the store lookup that
+   * used to run first for every Clerk-authenticated request.
+   */
+  if (!isJwtShapedToken(token)) {
+    return getSessionByToken(token);
   }
 
   const { getAuthenticatedClerkUser } = await import("./clerk-auth-service.js");

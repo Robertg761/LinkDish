@@ -1,14 +1,9 @@
 import { extractorApiEnv } from "../../../config/env.js";
 import { getSharedManagedFallbackExtractor } from "../../admin/model-control.js";
-import {
-  BrowserFetchError,
-  HtmlFetchError,
-  createBrowserFetcher,
-  fetchHtmlDocument,
-  fetchYouTubeDocument
-} from "../fetchers/index.js";
-import { looksLikeShellHtml, looksLikeThinHtml } from "../fetchers/shared.js";
-import { hasUsableRecipeStructuredData } from "../source-detection/detect-source-type.js";
+import { createExtractionResultCache } from "../cache/extraction-cache.js";
+import { createFallbackHandoffStore } from "../cache/fallback-handoff.js";
+import { BrowserFetchError, HtmlFetchError } from "../fetchers/errors.js";
+import { getDomainAdapter } from "../source-detection/domain-adapters.js";
 import { parseYouTubeVideoId } from "../source-detection/parse-youtube-video-id.js";
 import { validatePublicSourceUrl } from "../source-url-safety.js";
 import {
@@ -16,63 +11,161 @@ import {
   createGeminiRecipeTextCleaner
 } from "../text-cleanup/gemini-recipe-text-cleaner.js";
 
-import type { ExtractorRuntime, FetchResult, YouTubeSourceDocument } from "../types.js";
+import type * as BrowserEscalation from "./browser-escalation.js";
+import type { RequestDeadline } from "../deadline.js";
+import type * as HtmlFetcher from "../fetchers/fetch-html-document.js";
+import type * as TikTokFetcher from "../fetchers/fetch-tiktok-document.js";
+import type * as YouTubeFetcher from "../fetchers/fetch-youtube-document.js";
+import type {
+  BrowserFetcher,
+  ExtractorRuntime,
+  FetchResult,
+  RecipeTextCleaner,
+  SourceFetchOptions,
+  YouTubeSourceDocument
+} from "../types.js";
 
 const fetchImplementation = fetch;
 let sharedRuntime: ExtractorRuntime | null = null;
 
-export const shouldUseBrowserFallback = ({
-  available,
-  blockedSignals,
-  html
-}: {
-  available: boolean;
-  blockedSignals: string[];
-  html: string;
-}): boolean => {
-  if (!available || hasUsableRecipeStructuredData(html)) {
-    return false;
-  }
+/*
+ * The fetchers (and through them the HTML parser and Playwright) load on the
+ * first fetch instead of when the /extract function boots, so requests that
+ * never fetch (cache hits, billing denials, unsupported links) skip them.
+ */
+let htmlFetcherModule: Promise<typeof HtmlFetcher> | null = null;
+let browserEscalationModule: Promise<typeof BrowserEscalation> | null = null;
+let youTubeFetcherModule: Promise<typeof YouTubeFetcher> | null = null;
+let tikTokFetcherModule: Promise<typeof TikTokFetcher> | null = null;
 
-  return blockedSignals.length > 0 || looksLikeShellHtml(html) || looksLikeThinHtml(html);
+const loadHtmlFetcher = () => {
+  htmlFetcherModule ??= import("../fetchers/fetch-html-document.js");
+  return htmlFetcherModule;
 };
 
-export const createDefaultExtractorRuntime = (): ExtractorRuntime => {
-  const browserFetcher = createBrowserFetcher({
-    enabled: extractorApiEnv.BROWSER_FETCH_ENABLED,
-    timeoutMs: extractorApiEnv.BROWSER_FETCH_TIMEOUT_MS,
-    concurrency: extractorApiEnv.BROWSER_FETCH_CONCURRENCY
+const loadBrowserEscalation = () => {
+  browserEscalationModule ??= import("./browser-escalation.js");
+  return browserEscalationModule;
+};
+
+const loadTikTokFetcher = () => {
+  tikTokFetcherModule ??= import("../fetchers/fetch-tiktok-document.js");
+  return tikTokFetcherModule;
+};
+
+const loadYouTubeFetcher = () => {
+  youTubeFetcherModule ??= import("../fetchers/fetch-youtube-document.js");
+  return youTubeFetcherModule;
+};
+
+/* Time kept back after a browser render for parsing, extraction and the response. */
+const browserRenderReserveMs = 3_000;
+/* Below this much remaining time a browser render cannot finish, so it is not started. */
+const minimumBrowserBudgetMs = 4_000;
+
+const getBlockSignalPatterns = (url: string): RegExp[] | undefined => {
+  try {
+    return getDomainAdapter(new URL(url).hostname.toLowerCase())?.blockSignals;
+  } catch {
+    return undefined;
+  }
+};
+
+const createRecipeTextCleaner = (): RecipeTextCleaner =>
+  createGeminiRecipeTextCleaner({
+    apiKey: extractorApiEnv.RECIPE_TEXT_CLEANUP_ENABLED
+      ? extractorApiEnv.GEMINI_API_KEY
+      : undefined,
+    model: GEMINI_TEXT_CLEANUP_MODEL,
+    fetchImplementation,
+    timeoutMs: Math.min(extractorApiEnv.LLM_FALLBACK_TIMEOUT_MS, 8_000)
   });
+
+export const createDefaultExtractorRuntime = (): ExtractorRuntime => {
+  const browserEnabled = extractorApiEnv.BROWSER_FETCH_ENABLED;
+  let browserFetcherPromise: Promise<BrowserFetcher> | null = null;
+
+  const getBrowserFetcher = () => {
+    browserFetcherPromise ??= import("../fetchers/fetch-browser-document.js").then(
+      ({ createBrowserFetcher }) =>
+        createBrowserFetcher({
+          enabled: browserEnabled,
+          timeoutMs: extractorApiEnv.BROWSER_FETCH_TIMEOUT_MS,
+          concurrency: extractorApiEnv.BROWSER_FETCH_CONCURRENCY
+        })
+    );
+
+    return browserFetcherPromise;
+  };
+
+  const fetchWithBrowser = async (
+    url: string,
+    deadline: RequestDeadline | undefined,
+    blockSignalPatterns: RegExp[] | undefined
+  ): Promise<FetchResult> => {
+    const timeoutMs = deadline
+      ? deadline.budgetMs(extractorApiEnv.BROWSER_FETCH_TIMEOUT_MS, browserRenderReserveMs)
+      : extractorApiEnv.BROWSER_FETCH_TIMEOUT_MS;
+
+    if (timeoutMs < minimumBrowserBudgetMs) {
+      throw new BrowserFetchError("Not enough request time left for a browser render.", "timeout");
+    }
+
+    const browserFetcher = await getBrowserFetcher();
+
+    return browserFetcher.fetch(url, {
+      timeoutMs,
+      ...(deadline
+        ? {
+            signal: deadline.signal,
+            queueTimeoutMs: deadline.budgetMs(Number.POSITIVE_INFINITY, timeoutMs)
+          }
+        : {}),
+      ...(blockSignalPatterns ? { blockSignalPatterns } : {})
+    });
+  };
 
   return {
     fetchImplementation,
-    fetchHtmlDocument: async (url: string): Promise<FetchResult> => {
+    fetchHtmlDocument: async (url: string, options?: SourceFetchOptions): Promise<FetchResult> => {
+      const deadline = options?.deadline;
+      const blockSignalPatterns = getBlockSignalPatterns(url);
+
       try {
+        const { fetchHtmlDocument } = await loadHtmlFetcher();
         const httpResult = await fetchHtmlDocument(url, fetchImplementation, {
-          timeoutMs: extractorApiEnv.FETCH_HTTP_TIMEOUT_MS,
-          retries: extractorApiEnv.FETCH_HTTP_RETRIES
+          timeoutMs: deadline
+            ? deadline.budgetMs(extractorApiEnv.FETCH_HTTP_TIMEOUT_MS)
+            : extractorApiEnv.FETCH_HTTP_TIMEOUT_MS,
+          /* The browser is the retry when it is available, so HTTP does not retry first. */
+          retries: browserEnabled ? 0 : extractorApiEnv.FETCH_HTTP_RETRIES,
+          ...(blockSignalPatterns ? { blockSignalPatterns } : {}),
+          ...(deadline ? { signal: deadline.signal } : {})
         });
+        const { shouldUseBrowserFallback } = await loadBrowserEscalation();
 
         if (
           shouldUseBrowserFallback({
-            available: browserFetcher.available,
+            available: browserEnabled,
             blockedSignals: httpResult.blockedSignals,
-            html: httpResult.document.html
+            html: httpResult.document.html,
+            document: httpResult.document
           })
         ) {
-          return browserFetcher.fetch(url);
+          return await fetchWithBrowser(url, deadline, blockSignalPatterns);
         }
 
         return httpResult;
       } catch (error) {
         if (
-          browserFetcher.available &&
+          browserEnabled &&
+          !deadline?.signal.aborted &&
           error instanceof HtmlFetchError &&
           (error.reason === "blocked" ||
             error.reason === "timeout" ||
             error.reason === "unreachable")
         ) {
-          return browserFetcher.fetch(url);
+          return fetchWithBrowser(url, deadline, blockSignalPatterns);
         }
 
         if (error instanceof BrowserFetchError || error instanceof HtmlFetchError) {
@@ -85,22 +178,51 @@ export const createDefaultExtractorRuntime = (): ExtractorRuntime => {
         );
       }
     },
-    fetchYouTubeDocument: async (url: string, videoId: string): Promise<YouTubeSourceDocument> =>
-      fetchYouTubeDocument(
+    fetchYouTubeDocument: async (
+      url: string,
+      videoId: string,
+      options?: SourceFetchOptions
+    ): Promise<YouTubeSourceDocument> => {
+      const deadline = options?.deadline;
+      const { fetchYouTubeDocument } = await loadYouTubeFetcher();
+
+      return fetchYouTubeDocument(
         url,
         videoId,
         fetchImplementation,
-        extractorApiEnv.FETCH_HTTP_TIMEOUT_MS
-      ),
+        deadline
+          ? deadline.budgetMs(extractorApiEnv.FETCH_HTTP_TIMEOUT_MS)
+          : extractorApiEnv.FETCH_HTTP_TIMEOUT_MS,
+        deadline ? { signal: deadline.signal } : undefined
+      );
+    },
+    fetchSocialDocument: async (url: string, options?: SourceFetchOptions) => {
+      const deadline = options?.deadline;
+      const { fetchTikTokDocument } = await loadTikTokFetcher();
+
+      return fetchTikTokDocument(url, fetchImplementation, {
+        timeoutMs: deadline
+          ? deadline.budgetMs(extractorApiEnv.FETCH_HTTP_TIMEOUT_MS)
+          : extractorApiEnv.FETCH_HTTP_TIMEOUT_MS,
+        ...(deadline ? { signal: deadline.signal } : {}),
+        validateUrl: validatePublicSourceUrl
+      });
+    },
     fallbackExtractor: getSharedManagedFallbackExtractor(fetchImplementation),
-    recipeTextCleaner: createGeminiRecipeTextCleaner({
-      apiKey: extractorApiEnv.GEMINI_API_KEY,
-      model: GEMINI_TEXT_CLEANUP_MODEL,
-      fetchImplementation,
-      timeoutMs: Math.min(extractorApiEnv.LLM_FALLBACK_TIMEOUT_MS, 8_000)
-    }),
+    recipeTextCleaner: createRecipeTextCleaner(),
+    ...(extractorApiEnv.EXTRACT_CACHE_ENABLED
+      ? {
+          extractionCache: createExtractionResultCache({
+            ttlSeconds: extractorApiEnv.EXTRACT_CACHE_TTL_SECONDS
+          })
+        }
+      : {}),
+    fallbackHandoffStore: createFallbackHandoffStore(),
     validateSourceUrl: validatePublicSourceUrl,
-    dispose: () => browserFetcher.dispose()
+    dispose: async () => {
+      const browserFetcher = await browserFetcherPromise?.catch(() => null);
+      await browserFetcher?.dispose();
+    }
   };
 };
 

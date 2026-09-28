@@ -22,7 +22,9 @@ export const createFallbackExtractor = (options: {
   }
 
   if (options.provider === "openai") {
-    return createOpenAiFallbackExtractor(options.openAiApiKey, options.openAiModel);
+    return createOpenAiFallbackExtractor(options.openAiApiKey, options.openAiModel, {
+      timeoutMs: options.timeoutMs
+    });
   }
 
   return createGeminiFallbackExtractor({

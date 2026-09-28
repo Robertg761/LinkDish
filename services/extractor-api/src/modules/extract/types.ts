@@ -1,3 +1,6 @@
+import type { ExtractionResultCache } from "./cache/extraction-cache.js";
+import type { FallbackHandoffStore } from "./cache/fallback-handoff.js";
+import type { RequestDeadline } from "./deadline.js";
 import type { ValidateSourceUrl } from "./source-url-safety.js";
 import type {
   ExtractRecipeImage,
@@ -36,6 +39,23 @@ export interface YouTubeSourceDocument {
   transcript: string | null;
   chapters: string[];
   pageHtml: string | null;
+  /** The channel name from oEmbed, when known. */
+  authorName?: string | null | undefined;
+}
+
+/**
+ * Recipe text that did not come from a fetched page: a TikTok caption read through oEmbed, or
+ * text the user pasted. It only ever goes to the LLM extractor.
+ */
+export interface TextSourceDocument {
+  kind: "text";
+  /** The recipe's source URL (the video's canonical URL, or the pasted text's source/synthetic URL). */
+  url: string;
+  origin: "paste" | "tiktok";
+  text: string;
+  title: string | null;
+  authorName: string | null;
+  thumbnailUrl: string | null;
 }
 
 export interface ImageSourceDocument {
@@ -44,7 +64,11 @@ export interface ImageSourceDocument {
   images: ExtractRecipeImage[];
 }
 
-export type SourceDocument = HtmlSourceDocument | YouTubeSourceDocument | ImageSourceDocument;
+export type SourceDocument =
+  | HtmlSourceDocument
+  | YouTubeSourceDocument
+  | ImageSourceDocument
+  | TextSourceDocument;
 
 export interface FetchResult {
   document: HtmlSourceDocument;
@@ -60,8 +84,18 @@ export type InternalFetchFailureKind =
   | "unreachable"
   | "unsupported_content_type";
 
+export interface BrowserFetchOptions {
+  /** Aborts the render (request deadline or cancellation). */
+  signal?: AbortSignal | undefined;
+  /** Navigation budget; never more than the configured browser timeout. */
+  timeoutMs?: number | undefined;
+  /** How long to wait for a free browser slot. */
+  queueTimeoutMs?: number | undefined;
+  blockSignalPatterns?: RegExp[] | undefined;
+}
+
 export interface BrowserFetcher {
-  fetch(url: string): Promise<FetchResult>;
+  fetch(url: string, options?: BrowserFetchOptions): Promise<FetchResult>;
   readonly available: boolean;
   dispose(): Promise<void>;
 }
@@ -113,26 +147,57 @@ export interface FallbackExtractionInput {
   candidate: ExtractionCandidate | null;
   detection: DetectionResult;
   fetchMode: FetchMode;
+  /**
+   * Prompt-ready page summary handed off by the primary attempt. When present,
+   * providers use it instead of summarising `sourceDocument.html`.
+   */
+  sourceSummary?: string | undefined;
+  /** Request deadline; providers size their timeouts and attempts to fit it. */
+  deadline?: RequestDeadline | undefined;
 }
 
 export interface FallbackRecipeExtractor {
   extract(input: FallbackExtractionInput): Promise<ExtractionCandidate | null>;
+  /** Reloads runtime-managed settings (the admin model switch) before they are read. */
+  refresh?(): Promise<void>;
   readonly available: boolean;
   readonly providerName: "gemini" | "openai" | "none";
 }
 
+export interface RecipeTextCleanerOptions {
+  signal?: AbortSignal | undefined;
+  timeoutMs?: number | undefined;
+}
+
 export interface RecipeTextCleaner {
-  clean(recipe: Recipe): Promise<Recipe>;
+  clean(recipe: Recipe, options?: RecipeTextCleanerOptions): Promise<Recipe>;
   readonly available: boolean;
   readonly providerName: "gemini" | "none";
 }
 
+export interface SourceFetchOptions {
+  deadline?: RequestDeadline | undefined;
+}
+
 export interface ExtractorRuntime {
   fetchImplementation: typeof fetch;
-  fetchHtmlDocument(url: string): Promise<FetchResult>;
-  fetchYouTubeDocument(url: string, videoId: string): Promise<YouTubeSourceDocument>;
+  fetchHtmlDocument(url: string, options?: SourceFetchOptions): Promise<FetchResult>;
+  fetchYouTubeDocument(
+    url: string,
+    videoId: string,
+    options?: SourceFetchOptions
+  ): Promise<YouTubeSourceDocument>;
+  /**
+   * Reads a social post's caption (TikTok oEmbed today). Runtimes without it treat those
+   * links as unsupported.
+   */
+  fetchSocialDocument?: (url: string, options?: SourceFetchOptions) => Promise<TextSourceDocument>;
   fallbackExtractor: FallbackRecipeExtractor;
   recipeTextCleaner?: RecipeTextCleaner;
+  /** URL-keyed store of validated success responses. Test runtimes omit it unless they opt in. */
+  extractionCache?: ExtractionResultCache;
+  /** Short-lived primary-to-fallback document hand-off, keyed by correlation id and URL. */
+  fallbackHandoffStore?: FallbackHandoffStore;
   validateSourceUrl: ValidateSourceUrl;
   dispose(): Promise<void>;
 }
@@ -199,5 +264,11 @@ export interface ExtractionLogContext {
   finalUrl: string | null;
   blockedSignals: string[];
   browserAttempted: boolean;
+  /** URL result cache outcome: served from cache, looked up and missed, or not consulted. */
+  cacheStatus?: "hit" | "miss" | "bypass";
+  /** Whether the Gemini text cleanup ran for a success, and why not when it did not. */
+  textCleanup?: "applied" | "not_needed" | "disabled" | "skipped_budget";
+  /** Fallback attempts: whether the primary attempt's handed-off document was reused. */
+  fallbackHandoff?: "used" | "missing";
   latencyMs: number;
 }

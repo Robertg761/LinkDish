@@ -1,6 +1,6 @@
 import { load } from "cheerio";
 
-import type { FallbackExtractionInput } from "../types.js";
+import type { FallbackExtractionInput, TextSourceDocument } from "../types.js";
 
 const maxVisibleTextLength = 12_000;
 const maxHeadings = 18;
@@ -30,7 +30,11 @@ const buildCandidateSummary = (input: FallbackExtractionInput): string => {
   );
 };
 
-const buildHtmlSourceSummary = (html: string): string => {
+/*
+ * Parses its own copy of the page: it strips scripts and styles, so it must not
+ * touch the shared read-only parse used by detection and the extractors.
+ */
+export const buildHtmlSourceSummary = (html: string): string => {
   const $ = load(html);
   $("script, style, noscript, template, svg, iframe").remove();
 
@@ -60,10 +64,20 @@ const buildHtmlSourceSummary = (html: string): string => {
   ].join("\n");
 };
 
+const buildTextSourceSummary = (document: TextSourceDocument): string =>
+  [
+    document.origin === "tiktok"
+      ? "The source is a TikTok video caption. Ignore hashtags, emoji, calls to follow or shop, and links; use only recipe content the caption actually states."
+      : "The source is recipe text the user pasted. Ignore anything that is not part of the recipe (greetings, links, sign-offs).",
+    ...(document.title ? [`Title: ${document.title}`] : []),
+    ...(document.authorName ? [`Author: ${document.authorName}`] : []),
+    `Text:\n${document.text}`
+  ].join("\n");
+
 export const buildFallbackInputText = (input: FallbackExtractionInput): string => {
   const sourceDocument =
     input.sourceDocument.kind === "html"
-      ? buildHtmlSourceSummary(input.sourceDocument.html)
+      ? (input.sourceSummary ?? buildHtmlSourceSummary(input.sourceDocument.html))
       : input.sourceDocument.kind === "youtube"
         ? [
             `Title: ${input.sourceDocument.title ?? "Unknown"}`,
@@ -71,10 +85,12 @@ export const buildFallbackInputText = (input: FallbackExtractionInput): string =
             `Transcript: ${input.sourceDocument.transcript ?? "Unavailable"}`,
             `Chapters: ${input.sourceDocument.chapters.join(" | ") || "Unavailable"}`
           ].join("\n")
-        : [
-            `Image count: ${input.sourceDocument.images.length}`,
-            "The recipe source is attached as image input. Read only visible recipe text from the images."
-          ].join("\n");
+        : input.sourceDocument.kind === "text"
+          ? buildTextSourceSummary(input.sourceDocument)
+          : [
+              `Image count: ${input.sourceDocument.images.length}`,
+              "The recipe source is attached as image input. Read only visible recipe text from the images."
+            ].join("\n");
 
   return [
     "Extract a clean cooking recipe from the provided source.",

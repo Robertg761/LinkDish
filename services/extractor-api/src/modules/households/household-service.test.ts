@@ -366,7 +366,40 @@ describe("household-service", () => {
     });
 
     familyActive = false;
+    /* The owner's Family entitlement is cached until the next RevenueCat event for them. */
+    await expect(households.getActiveHouseholdQuotaForUser(member.id)).resolves.not.toBeNull();
+
+    const { invalidateRevenueCatEntitlementCache } =
+      await import("../billing/revenuecat-entitlements.js");
+    await invalidateRevenueCatEntitlementCache(owner.id);
     await expect(households.getActiveHouseholdQuotaForUser(member.id)).resolves.toBeNull();
+  });
+
+  it("serves household reads from the cached owner entitlement", async () => {
+    const fetchMock = vi.fn(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            subscriber: {
+              entitlements: { Family: { expires_date: "2099-01-01T00:00:00Z" } }
+            }
+          }),
+          { headers: { "content-type": "application/json" }, status: 200 }
+        )
+      )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const { auth, households } = await importHouseholdModules();
+    const owner = await createUser(auth, "owner@example.com");
+
+    await households.createHouseholdForOwner(owner);
+    const callsAfterCreate = fetchMock.mock.calls.length;
+
+    await households.getActiveHouseholdQuotaForUser(owner.id);
+    await households.getHouseholdSummaryForUser(owner.id);
+    await households.getSharedRecipesForUser(owner);
+
+    expect(fetchMock.mock.calls.length).toBe(callsAfterCreate);
   });
 
   it("reports active household members as effective Family accounts", async () => {

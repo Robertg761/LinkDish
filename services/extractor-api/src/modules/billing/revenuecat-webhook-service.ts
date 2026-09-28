@@ -7,6 +7,8 @@ import { hashAnalyticsUserId } from "../analytics/analytics-privacy.js";
 import { writeAnalyticsEvents } from "../analytics/analytics-store.js";
 import { getHeader, type RequestHeaders } from "../request-identity.js";
 
+import { invalidateRevenueCatEntitlementCache } from "./revenuecat-entitlements.js";
+
 const maxTimestampSkewSeconds = 300;
 const monthlyDurationMinimumMs = 20 * 24 * 60 * 60 * 1_000;
 const yearlyDurationMinimumMs = 300 * 24 * 60 * 60 * 1_000;
@@ -203,9 +205,32 @@ const isPromotionalGrant = (event: RevenueCatWebhookEvent): boolean =>
   event.period_type?.toUpperCase() === "PROMOTIONAL" ||
   event.store?.toUpperCase() === "PROMOTIONAL";
 
+const toStringList = (value: unknown): string[] =>
+  Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [];
+
+/* Every app user id an event can concern: the subscriber, its aliases and both sides of a transfer. */
+const getEventAppUserIds = (event: RevenueCatWebhookEvent): string[] => {
+  const record = event as Record<string, unknown>;
+
+  return [
+    event.app_user_id,
+    ...(typeof record.original_app_user_id === "string" ? [record.original_app_user_id] : []),
+    ...toStringList(record.aliases),
+    ...toStringList(record.transferred_from),
+    ...toStringList(record.transferred_to)
+  ];
+};
+
 export const handleVerifiedRevenueCatWebhook = async (
   event: RevenueCatWebhookEvent
 ): Promise<{ action: string; received: true }> => {
+  /*
+   * Any verified subscription event (purchase, renewal, cancellation,
+   * expiration, transfer, billing issue...) can change a plan, so the cached
+   * entitlements of everyone it concerns are dropped before anything else.
+   */
+  await invalidateRevenueCatEntitlementCache(...getEventAppUserIds(event));
+
   if (event.environment && event.environment !== "PRODUCTION") {
     return {
       action: "ignored_non_production",

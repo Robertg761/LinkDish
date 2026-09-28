@@ -28,6 +28,11 @@ const youtubeTranscript = readFileSync(
   new URL("../__fixtures__/youtube-transcript.txt", import.meta.url),
   "utf8"
 );
+/* The same recipe with leftover markup and a navigation label in a step. */
+const recipeJsonLdWithArtifacts = recipeJsonLd.replace(
+  "Boil the pasta in salted water.",
+  "<p>Boil the pasta in salted water.</p> Jump to Recipe"
+);
 
 const createFallbackExtractor = (
   candidate: ExtractionCandidate | null,
@@ -50,11 +55,13 @@ const createRuntime = (options?: {
         kind: "html",
         url,
         finalUrl: url,
-        html: url.includes("recipe-jsonld")
-          ? recipeJsonLd
-          : url.includes("article-recipe")
-            ? articleRecipe
-            : articleWeak,
+        html: url.includes("recipe-jsonld-artifacts")
+          ? recipeJsonLdWithArtifacts
+          : url.includes("recipe-jsonld")
+            ? recipeJsonLd
+            : url.includes("article-recipe")
+              ? articleRecipe
+              : articleWeak,
         contentType: "text/html",
         title: "Fixture HTML",
         description: null,
@@ -180,7 +187,7 @@ describe("POST /extract", () => {
     });
   });
 
-  it("cleans successful structured recipe text before returning it", async () => {
+  it("cleans successful structured recipe text that shows artifacts before returning it", async () => {
     const clean = vi.fn<RecipeTextCleaner["clean"]>().mockImplementation((recipe) =>
       Promise.resolve({
         ...recipe,
@@ -189,6 +196,38 @@ describe("POST /extract", () => {
     );
     const app = buildApp({
       runtime: createRuntime({
+        fallbackAvailable: true,
+        recipeTextCleaner: {
+          available: true,
+          providerName: "gemini",
+          clean
+        }
+      })
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/extract",
+      payload: {
+        url: "https://fixtures.linkdish.test/recipe-jsonld-artifacts"
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(clean).toHaveBeenCalledTimes(1);
+    expect(response.json()).toMatchObject({
+      status: "success",
+      recipe: {
+        title: "Clean One-Pan Tomato Pasta"
+      }
+    });
+  });
+
+  it("skips the text cleanup LLM call when the recipe text is already clean", async () => {
+    const clean = vi.fn<RecipeTextCleaner["clean"]>();
+    const app = buildApp({
+      runtime: createRuntime({
+        fallbackAvailable: true,
         recipeTextCleaner: {
           available: true,
           providerName: "gemini",
@@ -206,12 +245,40 @@ describe("POST /extract", () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(clean).toHaveBeenCalledTimes(1);
+    expect(clean).not.toHaveBeenCalled();
     expect(response.json()).toMatchObject({
       status: "success",
       recipe: {
-        title: "Clean One-Pan Tomato Pasta"
+        title: "One-Pan Tomato Pasta"
       }
+    });
+  });
+
+  it("never runs the text cleanup when the LLM provider is switched to none", async () => {
+    const clean = vi.fn<RecipeTextCleaner["clean"]>();
+    const app = buildApp({
+      runtime: createRuntime({
+        fallbackAvailable: false,
+        recipeTextCleaner: {
+          available: true,
+          providerName: "gemini",
+          clean
+        }
+      })
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/extract",
+      payload: {
+        url: "https://fixtures.linkdish.test/recipe-jsonld-artifacts"
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(clean).not.toHaveBeenCalled();
+    expect(response.json()).toMatchObject({
+      status: "success"
     });
   });
 
@@ -268,7 +335,7 @@ describe("POST /extract", () => {
       method: "POST",
       url: "/extract",
       payload: {
-        url: "https://www.youtube.com/shorts/abc123"
+        url: "https://vimeo.com/123456789"
       }
     });
 
@@ -276,8 +343,7 @@ describe("POST /extract", () => {
     expect(response.json()).toMatchObject({
       status: "failure",
       reason: "unsupported_source",
-      userMessage:
-        "Video links and shorts are not supported yet. Paste a written recipe page instead.",
+      userMessage: "That video site is not supported yet. Paste a written recipe page instead.",
       recovery: {
         allowFallback: false,
         retryable: false,
@@ -335,7 +401,7 @@ describe("POST /extract", () => {
           recipe: {
             title: "Fallback Skillet Chicken",
             ingredients: [{ text: "1 lb chicken thighs" }],
-            steps: [{ index: 1, text: "Sear the chicken." }],
+            steps: [{ index: 1, text: "Sear the chicken.<br>" }],
             servings: "4 servings",
             prepTimeMinutes: 10,
             cookTimeMinutes: 18,
@@ -401,7 +467,7 @@ describe("POST /extract", () => {
     );
     const fallbackExtract = vi.fn<FallbackRecipeExtractor["extract"]>().mockResolvedValue({
       recipe: {
-        title: "Scanned Skillet Chicken",
+        title: "SCANNED SKILLET CHICKEN",
         ingredients: [{ text: "1 lb chicken thighs" }],
         steps: [{ index: 1, text: "Sear the chicken." }],
         servings: "4 servings",
