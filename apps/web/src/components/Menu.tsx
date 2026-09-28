@@ -15,6 +15,12 @@ export interface MenuItem {
   description?: string | undefined;
   tone?: "default" | "danger" | undefined;
   disabled?: boolean | undefined;
+  /**
+   * Makes the item a selectable option (role menuitemradio, or menuitemcheckbox with
+   * `selection: "checkbox"`) and marks whether it is currently chosen with a check.
+   */
+  checked?: boolean | undefined;
+  selection?: "radio" | "checkbox" | undefined;
 }
 
 export interface MenuSeparator {
@@ -88,7 +94,7 @@ export const Menu: React.FC<MenuProps> = ({
   const getItemElements = () =>
     Array.from(
       menuRef.current?.querySelectorAll<HTMLButtonElement>(
-        "[role='menuitem']:not([aria-disabled='true'])"
+        "[role^='menuitem']:not([aria-disabled='true'])"
       ) ?? []
     );
 
@@ -271,8 +277,11 @@ export const Menu: React.FC<MenuProps> = ({
                   <div className="menu-separator" key={entry.id} role="separator" />
                 ) : (
                   <button
+                    aria-checked={entry.checked === undefined ? undefined : entry.checked}
                     aria-disabled={entry.disabled || undefined}
-                    className={`menu-item${entry.tone === "danger" ? " menu-item-danger" : ""}`}
+                    className={`menu-item${entry.tone === "danger" ? " menu-item-danger" : ""}${
+                      entry.checked ? " is-checked" : ""
+                    }`}
                     key={entry.id}
                     onClick={() => {
                       if (entry.disabled) {
@@ -282,7 +291,13 @@ export const Menu: React.FC<MenuProps> = ({
                       closeMenu(true);
                       entry.onSelect();
                     }}
-                    role="menuitem"
+                    role={
+                      entry.checked === undefined
+                        ? "menuitem"
+                        : entry.selection === "checkbox"
+                          ? "menuitemcheckbox"
+                          : "menuitemradio"
+                    }
                     tabIndex={-1}
                     type="button"
                   >
@@ -295,6 +310,9 @@ export const Menu: React.FC<MenuProps> = ({
                         <span className="menu-item-description">{entry.description}</span>
                       ) : null}
                     </span>
+                    {entry.checked ? (
+                      <Icon name="check" size={18} className="menu-item-check" />
+                    ) : null}
                   </button>
                 )
               )}
