@@ -281,7 +281,10 @@ describe("RecipePage saved route", () => {
     });
 
     fireEvent.click(screen.getAllByRole("button", { name: "Start cooking" })[0]!);
-    fireEvent.click(await screen.findByRole("button", { name: "Show all ingredients" }));
+    // Cook mode is its own chunk; the first test to open it waits for the import.
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Show all ingredients" }, { timeout: 5_000 })
+    );
     const sheet = screen.getByRole("dialog", { name: "Ingredients" });
     expect(within(sheet).getByRole("checkbox", { name: "2 cups flour" })).toHaveAttribute(
       "aria-checked",
@@ -516,7 +519,11 @@ describe("RecipePage saved route", () => {
     renderAt("/recipes/recipe_local?cook=1");
 
     expect(
-      await screen.findByRole("dialog", { name: "Cooking mode for Weeknight Chili" })
+      await screen.findByRole(
+        "dialog",
+        { name: "Cooking mode for Weeknight Chili" },
+        { timeout: 5_000 }
+      )
     ).toBeInTheDocument();
   });
 
@@ -526,9 +533,11 @@ describe("RecipePage saved route", () => {
     await screen.findByRole("heading", { level: 1, name: "Weeknight Chili" });
 
     fireEvent.click(screen.getByRole("button", { name: "Start cooking" }));
-    const cookMode = await screen.findByRole("dialog", {
-      name: "Cooking mode for Weeknight Chili"
-    });
+    const cookMode = await screen.findByRole(
+      "dialog",
+      { name: "Cooking mode for Weeknight Chili" },
+      { timeout: 5_000 }
+    );
     fireEvent.click(within(cookMode).getByRole("button", { name: "Next step" }));
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 300));
