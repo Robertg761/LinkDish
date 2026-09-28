@@ -309,236 +309,13 @@
   line-height: 1.3;
 }
 
-.pm-status {
-  display: flex;
-  height: 44px;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: space-between;
-  padding: 4px 26px 0 30px;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.pm-status-icons {
-  width: 46px;
-  height: 11px;
-  border-radius: 3px;
-  background:
-    linear-gradient(currentColor, currentColor) right / 20px 11px no-repeat,
-    radial-gradient(circle, currentColor 2px, transparent 2.4px) 0 50% / 7px 7px repeat-x;
-  opacity: 0.85;
-}
-
-.pm-body {
-  flex: 1 1 auto;
-  padding: 6px 14px 0;
-  overflow: hidden;
-}
-
-.pm-title {
-  margin: 4px 2px 10px;
-  font-family: var(--font-display);
-  font-size: 27px;
-  font-weight: 700;
-  letter-spacing: -0.035em;
-  line-height: 1;
-}
-
-.pm-seg {
-  display: inline-flex;
-  margin-bottom: 9px;
-  padding: 3px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--tint);
-  font-size: 10.5px;
-  font-weight: 750;
-}
-
-.pm-seg span {
-  padding: 4px 11px;
-  border-radius: 999px;
-  color: var(--muted);
-}
-
-.pm-seg .is-active {
-  background: var(--surface);
-  box-shadow: 0 1px 2px rgba(var(--shadow-rgb), 0.12);
-  color: var(--primary);
-}
-
-.pm-search {
-  display: flex;
-  height: 32px;
-  align-items: center;
-  gap: 7px;
-  padding: 0 12px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--surface);
-  color: var(--muted);
-  font-size: 10.5px;
-}
-
-.pm-search .icon {
-  width: 13px;
-  height: 13px;
-}
-
-.pm-chips {
-  display: flex;
-  gap: 5px;
-  margin: 9px 0 10px;
-  overflow: hidden;
-  font-size: 10px;
-  font-weight: 750;
-  white-space: nowrap;
-}
-
-.pm-chips span {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  padding: 4px 9px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--surface);
-  color: var(--muted);
-}
-
-.pm-chips .icon {
-  width: 10px;
-  height: 10px;
-  color: var(--tomato);
-  fill: currentColor;
-}
-
-.pm-chips .is-active {
-  border-color: var(--primary);
-  background: var(--primary);
-  color: var(--on-primary);
-}
-
-.pm-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 9px;
-}
-
-.pm-card {
-  position: relative;
-  overflow: hidden;
-  border: 1px solid var(--border-subtle);
-  border-radius: 14px;
-  background: var(--surface);
-  box-shadow: 0 1px 2px rgba(var(--shadow-rgb), 0.08);
-}
-
-.pm-photo {
+/* A real app screenshot filling the phone mock (390 x 844 capture, status bar included). */
+.phone-screen img {
   width: 100%;
-  height: auto;
-  aspect-ratio: 4 / 3;
+  height: 100%;
+  object-fit: cover;
+  object-position: top center;
 }
-
-.pm-card b {
-  display: block;
-  padding: 6px 8px 1px;
-  overflow: hidden;
-  font-family: var(--font-display);
-  font-size: 11.5px;
-  letter-spacing: -0.01em;
-  line-height: 1.15;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.pm-card small {
-  display: block;
-  padding: 0 8px 7px;
-  color: var(--muted);
-  font-size: 9px;
-}
-
-.pm-fav {
-  position: absolute;
-  top: 5px;
-  right: 5px;
-  display: grid;
-  width: 20px;
-  height: 20px;
-  place-items: center;
-  border-radius: 50%;
-  background: rgba(255, 253, 248, 0.94);
-  color: #b95233;
-}
-
-.pm-fav .icon {
-  width: 11px;
-  height: 11px;
-  fill: currentColor;
-  stroke-width: 1.4;
-}
-
-.pm-tabbar {
-  display: grid;
-  flex: 0 0 auto;
-  grid-template-columns: repeat(5, 1fr);
-  align-items: end;
-  padding: 7px 6px 16px;
-  border-top: 1px solid var(--border-subtle);
-  background: var(--canvas);
-  box-shadow: 0 -8px 20px rgba(var(--shadow-rgb), 0.06);
-}
-
-.pm-tab {
-  display: grid;
-  justify-items: center;
-  gap: 2px;
-  color: var(--muted);
-  font-size: 8.5px;
-  font-weight: 750;
-}
-
-.pm-tab i {
-  display: grid;
-  width: 38px;
-  height: 24px;
-  place-items: center;
-  border-radius: 999px;
-}
-
-.pm-tab .icon {
-  width: 16px;
-  height: 16px;
-}
-
-.pm-tab.is-active {
-  color: var(--ink);
-}
-
-.pm-tab.is-active i {
-  background: var(--primary-soft);
-  color: var(--on-primary-soft);
-}
-
-.pm-tab-add i {
-  width: 40px;
-  height: 40px;
-  margin-top: -18px;
-  border: 3px solid var(--canvas);
-  border-radius: 50%;
-  background: var(--tomato);
-  box-shadow: 0 6px 14px rgba(185, 82, 51, 0.35);
-  color: var(--on-tomato);
-}
-
-.pm-tab-add .icon {
-  width: 18px;
-  height: 18px;
-  stroke-width: 2.6;
-}
-
 /* Floating cards around the phone */
 
 .float-card {
@@ -947,209 +724,31 @@
   border-radius: 32px;
 }
 
-.mock-card {
-  width: min(100%, 420px);
-  padding: 20px;
-  border: 1px solid var(--border);
-  border-radius: 24px;
-  background: var(--surface);
+/* A real app screenshot rising from the bottom edge of the feature panel. */
+.feature-visual-shot {
+  align-items: end;
+  padding-bottom: 0;
+  overflow: hidden;
+}
+
+.feature-shot {
+  width: min(100%, 300px);
+}
+
+.feature-shot picture {
+  max-height: 520px;
+  overflow: hidden;
+  border: 8px solid var(--device);
+  border-bottom: 0;
+  border-radius: 40px 40px 0 0;
+  background: var(--device);
   box-shadow: var(--shadow-lg);
 }
-
-.mock-eyebrow {
-  display: block;
-  margin-bottom: 4px;
-  color: var(--on-tomato-soft);
-  font-size: 0.72rem;
-  font-weight: 800;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-}
-
-.mock-plan-head b {
-  display: block;
-  margin-bottom: 14px;
-  font-family: var(--font-display);
-  font-size: 2rem;
-  letter-spacing: -0.035em;
-  line-height: 1;
-}
-
-.mock-plan-head em {
-  color: var(--primary);
-  font-weight: 600;
-  box-shadow: inset 0 -0.14em 0 var(--butter);
-}
-
-.mock-days {
-  display: grid;
-  gap: 6px;
-  margin: 0 0 16px;
-  padding: 0;
-  list-style: none;
-}
-
-.mock-days li {
-  display: grid;
-  grid-template-columns: 38px 44px minmax(0, 1fr);
-  align-items: center;
-  gap: 10px;
-  padding: 6px;
-  border: 1px solid var(--border-subtle);
-  border-radius: 14px;
-  background: var(--canvas);
-  font-family: var(--font-display);
-  font-size: 0.98rem;
-  font-weight: 700;
-  line-height: 1.2;
-}
-
-.mock-days li > span:last-child {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.mock-days .is-open {
-  border-style: dashed;
-  border-color: var(--border-strong);
-  background: transparent;
-}
-
-.mock-day {
-  color: var(--muted);
-  font-family: var(--font-ui);
-  font-size: 0.7rem;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  text-align: center;
-  text-transform: uppercase;
-}
-
 .mock-thumb {
   width: 44px;
   height: 33px;
   border-radius: 8px;
 }
-
-.mock-empty {
-  grid-column: 2 / -1;
-  color: var(--muted);
-  font-family: var(--font-ui);
-  font-size: 0.86rem;
-  font-style: italic;
-  font-weight: 600;
-}
-
-.mock-button {
-  display: flex;
-  min-height: 46px;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  border-radius: 14px;
-  background: var(--tomato);
-  color: var(--on-tomato);
-  font-size: 0.95rem;
-  font-weight: 800;
-}
-
-.mock-list-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-
-.mock-list-head b {
-  font-family: var(--font-display);
-  font-size: 1.6rem;
-  letter-spacing: -0.03em;
-}
-
-.mock-sync {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 10px;
-  border-radius: 999px;
-  background: var(--primary-soft);
-  color: var(--on-primary-soft);
-  font-size: 0.74rem;
-  font-weight: 750;
-}
-
-.mock-sync .icon {
-  width: 13px;
-  height: 13px;
-}
-
-.mock-aisle {
-  display: grid;
-  gap: 2px;
-  padding-top: 10px;
-}
-
-.mock-aisle + .mock-aisle {
-  margin-top: 4px;
-  border-top: 1px solid var(--border-subtle);
-}
-
-.mock-aisle-name {
-  margin-bottom: 2px;
-  color: var(--primary);
-  font-size: 0.72rem;
-  font-weight: 800;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-}
-
-.mock-item {
-  display: grid;
-  grid-template-columns: 20px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 10px;
-  min-height: 34px;
-  font-size: 0.95rem;
-}
-
-.mock-item b {
-  font-weight: 800;
-}
-
-.mock-item small {
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: var(--tint);
-  color: var(--muted);
-  font-size: 0.72rem;
-  font-weight: 700;
-}
-
-.mock-item i {
-  width: 20px;
-  height: 20px;
-  border: 1.5px solid var(--border-strong);
-  border-radius: 50%;
-}
-
-.mock-item.is-done {
-  color: var(--muted);
-}
-
-.mock-item.is-done > span {
-  text-decoration: line-through;
-}
-
-.mock-item.is-done i {
-  border-color: var(--primary);
-  background:
-    var(--check-icon) center / 12px no-repeat,
-    var(--primary);
-}
-
 /* Bento grid */
 
 .bento {
@@ -1194,6 +793,36 @@
     var(--surface);
 }
 
+/* Dark mode shown on a night-time card in either site theme. */
+.bento-dark {
+  --night-ink: #f4ede1;
+  --night-muted: #c8bead;
+  padding-bottom: 0;
+  border-color: #34302a;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(221, 231, 223, 0.14), transparent 55%), #211f1b;
+  color: var(--night-ink);
+}
+
+.bento-dark p {
+  color: var(--night-muted);
+}
+
+.bento-dark .bento-icon {
+  background: rgba(221, 231, 223, 0.14);
+  color: #bcd6c6;
+}
+
+.bento-dark .bento-screen-peek picture {
+  max-height: 250px;
+  border-color: #0b0a09;
+}
+
+/* Start the peek at the search bar so the recipe photos show. */
+.bento-screen-peek img {
+  margin-top: -40%;
+}
+
 .bento-photos {
   grid-column: span 2;
   flex-direction: row;
@@ -1214,14 +843,13 @@
   min-width: 0;
 }
 
-.photo-strip svg {
-  width: 100%;
-  height: auto;
+.photo-strip picture {
+  overflow: hidden;
   border-radius: 14px;
   box-shadow: var(--shadow-sm);
 }
 
-.photo-strip svg:nth-child(2n) {
+.photo-strip picture:nth-child(2n) {
   transform: translateY(10px);
 }
 
@@ -1231,6 +859,22 @@
   margin: 28px auto 0;
 }
 
+/* Pinned to the card's bottom edge whatever height the row ends up. */
+.bento-cook .bento-screen,
+.bento-dark .bento-screen {
+  margin-top: auto;
+}
+
+.bento-cook .bento-copy,
+.bento-dark .bento-copy {
+  margin-bottom: 28px;
+}
+
+/* The cook card spans two rows, so there is room for the whole screen. */
+.bento-cook .bento-screen picture {
+  max-height: 660px;
+}
+
 .bento-screen picture {
   max-height: 440px;
   overflow: hidden;
@@ -1238,22 +882,6 @@
   border-bottom: 0;
   border-radius: 34px 34px 0 0;
   background: var(--device);
-}
-
-.timer-pill {
-  position: absolute;
-  bottom: 36px;
-  left: -14px;
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 9px 14px;
-  border-radius: 999px;
-  background: var(--tomato);
-  box-shadow: var(--shadow-lg);
-  color: var(--on-tomato);
-  font-size: 1.05rem;
-  font-weight: 800;
 }
 
 .units-demo,
@@ -2323,7 +1951,7 @@
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
-  .photo-strip svg:nth-child(2n) {
+  .photo-strip picture:nth-child(2n) {
     transform: none;
   }
 
@@ -2576,6 +2204,10 @@
     grid-row: auto;
   }
 
+  .bento-cook .bento-screen picture {
+    max-height: 440px;
+  }
+
   .source-card {
     display: grid;
     grid-template-columns: 44px minmax(0, 1fr);
@@ -2665,11 +2297,6 @@
     padding: 16px;
     border-radius: 24px;
   }
-
-  .mock-card {
-    padding: 16px;
-  }
-
   .household {
     padding: 10px;
   }

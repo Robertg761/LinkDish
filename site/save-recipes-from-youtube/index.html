@@ -417,7 +417,58 @@
         </div>
       </section>
 
-      <section class="section" aria-labelledby="honest-title">
+      <section class="section" aria-labelledby="result-title">
+        <div class="shell lp-split">
+          <div class="feature-copy" data-reveal>
+            <p class="eyebrow">What you get</p>
+            <h2 class="section-title" id="result-title">
+              A recipe card,<br /><em>not a timestamp.</em>
+            </h2>
+            <p>
+              The description becomes a real recipe with the photo, times, servings and every
+              ingredient, ready to scale, switch to metric, plan and cook from.
+            </p>
+            <ul class="check-list">
+              <li>Ingredients and steps read from the description</li>
+              <li>Scale servings and switch between US and metric</li>
+              <li>Add it to the week and to your shopping list</li>
+              <li>The video one tap away when you need the technique</li>
+            </ul>
+          </div>
+          <figure class="shot-frame" data-reveal>
+            <picture class="shot-crop">
+              <source
+                type="image/avif"
+                srcset="
+                  /assets/screen-import-360.avif 360w,
+                  /assets/screen-import-600.avif 600w,
+                  /assets/screen-import-720.avif 720w
+                "
+                sizes="(max-width: 640px) 234px, 304px"
+              />
+              <source
+                type="image/webp"
+                srcset="
+                  /assets/screen-import-360.webp 360w,
+                  /assets/screen-import-600.webp 600w,
+                  /assets/screen-import-720.webp 720w
+                "
+                sizes="(max-width: 640px) 234px, 304px"
+              />
+              <img
+                src="/assets/screen-import.png"
+                alt="A recipe just imported from a YouTube video in LinkDish: Smoky Three-Bean Chili with its photo, the youtube.com source, times, servings and ingredients, and a Save to cookbook button"
+                width="720"
+                height="1558"
+                loading="lazy"
+                decoding="async"
+              />
+            </picture>
+          </figure>
+        </div>
+      </section>
+
+      <section class="section section-surface" aria-labelledby="honest-title">
         <div class="shell">
           <div class="section-head" data-reveal>
             <p class="eyebrow">Good to know</p>
@@ -494,8 +545,8 @@
               <summary>Does LinkDish credit the creator?</summary>
               <div>
                 <p>
-                  Yes. The channel is saved as the recipe's author, and the original video stays one
-                  tap away.
+                  Yes. Every recipe saved from YouTube keeps the video as its source, one tap away,
+                  so the person who made it gets the credit.
                 </p>
               </div>
             </details>

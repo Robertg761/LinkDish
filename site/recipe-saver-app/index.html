@@ -335,19 +335,27 @@
               <picture class="shot-crop">
                 <source
                   type="image/avif"
-                  srcset="/assets/screen-recipe-360.avif 360w, /assets/screen-recipe-720.avif 720w"
-                  sizes="(max-width: 560px) 80vw, 320px"
+                  srcset="
+                    /assets/screen-recipe-360.avif 360w,
+                    /assets/screen-recipe-600.avif 600w,
+                    /assets/screen-recipe-720.avif 720w
+                  "
+                  sizes="(max-width: 640px) 234px, 304px"
                 />
                 <source
                   type="image/webp"
-                  srcset="/assets/screen-recipe-360.webp 360w, /assets/screen-recipe-720.webp 720w"
-                  sizes="(max-width: 560px) 80vw, 320px"
+                  srcset="
+                    /assets/screen-recipe-360.webp 360w,
+                    /assets/screen-recipe-600.webp 600w,
+                    /assets/screen-recipe-720.webp 720w
+                  "
+                  sizes="(max-width: 640px) 234px, 304px"
                 />
                 <img
                   src="/assets/screen-recipe.png"
-                  alt="A saved recipe in LinkDish with servings controls, ingredients and the original source"
+                  alt="A recipe saved in LinkDish: the dish photo, the weeknightkitchen.com source, total, prep and cook times, a five-star rating with how often it was cooked, and the ingredients with servings and Metric selected"
                   width="720"
-                  height="1482"
+                  height="1558"
                   fetchpriority="high"
                 />
               </picture>

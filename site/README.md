@@ -53,10 +53,22 @@ There is no compilation step. GitHub Pages publishes this directory through
 
 ## Images
 
-- Screenshots are served with `<picture>`: AVIF and WebP at 360 and 720 px
-  (`screen-*-360.avif`, `screen-*-720.webp`, ...) with the original PNG as the
-  fallback. Every `<img>` needs `alt`, `width` and `height`, and every
-  `srcset` file must exist (`pnpm check:site` checks all three).
+- Screenshots are served with `<picture>`: AVIF and WebP at 360, 600 and 720 px
+  (`screen-*-360.avif`, `screen-*-600.webp`, ...) with a 720 px PNG as the
+  fallback, and `sizes` set to the width the frame really renders at (so a 2x
+  phone picks 600 and a 3x phone 720). Every `<img>` needs `alt`, `width` and
+  `height`, and every `srcset` file must exist (`pnpm check:site` checks all
+  three).
+- The screenshots are real captures of the web app (a production build with the
+  API stubbed and a seeded cookbook, week plan and shopping list), taken at
+  390 x 844 with a 3x device scale and an iPhone status bar and home indicator
+  added, so every one is 720 x 1558 at the fallback size: `screen-cookbook`,
+  `screen-recipe` (Metric selected), `screen-cookmode` (running timer),
+  `screen-shopping` (by aisle), `screen-planner`, `screen-import` (a YouTube
+  import) and `screen-dark` (the cookbook in dark mode). Keep that frame when
+  replacing one, and retake them when the app's look changes.
+- `photo-*` are the recipe photos from those captures, as AVIF and WebP at 240
+  and 480 px with a JPEG fallback, for the homepage photo card.
 - The header and footer logo use `linkdish-icon-64.png`/`-128.png`; the 512 px
   `linkdish-icon.png` is only for structured data and external links.
 - Social cards stay under 300 KB (WhatsApp drops larger previews).
