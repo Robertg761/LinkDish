@@ -176,7 +176,7 @@
 
 .settings-toc {
   position: sticky;
-  top: 40px;
+  top: calc(var(--topbar-height) + 24px);
   display: flex;
   flex-direction: column;
   gap: 8px;

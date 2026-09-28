@@ -20,11 +20,11 @@ import {
 } from "./backup-export";
 import { DataTransferError } from "./errors";
 import { selectExportRecipes } from "./export-selection";
+import { loadExportSnapshot, loadSourceImages } from "./export-snapshot";
 import { analyzeImport, buildImportPlan } from "./import-plan";
 import { parseImportFile, readFileBytes } from "./import-sources";
 import { commitImport } from "./import-writer";
 import { recordBackupDownloaded } from "./last-backup";
-import { loadExportSnapshot, loadSourceImages } from "./local-data";
 
 import type { ImportSource } from "./import-formats";
 import type { DuplicateMode, ImportAnalysis, ImportPlan } from "./import-plan";
@@ -158,16 +158,20 @@ export async function prepareImport(
 export const previewImport = (
   prepared: PreparedImport,
   options: { duplicateMode: DuplicateMode; isPremium: boolean }
-): ImportPlan =>
-  buildImportPlan(prepared.analysis, {
+): ImportPlan => {
+  let previewIds = 0;
+
+  return buildImportPlan(prepared.analysis, {
     ...options,
     existingRecipeIds: prepared.existingRecipeIds,
     quotaUsed: prepared.analysis.quotaUsed,
     existingCollections: prepared.existingCollections,
     existingMealPlan: prepared.existingMealPlan,
     now: new Date().toISOString(),
-    createId: () => "preview"
+    // Placeholder ids: the real ones are made when the import is written.
+    createId: () => `preview-${(previewIds += 1)}`
   });
+};
 
 /** Writes the import in one transaction and records `library_imported`. */
 export async function runImport(

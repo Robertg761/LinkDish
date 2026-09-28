@@ -67,12 +67,12 @@ const importButtonLabel = (plan: ImportPlan, isBackup: boolean): string => {
       : "Nothing new to import";
   }
 
-  if (plan.counts.overLimit > 0) {
-    return `Import ${count} of ${count + plan.counts.overLimit}`;
-  }
-
   return isBackup ? `Restore ${plural(count, "recipe")}` : `Import ${plural(count, "recipe")}`;
 };
+
+/** "Sep 28, 2026" */
+const formatBackupDate = (iso: string): string =>
+  new Date(iso).toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" });
 
 const hasAnythingToWrite = (plan: ImportPlan): boolean =>
   plan.recipes.length +
@@ -172,6 +172,7 @@ export const ImportSheet: React.FC<ImportSheetProps> = ({
       ? phase.prepared.analysis.parsed
       : null;
   const isBackup = parsed?.source === "linkdish";
+  const scannedToWrite = plan?.recipes.filter((recipe) => recipe.sourceImages?.length).length ?? 0;
   const title =
     phase.kind === "done"
       ? "All set"
@@ -205,7 +206,6 @@ export const ImportSheet: React.FC<ImportSheetProps> = ({
             Done
           </Button>
           <Button
-            icon="book-open"
             onClick={() => {
               onClose();
               void navigate("/");
@@ -224,7 +224,6 @@ export const ImportSheet: React.FC<ImportSheetProps> = ({
         </Button>
         <Button
           disabled={!plan || !hasAnythingToWrite(plan)}
-          icon={isBackup ? "rotate-ccw" : "download"}
           loading={phase.kind === "importing"}
           onClick={() => void handleImport()}
         >
@@ -245,7 +244,13 @@ export const ImportSheet: React.FC<ImportSheetProps> = ({
         parsed ? (
           <span className="settings-import-source">
             <Badge tone="primary">
-              {isBackup ? "LinkDish backup" : `From ${IMPORT_SOURCE_LABELS[parsed.source]}`}
+              {isBackup
+                ? parsed.exportedAt
+                  ? `Backup from ${formatBackupDate(parsed.exportedAt)}`
+                  : "LinkDish backup"
+                : parsed.source === "schema_org"
+                  ? "Recipe data file"
+                  : `From ${IMPORT_SOURCE_LABELS[parsed.source]}`}
             </Badge>
             <span className="settings-import-file" title={parsed.fileName}>
               {parsed.fileName}
@@ -308,24 +313,35 @@ export const ImportSheet: React.FC<ImportSheetProps> = ({
               </SummaryRow>
             ) : null}
             {isBackup && parsed.collections.length > 0 ? (
-              <SummaryRow icon="folder">
+              <SummaryRow
+                icon="folder"
+                tone={plan.counts.collectionsCreated === 0 ? "muted" : "default"}
+              >
                 {plural(parsed.collections.length, "collection")}
-                {plan.counts.collectionsMatched > 0
-                  ? ` (${plan.counts.collectionsMatched} already here)`
-                  : ""}
+                {plan.counts.collectionsCreated === 0
+                  ? ", already here"
+                  : plan.counts.collectionsMatched > 0
+                    ? ` (${plan.counts.collectionsMatched} already here)`
+                    : ""}
               </SummaryRow>
             ) : null}
             {isBackup && parsed.mealPlan.length > 0 ? (
-              <SummaryRow icon="calendar-days">
-                {plural(plan.counts.mealPlanAdded, "planned meal")} to add
-                {plan.counts.mealPlanSkipped > 0
-                  ? ` (${plan.counts.mealPlanSkipped} already planned)`
-                  : ""}
+              <SummaryRow
+                icon="calendar-days"
+                tone={plan.counts.mealPlanAdded === 0 ? "muted" : "default"}
+              >
+                {plan.counts.mealPlanAdded === 0
+                  ? `${plural(parsed.mealPlan.length, "planned meal")}, already in your plan`
+                  : `${plural(plan.counts.mealPlanAdded, "planned meal")} to add${
+                      plan.counts.mealPlanSkipped > 0
+                        ? ` (${plan.counts.mealPlanSkipped} already planned)`
+                        : ""
+                    }`}
               </SummaryRow>
             ) : null}
-            {parsed.scannedPhotoRecipes > 0 ? (
+            {scannedToWrite > 0 ? (
               <SummaryRow icon="images">
-                Original scans for {plural(parsed.scannedPhotoRecipes, "recipe")}
+                Original scans for {plural(scannedToWrite, "recipe")}
               </SummaryRow>
             ) : null}
             {parsed.photosSkipped > 0 ? (

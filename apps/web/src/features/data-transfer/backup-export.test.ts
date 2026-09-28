@@ -26,8 +26,8 @@ import {
 import { WEB_BACKUP_EXTRAS_KEY } from "./backup-format";
 import { downloadBackup, downloadCookbookText, prepareImport, runImport } from "./data-transfer";
 import { selectExportRecipes } from "./export-selection";
+import { loadExportSnapshot } from "./export-snapshot";
 import { readLastBackupAt } from "./last-backup";
-import { loadExportSnapshot } from "./local-data";
 import { fileFromBytes, utf8Bytes } from "./testing/zip-fixtures";
 
 import type { WebLinkDishBackup } from "./backup-export";
@@ -270,7 +270,10 @@ describe("backups", () => {
           tags: ["quick"],
           notes: "Add more lime."
         }),
-        saved("a", { recipe: { ...skillet, title: "Apple Cake" } }),
+        saved("a", {
+          recipe: { ...skillet, title: "Apple Cake" },
+          sourceUrl: "https://linkdish.app/imports/paprika/apple-cake-1a2b3c4d"
+        }),
         starter(1)
       ],
       { exportedAt: new Date(2026, 8, 28) }
@@ -285,6 +288,9 @@ describe("backups", () => {
     expect(markdown).toContain("### Notes\n\nAdd more lime.");
     expect(markdown).toContain("\n\n---\n\n");
     expect(markdown).not.toContain(SAMPLE_RECIPES[1].recipe.title);
+    // Real sources are linked; made-up import addresses are not.
+    expect(markdown.match(/\[Source\]/gu)).toHaveLength(1);
+    expect(markdown).not.toContain("linkdish.app/imports");
   });
 
   it("downloads a backup, remembers when, and records library_exported", async () => {

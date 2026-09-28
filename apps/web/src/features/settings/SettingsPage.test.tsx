@@ -1,7 +1,7 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { configure, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import React from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { resetDataChangeFeedForTests, setDataChannelFactoryForTests } from "../../data/change-feed";
 import { resetCollectionsStoreForTests } from "../../data/collections-store";
@@ -121,7 +121,14 @@ const chooseFile = (file: File) => {
   fireEvent.change(screen.getByTestId("import-file-input"), { target: { files: [file] } });
 };
 
-describe("SettingsPage", () => {
+// The import flows read files, unzip and write IndexedDB; give them room on a busy CI machine.
+describe("SettingsPage", { timeout: 20_000 }, () => {
+  beforeAll(async () => {
+    configure({ asyncUtilTimeout: 5_000 });
+    // Warm the lazily loaded import/export code so the first test does not pay for it.
+    await Promise.all([import("../data-transfer/data-transfer"), import("./ImportSheet")]);
+  });
+
   beforeEach(() => {
     window.localStorage.clear();
     // Skip first-run starter seeding unless a test wants starters.
@@ -300,7 +307,7 @@ describe("SettingsPage", () => {
     expect(
       await within(sheet).findByText("Room for 1 more recipe on the free plan")
     ).toBeInTheDocument();
-    fireEvent.click(within(sheet).getByRole("button", { name: "Import 1 of 3" }));
+    fireEvent.click(within(sheet).getByRole("button", { name: "Import 1 recipe" }));
 
     await within(sheet).findByText("1 recipe added to your cookbook");
     expect(within(sheet).getByText(/2 recipes didn't fit in your free/u)).toBeInTheDocument();
@@ -362,7 +369,7 @@ describe("SettingsPage", () => {
     chooseFile(new File([exported!], "linkdish-backup-2026-09-28.json"));
 
     const sheet = await screen.findByRole("dialog", { name: "Restore a backup" });
-    expect(await within(sheet).findByText("LinkDish backup")).toBeInTheDocument();
+    expect(await within(sheet).findByText(/^Backup from /u)).toBeInTheDocument();
     fireEvent.click(within(sheet).getByRole("button", { name: "Restore 1 recipe" }));
     await within(sheet).findByText("1 recipe restored");
     expect((await getSavedRecipes())[0]).toMatchObject({

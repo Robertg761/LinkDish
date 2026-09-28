@@ -65,6 +65,8 @@ export interface ImportAnalysis {
   items: AnalyzedCandidate[];
   /** Personal recipes on this device when the analysis ran (starters excluded). */
   quotaUsed: number;
+  /** Collections each cookbook recipe already belongs to (only recipes that have some). */
+  existingCollectionIds: ReadonlyMap<string, readonly string[]>;
 }
 
 interface ExistingIndexEntry {
@@ -190,7 +192,12 @@ export async function analyzeImport(
   return {
     parsed,
     items,
-    quotaUsed: existing.filter((recipe) => !isStarterId(recipe.id)).length
+    quotaUsed: existing.filter((recipe) => !isStarterId(recipe.id)).length,
+    existingCollectionIds: new Map(
+      existing
+        .filter((recipe) => recipe.collectionIds?.length)
+        .map((recipe) => [recipe.id, recipe.collectionIds ?? []])
+    )
   };
 }
 
@@ -506,9 +513,12 @@ export function buildImportPlan(analysis: ImportAnalysis, context: ImportPlanCon
 
           // Restoring a backup onto a cookbook that already has the recipe still restores
           // which collections it belongs to.
-          if (collectionIds.length && context.existingRecipeIds.has(localId)) {
+          const current = new Set(analysis.existingCollectionIds.get(localId) ?? []);
+          const missing = collectionIds.filter((collectionId) => !current.has(collectionId));
+
+          if (missing.length && context.existingRecipeIds.has(localId)) {
             const set = membershipAdditions.get(localId) ?? new Set<string>();
-            collectionIds.forEach((collectionId) => set.add(collectionId));
+            missing.forEach((collectionId) => set.add(collectionId));
             membershipAdditions.set(localId, set);
           }
         }

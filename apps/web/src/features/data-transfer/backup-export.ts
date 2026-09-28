@@ -26,6 +26,7 @@ import {
   WEB_BACKUP_EXTRAS_VERSION
 } from "./backup-format";
 import { selectExportRecipes } from "./export-selection";
+import { isLinkDishInternalSourceUrl } from "./synthetic-url";
 
 import type { WebBackupExtras, WebCollectionExtras, WebRecipeExtras } from "./backup-format";
 import type { WebCollection } from "../../data/collections-store";
@@ -229,7 +230,11 @@ export const buildCookbookMarkdown = (
   ].join("\n\n");
 
   const sections = selected.map((recipe) => {
-    const markdown = recipeToMarkdown(recipe.recipe, { notes: recipe.notes ?? null })
+    const markdown = recipeToMarkdown(recipe.recipe, {
+      notes: recipe.notes ?? null,
+      // Made-up import and photo-scan addresses are not pages anyone can open.
+      includeSource: !isLinkDishInternalSourceUrl(recipe.sourceUrl)
+    })
       .trimEnd()
       // Each recipe's "# Title" becomes "## Title" under the cookbook heading.
       .replace(HEADING_PATTERN, "#$1 ");

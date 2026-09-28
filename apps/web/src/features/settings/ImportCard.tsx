@@ -1,16 +1,22 @@
-import React, { useRef, useState } from "react";
+import React, { Suspense, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { Button } from "../../components/Button";
 import { Icon } from "../../components/Icon";
+import { useToast } from "../../components/Toast";
+import { lazyWithRetry } from "../../platform/lazy";
+import { OptionalChunkBoundary } from "../../platform/OptionalChunkBoundary";
 import { IMPORT_FILE_ACCEPT } from "../data-transfer/import-formats";
 import { useUpgradeSheet } from "../upgrade/UpgradeSheet";
-
-import { ImportSheet } from "./ImportSheet";
 
 interface ImportCardProps {
   isPremium: boolean;
 }
+
+// The preview sheet (and the import code it loads) is only needed once a file is chosen.
+const ImportSheet = lazyWithRetry(() =>
+  import("./ImportSheet").then((module) => ({ default: module.ImportSheet }))
+);
 
 const FORMATS: ReadonlyArray<{ label: string; extension: string }> = [
   { label: "LinkDish backup", extension: ".json" },
@@ -24,7 +30,11 @@ export const ImportCard: React.FC<ImportCardProps> = ({ isPremium }) => {
   const [file, setFile] = useState<File | null>(null);
   const [dragging, setDragging] = useState(false);
   const { requestUpgradeSheet } = useUpgradeSheet();
+  const { showToast } = useToast();
   const navigate = useNavigate();
+  const preloadImporter = () => {
+    ImportSheet.preload().catch(() => undefined);
+  };
 
   const chooseFile = (next: File | undefined | null) => {
     if (next) {
@@ -98,7 +108,16 @@ export const ImportCard: React.FC<ImportCardProps> = ({ isPremium }) => {
       />
 
       <div className="settings-data-actions">
-        <Button icon="upload" onClick={() => inputRef.current?.click()} variant="secondary">
+        <Button
+          icon="upload"
+          onClick={() => {
+            preloadImporter();
+            inputRef.current?.click();
+          }}
+          onFocus={preloadImporter}
+          onPointerEnter={preloadImporter}
+          variant="secondary"
+        >
           Choose a file
         </Button>
         <span className="settings-data-footnote settings-import-hint">
@@ -107,16 +126,33 @@ export const ImportCard: React.FC<ImportCardProps> = ({ isPremium }) => {
         </span>
       </div>
 
-      <ImportSheet
-        file={file}
-        isPremium={isPremium}
-        onChooseAnother={() => {
-          setFile(null);
-          inputRef.current?.click();
-        }}
-        onClose={() => setFile(null)}
-        onUpgrade={handleUpgrade}
-      />
+      {file ? (
+        <OptionalChunkBoundary
+          key={`${file.name}-${file.size}-${file.lastModified}`}
+          name="Import preview"
+          onError={() => {
+            setFile(null);
+            showToast({
+              icon: "wifi-off",
+              message: "We couldn't open the importer. Check your connection and try again.",
+              tone: "danger"
+            });
+          }}
+        >
+          <Suspense fallback={null}>
+            <ImportSheet
+              file={file}
+              isPremium={isPremium}
+              onChooseAnother={() => {
+                setFile(null);
+                inputRef.current?.click();
+              }}
+              onClose={() => setFile(null)}
+              onUpgrade={handleUpgrade}
+            />
+          </Suspense>
+        </OptionalChunkBoundary>
+      ) : null}
     </div>
   );
 };

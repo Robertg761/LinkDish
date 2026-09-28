@@ -9,10 +9,26 @@
   padding: 18px;
 }
 
+/* Icon + title on one row; on phones the description runs the full card width below. */
 .settings-data-card-header {
-  display: flex;
-  align-items: flex-start;
-  gap: 14px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px 14px;
+}
+
+.settings-data-card-heading {
+  display: contents;
+}
+
+.settings-data-card-header .settings-data-card-text {
+  grid-column: 1 / -1;
+}
+
+.settings-data-option {
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  background: var(--color-canvas);
 }
 
 .settings-data-card-icon {
@@ -29,13 +45,6 @@
 .settings-data-card-icon-butter {
   background: var(--color-butter-soft);
   color: var(--color-on-butter-soft);
-}
-
-.settings-data-card-heading {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
 }
 
 .settings-data-card-title {
@@ -150,13 +159,11 @@
 }
 
 .settings-data-stat-label {
-  overflow: hidden;
   max-width: 100%;
   color: var(--color-ink-muted);
   font-size: var(--text-caption);
   font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.25;
 }
 
 .settings-data-protect {
@@ -497,9 +504,29 @@
   line-height: 1.2;
 }
 
+@media (max-width: 767px) {
+  /* Give the main action the room it needs next to Cancel. */
+  .settings-import-sheet .sheet-footer > .btn:last-child:not(:first-child) {
+    flex-grow: 1.8;
+  }
+}
+
 @media (min-width: 640px) {
   .settings-data-card {
     padding: 20px 22px;
+  }
+
+  .settings-data-card-header {
+    display: flex;
+    align-items: flex-start;
+  }
+
+  .settings-data-card-heading {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+    padding-top: 2px;
   }
 
   .settings-data-actions > .btn {

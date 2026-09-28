@@ -440,6 +440,8 @@ describe("importing into the cookbook", () => {
       mealPlanAdded: 0,
       mealPlanSkipped: 3
     });
+    expect(again.preview.membershipAdditions).toEqual([]);
+    expect(again.result.plan.recipes).toEqual([]);
   });
 
   it("explains a full device instead of failing with a raw error", async () => {

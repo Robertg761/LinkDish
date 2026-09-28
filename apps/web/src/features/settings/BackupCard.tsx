@@ -136,12 +136,14 @@ export const BackupCard: React.FC<BackupCardProps> = ({
       </div>
 
       {scannedRecipes > 0 ? (
-        <Switch
-          checked={includeImages}
-          description={`Adds ${photoBytes === null ? "the original photos" : `about ${formatBytes(photoBytes)}`} for ${plural(scannedRecipes, "photo import")}.`}
-          label="Include scanned photos"
-          onChange={setIncludeImages}
-        />
+        <div className="settings-data-option">
+          <Switch
+            checked={includeImages}
+            description={`Adds ${photoBytes === null ? "the original photos" : `about ${formatBytes(photoBytes)}`} for ${plural(scannedRecipes, "photo import")}.`}
+            label="Include scanned photos"
+            onChange={setIncludeImages}
+          />
+        </div>
       ) : null}
 
       {error ? (

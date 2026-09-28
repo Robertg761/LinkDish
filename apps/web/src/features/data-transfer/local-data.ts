@@ -1,9 +1,7 @@
 /**
- * Reads for the "Your data" tools: the export snapshot, original scans, counts, and the size of
- * stored scans. All reads go through the shared LinkDish database connection.
+ * Light reads for the Settings page: counts and the size of stored scans. All reads go through
+ * the shared LinkDish database connection.
  */
-import { getCollections } from "../../data/collections-store";
-import { getMealPlanEntries } from "../../data/meal-plan-store";
 import {
   COLLECTIONS_STORE_NAME,
   getLinkDishWebDb,
@@ -11,41 +9,8 @@ import {
   RECIPE_SOURCE_IMAGES_STORE_NAME,
   SAVED_RECIPES_STORE_NAME
 } from "../../storage/linkdish-db";
-import { getSavedRecipes } from "../library/saved-recipe-store";
 
-import type { ExportSnapshot } from "./backup-export";
-import type { WebRecipeSourceImagesRecord, WebSavedRecipe } from "../library/saved-recipe-types";
-import type { ExtractRecipeImage } from "@linkdish/api-contracts";
-
-export const loadExportSnapshot = async (): Promise<ExportSnapshot> => {
-  const [recipes, collections, mealPlan] = await Promise.all([
-    getSavedRecipes(),
-    getCollections(),
-    getMealPlanEntries()
-  ]);
-
-  return { recipes, collections, mealPlan };
-};
-
-/** Original scans for the given recipes (records written before v4 embed them). */
-export const loadSourceImages = async (
-  recipes: readonly WebSavedRecipe[]
-): Promise<Map<string, ExtractRecipeImage[]>> => {
-  const db = await getLinkDishWebDb();
-  const wanted = new Set(recipes.map((recipe) => recipe.id));
-  const records = (await db.getAll(
-    RECIPE_SOURCE_IMAGES_STORE_NAME
-  )) as WebRecipeSourceImagesRecord[];
-  const images = new Map<string, ExtractRecipeImage[]>();
-
-  for (const record of records) {
-    if (wanted.has(record.recipeId) && record.images?.length) {
-      images.set(record.recipeId, record.images);
-    }
-  }
-
-  return images;
-};
+import type { WebRecipeSourceImagesRecord } from "../library/saved-recipe-types";
 
 export interface SourceImageStats {
   recipes: number;
