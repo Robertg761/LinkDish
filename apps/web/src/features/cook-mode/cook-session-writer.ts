@@ -1,11 +1,12 @@
-import { clearCookSession, getCookSession, updateCookSession } from "../../data/cook-session-store";
+import { endCookSession, updateCookSession } from "../../data/cook-session-store";
 
 import type { CookSession, CookSessionPatch } from "../../data/cook-session-store";
 
 /**
- * `updateCookSession` is a read-modify-write, so two quick writes for the same recipe (a ticked
- * ingredient and a step change, or a timer tick) could overwrite each other. Every write from
- * the recipe view, cook mode and the timer dock goes through this per-recipe queue instead.
+ * Every cook-session write from the recipe view, cook mode and the timer dock goes through this
+ * per-recipe queue, so this tab's writes land in the order they were made and can be flushed.
+ * Each write is a read-modify-write in one IndexedDB transaction, which is what keeps it from
+ * overwriting another tab's (their queues are separate).
  */
 
 const queues = new Map<string, Promise<unknown>>();
@@ -33,20 +34,7 @@ export const queueCookSessionUpdate = (
  * while timers are still running so they survive a reload.
  */
 export const queueCookSessionReset = (recipeId: string): Promise<void> =>
-  enqueue(recipeId, async () => {
-    const session = await getCookSession(recipeId);
-
-    if (!session) {
-      return;
-    }
-
-    if (session.timers.length > 0) {
-      await updateCookSession(recipeId, { checkedIngredients: [], stepIndex: 0 });
-      return;
-    }
-
-    await clearCookSession(recipeId);
-  });
+  enqueue(recipeId, () => endCookSession(recipeId));
 
 /** Resolves once every queued write has settled (tests and page-hide flushes). */
 export const flushCookSessionWrites = async (): Promise<void> => {
