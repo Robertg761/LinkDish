@@ -316,9 +316,13 @@ const toUsVolume = (ml: QuantityValue): Converted => {
   const { unit, base } = pickUsVolumeUnit(maxOfValue(ml));
   const value = mapValue(ml, (end) => roundUs(end / base, unit));
 
-  // Snapping can land on the next unit's threshold (2.95 tsp → 3 tsp); re-pick from there.
+  // Snapping can land on the next unit's threshold (2.95 tsp → 3 tsp): show it in tablespoons.
   if (unit === "tsp" && maxOfValue(value) >= 3) {
-    return toUsVolume(mapValue(ml, (end) => end));
+    return {
+      value: mapValue(ml, (end) => roundUs(end / ML_PER_TBSP, "Tbsp")),
+      unit: "Tbsp",
+      approximate: false
+    };
   }
 
   return { value, unit, approximate: false };

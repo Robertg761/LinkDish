@@ -198,6 +198,18 @@ describe("convertIngredientLine to US", () => {
     expect(convertIngredientLine("1 cup milk", "us", { scale: 0.3 }).text).toBe("⅓ cup milk");
   });
 
+  it("shows an amount that rounds up to 3 tsp as a tablespoon", () => {
+    // Just under a tablespoon snaps to 3 tsp; that used to re-pick teaspoons forever.
+    expect(convertIngredientLine("14.5 ml water", "us").text).toBe("1 Tbsp water");
+    expect(convertIngredientLine("1 Tbsp oil", "us", { scale: 0.98 }).text).toBe("1 Tbsp oil");
+    expect(convertIngredientLine("10-14.5 ml water", "us").text).toBe("⅔–1 Tbsp water");
+    expect(convertIngredientLine("14 ml vanilla", "us").text).toBe("2 ⅞ tsp vanilla");
+
+    for (let tenths = 140; tenths < 148; tenths += 1) {
+      expect(() => convertIngredientLine(`${tenths / 10} ml water`, "us")).not.toThrow();
+    }
+  });
+
   it("can use the density table in reverse", () => {
     expect(convertIngredientLine("240 g flour", "us", { useDensity: true })).toMatchObject({
       text: "2 cups flour",
