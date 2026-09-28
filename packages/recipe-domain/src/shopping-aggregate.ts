@@ -12,12 +12,14 @@ import { inflectIngredientPhrase, singularizeNoun } from "./inflection.js";
 import { parseIngredientQuantity } from "./ingredient-quantities.js";
 import { MAX_SHOPPING_ITEM_TEXT_LENGTH } from "./limits.js";
 import { formatIngredientQuantity } from "./quantity-format.js";
+import { replaceBracketedGroups, trimEndMatching } from "./text-scan.js";
 import { canonicalUnit, getUnitDefinition, UNIT_ALIAS_LOOKUP } from "./units.js";
 
 import type { IngredientUnitsPreference } from "./conversion.js";
 import type { ShoppingCategoryId } from "./grocery-categories.js";
 import type { Recipe } from "./recipe-schema.js";
 import type { ShoppingQuantity } from "./shopping.js";
+import type { BracketPair } from "./text-scan.js";
 
 /** One line headed for a shopping list, with the recipe it came from. */
 export type ShoppingInput = {
@@ -81,12 +83,17 @@ export type MergeShoppingOptions = {
 const MAX_RECIPE_TITLE_LENGTH_ON_ITEM = 200;
 const MAX_SECTION_LENGTH_ON_ITEM = 120;
 const HIGH_SURROGATE_END_PATTERN = /[\uD800-\uDBFF]$/u;
-const PARENTHETICAL_PATTERN = /\s*(?:\([^)]*\)|\[[^\]]*\])\s*/gu;
+/** "(skim, 1% or whole)" and "[optional]" notes; dropped with a linear scan (see text-scan.ts). */
+const NOTE_BRACKETS: readonly BracketPair[] = [
+  ["(", ")"],
+  ["[", "]"]
+];
 const NOTE_START_PATTERN = /[,;]/u;
 /** Footnote marks and stray punctuation left at the end of a name ("water*"). */
-const TRAILING_MARKS_PATTERN = /[\s*†‡.:]+$/u;
+const TRAILING_MARK_CHARACTER = /[\s*†‡.:]/u;
+/** Runs on collapsed, trimmed text, where one `\s` is the whole gap (`\s+` rescans long runs). */
 const TRAILING_NOTE_PATTERN =
-  /\s+(?:to taste|as needed|if needed|for (?:serving|garnish|garnishing|dusting|frying|greasing)|optional|divided|plus more.*)$/iu;
+  /\s(?:to taste|as needed|if needed|for (?:serving|garnish|garnishing|dusting|frying|greasing)|optional|divided|plus more.*)$/iu;
 const WHITESPACE_PATTERN = /\s+/gu;
 const DIACRITIC_PATTERN = /[̀-ͯ]/gu;
 const NON_WORD_PATTERN = /[^a-z0-9\s-]+/gu;
@@ -240,15 +247,13 @@ const foldText = (text: string): string =>
  */
 export const cleanShoppingItemName = (text: string): string => {
   // Parentheticals go first: their commas ("(skim, 1% or whole)") are not the end of the name.
-  const withoutNotes = text.replace(PARENTHETICAL_PATTERN, " ");
+  const withoutNotes = replaceBracketedGroups(text, NOTE_BRACKETS, " ");
   const noteStart = NOTE_START_PATTERN.exec(withoutNotes);
   const head = noteStart ? withoutNotes.slice(0, noteStart.index) : withoutNotes;
-  const cleaned = head
-    .replace(WHITESPACE_PATTERN, " ")
-    .trim()
-    .replace(TRAILING_NOTE_PATTERN, "")
-    .replace(TRAILING_MARKS_PATTERN, "")
-    .trim();
+  const cleaned = trimEndMatching(
+    head.replace(WHITESPACE_PATTERN, " ").trim().replace(TRAILING_NOTE_PATTERN, ""),
+    TRAILING_MARK_CHARACTER
+  ).trim();
 
   return cleaned.length > 0 ? cleaned : text.replace(WHITESPACE_PATTERN, " ").trim();
 };

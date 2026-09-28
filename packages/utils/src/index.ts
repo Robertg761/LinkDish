@@ -236,6 +236,20 @@ export const decodeHtmlEntities = (value: string): string =>
     return namedHtmlEntityMap[token] ?? namedHtmlEntityMap[token.toLowerCase()] ?? entity;
   });
 
+/** A "<" that HTML reads as the start of markup: one before a letter, "/", "!" or "?". */
+const TAG_OPENER_PATTERN = /<(?=[!/?A-Za-z])/gu;
+
+/**
+ * Puts a space after every "<" that would still open markup once a tag stripper has run: one
+ * followed by an ASCII letter, "/", "!" or "?", which HTML's tokenizer reads as the start of a
+ * tag, an end tag, a comment or a declaration. However the input nested or split its tags
+ * ("<scr<b>ipt>", an unclosed "<script"), the result never contains "<script", "</p" or "<!--",
+ * and no character is lost: a real less-than keeps its meaning ("Heat to <medium" reads
+ * "Heat to < medium", "<jane@example.com>" reads "< jane@example.com>"), and text such as
+ * "cook to < 165°F", "<3" or "<- stir" is left as it is.
+ */
+export const defuseTagOpeners = (value: string): string => value.replace(TAG_OPENER_PATTERN, "< ");
+
 export const assertNever = (value: never): never => {
   throw new Error(`Unhandled value: ${String(value)}`);
 };

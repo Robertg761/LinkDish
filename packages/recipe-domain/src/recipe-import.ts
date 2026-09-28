@@ -7,7 +7,7 @@
  * when the source lacks what LinkDish requires (a title, ingredients and steps); `meta` carries
  * the personal data (favorite, rating, notes, tags, photo) the app stores beside the recipe.
  */
-import { decodeHtmlEntities } from "../../utils/src/index.js";
+import { decodeHtmlEntities, defuseTagOpeners } from "../../utils/src/index.js";
 
 import { parseDuration } from "./durations.js";
 import {
@@ -25,6 +25,7 @@ import {
   MAX_RECIPE_TITLE_LENGTH,
   recipeSchema
 } from "./recipe-schema.js";
+import { removeHtmlTags, trimEndMatching } from "./text-scan.js";
 
 import type {
   Recipe,
@@ -74,8 +75,9 @@ export type SchemaOrgImportOptions = {
 const DEFAULT_MAX_PHOTO_CHARS = 1_500_000;
 const MAX_TAGS = 50;
 const MAX_TAG_LENGTH = 60;
-const HTML_TAG_PATTERN = /<[^>]*>/gu;
 const BREAK_TAG_PATTERN = /<br\s*\/?>|<\/p>|<\/li>/giu;
+/** Tags that only appear once others are gone ("<scr<b>ipt>") need another pass; see stripMarkup. */
+const MAX_MARKUP_PASSES = 4;
 const LINE_SPLIT_PATTERN = /\r\n|\r|\n/u;
 const INLINE_SPACE_PATTERN = /[ \t\u00a0]+/gu;
 const WHITESPACE_PATTERN = /\s+/gu;
@@ -90,7 +92,8 @@ const PAPRIKA_DATE_PATTERN = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}(?::\d{2})?)$/
 const BASE64_PATTERN = /^[A-Za-z0-9+/=\s]+$/u;
 const NUTRITION_LINE_PATTERN = /^\s*([A-Za-z ]+?)\s*[:=]\s*(.+)$/u;
 const TRAILING_COLON_PATTERN = /:$/u;
-const TRAILING_SLASHES_PATTERN = /\/+$/u;
+/** Trailing slashes come off the synthetic source base with a linear scan, not /\/+$/. */
+const SLASH_CHARACTER = /\//u;
 const KEYWORD_SEPARATOR_PATTERN = /[,;]/u;
 
 const HIGH_SURROGATE_END_PATTERN = /[\uD800-\uDBFF]$/u;
@@ -108,9 +111,36 @@ const asText = (value: unknown): string =>
       ? String(value)
       : "";
 
-/** Decodes entities, turns block tags into line breaks, strips remaining tags. */
+/**
+ * Turns block tags into line breaks and drops the other tags (see removeHtmlTags for what is a
+ * tag), passing again while a pass exposes a new tag, then defuses any "<" that could still open
+ * one (an unclosed "<script", or nesting deeper than MAX_MARKUP_PASSES, which only hostile input
+ * has). The pass limit keeps the work linear; defuseTagOpeners makes the result complete anyway.
+ */
+const stripMarkup = (text: string): string => {
+  let stripped = text;
+
+  for (let pass = 0; pass < MAX_MARKUP_PASSES; pass += 1) {
+    const next = removeHtmlTags(stripped.replace(BREAK_TAG_PATTERN, "\n"));
+
+    if (next === stripped) {
+      break;
+    }
+
+    stripped = next;
+  }
+
+  return defuseTagOpeners(stripped);
+};
+
+/**
+ * Plain text from an export field: markup stripped, entities decoded, and markup stripped
+ * again, since some exports entity-encode their tags ("&lt;p&gt;Mix&lt;/p&gt;"). The second
+ * pass reads tags as the first does, and as the extractor does after decoding: an encoded
+ * "&lt;chef@example.com&gt;" stays text, while "&lt;your favorite&gt;" reads as a tag and goes.
+ */
 const cleanText = (value: unknown): string =>
-  decodeHtmlEntities(asText(value).replace(BREAK_TAG_PATTERN, "\n").replace(HTML_TAG_PATTERN, ""))
+  stripMarkup(decodeHtmlEntities(stripMarkup(asText(value))))
     .split(LINE_SPLIT_PATTERN)
     .map((line) => line.replace(INLINE_SPACE_PATTERN, " ").trim())
     .join("\n")
@@ -288,9 +318,9 @@ const resolveSourceUrl = (
     }
   }
 
-  const base = (options.syntheticSourceBase ?? `https://linkdish.app/imports/${app}`).replace(
-    TRAILING_SLASHES_PATTERN,
-    ""
+  const base = trimEndMatching(
+    options.syntheticSourceBase ?? `https://linkdish.app/imports/${app}`,
+    SLASH_CHARACTER
   );
   return { sourceUrl: `${base}/${slugify(title)}-${hashText(identity)}`, synthetic: true };
 };

@@ -14,10 +14,37 @@ import { PREFERENCES_STORAGE_KEY, THEME_COLORS } from "./preferences-store";
  */
 const THEME_BOOT_SCRIPT_CSP_HASH = "sha256-Gx75g3P/94t2dubzu/zEVZUhlNzdIAiLifLVj8l4WJA=";
 
+/**
+ * Bodies of the inline (no `src`) scripts in an HTML page. Tags match the way browsers read
+ * them: any case, attributes on the start tag, whitespace or junk before the end tag's ">".
+ */
+const readInlineScripts = (html: string): string[] =>
+  [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script\b[^>]*>/giu)]
+    .filter((match) => !/\ssrc\s*=/iu.test(match[1] ?? ""))
+    .map((match) => match[2] ?? "");
+
 const indexHtml = readFileSync(resolve(__dirname, "../../index.html"), "utf8");
-const inlineScript = /<script>([\s\S]*?)<\/script>/.exec(indexHtml)?.[1] ?? "";
+const inlineScripts = readInlineScripts(indexHtml);
+const inlineScript = inlineScripts[0] ?? "";
 
 describe("theme boot script in index.html", () => {
+  it("is the page's only inline script, since the CSP allows exactly one hash", () => {
+    expect(inlineScripts).toHaveLength(1);
+  });
+
+  it("finds inline scripts in any case and with loose end tags", () => {
+    expect(
+      readInlineScripts(
+        [
+          "<SCRIPT>upper()</SCRIPT>",
+          '<script type="module" src="/src/main.tsx"></script>',
+          "<Script nonce=x>mixed()</script >",
+          '<script>\nlines()\n</script\t\n foo="bar">'
+        ].join("")
+      )
+    ).toEqual(["upper()", "mixed()", "\nlines()\n"]);
+  });
+
   it("reads the same storage key and colors as the preferences store", () => {
     expect(inlineScript).toContain(PREFERENCES_STORAGE_KEY);
     expect(inlineScript).toContain(THEME_COLORS.dark);
