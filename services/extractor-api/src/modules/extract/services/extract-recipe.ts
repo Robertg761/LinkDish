@@ -1177,7 +1177,11 @@ const runUrlFallbackExtraction = async ({
       }
     });
 
-    await scheduleCacheWrite(context, request.url, response, sourceDocument, detection);
+    /*
+     * LLM output is never written to the shared result cache: the model reads page text that
+     * other people can post (comments, reviews), so one caller could steer what every later
+     * importer of this URL is served. See extraction-cache.ts.
+     */
 
     return {
       response,

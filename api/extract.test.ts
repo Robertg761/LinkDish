@@ -330,15 +330,36 @@ describe("Vercel extract adapter request identity", () => {
     await expect(response.json()).resolves.toMatchObject({ status: "success", quota });
   });
 
-  it("reads around the result cache for live canary requests", async () => {
+  it("reads around the result cache only for the token-verified live canary", async () => {
+    const { extractorApiEnv } = await import("../services/extractor-api/src/config/env.js");
+    const originalCanaryToken = extractorApiEnv.LINKDISH_CANARY_TOKEN;
+    extractorApiEnv.LINKDISH_CANARY_TOKEN = "canary-secret-token";
     const extractApi = await import("./extract.js");
 
-    await extractApi.POST(createRequest(undefined, { "x-linkdish-canary": "1" }));
+    try {
+      await extractApi.POST(
+        createRequest(undefined, {
+          authorization: "Bearer canary-secret-token",
+          "x-linkdish-canary": "1"
+        })
+      );
+      /* The bare marker is caller-controlled: it must not let anyone refresh shared entries. */
+      await extractApi.POST(createRequest(undefined, { "x-linkdish-canary": "1" }));
+    } finally {
+      extractorApiEnv.LINKDISH_CANARY_TOKEN = originalCanaryToken;
+    }
 
-    expect(mocks.extractRecipe).toHaveBeenCalledWith(
+    expect(mocks.extractRecipe).toHaveBeenNthCalledWith(
+      1,
       expect.any(Object),
       undefined,
       expect.objectContaining({ cacheMode: "refresh" })
+    );
+    expect(mocks.extractRecipe).toHaveBeenNthCalledWith(
+      2,
+      expect.any(Object),
+      undefined,
+      expect.objectContaining({ cacheMode: "default" })
     );
   });
 });

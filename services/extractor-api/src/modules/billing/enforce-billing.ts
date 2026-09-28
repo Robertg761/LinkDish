@@ -1,5 +1,3 @@
-import { createHash, timingSafeEqual } from "node:crypto";
-
 import { extractorApiEnv } from "../../config/env.js";
 import { getAuthenticatedUser } from "../auth/auth-service.js";
 import { createBoundedExpiringMap } from "../bounded-expiring-map.js";
@@ -8,6 +6,7 @@ import {
   getHeader,
   getRequestAddress,
   hashServerSideIdentity,
+  isAuthorizedCanaryRequest,
   type RequestHeaders,
   type RequestIdentity
 } from "../request-identity.js";
@@ -445,31 +444,6 @@ const noopCommitUsage = (
   _response: ExtractRecipeResponse,
   logContext: BillingAuthorizationResult["logContext"]
 ) => Promise.resolve(logContext);
-
-const isAuthorizedCanaryRequest = (headers: RequestHeaders): boolean => {
-  const canaryToken = extractorApiEnv.LINKDISH_CANARY_TOKEN?.trim();
-
-  if (!canaryToken) {
-    return false;
-  }
-
-  const authorization = getHeader(headers, "authorization");
-
-  if (!authorization?.startsWith("Bearer ")) {
-    return false;
-  }
-
-  const presentedToken = authorization.slice("Bearer ".length).trim();
-
-  if (!presentedToken) {
-    return false;
-  }
-
-  return timingSafeEqual(
-    createHash("sha256").update(canaryToken).digest(),
-    createHash("sha256").update(presentedToken).digest()
-  );
-};
 
 interface QuotaSubject {
   plan: QuotaPlan;

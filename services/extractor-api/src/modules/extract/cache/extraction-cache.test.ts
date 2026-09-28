@@ -130,6 +130,41 @@ describe("extraction result cache", () => {
     expect(setSpy).not.toHaveBeenCalled();
   });
 
+  it("never stores or serves LLM output, which another caller could have steered", async () => {
+    const values = new Map<string, string>();
+    const store: CacheStore = {
+      get: (key) => Promise.resolve(values.get(key) ?? null),
+      set: (key, value) => {
+        values.set(key, value);
+        return Promise.resolve();
+      }
+    };
+    const cache = createExtractionResultCache({ ttlSeconds: 60, store });
+    const deterministic = successResponse();
+    const llmResponse: ExtractRecipeResponse =
+      deterministic.status === "success"
+        ? {
+            ...deterministic,
+            recipe: { ...deterministic.recipe, title: "LLM Output Title" },
+            extraction: {
+              ...deterministic.extraction,
+              strategy: "llm-fallback",
+              provenance: ["llm"]
+            }
+          }
+        : deterministic;
+
+    await expect(cache.write(writeInput(llmResponse))).resolves.toBe("llm_derived");
+    expect(values.size).toBe(0);
+
+    /* An LLM entry already in the store (e.g. written by an older release) is a miss. */
+    values.set(
+      getExtractionCacheKey("https://example.com/pasta"),
+      JSON.stringify({ v: 1, detectionConfidence: "high", response: llmResponse })
+    );
+    await expect(cache.read("https://example.com/pasta")).resolves.toBeNull();
+  });
+
   it("refuses to cache a page that redirected to another site", async () => {
     const store = createMemoryCacheStore(10);
     const cache = createExtractionResultCache({ ttlSeconds: 60, store });

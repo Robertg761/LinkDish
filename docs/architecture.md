@@ -194,13 +194,19 @@ Performance pieces in `services/extractor-api/src/modules/extract`:
 - **Result cache** (`cache/extraction-cache.ts`): a URL-keyed Upstash cache
   (`linkdish:extract-cache:v1:<EXTRACTOR_CACHE_VERSION>:<sha256(canonical URL)>`, where
   the canonical URL has tracking parameters, fragments, host case and trailing slashes
-  normalised, and YouTube URLs use their watch URL). It holds only validated successes
-  at or above the success confidence bar. It never stores needs_retry, failures, quota
-  data or image scans, and never a page that redirected to another site. A hit skips
-  fetch, parse and LLM calls and re-stamps the per-request `recipe.sourceUrl`. Bump
-  `EXTRACTOR_CACHE_VERSION` whenever extraction output changes. `EXTRACT_CACHE_ENABLED`
-  is the kill switch and `EXTRACT_CACHE_TTL_SECONDS` sets the lifetime (default 7 days).
-  Live canary requests (`x-linkdish-canary`) skip cache reads. Responses carry
+  normalised, and YouTube URLs use their watch URL). It holds only validated
+  deterministic successes at or above the success confidence bar. It never stores
+  needs_retry, failures, quota data, image scans or LLM fallback output (strategy
+  `llm-fallback` or `llm` provenance: the model reads page text anyone can post, such as
+  comments, so one caller could steer what later importers are served), and never a page
+  that redirected to another site. Reads treat an LLM-derived entry as a miss. A hit skips
+  fetch, parse and the text-cleanup LLM call and re-stamps the per-request
+  `recipe.sourceUrl`. Bump `EXTRACTOR_CACHE_VERSION` whenever extraction output or cache
+  semantics change. `EXTRACT_CACHE_ENABLED` is the kill switch and
+  `EXTRACT_CACHE_TTL_SECONDS` sets the lifetime (default 7 days). Only the live canary that
+  presents `LINKDISH_CANARY_TOKEN` as a bearer token (the same check billing uses) skips
+  cache reads and refreshes the entry; the bare `x-linkdish-canary` marker is
+  caller-controlled and only keeps a request out of durable analytics. Responses carry
   `x-linkdish-cache: hit|miss|bypass`, and logs and analytics carry `cacheStatus`.
 - **Fallback hand-off** (`cache/fallback-handoff.ts`): when a primary attempt with a
   `correlationId` returns needs_retry, it stores the LLM prompt summary, candidate,
