@@ -131,15 +131,28 @@ const decodeEntities = (text) =>
     .replaceAll("&gt;", ">")
     .replaceAll("&amp;", "&");
 
+// Script and style bodies are never visible, whatever the tag's case or the end tag's spacing
+// ("<SCRIPT>", "</script >", "</style\n>"): HTML matches both case-insensitively.
 const visibleText = (html) =>
   decodeEntities(
     html
-      .replace(/<script\b[\s\S]*?<\/script>/gu, " ")
-      .replace(/<style\b[\s\S]*?<\/style>/gu, " ")
+      .replace(/<script\b[\s\S]*?<\/script\b[^>]*>/giu, " ")
+      .replace(/<style\b[\s\S]*?<\/style\b[^>]*>/giu, " ")
       .replace(/<[^>]+>/gu, " ")
   )
     .replace(/\s+/gu, " ")
     .replace(/\s([.,;:!?)])/gu, "$1");
+
+// Self-check: a regression here would let script text count as visible FAQ copy.
+for (const [html, expected] of [
+  ['<p>Hi</p><SCRIPT>var faq = "hidden";</SCRIPT>', "Hi"],
+  ['<p>Hi</p><script type="module">hidden()</script >', "Hi"],
+  ["<p>Hi</p><Style media=all>.hidden{}</style\n>", "Hi"]
+]) {
+  if (visibleText(html).trim() !== expected) {
+    errors.push(`check-site visibleText kept hidden markup: ${JSON.stringify(html)}`);
+  }
+}
 
 // srcset="a.avif 360w, b.avif 720w" (also imagesrcset on preload links) -> ["a.avif", "b.avif"]
 const srcsetReferences = (html) =>
@@ -227,7 +240,7 @@ for (const [filePath, html] of htmlByPath) {
   const pageText = visibleText(html);
 
   for (const match of html.matchAll(
-    /<script\b[^>]*type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/gu
+    /<script\b[^>]*type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script\b[^>]*>/giu
   )) {
     let data;
 
