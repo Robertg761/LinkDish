@@ -748,7 +748,8 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
           }
         ]
       : []),
-    { id: "group-edit", label: "Edit", type: "separator" },
+    // Without edit rights the group only holds "Save a copy", so it goes unnamed.
+    { id: "group-edit", label: canEdit ? "Edit" : undefined, type: "separator" },
     ...(canEdit
       ? [
           {

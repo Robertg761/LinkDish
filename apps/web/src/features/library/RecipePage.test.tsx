@@ -629,6 +629,9 @@ describe("RecipePage shared route", () => {
     const menu = openMenu();
     expect(within(menu).queryByRole("menuitem", { name: "Edit recipe" })).toBeNull();
     expect(within(menu).queryByRole("menuitem", { name: /Unshare/ })).toBeNull();
+    // "Save a copy" alone isn't an "Edit" group.
+    expect(within(menu).queryByRole("group", { name: "Edit" })).toBeNull();
+    expect(within(menu).getByRole("menuitem", { name: "Save a copy" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save a copy to my cookbook" })).toBeInTheDocument();
   });
 
