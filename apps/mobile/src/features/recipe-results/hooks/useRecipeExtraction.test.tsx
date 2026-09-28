@@ -56,7 +56,7 @@ import { trackMobileEvent } from "../../../analytics/client";
 import { extractRecipe } from "../../../services/extractor-api";
 import { BillingProvider } from "../../billing/BillingContext";
 import { getBillingPeriodKey } from "../../billing/store";
-import { createSavedRecipeRecord } from "../../saved-recipes/store";
+import { createSavedRecipeRecord, type SavedRecipeRecord } from "../../saved-recipes/store";
 
 import { shouldShowLastFreeImportPrompt, useRecipeExtraction } from "./useRecipeExtraction";
 
@@ -71,8 +71,13 @@ const HookProbeBody = ({ url }: { url?: string | undefined }) => {
   return <Text>{JSON.stringify(state)}</Text>;
 };
 
-const HookRequestProbeBody = ({ request }: { request: ExtractRecipeRequest }) => {
-  const { state } = useRecipeExtraction(request);
+interface HookRequestProbeProps {
+  request: ExtractRecipeRequest;
+  savedRecipe?: SavedRecipeRecord | undefined;
+}
+
+const HookRequestProbeBody = ({ request, savedRecipe }: HookRequestProbeProps) => {
+  const { state } = useRecipeExtraction(request, savedRecipe);
   return <Text>{JSON.stringify(state)}</Text>;
 };
 
@@ -82,9 +87,9 @@ const HookProbe = ({ url }: { url?: string | undefined }) => (
   </BillingProvider>
 );
 
-const HookRequestProbe = ({ request }: { request: ExtractRecipeRequest }) => (
+const HookRequestProbe = ({ request, savedRecipe }: HookRequestProbeProps) => (
   <BillingProvider>
-    <HookRequestProbeBody request={request} />
+    <HookRequestProbeBody request={request} savedRecipe={savedRecipe} />
   </BillingProvider>
 );
 
@@ -531,6 +536,104 @@ describe("useRecipeExtraction", () => {
       expect.objectContaining(request),
       expect.any(Object)
     );
+  });
+
+  it("shows the imported scan again when the saved copy of a scan is removed", async () => {
+    // Removing the saved record deletes its recipe-scans files, so a screen that still pointed at
+    // them showed broken thumbnails, and saving again stored a record with deleted files.
+    mockedExtractRecipe.mockResolvedValueOnce({
+      status: "success",
+      recipe: {
+        title: "Scanned Soup",
+        sourceUrl: "https://linkdish.app/image-imports/test",
+        sourceType: "image",
+        ingredients: [{ text: "1 onion" }],
+        steps: [{ index: 1, text: "Cook." }],
+        servings: "4 servings",
+        prepTimeMinutes: 10,
+        cookTimeMinutes: 20,
+        nutrition: null,
+        confidence: {
+          score: 0.81,
+          summary: "Confident image extraction.",
+          missingFields: [],
+          notes: [],
+          fieldProvenance: {
+            title: "llm",
+            ingredients: "llm",
+            steps: "llm",
+            servings: "llm",
+            prepTimeMinutes: "llm",
+            cookTimeMinutes: "llm",
+            nutrition: null
+          }
+        }
+      },
+      extraction: {
+        sourceType: "image",
+        strategy: "llm-fallback",
+        confidenceScore: 0.81,
+        missingFields: [],
+        warnings: [],
+        fetchMode: "http",
+        provenance: ["llm"]
+      }
+    });
+
+    const request: ExtractRecipeRequest = {
+      images: [{ dataUrl: "data:image/jpeg;base64,abc123", mimeType: "image/jpeg" }],
+      sourceUrl: "https://linkdish.app/image-imports/test",
+      attempt: "fallback"
+    };
+    const scanFileUri = "file:///documents/recipe-scans/saved-1-0.jpg";
+    let renderer: ReturnType<typeof create>;
+    const readState = () =>
+      JSON.parse(renderer!.root.findByType(Text).props.children as string) as {
+        recipe?: { title: string };
+        sourceImages?: Array<{ mimeType: string; uri: string }>;
+        state: string;
+      };
+
+    await act(() => {
+      renderer = create(<HookRequestProbe request={request} />);
+      return Promise.resolve();
+    });
+    await act(async () => {
+      await flushAsyncWork();
+    });
+
+    const extracted = readState();
+    expect(extracted.state).toBe("success");
+
+    const savedRecipe: SavedRecipeRecord = {
+      ...createSavedRecipeRecord(
+        extracted as unknown as Parameters<typeof createSavedRecipeRecord>[0],
+        "2026-09-28T12:00:00.000Z"
+      ),
+      id: "saved-1",
+      recipe: { ...(extracted as unknown as SavedRecipeRecord).recipe, title: "Edited Soup" },
+      sourceImages: [{ mimeType: "image/jpeg", uri: scanFileUri }]
+    };
+
+    await act(async () => {
+      renderer!.update(<HookRequestProbe request={request} savedRecipe={savedRecipe} />);
+      await flushAsyncWork();
+    });
+
+    expect(readState().sourceImages).toEqual([{ mimeType: "image/jpeg", uri: scanFileUri }]);
+
+    await act(async () => {
+      renderer!.update(<HookRequestProbe request={request} />);
+      await flushAsyncWork();
+    });
+
+    const afterRemoval = readState();
+    expect(afterRemoval.state).toBe("success");
+    expect(afterRemoval.recipe?.title).toBe("Edited Soup");
+    expect(afterRemoval.sourceImages).toEqual([
+      { mimeType: "image/jpeg", uri: "data:image/jpeg;base64,abc123" }
+    ]);
+    expect(mockedExtractRecipe).toHaveBeenCalledTimes(1);
   });
 
   it("restores a draft extraction without spending another API request", async () => {
