@@ -317,19 +317,22 @@
   color: var(--color-ink-muted);
 }
 
+/* The email gets the row (it wraps rather than being cut); actions wrap below when narrow. */
 .household-pending-copy {
   display: flex;
-  flex: 1 1 160px;
+  flex: 1 1 220px;
   flex-direction: column;
   min-width: 0;
 }
 
 .household-pending-email {
-  overflow: hidden;
   color: var(--color-ink);
   font-size: var(--text-small);
   font-weight: 650;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
+}
+
+.household-pending-sent {
   white-space: nowrap;
 }
 
@@ -340,8 +343,15 @@
 
 .household-pending-actions {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 6px;
   margin-left: auto;
+}
+
+.household-member-remove.btn {
+  flex-shrink: 0;
+  color: var(--color-ink-muted);
 }
 
 /* Join ---------------------------------------------------------------------- */

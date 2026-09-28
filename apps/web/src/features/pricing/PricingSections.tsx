@@ -74,7 +74,11 @@ const ComparisonValue: React.FC<{ value: string | boolean }> = ({ value }) => {
   return <span className="plan-compare-text num">{value}</span>;
 };
 
-export const PlanComparisonTable: React.FC<{ currentPlan: WebBillingTier }> = ({ currentPlan }) => (
+export const PlanComparisonTable: React.FC<{
+  /** Null when signed out (no "You" column marker). */
+  currentPlan: WebBillingTier | null;
+  featuredPlan?: WebBillingTier | undefined;
+}> = ({ currentPlan, featuredPlan = "plus" }) => (
   <section aria-labelledby="plan-compare-title" className="pricing-section">
     <div className="pricing-section-heading">
       <h2 className="pricing-section-title" id="plan-compare-title">
@@ -94,7 +98,7 @@ export const PlanComparisonTable: React.FC<{ currentPlan: WebBillingTier }> = ({
               <th
                 className={[
                   "plan-compare-plan",
-                  tier === "plus" ? "is-featured" : "",
+                  tier === featuredPlan ? "is-featured" : "",
                   tier === currentPlan ? "is-current" : ""
                 ]
                   .filter(Boolean)
@@ -115,7 +119,7 @@ export const PlanComparisonTable: React.FC<{ currentPlan: WebBillingTier }> = ({
                 {row.hint ? <span className="plan-compare-hint">{row.hint}</span> : null}
               </th>
               {TIERS.map((tier) => (
-                <td className={tier === "plus" ? "is-featured" : undefined} key={tier}>
+                <td className={tier === featuredPlan ? "is-featured" : undefined} key={tier}>
                   <ComparisonValue value={row.values[tier]} />
                 </td>
               ))}

@@ -255,8 +255,14 @@ describe("PricingPage", () => {
 
     const signInLink = planCard("Plus").getByRole("link", { name: "Sign in to upgrade" });
     expect(signInLink).toHaveAttribute("href", "/account?upgrade=plus");
-    expect(planCard("Free").getByText("3 of 3")).toBeVisible();
-    expect(planCard("Free").getByRole("progressbar", { name: "Free imports left" })).toBeVisible();
+    // Signed out, Free is where to start, not "your current plan".
+    expect(planCard("Free").queryByText("Current plan")).not.toBeInTheDocument();
+    expect(planCard("Free").getByRole("link", { name: "Start free" })).toHaveAttribute("href", "/");
+    // One meter convention app-wide: what's used, filling toward the limit.
+    expect(planCard("Free").getByText("0 of 3")).toBeVisible();
+    expect(
+      planCard("Free").getByRole("progressbar", { name: "Free imports used" })
+    ).toHaveAttribute("aria-valuenow", "0");
 
     fireEvent.click(screen.getByRole("radio", { name: "Monthly" }));
     expect(planCard("Family").getByRole("link", { name: "Sign in to upgrade" })).toHaveAttribute(
@@ -278,6 +284,10 @@ describe("PricingPage", () => {
     const family = screen.getByRole("article", { name: "Family" });
     expect(family).toHaveClass("is-selected");
     expect(screen.getByRole("article", { name: "Plus" })).not.toHaveClass("is-selected");
+    // One emphasis: the plan asked about takes the featured treatment from Plus.
+    expect(family).toHaveClass("plan-card-featured");
+    expect(within(family).getByText("Recommended")).toBeVisible();
+    expect(screen.getByRole("article", { name: "Plus" })).not.toHaveClass("plan-card-featured");
     expect(screen.getByRole("radio", { name: "Monthly" })).toHaveAttribute("aria-checked", "true");
     await waitFor(() => expect(scrollIntoView).toHaveBeenCalled());
     expect(scrollIntoView.mock.contexts[0]).toBe(family);
@@ -422,6 +432,10 @@ describe("PricingPage checkout return", () => {
     renderPricing("/pricing?checkout=success");
     expect(await screen.findByRole("heading", { name: "Welcome to Plus!" })).toBeVisible();
     expect(purchaseEvents()).toHaveLength(1);
+    // No sales pitch right after paying: the plans stay folded away until asked for.
+    expect(screen.queryByRole("heading", { level: 1 })).not.toBeInTheDocument();
+    expect(screen.queryByRole("article", { name: "Plus" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Compare plans" }));
     expect(planCard("Plus").getByText("Current plan")).toBeVisible();
   });
 

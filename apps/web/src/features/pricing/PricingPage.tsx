@@ -71,6 +71,10 @@ export const PricingPage: React.FC = () => {
     isBillingPeriod(periodParam) ? periodParam : "yearly"
   );
   const checkoutResult = searchParams.get("checkout");
+  const celebrating = checkoutResult === "success";
+  /** After paying, the plans (and the sales pitch) stay folded away unless asked for. */
+  const [plansOpen, setPlansOpen] = useState(false);
+  const showPlans = !celebrating || plansOpen;
   const availabilityView = useWebBillingAvailability();
   const { availability } = availabilityView;
   const checkout = useWebCheckout({ trigger: "pricing" });
@@ -134,8 +138,11 @@ export const PricingPage: React.FC = () => {
   const signInPath = (plan: PaidBillingPlan) =>
     `/account?upgrade=${plan}${period === "monthly" ? "&period=monthly" : ""}`;
 
+  /** The one plan that gets the forest "Recommended" treatment: the one asked about, else Plus. */
+  const featuredPlan: PaidBillingPlan = requestedPlan ?? RECOMMENDED_PLAN;
+
   const renderPaidAction = (plan: PaidBillingPlan): React.ReactNode => {
-    const emphasize = plan === (requestedPlan ?? RECOMMENDED_PLAN);
+    const emphasize = plan === featuredPlan;
     const planName = planContent[plan].name;
 
     if (currentPlan === plan) {
@@ -256,8 +263,21 @@ export const PricingPage: React.FC = () => {
       return <PlanStatus tone="muted">Always free</PlanStatus>;
     }
 
+    // Signed out, Free isn't "your plan" yet: it's where to start.
+    if (!isAuthenticated) {
+      return (
+        <ButtonLink fullWidth to="/" variant="secondary">
+          Start free
+        </ButtonLink>
+      );
+    }
+
     return <PlanStatus icon="check-circle">Your current plan</PlanStatus>;
   };
+
+  const freeImportLimit = webBillingPlans.free.limits.monthlyImports;
+  const freeImportsUsed =
+    remainingImports === null ? 0 : Math.max(0, freeImportLimit - remainingImports);
 
   const showFoundingOffer = availability.founding?.available === true && currentPlan === "free";
 
@@ -275,98 +295,120 @@ export const PricingPage: React.FC = () => {
         <CheckoutCancelled onDismiss={dismissCheckoutResult} />
       ) : null}
 
-      <PageHeader
-        accent="juggle less."
-        align="center"
-        className="pricing-header"
-        eyebrow="Plans"
-        size="lg"
-        subtitle="Save recipes from anywhere and cook from them calmly. Start free, and upgrade when your cookbook outgrows it."
-        title="Cook more,"
-      />
+      {showPlans ? null : (
+        <div className="pricing-compare-toggle">
+          <Button onClick={() => setPlansOpen(true)} trailingIcon="chevron-down" variant="ghost">
+            Compare plans
+          </Button>
+        </div>
+      )}
 
-      {checkout.error ? (
-        <BillingErrorNotice message={checkout.error} onDismiss={checkout.clearError} />
-      ) : null}
+      {showPlans ? (
+        <>
+          <PageHeader
+            accent="juggle less."
+            align="center"
+            className="pricing-header"
+            eyebrow="Plans"
+            size="lg"
+            subtitle="Save recipes from anywhere and cook from them calmly. Start free, and upgrade when your cookbook outgrows it."
+            title="Cook more,"
+          />
 
-      <div className="pricing-period">
-        <BillingPeriodToggle bestSavings={bestSavings} onChange={setPeriod} value={period} />
-      </div>
+          {checkout.error ? (
+            <BillingErrorNotice message={checkout.error} onDismiss={checkout.clearError} />
+          ) : null}
 
-      <div className="pricing-grid">
-        {tiers.map((tier) => (
-          <PlanCard
-            action={tier === "free" ? renderFreeAction() : renderPaidAction(tier)}
-            availability={availability}
-            isCurrent={currentPlan === tier}
-            isRecommended={tier === RECOMMENDED_PLAN}
-            isSelected={tier === requestedPlan && currentPlan !== tier}
-            key={tier}
-            period={period}
-            ref={(element) => {
-              cardRefs.current[tier] = element;
-            }}
-            tier={tier}
-          >
-            {tier === "free" && remainingImports !== null ? (
-              <div className="pricing-usage">
-                <div className="pricing-usage-row">
-                  <span>Free imports left on this device</span>
-                  <strong className="num">
-                    {remainingImports} of {webBillingPlans.free.limits.monthlyImports}
-                  </strong>
-                </div>
-                <ProgressBar
-                  label="Free imports left"
-                  max={webBillingPlans.free.limits.monthlyImports}
-                  tone={remainingImports === 0 ? "tomato" : "primary"}
-                  value={remainingImports}
-                  valueText={`${remainingImports} of ${webBillingPlans.free.limits.monthlyImports} left`}
-                />
-              </div>
-            ) : null}
-          </PlanCard>
-        ))}
-      </div>
-
-      {showFoundingOffer && availability.founding ? (
-        <FoundingOfferCard
-          action={
-            isAuthenticated ? (
-              <Button
-                disabled={checkout.busyAction !== null}
-                fullWidth
-                loading={checkout.busyAction === "founding"}
-                onClick={() => void checkout.startFoundingCheckout()}
-              >
-                Become a founding member
-              </Button>
-            ) : (
-              <ButtonLink fullWidth to="/account?upgrade=plus">
-                Sign in to claim
-              </ButtonLink>
-            )
-          }
-          priceLabel={availability.founding.priceLabel}
-        />
-      ) : null}
-
-      <PricingTrustRow />
-
-      {currentPlan === "family" ? (
-        <section className="pricing-household-callout">
-          <div>
-            <h2>Your household</h2>
-            <p>Invite the people you cook with and share one cookbook and shopping list.</p>
+          <div className="pricing-period">
+            <BillingPeriodToggle bestSavings={bestSavings} onChange={setPeriod} value={period} />
           </div>
-          <ButtonLink icon="users" to="/household" variant="secondary">
-            Manage household
-          </ButtonLink>
-        </section>
-      ) : null}
 
-      <PlanComparisonTable currentPlan={currentPlan} />
-      <PricingFaq />
+          <div className="pricing-grid">
+            {tiers.map((tier) => (
+              <PlanCard
+                action={tier === "free" ? renderFreeAction() : renderPaidAction(tier)}
+                availability={availability}
+                isCurrent={isAuthenticated ? currentPlan === tier : false}
+                isRecommended={tier === featuredPlan}
+                isSelected={tier === requestedPlan && currentPlan !== tier}
+                key={tier}
+                period={period}
+                ref={(element) => {
+                  cardRefs.current[tier] = element;
+                }}
+                tier={tier}
+              >
+                {tier === "free" && remainingImports !== null ? (
+                  // The app's one meter convention: what's used, filling toward the limit.
+                  <div className="pricing-usage">
+                    <div className="pricing-usage-row">
+                      <span>Free imports used on this device</span>
+                      <strong className="num">
+                        {freeImportsUsed} of {freeImportLimit}
+                      </strong>
+                    </div>
+                    <ProgressBar
+                      label="Free imports used"
+                      max={freeImportLimit}
+                      tone={
+                        freeImportsUsed >= freeImportLimit
+                          ? "tomato"
+                          : freeImportsUsed >= freeImportLimit - 1
+                            ? "butter"
+                            : "primary"
+                      }
+                      value={freeImportsUsed}
+                      valueText={`${freeImportsUsed} of ${freeImportLimit} used`}
+                    />
+                  </div>
+                ) : null}
+              </PlanCard>
+            ))}
+          </div>
+
+          {showFoundingOffer && availability.founding ? (
+            <FoundingOfferCard
+              action={
+                isAuthenticated ? (
+                  <Button
+                    disabled={checkout.busyAction !== null}
+                    fullWidth
+                    loading={checkout.busyAction === "founding"}
+                    onClick={() => void checkout.startFoundingCheckout()}
+                  >
+                    Become a founding member
+                  </Button>
+                ) : (
+                  <ButtonLink fullWidth to="/account?upgrade=plus">
+                    Sign in to claim
+                  </ButtonLink>
+                )
+              }
+              priceLabel={availability.founding.priceLabel}
+            />
+          ) : null}
+
+          <PricingTrustRow />
+
+          {currentPlan === "family" ? (
+            <section className="pricing-household-callout">
+              <div>
+                <h2>Your household</h2>
+                <p>Invite the people you cook with and share one cookbook and shopping list.</p>
+              </div>
+              <ButtonLink icon="users" to="/household" variant="secondary">
+                Manage household
+              </ButtonLink>
+            </section>
+          ) : null}
+
+          <PlanComparisonTable
+            currentPlan={isAuthenticated ? currentPlan : null}
+            featuredPlan={featuredPlan}
+          />
+          <PricingFaq />
+        </>
+      ) : null}
     </div>
   );
 };

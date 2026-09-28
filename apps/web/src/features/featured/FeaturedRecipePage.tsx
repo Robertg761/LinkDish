@@ -5,7 +5,6 @@ import { Button, ButtonLink } from "../../components/Button";
 import { ConfirmationDialog } from "../../components/ConfirmationDialog";
 import { EmptyState } from "../../components/EmptyState";
 import { Icon } from "../../components/Icon";
-import { IconButton } from "../../components/IconButton";
 import { useDocumentTitle } from "../../lib/use-document-title";
 import { RAIL_MEDIA_QUERY, useMediaQuery } from "../../lib/use-media-query";
 import { LazyCookMode, preloadCookMode } from "../cook-mode/LazyCookMode";
@@ -104,7 +103,25 @@ const FeaturedRecipeScreen: React.FC<{ featured: FeaturedRecipe }> = ({ featured
     </Button>
   );
 
-  const banner = (
+  // Save problems stay right under the recipe header, where the save button is.
+  const alerts =
+    saving.error || saving.syncWarning ? (
+      <div className="featured-alerts print-hide">
+        {saving.error ? (
+          <p className="featured-banner-alert" role="alert">
+            {saving.error}
+          </p>
+        ) : null}
+        {saving.syncWarning ? (
+          <p className="featured-banner-alert" role="status">
+            {saving.syncWarning}
+          </p>
+        ) : null}
+      </div>
+    ) : null;
+
+  // The LinkDish pitch comes after the recipe, so the ingredients are on the first screen.
+  const promo = (
     <aside className="featured-banner print-hide" aria-labelledby="featured-banner-title">
       <span aria-hidden="true" className="featured-banner-mark">
         <Icon name="sparkles" size={20} />
@@ -118,16 +135,6 @@ const FeaturedRecipeScreen: React.FC<{ featured: FeaturedRecipe }> = ({ featured
           Paste any recipe link and LinkDish keeps just the recipe: no ads, no life story. Then
           scale it, switch units and cook it step by step.
         </p>
-        {saving.error ? (
-          <p className="featured-banner-alert" role="alert">
-            {saving.error}
-          </p>
-        ) : null}
-        {saving.syncWarning ? (
-          <p className="featured-banner-alert" role="status">
-            {saving.syncWarning}
-          </p>
-        ) : null}
       </div>
       <div className="featured-banner-actions">
         <ButtonLink icon="link" to="/import" variant="secondary">
@@ -140,18 +147,21 @@ const FeaturedRecipeScreen: React.FC<{ featured: FeaturedRecipe }> = ({ featured
   return (
     <div className={`featured-page page-enter${isDesktop ? " is-desktop" : ""}`}>
       <RecipeView
-        banner={banner}
+        banner={alerts}
         checks={checks}
         footer={
-          <p className="featured-footer print-hide">
-            Recipe and photo © {source.label}.{" "}
-            {source.href ? (
-              <a href={source.href} rel="noopener noreferrer" target="_blank">
-                Read the original
-              </a>
-            ) : null}{" "}
-            · <Link to="/import">Save your own recipes with LinkDish</Link>
-          </p>
+          <>
+            {promo}
+            <p className="featured-footer print-hide">
+              Recipe and photo © {source.label}.{" "}
+              {source.href ? (
+                <a href={source.href} rel="noopener noreferrer" target="_blank">
+                  Read the original
+                </a>
+              ) : null}{" "}
+              · <Link to="/import">Save your own recipes with LinkDish</Link>
+            </p>
+          </>
         }
         heroActions={
           isDesktop ? (
@@ -178,13 +188,16 @@ const FeaturedRecipeScreen: React.FC<{ featured: FeaturedRecipe }> = ({ featured
       {!isDesktop ? (
         <RecipeActionBar>
           {saveButton}
-          <IconButton
+          <Button
             aria-label="Start cooking"
             icon="chef-hat"
             onClick={() => setCookOpen(true)}
+            onPointerEnter={preloadCookMode}
             size="lg"
             variant="tonal"
-          />
+          >
+            Cook
+          </Button>
         </RecipeActionBar>
       ) : null}
 

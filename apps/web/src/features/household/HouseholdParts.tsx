@@ -63,8 +63,10 @@ export const MemberRow: React.FC<MemberRowProps> = ({
   disabled,
   onRemove
 }) => {
-  const name = getMemberDisplayName(member);
-  const showEmail = name !== member.email;
+  // Without a display name, the email is the name (not "jo.bennett" over the same email).
+  const hasDisplayName = Boolean(member.displayName?.trim());
+  const name = hasDisplayName ? getMemberDisplayName(member) : member.email;
+  const showEmail = hasDisplayName && name !== member.email;
 
   return (
     <li className="household-member">
@@ -81,14 +83,16 @@ export const MemberRow: React.FC<MemberRowProps> = ({
         </span>
         {showEmail ? <span className="household-member-email">{member.email}</span> : null}
       </span>
+      {/* Neutral until confirmed: the confirmation dialog carries the red. */}
       {canRemove ? (
         <Button
-          aria-label={`Remove ${name}`}
+          aria-label={`Remove ${getMemberDisplayName(member)}`}
+          className="household-member-remove"
           disabled={disabled}
           loading={removing}
           onClick={() => onRemove(member)}
           size="sm"
-          variant="outline-danger"
+          variant="ghost"
         >
           Remove
         </Button>
@@ -235,7 +239,7 @@ export const PendingInviteRow: React.FC<PendingInviteRowProps> = ({
       <span className="household-pending-email">{email}</span>
       <span className="household-pending-meta">
         {formatInviteExpiry(expiresAt)}
-        {inviteCode ? "" : " · sent by email"}
+        {inviteCode ? "" : <span className="household-pending-sent"> · sent by email</span>}
       </span>
     </span>
     <span className="household-pending-actions">
@@ -288,9 +292,9 @@ export const JoinHouseholdForm: React.FC<JoinHouseholdFormProps> = ({
         autoCapitalize="off"
         autoComplete="off"
         error={problem ?? undefined}
-        hint="Paste the code or link from your invite email."
         label="Invite code or link"
         leadingIcon="gift"
+        placeholder="Paste your invite link or code"
         onChange={(event) => {
           setValue(event.target.value);
 
@@ -301,7 +305,12 @@ export const JoinHouseholdForm: React.FC<JoinHouseholdFormProps> = ({
         spellCheck={false}
         value={value}
       />
-      <Button loading={busy} type="submit" variant={highlighted ? "primary" : "secondary"}>
+      <Button
+        disabled={!value.trim()}
+        loading={busy}
+        type="submit"
+        variant={highlighted ? "primary" : "secondary"}
+      >
         Join household
       </Button>
     </form>

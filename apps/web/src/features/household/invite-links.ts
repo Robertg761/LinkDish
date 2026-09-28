@@ -148,12 +148,21 @@ export const formatInviteExpiry = (expiresAt: string, now = Date.now()): string 
     return "Expired";
   }
 
-  const days = Math.round((time - now) / 86_400_000);
+  // Relative everywhere ("Expires tomorrow"), never a mix of countdowns and timestamps.
+  const hours = (time - now) / 3_600_000;
+  const days = Math.round(hours / 24);
 
   if (days >= 2) {
     return `Expires in ${days} days`;
   }
 
-  const date = new Date(time);
-  return `Expires ${date.toLocaleDateString(undefined, { day: "numeric", month: "short" })} at ${date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
+  if (hours >= 24) {
+    return "Expires tomorrow";
+  }
+
+  const wholeHours = Math.floor(hours);
+
+  return wholeHours >= 1
+    ? `Expires in ${wholeHours} ${wholeHours === 1 ? "hour" : "hours"}`
+    : "Expires within the hour";
 };
