@@ -669,11 +669,11 @@ describe("LibraryPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Import" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("doesn't look like a link");
 
+    // The samples load after the welcome (placeholder cards hold their place meanwhile).
     const samples = await screen.findByRole("region", { name: "Try a sample" });
-    expect(within(samples).getByRole("link", { name: "Classic Sandwich Bread" })).toHaveAttribute(
-      "href",
-      "/featured/classic-sandwich-bread"
-    );
+    expect(
+      await within(samples).findByRole("link", { name: "Classic Sandwich Bread" })
+    ).toHaveAttribute("href", "/featured/classic-sandwich-bread");
 
     fireEvent.change(input, { target: { value: "www.seriouseats.com/best-chili" } });
     fireEvent.click(screen.getByRole("button", { name: "Import" }));
@@ -700,6 +700,55 @@ describe("LibraryPage", () => {
         icon.getAttribute("data-icon")
       ).filter((name) => !isCoreIconName(name ?? ""))
     ).toEqual([]);
+  });
+
+  it("opens a first visit on the welcome while it sets up the starter recipes", async () => {
+    localStorage.removeItem("linkdish:web:starter-recipes-seeded:v1");
+    resetLinkDishWebDbForTests();
+    const releaseStorage = fakeIdb.holdNextOpen();
+
+    const { container } = renderPage();
+
+    // Storage hasn't answered yet: the welcome shows anyway, with the recipes' skeleton below.
+    expect(
+      await screen.findByRole("heading", { name: "Paste a link. Get cooking." })
+    ).toBeInTheDocument();
+    expect(screen.getByText("Welcome to LinkDish")).toBeInTheDocument();
+    expect(container.querySelector(".library-welcome ~ .library-skeleton")).not.toBeNull();
+    expect(screen.queryByRole("heading", { name: /Starter recipes/ })).not.toBeInTheDocument();
+
+    releaseStorage();
+
+    // The same welcome stays; the starter recipes it just seeded take the skeleton's place.
+    expect(await screen.findByRole("heading", { name: /Starter recipes/ })).toBeInTheDocument();
+    expect(screen.getByText("Welcome to LinkDish")).toBeInTheDocument();
+    expect(container.querySelector(".library-skeleton")).toBeNull();
+    expect(document.querySelectorAll(".library-grid .recipe-card")).toHaveLength(3);
+    expect(localStorage.getItem("linkdish:web:starter-recipes-seeded:v1")).toBe("true");
+  });
+
+  it("keeps a returning cook's loading cookbook to a skeleton, without the welcome", async () => {
+    seedRecipes([makeRecipe("soup", { title: "Tomato Soup" })]);
+    resetLinkDishWebDbForTests();
+    const releaseStorage = fakeIdb.holdNextOpen();
+
+    const { container } = renderPage();
+
+    await waitFor(() => expect(container.querySelector(".library-skeleton")).not.toBeNull());
+    // Long enough for a first visit's welcome to have shown (the frame after the first paint).
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(
+      screen.queryByRole("heading", { name: "Paste a link. Get cooking." })
+    ).not.toBeInTheDocument();
+
+    releaseStorage();
+
+    expect(await screen.findByText("Tomato Soup")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "Paste a link. Get cooking." })
+    ).not.toBeInTheDocument();
   });
 
   it("shows an error with a retry instead of an empty cookbook when storage fails", async () => {

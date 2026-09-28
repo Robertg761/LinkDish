@@ -5,11 +5,10 @@ import {
   deleteSavedRecipe,
   duplicateSavedRecipe,
   getSavedRecipeById,
-  getSavedRecipes,
+  loadCookbookRecipes,
   logRecipeCooked,
   markRecipeOpened,
   normalizeRecipeTags,
-  seedStarterRecipesIfNeeded,
   setRecipeCollections,
   setRecipeFavorite,
   setRecipePreferredServings,
@@ -122,10 +121,7 @@ const libraryResource = createResourceStore<WebSavedRecipe[]>({
   applyLocalChange: applySavedRecipeChange,
   applyRemoteChanges: applyRemoteSavedRecipeChanges,
   initial: [],
-  async load() {
-    await seedStarterRecipesIfNeeded();
-    return getSavedRecipes();
-  },
+  load: loadCookbookRecipes,
   reconcile: (previous, next) => reconcileById(previous, next, getRecipeId, reconcileRecipe),
   topic: "savedRecipes"
 });

@@ -245,19 +245,27 @@ const timeOf = (value: string | null | undefined): number => {
 
 /*
  * One collator for every A–Z comparison: `localeCompare` with an options object resolves a new
- * collator on each call (about 20x slower over a 2,000-recipe sort). Same order.
+ * collator on each call (about 20x slower over a 2,000-recipe sort). Same order. It is created on
+ * the first A–Z sort, not when the Cookbook loads: resolving it costs tens of milliseconds on a
+ * slow phone, before the first paint, and most visits sort by date.
  */
-const TITLE_COLLATOR = new Intl.Collator(undefined, { sensitivity: "base" });
+let titleCollator: Intl.Collator | null = null;
+
+const getTitleCollator = (): Intl.Collator =>
+  (titleCollator ??= new Intl.Collator(undefined, { sensitivity: "base" }));
 
 const compareTitles = (left: string, right: string): number =>
-  TITLE_COLLATOR.compare(normalizeText(left), normalizeText(right));
+  getTitleCollator().compare(normalizeText(left), normalizeText(right));
 
 /** Sorts by a precomputed title key (decorate, sort, undecorate), so each title is read once. */
-const sortByTitle = <T>(records: readonly T[], titleOf: (record: T) => string): T[] =>
-  records
+const sortByTitle = <T>(records: readonly T[], titleOf: (record: T) => string): T[] => {
+  const collator = getTitleCollator();
+
+  return records
     .map((record) => ({ key: normalizeText(titleOf(record)), record }))
-    .sort((left, right) => TITLE_COLLATOR.compare(left.key, right.key))
+    .sort((left, right) => collator.compare(left.key, right.key))
     .map((entry) => entry.record);
+};
 
 const byRecentlyAdded = (left: WebSavedRecipe, right: WebSavedRecipe): number =>
   timeOf(right.createdAt) - timeOf(left.createdAt) ||

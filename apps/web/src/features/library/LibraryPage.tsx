@@ -19,9 +19,10 @@ import { RecipeCard } from "../../components/RecipeCard";
 import { SearchField } from "../../components/SearchField";
 import { SegmentedControl } from "../../components/SegmentedControl";
 import { useToast } from "../../components/Toast";
-import { useCollections } from "../../data/collections-store";
+import { loadCollections, useCollections } from "../../data/collections-store";
 import {
   duplicateRecipe,
+  loadSavedRecipes,
   removeSavedRecipe,
   toggleFavorite,
   useSavedRecipes
@@ -29,6 +30,7 @@ import {
 import { retryLinkDishStorage } from "../../data/storage-status";
 import { useMediaQuery } from "../../lib/use-media-query";
 import { holdAutoApplyUpdate, UNDO_UPDATE_HOLD_MS } from "../../platform/app-update";
+import { afterNextPaint, useBootSettleHold } from "../../platform/boot-settle";
 import { lazyWithRetry } from "../../platform/lazy";
 import { OptionalChunkBoundary } from "../../platform/OptionalChunkBoundary";
 import { getWebBillingTier } from "../billing/web-billing";
@@ -77,6 +79,7 @@ import {
   pluralize
 } from "./components/LibraryResultsParts";
 import { LibraryShelf } from "./components/LibraryShelf";
+import { LibraryWelcome, loadWelcomeSamples } from "./components/LibraryWelcome";
 import { CompactRecipeMeta } from "./components/RecipeMeta";
 import {
   recipeSearchKey,
@@ -87,6 +90,7 @@ import {
 import { isSharedRecipeNotFoundError, useSharedRecipes } from "./components/use-shared-recipes";
 import {
   getSavedRecipeById,
+  hasSeededStarterRecipes,
   LOCAL_LIMIT_FREE,
   restoreSavedRecipe,
   SavedRecipeLimitError,
@@ -113,13 +117,23 @@ const PRIORITY_CARD_COUNT = 6;
 /** Keeps the subtitle's line while the count is unknown, so nothing jumps when it arrives. */
 const BLANK_SUBTITLE = "\u00a0";
 
-// New cooks and the Family tab are the minority of visits, so their UI loads on demand. The
-// welcome is a new cook's first paint: it uses only core icons and doesn't wait for the rest.
-const LibraryWelcome = lazyWithRetry(
-  () =>
-    import("./components/LibraryWelcome").then((module) => ({ default: module.LibraryWelcome })),
-  { standalone: true }
-);
+/**
+ * What the Cookbook reads before its first meaningful paint, requested from main.tsx alongside
+ * this chunk (see app/routes.ts): the recipes and the collections (read together, so the filter
+ * chips appear complete rather than growing a frame later), and on a first visit the welcome's
+ * sample recipes.
+ */
+export const warmCookbook = (): Promise<void> => {
+  if (!hasSeededStarterRecipes()) {
+    loadWelcomeSamples().catch(() => undefined);
+  }
+
+  void loadCollections();
+  return loadSavedRecipes();
+};
+
+// The Family tab is the minority of visits, so its UI loads on demand. (The welcome, a new cook's
+// first paint, is part of this chunk: it must not wait for another download.)
 const FamilyCookbook = lazyWithRetry(() =>
   import("./components/FamilyCookbook").then((module) => ({ default: module.FamilyCookbook }))
 );
@@ -172,6 +186,11 @@ export const LibraryPage: React.FC = () => {
   const [sort, setSort] = useState<LibrarySort>(readStoredSort);
   const [direction, setDirection] = useState<LibrarySortDirection>(readStoredSortDirection);
   const [view, setView] = useState<LibraryView>(readStoredView);
+  // A first visit (starter recipes not seeded yet) always opens on the welcome. It shows while
+  // storage is still being set up rather than after: from the frame after the first one (the
+  // shell and this header, which paint as early as they can), above a skeleton of the recipes.
+  const [expectingWelcome] = useState(() => !hasSeededStarterRecipes());
+  const [welcomeAhead, setWelcomeAhead] = useState(false);
 
   const [familySignInOpen, setFamilySignInOpen] = useState(false);
   const [collectionPickerIds, setCollectionPickerIds] = useState<string[] | null>(null);
@@ -198,6 +217,17 @@ export const LibraryPage: React.FC = () => {
   const libraryReady = library.status === "ready";
   const isEmptyLibrary = libraryReady && recipes.length === 0;
   const isNewCook = libraryReady && recipes.length > 0 && recipes.every(isStarterRecipe);
+
+  // Deferred boot work (platform/boot-settle.ts) waits until the recipes (or the welcome) show.
+  useBootSettleHold(library.status === "loading");
+
+  const awaitingWelcome = expectingWelcome && library.status === "loading";
+
+  useEffect(
+    () =>
+      awaitingWelcome && !welcomeAhead ? afterNextPaint(() => setWelcomeAhead(true)) : undefined,
+    [awaitingWelcome, welcomeAhead]
+  );
 
   // Remember search, filters and tab for the trip to a recipe and back.
   useEffect(() => {
@@ -318,7 +348,12 @@ export const LibraryPage: React.FC = () => {
     [filters.length, personalSearch, searchText, searching, visiblePersonal.length]
   );
 
-  const filterChips = useMemo(() => buildFilterChips(recipes, collections), [collections, recipes]);
+  // The filter bar shows with the search bar only (not on the welcome, for instance).
+  const personalSearchShown = libraryReady && recipes.length > 0 && !isNewCook;
+  const filterChips = useMemo(
+    () => (isPersonal && personalSearchShown ? buildFilterChips(recipes, collections) : []),
+    [collections, isPersonal, personalSearchShown, recipes]
+  );
   const shelves = useMemo(
     () =>
       isPersonal && !searching && filters.length === 0 && !isNewCook
@@ -644,8 +679,9 @@ export const LibraryPage: React.FC = () => {
       : shared.status === "ready"
         ? pluralize(shared.recipes.length, "family recipe")
         : BLANK_SUBTITLE;
-  const showSearch = isPersonal ? libraryReady && recipes.length > 0 && !isNewCook : !familyLocked;
-  const showWelcome = isPersonal && (isEmptyLibrary || isNewCook);
+  const showSearch = isPersonal ? personalSearchShown : !familyLocked;
+  const showWelcome =
+    isPersonal && (isEmptyLibrary || isNewCook || (awaitingWelcome && welcomeAhead));
   const showFilters = isPersonal && showSearch && filterChips.length > 0;
 
   const renderPersonal = () => {
@@ -662,7 +698,8 @@ export const LibraryPage: React.FC = () => {
     }
 
     if (!libraryReady) {
-      return <LibrarySkeleton view={view} />;
+      // Nothing yet in the first frame of a first visit: the welcome comes next, above this.
+      return awaitingWelcome && !welcomeAhead ? null : <LibrarySkeleton view={view} />;
     }
 
     if (isEmptyLibrary) {
@@ -788,14 +825,13 @@ export const LibraryPage: React.FC = () => {
         <LibraryStorageBanner />
 
         {showWelcome ? (
-          // The welcome and the starter recipes appear together (one Suspense boundary), so the
-          // welcome card never lands on top of cards that are already on screen.
-          <Suspense fallback={<LibrarySkeleton view={view} />}>
-            <OptionalChunkBoundary name="Welcome">
-              <LibraryWelcome variant={isEmptyLibrary ? "empty" : "starter"} />
-            </OptionalChunkBoundary>
+          // The welcome comes first and the starter recipes below it (a skeleton while a first
+          // visit sets up storage), so the welcome card never lands on top of cards already on
+          // screen.
+          <>
+            <LibraryWelcome variant={isEmptyLibrary ? "empty" : "starter"} />
             {renderPersonal()}
-          </Suspense>
+          </>
         ) : null}
 
         {showSearch ? (

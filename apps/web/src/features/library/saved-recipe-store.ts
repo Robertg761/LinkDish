@@ -1,3 +1,7 @@
+// The samples module directly: the package index would bring the whole domain engine (and zod)
+// into the Cookbook's first download.
+import { createStarterRecipeSeedRecords } from "@linkdish/recipe-domain/src/samples";
+
 import { apiClient } from "../../api/client";
 import { isCachedUserPremium } from "../../auth/auth-cache";
 import { emitDataChange } from "../../data/change-feed";
@@ -308,32 +312,36 @@ const hydrateImages = async (record: WebSavedRecipe | undefined) => {
   return withImages(record, await getSavedRecipeSourceImages(record.id));
 };
 
-export async function seedStarterRecipesIfNeeded(): Promise<void> {
-  if (typeof window === "undefined") {
-    return;
+/**
+ * True once this browser's cookbook has been set up (starter recipes seeded, or recipes found).
+ * False on a first visit, when the Cookbook will greet a new cook.
+ */
+export const hasSeededStarterRecipes = (): boolean =>
+  safeGetItem(STARTER_RECIPES_SEEDED_STORAGE_KEY) === "true";
+
+/**
+ * Seeds the starter recipes into an empty cookbook (a first visit) and returns what it wrote;
+ * null when there was nothing to do. The starters (~2 KB) ship with the store, and the check and
+ * the writes are one transaction with no waits in between: on a slow phone every step waits for
+ * the main thread, and the first visit's Cookbook shows as soon as storage answers.
+ */
+async function seedStarterRecipes(): Promise<WebSavedRecipe[] | null> {
+  if (typeof window === "undefined" || hasSeededStarterRecipes()) {
+    return null;
   }
 
-  const hasSeededStarterRecipes = safeGetItem(STARTER_RECIPES_SEEDED_STORAGE_KEY) === "true";
-  if (hasSeededStarterRecipes) {
-    return;
-  }
-
-  if ((await countSavedRecipes()) > 0) {
-    safeSetItem(STARTER_RECIPES_SEEDED_STORAGE_KEY, "true");
-    return;
-  }
-
-  // Only first-run visitors need the starter recipes (and the recipe-domain code that builds
-  // them), so they load on demand instead of sitting in the entry bundle.
-  const { createStarterRecipeSeedRecords } = await import("./starter-recipe-seeds");
   const db = await getDb();
-  const starterRecipes = createStarterRecipeSeedRecords();
   const tx = db.transaction(STORE_NAME, "readwrite");
   const store = tx.objectStore(STORE_NAME);
-  const seeded: WebSavedRecipe[] = [];
 
-  for (const starterRecipe of starterRecipes) {
-    const savedRecipe: WebSavedRecipe = {
+  if ((await store.count()) > 0) {
+    await tx.done;
+    safeSetItem(STARTER_RECIPES_SEEDED_STORAGE_KEY, "true");
+    return null;
+  }
+
+  const seeded = createStarterRecipeSeedRecords().map(
+    (starterRecipe): WebSavedRecipe => ({
       id: starterRecipe.id,
       recipe: starterRecipe.recipe,
       sourceUrl: starterRecipe.recipe.sourceUrl,
@@ -351,18 +359,36 @@ export async function seedStarterRecipesIfNeeded(): Promise<void> {
       sync: {
         status: "local_only"
       }
-    };
+    })
+  );
 
-    await store.put(savedRecipe);
-    seeded.push(savedRecipe);
-  }
-
-  await tx.done;
+  await Promise.all([...seeded.map((recipe) => store.put(recipe)), tx.done]);
 
   // Only mark the library as seeded once every starter recipe is written, so a
   // failure part-way through can be retried on the next launch.
   safeSetItem(STARTER_RECIPES_SEEDED_STORAGE_KEY, "true");
   emitDataChange({ topic: "savedRecipes", upserted: seeded });
+  return seeded;
+}
+
+export async function seedStarterRecipesIfNeeded(): Promise<void> {
+  await seedStarterRecipes();
+}
+
+/** IndexedDB key order, which `getAll` returns records in. */
+const byId = (left: WebSavedRecipe, right: WebSavedRecipe): number =>
+  left.id < right.id ? -1 : left.id > right.id ? 1 : 0;
+
+/**
+ * The cookbook's first read ({@link getSavedRecipes} list records, newest first). On a first
+ * visit it seeds the starter recipes and returns them as written, without reading them back.
+ */
+export async function loadCookbookRecipes(): Promise<WebSavedRecipe[]> {
+  const seeded = await seedStarterRecipes();
+
+  return seeded
+    ? sortByUpdatedAtDesc([...seeded].sort(byId).map(toSavedRecipeListRecord))
+    : getSavedRecipes();
 }
 
 export interface SaveRecipeInput {

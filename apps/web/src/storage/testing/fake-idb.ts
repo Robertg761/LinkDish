@@ -25,6 +25,8 @@ interface FakeIdbState {
   failPuts: Map<string, Error>;
   definitions: Map<string, FakeStoreDefinition>;
   failNextOpen: Error | null;
+  /** The next open waits for this (storage that is slow to answer). */
+  openHold: Promise<void> | null;
   oldVersion: number;
   openCalls: FakeOpenCall[];
   records: Map<string, Map<string, unknown>>;
@@ -36,6 +38,7 @@ const state: FakeIdbState = {
   failPuts: new Map(),
   definitions: new Map(),
   failNextOpen: null,
+  openHold: null,
   oldVersion: 0,
   openCalls: [],
   records: new Map()
@@ -212,6 +215,12 @@ async function openDB(name: string, version?: number, callbacks: FakeOpenCallbac
   state.callbacks = callbacks;
   await Promise.resolve();
 
+  if (state.openHold) {
+    const hold = state.openHold;
+    state.openHold = null;
+    await hold;
+  }
+
   if (state.failNextOpen) {
     const error = state.failNextOpen;
     state.failNextOpen = null;
@@ -326,6 +335,7 @@ export const fakeIdb = {
     state.oldVersion = version;
     state.openCalls = [];
     state.failNextOpen = null;
+    state.openHold = null;
     state.blockedOnce = false;
     state.callbacks = null;
     state.failPuts = new Map();
@@ -369,6 +379,16 @@ export const fakeIdb = {
 
   failNextOpen(error: Error): void {
     state.failNextOpen = error;
+  },
+
+  /** The next open waits until the returned function is called (storage slow to answer). */
+  holdNextOpen(): () => void {
+    let release: () => void = () => undefined;
+    state.openHold = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    return release;
   },
 
   blockNextOpen(): void {

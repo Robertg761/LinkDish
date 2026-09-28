@@ -23,6 +23,7 @@ import {
   getSavedRecipeSourceImages,
   getSourceHost,
   incrementSavedRecipeTimesCooked,
+  loadCookbookRecipes,
   logRecipeCooked,
   markRecipeOpened,
   normalizeRecipeTags,
@@ -44,7 +45,7 @@ import {
 import type { WebSavedRecipe } from "./saved-recipe-types";
 import type { SharedRecipe } from "@linkdish/api-contracts";
 import type { Recipe } from "@linkdish/recipe-domain";
-import type * as RecipeDomain from "@linkdish/recipe-domain";
+import type * as RecipeDomainSamples from "@linkdish/recipe-domain/src/samples";
 
 const starterSeedMocks = vi.hoisted(() => ({ fail: false }));
 
@@ -58,8 +59,8 @@ vi.mock("../../api/client", () => ({
   apiClient: apiMocks
 }));
 
-vi.mock("@linkdish/recipe-domain", async (importOriginal) => {
-  const actual = await importOriginal<typeof RecipeDomain>();
+vi.mock("@linkdish/recipe-domain/src/samples", async (importOriginal) => {
+  const actual = await importOriginal<typeof RecipeDomainSamples>();
 
   return {
     ...actual,
@@ -235,6 +236,25 @@ describe("saved-recipe-store", () => {
 
     await seedStarterRecipesIfNeeded();
     expect(await countSavedRecipes()).toBe(3);
+  });
+
+  it("loads a first visit's cookbook as the seeded starters, as a re-read would list them", async () => {
+    const firstVisit = await loadCookbookRecipes();
+    const ids = firstVisit.map((recipe) => recipe.id);
+    const sortById = (recipes: WebSavedRecipe[]) =>
+      [...recipes].sort((left, right) => left.id.localeCompare(right.id));
+
+    expect(firstVisit).toHaveLength(3);
+    expect(firstVisit.every((recipe) => recipe.isStarter)).toBe(true);
+    // Same save time for all three, so IndexedDB's key order (the fake keeps insertion order).
+    expect(ids).toEqual([...ids].sort());
+    expect(firstVisit).toEqual(sortById(await getSavedRecipes()));
+    expect(localStorage.getItem("linkdish:web:starter-recipes-seeded:v1")).toBe("true");
+
+    // Later loads just read what is stored.
+    await deleteSavedRecipe(firstVisit[0]?.id ?? "");
+    expect(await loadCookbookRecipes()).toEqual(await getSavedRecipes());
+    expect(await countSavedRecipes()).toBe(2);
   });
 
   it("marks existing libraries as seeded without backfilling starters", async () => {
