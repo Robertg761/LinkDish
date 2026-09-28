@@ -43,6 +43,20 @@
   resize: vertical;
 }
 
+/* Grows with its text (field-sizing where supported, measured in JS otherwise). */
+.field-textarea.is-auto-grow {
+  overflow: hidden;
+  resize: none;
+  field-sizing: content;
+}
+
+/* A text field that wraps: a long title stays fully visible. */
+.field-textarea.is-single-line {
+  min-height: 52px;
+  padding: 13px 16px;
+  line-height: 1.5;
+}
+
 .field-input-with-right {
   padding-right: 52px;
 }

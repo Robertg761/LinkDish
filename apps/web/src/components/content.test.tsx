@@ -36,16 +36,26 @@ describe("RecipeImage", () => {
     expect(container.querySelector("img")).toHaveAttribute("fetchpriority", "high");
   });
 
-  it("falls back to a monogram without a photo or after an error", () => {
-    const { container, rerender } = render(<RecipeImage image={null} title="banana bread" />);
+  it("falls back to a course-aware cover (never a lone letter) without a photo or on error", () => {
+    const { container, rerender } = render(
+      <RecipeImage image={null} title="Brown Butter Chocolate Chip Cookies" />
+    );
 
-    expect(screen.getByText("B")).toBeInTheDocument();
+    const cover = container.querySelector(".recipe-cover");
+    expect(cover).toHaveAttribute("aria-hidden", "true");
+    expect(cover).toHaveAttribute("data-course", "dessert");
+    expect(cover?.querySelector("[data-icon='cake-slice']")).not.toBeNull();
+    expect(cover).toHaveTextContent("");
 
-    rerender(<RecipeImage image={image} title="banana bread" />);
+    rerender(<RecipeImage image={image} title="Weeknight Chicken Soup" />);
     fireEvent.error(container.querySelector("img") as Element);
 
-    expect(screen.getByText("B")).toBeInTheDocument();
     expect(container.querySelector("img")).toBeNull();
+    expect(container.querySelector(".recipe-cover")).not.toBeNull();
+
+    // A course from the whole recipe wins over the title's guess.
+    rerender(<RecipeImage course="drink" image={null} title="Weeknight Chicken Soup" />);
+    expect(container.querySelector(".recipe-cover")).toHaveAttribute("data-course", "drink");
   });
 });
 

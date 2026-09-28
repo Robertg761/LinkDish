@@ -1,9 +1,11 @@
 import React, { useCallback, useEffect, useState } from "react";
 
-import { buildRecipeImageUrl, getRecipeMonogram } from "../lib/recipe-image";
+import { buildRecipeImageUrl } from "../lib/recipe-image";
+
+import { RecipeCover } from "./RecipeCover";
 
 import type { RecipeImageWidth } from "../lib/recipe-image";
-import type { RecipeImage as RecipeImageData } from "@linkdish/recipe-domain";
+import type { RecipeCourse, RecipeImage as RecipeImageData } from "@linkdish/recipe-domain";
 
 import "./RecipeImage.css";
 
@@ -68,8 +70,10 @@ export const FadeImage: React.FC<FadeImageProps> = ({
 
 export interface RecipeImageProps {
   image: RecipeImageData | null | undefined;
-  /** Recipe title, used for the monogram fallback. */
+  /** Recipe title: picks the no-photo cover's art (a course-appropriate plate). */
   title: string;
+  /** The recipe's course when known (from the whole recipe); otherwise read from the title. */
+  course?: RecipeCourse | null | undefined;
   /** Empty by default: the title is almost always visible right next to the photo. */
   alt?: string | undefined;
   /** The `sizes` attribute, e.g. "(min-width: 1024px) 280px, 50vw". */
@@ -78,7 +82,7 @@ export interface RecipeImageProps {
   aspectRatio?: string | undefined;
   priority?: boolean | undefined;
   widths?: ReadonlyArray<RecipeImageWidth> | undefined;
-  /** Replaces the monogram when there is no photo. */
+  /** Replaces the designed cover when there is no photo. */
   fallback?: React.ReactNode;
   className?: string | undefined;
   crossOrigin?: "anonymous" | undefined;
@@ -87,11 +91,13 @@ export interface RecipeImageProps {
 /**
  * Photo-forward recipe image through the image proxy: a srcset over the proxy widths
  * (96/480/1200), a reserved aspect-ratio box with a warm placeholder tint, a fade-in,
- * and a Fraunces monogram when there is no photo or it fails to load.
+ * and a designed cover (a plate with a course mark on gingham) when there is no photo or it
+ * fails to load.
  */
 export const RecipeImage: React.FC<RecipeImageProps> = ({
   image,
   title,
+  course,
   alt = "",
   sizes = "(min-width: 1024px) 400px, 100vw",
   aspectRatio = "4 / 3",
@@ -131,11 +137,7 @@ export const RecipeImage: React.FC<RecipeImageProps> = ({
       style={aspectRatio === "auto" ? undefined : { aspectRatio }}
     >
       {showFallback ? (
-        (fallback ?? (
-          <span aria-hidden="true" className="recipe-image-monogram">
-            {getRecipeMonogram(title)}
-          </span>
-        ))
+        (fallback ?? <RecipeCover course={course} title={title} />)
       ) : (
         <FadeImage
           alt={alt}

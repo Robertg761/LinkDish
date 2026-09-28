@@ -1,8 +1,8 @@
 import type { Recipe } from "@linkdish/recipe-domain";
 
 /**
- * The plain-text formats the recipe editor uses: one ingredient per line with "## Section"
- * headings (older "Section:" headings still read back), and one step per line.
+ * The plain-text formats the recipe editor uses: one ingredient per line with plain-language
+ * section headings ("For the sauce:"; "## Section" still reads back), and one step per line.
  */
 
 type EditableIngredient = { section?: string | undefined; text: string };
@@ -52,7 +52,8 @@ export const formatEditableIngredients = (ingredients: Recipe["ingredients"]): s
         lines.push("");
       }
 
-      lines.push(`## ${section}`);
+      // "For the sauce:" reads like a recipe; a name that itself has a colon keeps "## ".
+      lines.push(section.includes(":") ? `## ${section}` : `${section}:`);
       currentSection = section;
     } else if (!section && currentSection) {
       lines.push("");

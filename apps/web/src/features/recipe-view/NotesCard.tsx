@@ -3,6 +3,7 @@ import React, { useEffect, useId, useRef, useState } from "react";
 import { Button } from "../../components/Button";
 import { Icon } from "../../components/Icon";
 import { IconButton } from "../../components/IconButton";
+import { useAutosizeTextarea } from "../../components/use-autosize-textarea";
 
 import "./NotesCard.css";
 
@@ -35,6 +36,9 @@ export const NotesCard: React.FC<NotesCardProps> = ({ notes, onSave }) => {
       element?.setSelectionRange(element.value.length, element.value.length);
     }
   }, [editing]);
+
+  // The note grows with its text (no scroll box, no resize grip in the rounded corner).
+  useAutosizeTextarea(textareaRef, draft, editing);
 
   if (!onSave && !trimmed) {
     return null;

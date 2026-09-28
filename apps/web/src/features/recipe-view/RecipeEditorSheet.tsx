@@ -239,14 +239,16 @@ export const RecipeEditorSheet: React.FC<RecipeEditorSheetProps> = ({
             </p>
           ) : null}
 
-          <Field
+          <TextAreaField
             autoComplete="off"
             error={errors.title}
             label="Title"
             onChange={update("title")}
+            singleLine
             value={draft.title}
           />
           <TextAreaField
+            autoGrow
             hint="A line or two about the dish (optional)."
             label="Description"
             onChange={update("description")}
@@ -278,22 +280,24 @@ export const RecipeEditorSheet: React.FC<RecipeEditorSheetProps> = ({
             />
           </div>
           <TextAreaField
+            autoGrow
             className="recipe-editor-lines"
             error={errors.ingredients}
-            hint="One per line. Start a line with ## to add a section, like “## For the sauce”."
+            hint="One per line. End a line with a colon to start a section, like “For the sauce:”."
             label="Ingredients"
             onChange={update("ingredients")}
-            rows={10}
+            rows={6}
             spellCheck={false}
             value={draft.ingredients}
           />
           <TextAreaField
+            autoGrow
             className="recipe-editor-lines"
             error={errors.steps}
             hint="One step per line."
             label="Method"
             onChange={update("steps")}
-            rows={8}
+            rows={6}
             value={draft.steps}
           />
           {sourceEditable ? (
@@ -308,6 +312,7 @@ export const RecipeEditorSheet: React.FC<RecipeEditorSheetProps> = ({
             />
           ) : null}
           <TextAreaField
+            autoGrow
             label="Notes"
             onChange={update("notes")}
             placeholder="Swaps, timings, who loved it…"

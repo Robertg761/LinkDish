@@ -79,8 +79,10 @@
     transform var(--transition-fast);
 }
 
-.method-timer-chip:hover {
-  background: color-mix(in srgb, var(--color-tomato) 22%, var(--color-tomato-soft));
+@media (hover: hover) {
+  .method-timer-chip:hover {
+    background: color-mix(in srgb, var(--color-tomato) 22%, var(--color-tomato-soft));
+  }
 }
 
 .method-timer-chip:active {
@@ -95,7 +97,7 @@
 .method-timer-chip.is-running {
   border-color: color-mix(in srgb, var(--color-tomato) 40%, transparent);
   background: transparent;
-  color: var(--color-tomato);
+  color: var(--color-tomato-ink);
 }
 
 .method-timer-chip-state {

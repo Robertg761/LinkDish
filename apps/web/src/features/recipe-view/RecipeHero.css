@@ -46,6 +46,11 @@
   object-fit: cover;
 }
 
+/* No photo: the same band holds the designed cover, a little shorter than a photo. */
+.recipe-hero.has-cover .recipe-hero-media {
+  aspect-ratio: 2 / 1;
+}
+
 .recipe-hero-content {
   display: flex;
   flex-direction: column;
@@ -88,10 +93,12 @@
     color var(--transition-fast);
 }
 
-.recipe-source-chip.is-link:hover {
-  background: var(--color-primary-soft);
-  color: var(--color-on-primary-soft);
-  text-decoration: none;
+@media (hover: hover) {
+  .recipe-source-chip.is-link:hover {
+    background: var(--color-primary-soft);
+    color: var(--color-on-primary-soft);
+    text-decoration: none;
+  }
 }
 
 .recipe-source-chip-external {
@@ -137,6 +144,40 @@
   padding: 0 10px;
 }
 
+.recipe-hero-meta-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Four stats share a phone's width: tighter columns, and the icons step aside on the
+   narrowest screens so "SERVES" never gets cut. */
+.recipe-hero-meta {
+  container-type: inline-size;
+}
+
+@container (max-width: 439.98px) {
+  .recipe-hero-meta-item {
+    padding: 0 8px;
+  }
+
+  .recipe-hero-meta dt {
+    gap: 4px;
+    letter-spacing: 0.02em;
+  }
+
+  .recipe-hero-meta dt .icon {
+    width: 14px;
+    height: 14px;
+  }
+}
+
+@container (max-width: 349.98px) {
+  .recipe-hero-meta dt .icon {
+    display: none;
+  }
+}
+
 .recipe-hero-meta-item:first-child {
   padding-left: 0;
 }
@@ -149,6 +190,8 @@
   display: flex;
   align-items: center;
   gap: 5px;
+  min-width: 0;
+  white-space: nowrap;
   color: var(--color-ink-muted);
   font-size: var(--text-label);
   font-weight: 700;
@@ -162,14 +205,16 @@
   color: var(--color-primary);
 }
 
+/* Values are short by construction ("1h 30m", "24"), so the row never goes ragged. */
 .recipe-hero-meta dd {
   margin: 0;
+  overflow: hidden;
   color: var(--color-ink);
   font-size: var(--text-body);
   font-weight: 700;
   line-height: 1.25;
-  text-wrap: balance;
-  overflow-wrap: anywhere;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .recipe-hero-tags {
@@ -249,58 +294,15 @@
   color: var(--color-butter);
 }
 
-.rating-star:hover {
-  transform: scale(1.12);
+@media (hover: hover) {
+  .rating-star:hover {
+    transform: scale(1.12);
+  }
 }
 
 .rating-star:focus-visible {
   outline: 2px solid var(--color-focus);
   outline-offset: -2px;
-}
-
-/* ------------------------------ No photo --------------------------------- */
-.recipe-hero.is-typographic {
-  overflow: hidden;
-  margin: calc(-1 * var(--recipe-hero-bleed-top)) calc(-1 * var(--page-gutter)) 0;
-  padding: calc(var(--recipe-hero-bleed-top) + 28px) var(--page-gutter) 28px;
-  border-radius: 0 0 var(--radius-sheet) var(--radius-sheet);
-  background:
-    radial-gradient(
-      120% 90% at 100% 0%,
-      color-mix(in srgb, var(--color-butter) 34%, transparent),
-      transparent 62%
-    ),
-    linear-gradient(170deg, var(--color-butter-soft), var(--color-canvas) 78%);
-}
-
-.recipe-hero.is-typographic .recipe-hero-meta {
-  border-color: color-mix(in srgb, var(--color-ink) 12%, transparent);
-}
-
-.recipe-hero.is-typographic .recipe-hero-meta-item + .recipe-hero-meta-item {
-  border-left-color: color-mix(in srgb, var(--color-ink) 12%, transparent);
-}
-
-.recipe-hero.is-typographic .recipe-source-chip {
-  background: color-mix(in srgb, var(--color-surface) 70%, transparent);
-}
-
-.recipe-hero-monogram {
-  position: absolute;
-  top: calc(var(--recipe-hero-bleed-top) - 36px);
-  right: -18px;
-  color: color-mix(in srgb, var(--color-butter) 55%, transparent);
-  font-family: var(--font-family-serif);
-  font-size: 13rem;
-  font-style: italic;
-  font-weight: 600;
-  line-height: 1;
-  pointer-events: none;
-  user-select: none;
-}
-
-.recipe-hero.is-typographic .recipe-hero-content {
-  position: relative;
 }
 
 /* ------------------------------ Tablet ----------------------------------- */
@@ -315,46 +317,29 @@
     display: none;
   }
 
-  .recipe-hero.is-typographic {
-    margin: 0;
-    padding: 40px 40px 32px;
-    border-radius: var(--radius-sheet);
-  }
-
-  .recipe-hero-monogram {
-    top: -40px;
-    right: 8px;
-    font-size: 17rem;
+  .recipe-hero.has-cover .recipe-hero-media {
+    aspect-ratio: 5 / 2;
   }
 }
 
 /* ------------------------------ Desktop ---------------------------------- */
 @media (min-width: 1024px) {
-  .recipe-hero.has-image {
+  .recipe-hero {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1.08fr);
     align-items: center;
     gap: 56px;
   }
 
-  .recipe-hero.has-image .recipe-hero-media {
+  .recipe-hero .recipe-hero-media,
+  .recipe-hero.has-cover .recipe-hero-media {
     order: 2;
     aspect-ratio: 5 / 4;
     box-shadow: var(--shadow-md);
   }
 
-  .recipe-hero.is-typographic {
-    padding: 56px 56px 44px;
-  }
-
-  .recipe-hero.is-typographic .recipe-hero-content {
-    max-width: 760px;
-  }
-
-  .recipe-hero-monogram {
-    top: -70px;
-    right: 40px;
-    font-size: 24rem;
+  .recipe-hero.has-cover .recipe-hero-media {
+    aspect-ratio: 4 / 3;
   }
 
   .recipe-hero-meta {
@@ -378,39 +363,40 @@
 
 @media print {
   .recipe-hero {
+    display: flex;
     gap: 10px;
   }
 
   .recipe-hero-media,
-  .recipe-hero.is-typographic {
-    display: block;
-    margin: 0;
-    padding: 0;
-    border-radius: 0;
-    background: none;
-    box-shadow: none;
-  }
-
-  .recipe-hero-media {
-    display: none;
-  }
-
-  .recipe-hero-monogram,
   .recipe-hero-tags {
     display: none;
+  }
+
+  /* Full width like the body, and the full source link instead of the ↗ chip. */
+  .recipe-hero-content,
+  .recipe-hero-meta,
+  .recipe-hero-description {
+    width: 100%;
+    max-width: none;
   }
 
   .recipe-source-chip {
     min-height: 0;
     padding: 0;
     background: none;
+    color: black;
+  }
+
+  .recipe-source-chip-external {
+    display: none;
   }
 
   .recipe-hero-title {
     font-size: 26pt;
   }
 
-  .recipe-hero-meta {
-    max-width: none;
+  .recipe-hero-meta dd {
+    overflow: visible;
+    white-space: normal;
   }
 }

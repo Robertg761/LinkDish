@@ -24,16 +24,25 @@
     transform var(--transition-fast);
 }
 
-.stepper-button:hover:not(:disabled) {
-  background: var(--color-primary-soft);
-  color: var(--color-on-primary-soft);
+@media (hover: hover) {
+  .stepper-button:hover:not(:disabled, [aria-disabled="true"]) {
+    background: var(--color-primary-soft);
+    color: var(--color-on-primary-soft);
+  }
 }
 
-.stepper-button:active:not(:disabled) {
+.stepper-button:active:not(:disabled, [aria-disabled="true"]) {
   transform: scale(0.92);
 }
 
-.stepper-button:disabled {
+.stepper-button:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+/* At a bound the button stays focusable (aria-disabled), just visibly unavailable. */
+.stepper-button:disabled,
+.stepper-button[aria-disabled="true"] {
   cursor: not-allowed;
   opacity: 0.38;
 }

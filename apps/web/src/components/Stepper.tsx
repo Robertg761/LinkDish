@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useRef, useState } from "react";
 
 import { Icon } from "./Icon";
 
@@ -23,7 +23,8 @@ const clamp = (value: number, min: number, max: number) => Math.min(max, Math.ma
 
 /**
  * −/+ number control. The value is a spinbutton (ArrowUp/ArrowDown, Home/End,
- * PageUp/PageDown) and both buttons disable at the bounds.
+ * PageUp/PageDown). At a bound the button is only aria-disabled, so keyboard focus stays on it
+ * (a disabled button would drop focus to the page), and each −/+ press is announced ("Serves 5").
  */
 export const Stepper: React.FC<StepperProps> = ({
   value,
@@ -38,6 +39,28 @@ export const Stepper: React.FC<StepperProps> = ({
   className = ""
 }) => {
   const display = formatValue ? formatValue(value) : String(value);
+  const [announcement, setAnnouncement] = useState("");
+  const pressedRef = useRef(false);
+  const atMin = value <= min;
+  const atMax = value >= max;
+
+  // Say the new value after a −/+ press (the focused button's own name doesn't change).
+  useEffect(() => {
+    if (pressedRef.current) {
+      pressedRef.current = false;
+      setAnnouncement(display);
+    }
+  }, [display]);
+
+  const press = (next: number, blocked: boolean) => {
+    if (disabled || blocked) {
+      return;
+    }
+
+    pressedRef.current = true;
+    update(next);
+  };
+
   const update = (next: number) => {
     const rounded = Math.round(next * 1000) / 1000;
     const clamped = clamp(rounded, min, max);
@@ -79,10 +102,11 @@ export const Stepper: React.FC<StepperProps> = ({
       role="group"
     >
       <button
+        aria-disabled={!disabled && atMin ? true : undefined}
         aria-label={`Decrease ${label.toLowerCase()}`}
         className="stepper-button"
-        disabled={disabled || value <= min}
-        onClick={() => update(value - step)}
+        disabled={disabled}
+        onClick={() => press(value - step, atMin)}
         type="button"
       >
         <Icon name="minus" size={size === "sm" ? 16 : 18} strokeWidth={2.4} />
@@ -102,14 +126,18 @@ export const Stepper: React.FC<StepperProps> = ({
         {display}
       </span>
       <button
+        aria-disabled={!disabled && atMax ? true : undefined}
         aria-label={`Increase ${label.toLowerCase()}`}
         className="stepper-button"
-        disabled={disabled || value >= max}
-        onClick={() => update(value + step)}
+        disabled={disabled}
+        onClick={() => press(value + step, atMax)}
         type="button"
       >
         <Icon name="plus" size={size === "sm" ? 16 : 18} strokeWidth={2.4} />
       </button>
+      <span aria-live="polite" className="sr-only">
+        {announcement}
+      </span>
     </div>
   );
 };

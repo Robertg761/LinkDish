@@ -25,10 +25,22 @@ interface RecipeScaleBarProps {
   compact?: boolean | undefined;
 }
 
+/** Stepper text for a yield: "Serves 6", "10 slices", "Makes 12". */
+const formatYieldValue = (
+  servings: NonNullable<RecipeScaling["servings"]>,
+  value: number
+): string => {
+  if (servings.kind === "servings") {
+    return `Serves ${value}`;
+  }
+
+  return servings.noun ? `${value} ${servings.noun}` : `Makes ${value}`;
+};
+
 /**
- * Servings and units for a recipe: a "Serves N" stepper when the recipe has a servings count,
- * batch chips (½× 1× 2× 3× + custom) otherwise, and Original / US / Metric when converting
- * would change something.
+ * Servings and units for a recipe: one −/+ stepper whenever the yield has a count ("Serves 6",
+ * "10 slices", "2 bowls"), batch chips (½× 1× 2× 3× + other) only for a yield without one, and
+ * Original / US / Metric when converting would change something.
  */
 export const RecipeScaleBar: React.FC<RecipeScaleBarProps> = ({
   scaling,
@@ -38,7 +50,7 @@ export const RecipeScaleBar: React.FC<RecipeScaleBarProps> = ({
 }) => {
   const customId = useId();
   const { servings, state, summary } = scaling;
-  const byServings = servings?.kind === "servings" && scaling.targetServings != null;
+  const byServings = servings != null && scaling.targetServings != null;
   const isPreset = PRESET_SCALE_FACTORS.some((factor) => Math.abs(factor - state.factor) < 1e-9);
   const factorOptions = PRESET_SCALE_FACTORS.map((factor) => ({
     label: formatScaleFactor(factor),
@@ -81,8 +93,8 @@ export const RecipeScaleBar: React.FC<RecipeScaleBarProps> = ({
         {byServings ? (
           <Stepper
             className="recipe-scale-bar-stepper"
-            formatValue={(value) => `Serves ${value}`}
-            label="Servings"
+            formatValue={(value) => formatYieldValue(servings, value)}
+            label={servings.kind === "servings" ? "Servings" : "Amount"}
             max={MAX_SERVINGS}
             min={1}
             onChange={scaling.setServings}
@@ -97,7 +109,11 @@ export const RecipeScaleBar: React.FC<RecipeScaleBarProps> = ({
               size="sm"
               value={isPreset ? String(state.factor) : ""}
             />
-            <label className="recipe-scale-bar-custom" htmlFor={customId}>
+            {/* Reads as a field, not a removable chip: the × (times) appears only with a number. */}
+            <label
+              className={`recipe-scale-bar-custom${isPreset ? "" : " is-active"}`}
+              htmlFor={customId}
+            >
               <span className="sr-only">Custom recipe scale</span>
               <input
                 aria-label="Custom recipe scale"
@@ -105,11 +121,15 @@ export const RecipeScaleBar: React.FC<RecipeScaleBarProps> = ({
                 id={customId}
                 inputMode="decimal"
                 onChange={(event) => scaling.setCustomFactor(event.target.value)}
-                placeholder="Custom"
+                placeholder="Other"
                 type="text"
                 value={isPreset ? "" : state.customFactor}
               />
-              <span aria-hidden="true">×</span>
+              {isPreset ? null : (
+                <span aria-hidden="true" className="recipe-scale-bar-custom-unit">
+                  ×
+                </span>
+              )}
             </label>
           </div>
         )}
