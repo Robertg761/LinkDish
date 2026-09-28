@@ -116,7 +116,9 @@ const LibraryRecipeTileComponent: React.FC<LibraryRecipeTileProps> = ({
     const familyLabel =
       canShareToFamily && !isStarterRecipe(recipe) ? familyMenuLabel(recipe) : null;
 
+    // Grouped like the recipe page's menu: organise first, then copies, then Delete on its own.
     return [
+      { id: "group-organise", label: "Plan & organise", type: "separator" },
       {
         icon: "folder-plus",
         id: "collections",
@@ -136,6 +138,7 @@ const LibraryRecipeTileComponent: React.FC<LibraryRecipeTileProps> = ({
         label: "Add to shopping list",
         onSelect: () => onAction("shopping", recipe)
       },
+      { id: "group-copy", type: "separator" },
       ...(familyLabel
         ? [
             {
@@ -180,6 +183,8 @@ const LibraryRecipeTileComponent: React.FC<LibraryRecipeTileProps> = ({
         <Menu
           items={menuItems}
           label={`Actions for ${title}`}
+          presentation="adaptive"
+          sheetTitle={title}
           onOpenChange={(open) => {
             if (open) {
               onMenuOpen?.();

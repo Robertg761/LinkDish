@@ -3,6 +3,8 @@ import React from "react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { isCoreIconName } from "../../components/icons/lucide-icons";
+import { MENU_SHEET_MEDIA_QUERY } from "../../components/Menu";
 import { ToastProvider } from "../../components/Toast";
 import { resetDataChangeFeedForTests, setDataChannelFactoryForTests } from "../../data/change-feed";
 import { resetCollectionsStoreForTests } from "../../data/collections-store";
@@ -437,6 +439,37 @@ describe("LibraryPage", () => {
     await waitFor(() => expect(storedRecipe("soup")?.recipe.title).toBe("Tomato Soup"));
   });
 
+  it("keeps a recipe deleted when Undo would take a free cookbook past its limit", async () => {
+    seedRecipes(
+      Array.from({ length: 15 }, (_, index) =>
+        makeRecipe(`recipe-${index}`, { daysAgo: index + 1, title: `Recipe ${index}` })
+      )
+    );
+
+    renderPage();
+    await screen.findByText("Recipe 0");
+    fireEvent.click(within(openCardMenu("Recipe 0")).getByRole("menuitem", { name: "Delete" }));
+    await waitFor(() => expect(storedRecipe("recipe-0")).toBeUndefined());
+
+    // Another recipe was saved (say, in another tab) before Undo: the cookbook is full again.
+    seedRecipes([makeRecipe("recipe-new", { title: "Fresh Save" })]);
+    upgradeMocks.requestUpgradeSheet.mockReturnValue(false);
+    fireEvent.click(await screen.findByRole("button", { name: "Undo" }));
+
+    expect(
+      await screen.findByText(
+        "Your cookbook is full, so “Recipe 0” stays deleted. Free cookbooks hold 15 recipes."
+      )
+    ).toBeInTheDocument();
+    expect(storedRecipe("recipe-0")).toBeUndefined();
+    expect(fakeIdb.records(SAVED_RECIPES_STORE_NAME)).toHaveLength(15);
+
+    fireEvent.click(screen.getByRole("button", { name: "Upgrade" }));
+    expect(upgradeMocks.requestUpgradeSheet).toHaveBeenCalledWith("save_limit");
+    // With the upgrade sheet already seen this session, the plans page opens instead.
+    expect(await screen.findByTestId("location")).toHaveTextContent("/pricing?upgrade=plus");
+  });
+
   it("confirms before deleting a household-synced recipe and removes the household copy first", async () => {
     authMocks.user = { billingPlan: "family", email: "owner@example.com", id: "user_owner" };
     seedRecipes([
@@ -661,6 +694,12 @@ describe("LibraryPage", () => {
     ).toBeInTheDocument();
     expect(await screen.findByRole("heading", { name: /Starter recipes/ })).toBeInTheDocument();
     expect(cardFor("Berry Oat Bars").textContent).toContain("Starter");
+    // A new cook's first paint doesn't wait for the rest of the icon set.
+    expect(
+      Array.from(document.querySelectorAll("[data-icon]"), (icon) =>
+        icon.getAttribute("data-icon")
+      ).filter((name) => !isCoreIconName(name ?? ""))
+    ).toEqual([]);
   });
 
   it("shows an error with a retry instead of an empty cookbook when storage fails", async () => {
@@ -729,6 +768,58 @@ describe("LibraryPage", () => {
     expect(localStorage.getItem("linkdish:web:cookbook-sort-direction:v1")).toBe("reverse");
   });
 
+  it("opens the sort and card menus as action sheets on touch phones", async () => {
+    const mediaQuery = (matches: (query: string) => boolean) => (query: string) => ({
+      addEventListener: vi.fn(),
+      addListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+      matches: matches(query),
+      media: query,
+      onchange: null,
+      removeEventListener: vi.fn(),
+      removeListener: vi.fn()
+    });
+    vi.mocked(window.matchMedia).mockImplementation(
+      mediaQuery((query) => query === MENU_SHEET_MEDIA_QUERY)
+    );
+
+    try {
+      seedRecipes([
+        makeRecipe("apple", { daysAgo: 9, title: "Apple Salad" }),
+        makeRecipe("ziti", { daysAgo: 1, title: "Ziti Bake" })
+      ]);
+
+      renderPage();
+      await screen.findByText("Ziti Bake");
+      expect(gridTitles()).toEqual(["Ziti Bake", "Apple Salad"]);
+
+      fireEvent.click(screen.getByRole("button", { name: /^Sort recipes\. Current:/ }), {
+        detail: 1
+      });
+      const sortMenu = screen.getByRole("menu", { name: "Sort recipes" });
+      expect(sortMenu).toHaveClass("menu-in-sheet");
+      expect(within(sortMenu).getByRole("group", { name: "Sort by" })).toContainElement(
+        screen.getByRole("menuitemradio", { name: "A–Z" })
+      );
+      fireEvent.click(screen.getByRole("menuitemradio", { name: "A–Z" }));
+      expect(gridTitles()).toEqual(["Apple Salad", "Ziti Bake"]);
+
+      fireEvent.click(screen.getByRole("button", { name: "More actions for Ziti Bake" }), {
+        detail: 1
+      });
+      const cardMenu = screen.getByRole("menu", { name: "Actions for Ziti Bake" });
+      expect(cardMenu).toHaveClass("menu-in-sheet");
+      expect(cardMenu.closest(".menu-sheet")).toHaveTextContent("Ziti Bake");
+      expect(
+        within(within(cardMenu).getByRole("group", { name: "Plan & organise" }))
+          .getAllByRole("menuitem")
+          .map((item) => item.textContent)
+      ).toEqual(["Add to collection…", "Edit tags…", "Add to meal plan…", "Add to shopping list"]);
+    } finally {
+      vi.mocked(window.matchMedia).mockImplementation(mediaQuery(() => false));
+    }
+  });
+
   it("switches between grid and list and remembers the layout", async () => {
     seedRecipes([makeRecipe("soup", { title: "Tomato Soup" })]);
 
@@ -780,6 +871,41 @@ describe("LibraryPage", () => {
       expect(screen.queryByRole("region", { name: "Cook again" })).not.toBeInTheDocument()
     );
     expect(screen.getByRole("button", { name: /Quick/ })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("draws the Cookbook and its menus with core icons only, so it never waits for the rest", async () => {
+    seedRecipes([
+      makeRecipe("a", {
+        cook: 10,
+        extra: { favorite: true, lastCookedAt: iso(1), timesCooked: 3 },
+        title: "Alpha"
+      }),
+      makeRecipe("b", {
+        cook: 20,
+        extra: { lastCookedAt: iso(3), timesCooked: 1 },
+        title: "Bravo"
+      }),
+      makeRecipe("c", { cook: 90, extra: { tags: ["dinner"] }, image: true, title: "Charlie" }),
+      makeRecipe("d", { cook: 15, title: "Delta Cake" }),
+      makeRecipe("e", { cook: 60, title: "Echo Salad" }),
+      makeRecipe("starter-soup", { extra: { isStarter: true }, title: "Starter Soup" })
+    ]);
+    const nonCoreIcons = () =>
+      Array.from(document.querySelectorAll("[data-icon]"), (icon) =>
+        icon.getAttribute("data-icon")
+      ).filter((name) => !isCoreIconName(name ?? ""));
+
+    renderPage();
+    await screen.findByRole("region", { name: "Cook again" });
+    expect(document.querySelectorAll("[data-icon]").length).toBeGreaterThan(10);
+    expect(nonCoreIcons()).toEqual([]);
+
+    fireEvent.click(screen.getByRole("button", { name: /^Sort recipes\. Current:/ }));
+    expect(nonCoreIcons()).toEqual([]);
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+
+    openCardMenu("Charlie");
+    expect(nonCoreIcons()).toEqual([]);
   });
 
   it("jumps to search with the slash key when not typing", async () => {

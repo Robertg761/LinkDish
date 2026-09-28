@@ -1,9 +1,8 @@
 /*
  * The multicolor Google "G", used only on the "Continue with Google" button as
- * Google's sign-in branding guidelines require. Drawn on an 18×18 grid.
+ * Google's sign-in branding guidelines require. Drawn on an 18×18 grid (Icon's viewBox for it).
+ * Part of the extended icon set's chunk (./lucide-icons-extended.ts).
  */
-export const GOOGLE_GLYPH_VIEWBOX = "0 0 18 18";
-
 export const GOOGLE_GLYPH_PATHS: ReadonlyArray<{ readonly d: string; readonly fill: string }> = [
   {
     d: "M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.92c1.7-1.57 2.68-3.88 2.68-6.62z",

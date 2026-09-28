@@ -117,7 +117,23 @@ export interface LazyWithRetryOptions {
   retries?: number | undefined;
   /** Delay before the first retry; doubles each time (default 400 ms). */
   retryDelayMs?: number | undefined;
+  /**
+   * Render as soon as this chunk is in, without waiting for the companion load (see
+   * {@link setLazyCompanionLoad}). For the landing page and what it shows at first paint.
+   */
+  standalone?: boolean | undefined;
 }
+
+let companionLoad: (() => Promise<unknown>) | null = null;
+
+/**
+ * Registers a load that lazy components (unless `standalone`) wait for alongside their own chunk:
+ * main.tsx registers the extended icon set, so a page or sheet never paints with blank icons.
+ * Both download in parallel, and a failed companion load never fails the component.
+ */
+export const setLazyCompanionLoad = (load: (() => Promise<unknown>) | null): void => {
+  companionLoad = load;
+};
 
 export async function importWithRetry<Module>(
   factory: () => Promise<Module>,
@@ -168,7 +184,10 @@ export function lazyWithRetry<Component extends AnyComponentType>(
   let loadedComponent: Component | null = null;
 
   const load = () =>
-    importWithRetry(factory, options).then((module) => {
+    Promise.all([
+      importWithRetry(factory, options),
+      options?.standalone || !companionLoad ? undefined : companionLoad().catch(() => undefined)
+    ]).then(([module]) => {
       loadedComponent = module.default;
       return module;
     });

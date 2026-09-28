@@ -55,7 +55,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  color: var(--color-tomato);
+  color: var(--color-tomato-ink);
   font-size: var(--text-label);
   font-weight: 800;
   letter-spacing: var(--text-label-letter-spacing);
@@ -410,7 +410,7 @@
 }
 
 .plan-entry-slot {
-  color: var(--color-tomato);
+  color: var(--color-tomato-ink);
   font-size: var(--text-caption);
   font-weight: 800;
   letter-spacing: 0.06em;

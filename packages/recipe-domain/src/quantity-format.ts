@@ -1,22 +1,21 @@
+/**
+ * Public quantity formatting. formatQuantity (numbers only) lives in number-format.ts, so what
+ * only prints numbers doesn't pull in the unit tables; formatIngredientQuantity adds units.
+ */
+import { formatUnitLabel } from "./format-internal.js";
 import {
   displayedValue,
-  formatUnitLabel,
   formatValue,
   formatWholeQuantity,
-  isRangeValue
-} from "./format-internal.js";
+  isFormattable,
+  normalizeRange
+} from "./number-format.js";
 import { getUnitDefinition } from "./units.js";
 
-export type QuantityRange = { min: number; max: number };
-export type FormattableQuantity = number | QuantityRange;
+import type { FormattableQuantity } from "./number-format.js";
 
-export type FormatQuantityOptions = {
-  /**
-   * "fraction" (default) prints the nearest friendly fraction ("⅔", "1 ½") and falls back to a
-   * short decimal when no printable fraction is close; "decimal" always prints decimals.
-   */
-  style?: "fraction" | "decimal" | undefined;
-};
+export { formatQuantity } from "./number-format.js";
+export type { FormatQuantityOptions, FormattableQuantity, QuantityRange } from "./number-format.js";
 
 export type FormatIngredientQuantityOptions = {
   /**
@@ -25,37 +24,6 @@ export type FormatIngredientQuantityOptions = {
    * does ("1–2 cans").
    */
   wholeItems?: "exact" | "range" | undefined;
-};
-
-const isUsableNumber = (value: number): boolean => Number.isFinite(value) && value >= 0;
-
-const isFormattable = (value: unknown): value is FormattableQuantity =>
-  typeof value === "number"
-    ? isUsableNumber(value)
-    : typeof value === "object" &&
-      value !== null &&
-      typeof (value as QuantityRange).min === "number" &&
-      typeof (value as QuantityRange).max === "number" &&
-      isUsableNumber((value as QuantityRange).min) &&
-      isUsableNumber((value as QuantityRange).max);
-
-const normalizeRange = (value: FormattableQuantity): FormattableQuantity =>
-  isRangeValue(value) && value.min > value.max ? { min: value.max, max: value.min } : value;
-
-/**
- * Formats an amount for people: friendly unicode fractions ("⅔", "1 ½"), en-dash ranges
- * ("1–2"), and never float noise ("0.6666666666666666" → "⅔", "0.30000000000000004" → "0.3").
- * Missing, negative or non-finite input formats as "".
- */
-export const formatQuantity = (
-  value: FormattableQuantity | null | undefined,
-  options: FormatQuantityOptions = {}
-): string => {
-  if (!isFormattable(value)) {
-    return "";
-  }
-
-  return formatValue(normalizeRange(value), (options.style ?? "fraction") === "fraction");
 };
 
 /**

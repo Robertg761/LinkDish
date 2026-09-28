@@ -477,7 +477,8 @@ const countOf = (qty: ShoppingQuantity | undefined): number | null =>
 
 /**
  * Re-inflects a unitless item's name for a new total ("large egg" + 2 → "large eggs"), guarded
- * so mass nouns written with a mismatched number are left alone.
+ * so mass nouns written with a mismatched number are left alone. Clipped after inflecting: a
+ * name already at the length limit can grow ("egg" → "eggs") past what the contract accepts.
  */
 const nameForTotal = (
   text: string,
@@ -487,12 +488,12 @@ const nameForTotal = (
 ): string => {
   const written = countOf(writtenQty);
   const total = countOf(totalQty);
+  const name =
+    unit != null || written == null || total == null
+      ? text
+      : inflectIngredientPhrase(text, written, total);
 
-  if (unit != null || written == null || total == null) {
-    return text;
-  }
-
-  return inflectIngredientPhrase(text, written, total);
+  return clip(name, MAX_SHOPPING_ITEM_TEXT_LENGTH);
 };
 
 /**

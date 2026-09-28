@@ -50,7 +50,9 @@ import {
   getSavedRecipeSourceImages,
   getSharedRecipeOwnerLabel,
   getSourceHost,
+  LOCAL_LIMIT_FREE,
   putSavedRecipe,
+  restoreSavedRecipe,
   SavedRecipeLimitError,
   saveSharedRecipeCopy,
   sharedRecipeToWebSavedRecipe,
@@ -357,7 +359,7 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
   const shared = props.kind === "shared" ? props.shared : null;
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { isAuthenticated, loading: authLoading, user } = useAuth();
+  const { credentialsKey, isAuthenticated, loading: authLoading, user } = useAuth();
   const { requestUpgradeSheet } = useUpgradeSheet();
   const { showToast } = useToast();
   const isDesktop = useMediaQuery(RAIL_MEDIA_QUERY);
@@ -442,7 +444,7 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
     setShoppingCanSync(isAuthenticated ? undefined : false);
     // Offline (or when the check fails) a household member's items must still be marked for the
     // household list: the sheet then falls back to the shopping sync layer's (cached) mode.
-    setShoppingAccount({ isAuthenticated, loading: authLoading, userId: user?.id });
+    setShoppingAccount({ credentialsKey, isAuthenticated, loading: authLoading, userId: user?.id });
 
     if (isAuthenticated) {
       try {
@@ -454,7 +456,7 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
     }
 
     setShoppingOpen(true);
-  }, [authLoading, isAuthenticated, user?.id]);
+  }, [authLoading, credentialsKey, isAuthenticated, user?.id]);
 
   const handleShare = async () => {
     const title = recipe.title;
@@ -623,9 +625,26 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
       action: {
         label: "Undo",
         onClick: () => {
-          void putSavedRecipe(snapshot).then(
+          void restoreSavedRecipe(snapshot, { isPremiumUser }).then(
             () => showToast({ message: `“${title}” is back in your cookbook.` }),
-            () => showToast({ message: "That recipe couldn’t be restored.", tone: "danger" })
+            (error: unknown) =>
+              showToast(
+                error instanceof SavedRecipeLimitError
+                  ? {
+                      // The cookbook filled up again since the delete: it stays deleted.
+                      action: {
+                        label: "Upgrade",
+                        onClick: () => {
+                          if (!requestUpgradeSheet("save_limit")) {
+                            void navigate("/pricing?upgrade=plus");
+                          }
+                        }
+                      },
+                      icon: "lock",
+                      message: `Your cookbook is full, so “${title}” stays deleted. Free cookbooks hold ${LOCAL_LIMIT_FREE} recipes.`
+                    }
+                  : { message: "That recipe couldn’t be restored.", tone: "danger" }
+              )
           );
         }
       },
@@ -863,13 +882,10 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
     </Button>
   );
 
+  // A starter needs no chip of its own: the source chip beside these already says "LinkDish
+  // kitchen". Sync labels match the Cookbook cards'.
   const statusChips = (
     <>
-      {record.isStarter ? (
-        <Chip icon="sparkles" size="sm" variant="butter">
-          Starter recipe
-        </Chip>
-      ) : null}
       {shared ? (
         <Chip icon="users" size="sm" variant="accent">
           Shared by {getSharedRecipeOwnerLabel(shared)}
@@ -879,8 +895,8 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
           Synced
         </Chip>
       ) : record.sync?.status === "dirty" ? (
-        <Chip size="sm" variant="butter">
-          Local edits
+        <Chip icon="refresh" size="sm" variant="butter">
+          Edits not shared
         </Chip>
       ) : record.sync?.status === "sync_failed" ? (
         <Chip size="sm" variant="tomato">

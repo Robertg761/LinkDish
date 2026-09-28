@@ -466,6 +466,26 @@ export async function putSavedRecipe(recipe: WebSavedRecipe): Promise<WebSavedRe
   return recipe;
 }
 
+/**
+ * Puts a deleted recipe back (Undo), like {@link putSavedRecipe}. When a free cookbook filled up
+ * again after the delete there is no room for it, so this throws {@link SavedRecipeLimitError}
+ * instead of going past the limit. Starters, and a record that is still stored, go straight back.
+ */
+export async function restoreSavedRecipe(
+  recipe: WebSavedRecipe,
+  options?: SavedRecipeQuotaOptions
+): Promise<WebSavedRecipe> {
+  if (!isStarterRecipeId(recipe.id)) {
+    const db = await getDb();
+
+    if ((await db.get(STORE_NAME, recipe.id)) === undefined) {
+      await assertCanAddSavedRecipe(options);
+    }
+  }
+
+  return putSavedRecipe(recipe);
+}
+
 export async function updateSavedRecipe(
   id: string,
   update: {

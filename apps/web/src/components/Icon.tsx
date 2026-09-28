@@ -1,9 +1,9 @@
-import React from "react";
+import React, { useEffect, useSyncExternalStore } from "react";
 
-import { GOOGLE_GLYPH_PATHS, GOOGLE_GLYPH_VIEWBOX } from "./icons/google-glyph";
-import { LUCIDE_ICON_NODES } from "./icons/lucide-icons";
+import { CORE_ICON_NODES, isCoreIconName } from "./icons/lucide-icons";
 
-import type { LucideIconName } from "./icons/lucide-icons";
+import type { ExtendedIconName, IconNode, LucideIconName } from "./icons/lucide-icons";
+import type { ExtendedIconSet } from "./icons/lucide-icons-extended";
 
 import "./Icon.css";
 
@@ -24,10 +24,75 @@ export interface IconProps {
   strokeWidth?: number | undefined;
 }
 
-const renderGoogleGlyph = () =>
-  GOOGLE_GLYPH_PATHS.map((path) =>
-    React.createElement("path", { d: path.d, fill: path.fill, key: path.fill })
+/** The Google glyph is drawn on an 18×18 grid (see ./icons/google-glyph.ts). */
+const GOOGLE_VIEWBOX = "0 0 18 18";
+
+/* ------------------------------------------------------------------------------------------------
+ * The extended icon set
+ *
+ * Icons the shell and the Cookbook never show on their own live in a separate chunk, so the
+ * landing page doesn't download them. It loads when the browser is idle after boot (main.tsx),
+ * alongside every lazily loaded page or sheet (platform/lazy.ts), or when one of its icons first
+ * renders. Until then such an icon is an empty SVG of the same size, so nothing shifts.
+ * ---------------------------------------------------------------------------------------------- */
+
+let extendedIcons: ExtendedIconSet | null = null;
+let extendedIconsLoad: Promise<void> | null = null;
+const extendedIconsListeners = new Set<() => void>();
+
+/** Loads the extended icon set once; a failed load (offline) is tried again on the next call. */
+export const loadExtendedIcons = (): Promise<void> => {
+  extendedIconsLoad ??= import("./icons/lucide-icons-extended").then(
+    (module) => {
+      extendedIcons = module.EXTENDED_ICONS;
+      extendedIconsListeners.forEach((listener) => {
+        listener();
+      });
+    },
+    (error: unknown) => {
+      extendedIconsLoad = null;
+      throw error;
+    }
   );
+
+  return extendedIconsLoad;
+};
+
+const subscribeExtendedIcons = (listener: () => void) => {
+  extendedIconsListeners.add(listener);
+
+  return () => {
+    extendedIconsListeners.delete(listener);
+  };
+};
+
+const getExtendedIcons = () => extendedIcons;
+
+const renderNodes = (nodes: IconNode) =>
+  nodes.map(([tag, attributes], index) => React.createElement(tag, { ...attributes, key: index }));
+
+/** The drawing of an extended icon (or the Google glyph) once its chunk has loaded. */
+const ExtendedGlyph: React.FC<{ name: ExtendedIconName | "google" }> = ({ name }) => {
+  const icons = useSyncExternalStore(subscribeExtendedIcons, getExtendedIcons, getExtendedIcons);
+
+  useEffect(() => {
+    if (!icons) {
+      loadExtendedIcons().catch(() => undefined);
+    }
+  }, [icons]);
+
+  if (!icons) {
+    return null;
+  }
+
+  if (name === "google") {
+    return icons.google.map((path) =>
+      React.createElement("path", { d: path.d, fill: path.fill, key: path.fill })
+    );
+  }
+
+  return renderNodes(icons.nodes[name]);
+};
 
 /**
  * Inline SVG icon. Geometry is vendored from Lucide (ISC) so icons render with the
@@ -42,11 +107,6 @@ export const Icon: React.FC<IconProps> = ({
   strokeWidth = 2
 }) => {
   const isGoogle = name === "google";
-  const children = isGoogle
-    ? renderGoogleGlyph()
-    : LUCIDE_ICON_NODES[name].map(([tag, attributes], index) =>
-        React.createElement(tag, { ...attributes, key: index })
-      );
   const accessibilityProps = title
     ? { role: "img", "aria-label": title }
     : { "aria-hidden": true as const };
@@ -58,7 +118,7 @@ export const Icon: React.FC<IconProps> = ({
       data-icon={name}
       width={size}
       height={size}
-      viewBox={isGoogle ? GOOGLE_GLYPH_VIEWBOX : "0 0 24 24"}
+      viewBox={isGoogle ? GOOGLE_VIEWBOX : "0 0 24 24"}
       fill="none"
       stroke={isGoogle ? "none" : "currentColor"}
       strokeWidth={strokeWidth}
@@ -69,7 +129,7 @@ export const Icon: React.FC<IconProps> = ({
       {...accessibilityProps}
     >
       {title ? <title>{title}</title> : null}
-      {children}
+      {isCoreIconName(name) ? renderNodes(CORE_ICON_NODES[name]) : <ExtendedGlyph name={name} />}
     </svg>
   );
 };

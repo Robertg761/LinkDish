@@ -3,6 +3,7 @@ import React from "react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { MENU_SHEET_MEDIA_QUERY } from "../../components/Menu";
 import { ToastProvider } from "../../components/Toast";
 import { resetDataChangeFeedForTests } from "../../data/change-feed";
 import { resetLibraryStoreForTests } from "../../data/library-store";
@@ -132,6 +133,36 @@ describe("ShoppingListPage", () => {
         properties: { count: 3, method: "paste", source: "manual" }
       })
     );
+  });
+
+  it("opens the list options as a grouped action sheet on touch phones", async () => {
+    window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+      addEventListener: vi.fn(),
+      addListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+      matches: query === MENU_SHEET_MEDIA_QUERY || query.includes("reduce"),
+      media: query,
+      onchange: null,
+      removeEventListener: vi.fn(),
+      removeListener: vi.fn()
+    }));
+    await addShoppingItems([{ text: "2 lemons" }], { canSync: false });
+    renderPage();
+    await screen.findByRole("checkbox", { name: "2 lemons" });
+
+    fireEvent.click(screen.getByRole("button", { name: "List options" }), { detail: 1 });
+
+    const menu = screen.getByRole("menu", { name: "List options" });
+    expect(menu).toHaveClass("menu-in-sheet");
+    expect(menu.closest(".menu-sheet")).toHaveTextContent("Shopping list");
+    expect(
+      within(within(menu).getByRole("group", { name: "Share & print" }))
+        .getAllByRole("menuitem")
+        .map((item) => item.textContent)
+    ).toEqual(["Share list", "Print"]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
 
   it("adds typed items and offers them again as quick adds", async () => {

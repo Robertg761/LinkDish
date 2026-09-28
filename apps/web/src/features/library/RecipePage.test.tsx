@@ -30,6 +30,7 @@ import { resetShoppingListStoreForTests } from "../shopping/shopping-list-store"
 import { resetShoppingSyncForTests, SHOPPING_HOUSEHOLD_CACHE_KEY } from "../shopping/shopping-sync";
 
 import { RecipePage } from "./RecipePage";
+import { LOCAL_LIMIT_FREE } from "./saved-recipe-store";
 
 import type { WebSavedRecipe } from "./saved-recipe-types";
 import type * as ApiClientModuleNamespace from "../../api/client";
@@ -359,6 +360,46 @@ describe("RecipePage saved route", () => {
     expect(within(menu).getAllByRole("separator")).toHaveLength(3);
   });
 
+  it("labels a starter once and unshared household edits in the Cookbook's words", async () => {
+    await seed([
+      savedRecipe({ id: "starter-pitas", isStarter: true }),
+      savedRecipe({ id: "recipe_dirty", sync: { sharedRecipeId: "shared_9", status: "dirty" } })
+    ]);
+    const starterPage = renderAt("/recipes/starter-pitas");
+
+    await screen.findByRole("heading", { level: 1, name: "Weeknight Chili" });
+    expect(screen.getByText("LinkDish kitchen")).toBeInTheDocument();
+    expect(screen.queryByText("Starter recipe")).not.toBeInTheDocument();
+    starterPage.unmount();
+
+    renderAt("/recipes/recipe_dirty");
+    await screen.findByRole("heading", { level: 1, name: "Weeknight Chili" });
+    expect(screen.getByText("Edits not shared")).toBeInTheDocument();
+    expect(screen.queryByText("Local edits")).not.toBeInTheDocument();
+  });
+
+  it("rates from the keyboard, with the stars as one Tab stop", async () => {
+    await seed([savedRecipe({ rating: 3 })]);
+    renderAt("/recipes/recipe_local");
+    await screen.findByRole("heading", { level: 1, name: "Weeknight Chili" });
+
+    const stars = within(screen.getByRole("radiogroup", { name: "Your rating" })).getAllByRole(
+      "radio"
+    );
+    expect(stars.map((star) => star.tabIndex)).toEqual([-1, -1, 0, -1, -1]);
+
+    fireEvent.keyDown(screen.getByRole("radio", { name: "3 stars" }), { key: "ArrowRight" });
+    await waitFor(() => expect(stored("recipe_local")?.rating).toBe(4));
+    expect(screen.getByRole("radio", { name: "4 stars" })).toHaveFocus();
+    await waitFor(() =>
+      expect(screen.getByRole("radio", { name: "4 stars" })).toHaveAttribute("aria-checked", "true")
+    );
+
+    fireEvent.keyDown(screen.getByRole("radio", { name: "4 stars" }), { key: "Home" });
+    await waitFor(() => expect(stored("recipe_local")?.rating).toBe(1));
+    expect(screen.getByRole("radio", { name: "1 star" })).toHaveFocus();
+  });
+
   it("duplicates into a new recipe and opens it", async () => {
     await seed([savedRecipe()]);
     renderAt("/recipes/recipe_local");
@@ -434,6 +475,35 @@ describe("RecipePage saved route", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Undo" }));
     await waitFor(() => expect(stored("recipe_local")?.recipe.title).toBe("Weeknight Chili"));
+  });
+
+  it("keeps a recipe deleted when Undo would take a free cookbook past its limit", async () => {
+    await seed([
+      savedRecipe(),
+      ...Array.from({ length: LOCAL_LIMIT_FREE - 1 }, (_, index) =>
+        savedRecipe({ id: `recipe_${index}` })
+      )
+    ]);
+    upgradeMocks.requestUpgradeSheet.mockReturnValue(true);
+    renderAt("/recipes/recipe_local");
+    await screen.findByRole("heading", { level: 1, name: "Weeknight Chili" });
+
+    fireEvent.click(within(openMenu()).getByRole("menuitem", { name: "Delete recipe" }));
+    expect(await screen.findByText("Cookbook route")).toBeInTheDocument();
+    // A save elsewhere fills the free cookbook again before Undo.
+    fakeIdb.seed(SAVED_RECIPES_STORE_NAME, [savedRecipe({ id: "recipe_new" })]);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Undo" }));
+
+    expect(
+      await screen.findByText(
+        `Your cookbook is full, so “Weeknight Chili” stays deleted. Free cookbooks hold ${LOCAL_LIMIT_FREE} recipes.`
+      )
+    ).toBeInTheDocument();
+    expect(stored("recipe_local")).toBeUndefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Upgrade" }));
+    expect(upgradeMocks.requestUpgradeSheet).toHaveBeenCalledWith("save_limit");
   });
 
   it("keeps the Undo when an ignored app update is waiting to apply on navigation", async () => {

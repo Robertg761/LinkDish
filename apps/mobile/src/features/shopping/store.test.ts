@@ -300,6 +300,30 @@ describe("shopping store helpers", () => {
     expect(shoppingItemSchema.safeParse(apiItem).success).toBe(true);
   });
 
+  it("clips every text field the household list limits, not only the name", () => {
+    const apiItem = toApiShoppingItem(
+      buildItem({
+        recipeId: `recipe_${"r".repeat(300)}`,
+        recipeTitle: "Grandma's ".repeat(40),
+        section: "For the frosting ".repeat(20),
+        unit: "heaping tablespoon ".repeat(5)
+      })
+    );
+
+    expect(apiItem.recipeId).toHaveLength(180);
+    expect(apiItem.recipeTitle?.length).toBeLessThanOrEqual(200);
+    expect(apiItem.recipeTitle?.startsWith("Grandma's Grandma's")).toBe(true);
+    expect(apiItem.section?.length).toBeLessThanOrEqual(120);
+    expect(apiItem.unit?.length).toBeLessThanOrEqual(40);
+    expect(shoppingItemSchema.safeParse(apiItem).success).toBe(true);
+
+    // Nothing left after trimming: the field is left out rather than sent empty.
+    const blank = toApiShoppingItem(buildItem({ section: "   ", unit: "cup" }));
+    expect(blank).not.toHaveProperty("section");
+    expect(blank.unit).toBe("cup");
+    expect(shoppingItemSchema.safeParse(blank).success).toBe(true);
+  });
+
   it("marks check-off transitions dirty with the acting user", () => {
     const checked = setShoppingItemCheckedInList([buildItem()], "shopping_1", true, {
       canSync: true,

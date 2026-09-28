@@ -88,7 +88,7 @@ import { isSharedRecipeNotFoundError, useSharedRecipes } from "./components/use-
 import {
   getSavedRecipeById,
   LOCAL_LIMIT_FREE,
-  putSavedRecipe,
+  restoreSavedRecipe,
   SavedRecipeLimitError,
   syncRecipeToHousehold
 } from "./saved-recipe-store";
@@ -113,9 +113,12 @@ const PRIORITY_CARD_COUNT = 6;
 /** Keeps the subtitle's line while the count is unknown, so nothing jumps when it arrives. */
 const BLANK_SUBTITLE = "\u00a0";
 
-// New cooks and the Family tab are the minority of visits, so their UI loads on demand.
-const LibraryWelcome = lazyWithRetry(() =>
-  import("./components/LibraryWelcome").then((module) => ({ default: module.LibraryWelcome }))
+// New cooks and the Family tab are the minority of visits, so their UI loads on demand. The
+// welcome is a new cook's first paint: it uses only core icons and doesn't wait for the rest.
+const LibraryWelcome = lazyWithRetry(
+  () =>
+    import("./components/LibraryWelcome").then((module) => ({ default: module.LibraryWelcome })),
+  { standalone: true }
 );
 const FamilyCookbook = lazyWithRetry(() =>
   import("./components/FamilyCookbook").then((module) => ({ default: module.FamilyCookbook }))
@@ -375,7 +378,25 @@ export const LibraryPage: React.FC = () => {
         ? {
             label: "Undo",
             onClick: () => {
-              putSavedRecipe(restorable).catch((error: unknown) => {
+              restoreSavedRecipe(restorable, { isPremiumUser }).catch((error: unknown) => {
+                if (error instanceof SavedRecipeLimitError) {
+                  // The cookbook filled up again since the delete: it stays deleted.
+                  showToast({
+                    action: {
+                      label: "Upgrade",
+                      onClick: () => {
+                        if (!requestUpgradeSheet("save_limit")) {
+                          void navigate("/pricing?upgrade=plus");
+                        }
+                      }
+                    },
+                    icon: "lock",
+                    id: `library-delete-${recipe.id}`,
+                    message: `Your cookbook is full, so “${recipe.recipe.title}” stays deleted. Free cookbooks hold ${LOCAL_LIMIT_FREE} recipes.`
+                  });
+                  return;
+                }
+
                 console.error("Restore failed:", error);
                 showToast({ message: getFriendlyErrorMessage(error, "save"), tone: "danger" });
               });

@@ -13,6 +13,7 @@ import {
 } from "../../preferences/preferences-store";
 import { resetLinkDishWebDbForTests } from "../../storage/linkdish-db";
 import { fakeIdb } from "../../storage/testing/fake-idb";
+import { COOK_TEXT_SIZE_OPTIONS } from "../cook-mode/cook-text-size";
 import {
   buildPaprikaExport,
   fileFromBytes,
@@ -185,6 +186,17 @@ describe("SettingsPage", { timeout: 20_000 }, () => {
       weekStartsOn: 1
     });
     expect(screen.getByText(/grams, millilitres/)).toBeInTheDocument();
+  });
+
+  it("names the cook text sizes exactly as cook mode's own picker does", async () => {
+    await renderPage();
+
+    const picker = screen.getByRole("radiogroup", { name: "Cook mode text size" });
+    expect(
+      within(picker)
+        .getAllByRole("radio")
+        .map((option) => option.textContent)
+    ).toEqual(COOK_TEXT_SIZE_OPTIONS.map((option) => option.label));
   });
 
   it("links to install, support and privacy and shows the data tools", async () => {

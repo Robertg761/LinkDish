@@ -74,13 +74,30 @@ const HIGH_SURROGATE_END_PATTERN = /[\uD800-\uDBFF]$/u;
  * character, and older app versions stored names unclipped. One over-long name makes the
  * household list reject the whole sync batch, so every later edit would fail with it.
  */
-const clipShoppingItemText = (text: string): string =>
-  text.length <= MAX_SHOPPING_ITEM_TEXT_LENGTH
+const clipToLength = (text: string, maxLength: number): string =>
+  text.length <= maxLength
     ? text
-    : text
-        .slice(0, MAX_SHOPPING_ITEM_TEXT_LENGTH)
-        .replace(HIGH_SURROGATE_END_PATTERN, "")
-        .trimEnd();
+    : text.slice(0, maxLength).replace(HIGH_SURROGATE_END_PATTERN, "").trimEnd();
+
+const clipShoppingItemText = (text: string): string =>
+  clipToLength(text, MAX_SHOPPING_ITEM_TEXT_LENGTH);
+
+/** The household list's limits for an item's other text fields (the domain's shoppingItemSchema). */
+const API_FIELD_MAX_LENGTH = {
+  recipeId: 180,
+  recipeTitle: 200,
+  section: 120,
+  unit: 40
+} as const;
+
+/** An optional field within its limit, or undefined when nothing is left to send. */
+const clipApiField = (
+  value: string | null | undefined,
+  field: keyof typeof API_FIELD_MAX_LENGTH
+): string | undefined => {
+  const clipped = value == null ? "" : clipToLength(value.trim(), API_FIELD_MAX_LENGTH[field]);
+  return clipped.length > 0 ? clipped : undefined;
+};
 
 const createShoppingItemId = (timestamp: string, index: number): string =>
   `shopping_${timestamp.replace(/\D/gu, "")}_${index}_${Math.random().toString(36).slice(2, 10)}`;
@@ -137,19 +154,31 @@ export const recipeIngredientsToShoppingInputs = (
     units: scaling.unitMode ?? "original"
   });
 
-export const toApiShoppingItem = (item: MobileShoppingItem): ShoppingItem => ({
-  id: item.id,
-  text: clipShoppingItemText(item.text),
-  ...(item.qty == null ? {} : { qty: item.qty }),
-  ...(item.unit == null ? {} : { unit: item.unit }),
-  ...(item.recipeId == null ? {} : { recipeId: item.recipeId }),
-  ...(item.recipeTitle == null ? {} : { recipeTitle: item.recipeTitle }),
-  ...(item.section == null ? {} : { section: item.section }),
-  addedBy: item.addedBy,
-  checked: item.checked,
-  ...(item.checkedBy == null ? {} : { checkedBy: item.checkedBy }),
-  updatedAt: item.updatedAt
-});
+/**
+ * The item as the household list accepts it. Every text field is clipped to its limit: one
+ * over-long field (a long recipe title or section, a stored name from an older version) would
+ * make the list reject the whole sync batch.
+ */
+export const toApiShoppingItem = (item: MobileShoppingItem): ShoppingItem => {
+  const unit = clipApiField(item.unit, "unit");
+  const recipeId = clipApiField(item.recipeId, "recipeId");
+  const recipeTitle = clipApiField(item.recipeTitle, "recipeTitle");
+  const section = clipApiField(item.section, "section");
+
+  return {
+    id: item.id,
+    text: clipShoppingItemText(item.text),
+    ...(item.qty == null ? {} : { qty: item.qty }),
+    ...(unit === undefined ? {} : { unit }),
+    ...(recipeId === undefined ? {} : { recipeId }),
+    ...(recipeTitle === undefined ? {} : { recipeTitle }),
+    ...(section === undefined ? {} : { section }),
+    addedBy: item.addedBy,
+    checked: item.checked,
+    ...(item.checkedBy == null ? {} : { checkedBy: item.checkedBy }),
+    updatedAt: item.updatedAt
+  };
+};
 
 export const mergeShoppingItems = (
   existingItems: MobileShoppingItem[],

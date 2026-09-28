@@ -36,7 +36,7 @@
 }
 
 .library-welcome-eyebrow {
-  color: var(--color-tomato);
+  color: var(--color-tomato-ink);
   font-size: var(--text-label);
   font-weight: 800;
   letter-spacing: var(--text-label-letter-spacing);

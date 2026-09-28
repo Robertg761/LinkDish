@@ -47,6 +47,7 @@ export const LibraryToolbar: React.FC<LibraryToolbarProps> = ({
 }) => {
   const sortLabel = getSortLabel(sort);
   const items: MenuEntry[] = [
+    { id: "sort-group", label: "Sort by", type: "separator" },
     ...LIBRARY_SORT_OPTIONS.filter(
       (option) => !availableSorts || availableSorts.has(option.value)
     ).map((option) => ({
@@ -70,9 +71,12 @@ export const LibraryToolbar: React.FC<LibraryToolbarProps> = ({
       {heading}
       <div className="library-toolbar-tools">
         {showSort ? (
+          // On phones a bottom sheet (its "Sort by" group needs no title above it): the long list
+          // stays in thumb reach, clear of the tab bar.
           <Menu
             items={items}
             label="Sort recipes"
+            presentation="adaptive"
             renderTrigger={(props) => (
               <Button
                 {...props}
