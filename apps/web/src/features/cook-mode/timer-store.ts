@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
 
+import { trackWebEvent } from "../../analytics/client";
 import { subscribeDataChanges } from "../../data/change-feed";
 import {
   getCookSession,
@@ -475,6 +476,14 @@ export const startKitchenTimer = (input: StartTimerInput): string => {
   };
 
   setTimers([...timers, timer], { recipeId: input.recipeId, upserted: [timer] });
+  trackWebEvent({
+    eventName: "cook_timer_started",
+    properties: {
+      duration_seconds: Math.round(timer.durationMs / 1000),
+      from_step: input.stepIndex != null
+    },
+    routeOrScreen: window.location.pathname
+  });
   return timer.id;
 };
 

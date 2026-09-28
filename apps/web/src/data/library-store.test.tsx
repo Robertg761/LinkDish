@@ -13,6 +13,7 @@ import {
   removeSavedRecipe,
   resetLibraryStoreForTests,
   setFavorite,
+  setRating,
   setTags,
   toggleFavorite,
   useSavedRecipe,
@@ -26,6 +27,9 @@ vi.mock("idb", async () => (await import("../storage/testing/fake-idb")).fakeIdb
 vi.mock("../api/client", () => ({
   apiClient: {}
 }));
+
+const analytics = vi.hoisted(() => ({ trackWebEvent: vi.fn<(event: unknown) => void>() }));
+vi.mock("../analytics/client", () => ({ trackWebEvent: analytics.trackWebEvent }));
 
 const saveInput = (index: number) => ({
   extraction: {
@@ -83,6 +87,7 @@ describe("library-store", () => {
       uuid += 1;
       return `00000000-0000-4000-8000-${String(uuid).padStart(12, "0")}`;
     });
+    analytics.trackWebEvent.mockReset();
   });
 
   afterEach(() => {
@@ -145,6 +150,27 @@ describe("library-store", () => {
       await expect(setFavorite(id, false)).rejects.toThrow("disk full");
     });
     expect(getCachedSavedRecipe(id)?.favorite).toBe(true);
+  });
+
+  it("reports favorites, ratings and tags once they are saved", async () => {
+    await loadSavedRecipes();
+    const id = (await import("./library-store")).getSavedRecipesSnapshot().data[0]!.id;
+
+    await setFavorite(id, true);
+    await setRating(id, 4);
+    await setTags(id, ["Cozy", "cozy", "Quick"]);
+    fakeIdb.failNextPut(SAVED_RECIPES_STORE_NAME, new Error("disk full"));
+    await expect(setFavorite(id, false)).rejects.toThrow("disk full");
+
+    const events = analytics.trackWebEvent.mock.calls.map(([event]) => [
+      (event as { eventName: string }).eventName,
+      (event as { properties: unknown }).properties
+    ]);
+    expect(events).toEqual([
+      ["recipe_favorited", { favorited: true }],
+      ["recipe_rated", { rating: 4 }],
+      ["recipe_tagged", { tag_count: 2 }]
+    ]);
   });
 
   it("keeps metadata helpers in sync with storage", async () => {

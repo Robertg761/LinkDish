@@ -1,10 +1,12 @@
+import { flushAnalytics, trackWebEvent } from "./client";
+
 /**
  * Records Core Web Vitals (LCP, INP, CLS) with PerformanceObserver — no library.
  *
- * Values are kept in memory only. The analytics contract has no event these fit (reusing
- * `web_route_viewed` or `client_error` would distort those metrics), so nothing is sent until a
- * dedicated event name exists in `analyticsEventNameSchema`. Use `getWebVitalsSnapshot()` or
- * `subscribeWebVitals()` (fires with the final values when the page is hidden).
+ * The first time the page is hidden, each measured value is sent once as a `web_vitals` event
+ * (`{ metric: "LCP" | "INP" | "CLS", value }`) with the page-hide beacon. `getWebVitalsSnapshot()`
+ * and `subscribeWebVitals()` (fires with the latest values whenever the page is hidden) expose
+ * them too.
  */
 
 export interface WebVitalsSnapshot {
@@ -30,6 +32,7 @@ interface LcpEntry extends PerformanceEntry {
 }
 
 let started = false;
+let reported = false;
 let snapshot: WebVitalsSnapshot = {};
 let lcpFinal = false;
 const listeners = new Set<(snapshot: WebVitalsSnapshot) => void>();
@@ -146,6 +149,35 @@ const reportFinal = () => {
   });
 };
 
+/** Sends the page's vitals once per page load (LCP in ms, INP in ms, CLS unitless). */
+const reportOnce = (current: WebVitalsSnapshot) => {
+  const metrics: Array<[metric: "LCP" | "INP" | "CLS", value: number | undefined]> = [
+    ["LCP", current.lcpMs],
+    ["INP", current.inpMs],
+    ["CLS", current.cls]
+  ];
+  const measured = metrics.filter((entry): entry is ["LCP" | "INP" | "CLS", number] =>
+    Number.isFinite(entry[1])
+  );
+
+  if (reported || measured.length === 0) {
+    return;
+  }
+
+  reported = true;
+
+  for (const [metric, value] of measured) {
+    trackWebEvent({
+      eventName: "web_vitals",
+      properties: { metric, value },
+      routeOrScreen: window.location.pathname
+    });
+  }
+
+  // The page may never be visible again: send now, the way page-hide flushes do.
+  flushAnalytics({ useBeacon: true });
+};
+
 /** Starts observing (idempotent, safe to call where PerformanceObserver is missing). */
 export function startWebVitalsObserver(): void {
   if (started || typeof window === "undefined" || typeof PerformanceObserver === "undefined") {
@@ -162,6 +194,7 @@ export function startWebVitalsObserver(): void {
   window.addEventListener("pointerdown", finalizeLcp, { capture: true, once: true });
   window.addEventListener("keydown", finalizeLcp, { capture: true, once: true });
   document.addEventListener("visibilitychange", reportFinal);
+  listeners.add(reportOnce);
 }
 
 export function getWebVitalsSnapshot(): WebVitalsSnapshot {
@@ -175,4 +208,21 @@ export function subscribeWebVitals(listener: (snapshot: WebVitalsSnapshot) => vo
   return () => {
     listeners.delete(listener);
   };
+}
+
+/** Test seam: forget observers, values and whether this page load already reported. */
+export function resetWebVitalsForTests(): void {
+  if (typeof document !== "undefined") {
+    document.removeEventListener("visibilitychange", reportFinal);
+  }
+
+  started = false;
+  reported = false;
+  lcpFinal = false;
+  snapshot = {};
+  clsWindowValue = 0;
+  clsWindowStart = 0;
+  clsWindowLast = 0;
+  interactionDurations.clear();
+  listeners.clear();
 }

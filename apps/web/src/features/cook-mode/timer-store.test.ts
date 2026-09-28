@@ -31,6 +31,9 @@ import {
 
 vi.mock("idb", async () => (await import("../../storage/testing/fake-idb")).fakeIdbModule);
 
+const analytics = vi.hoisted(() => ({ trackWebEvent: vi.fn<(event: unknown) => void>() }));
+vi.mock("../../analytics/client", () => ({ trackWebEvent: analytics.trackWebEvent }));
+
 const NOW = Date.parse("2026-09-28T18:00:00.000Z");
 
 const oscillatorStart = vi.fn();
@@ -147,6 +150,30 @@ describe("kitchen timers", () => {
       expect.objectContaining({ body: "Pancakes · Step 2" })
     );
     expect(notificationConstructor).not.toHaveBeenCalled();
+  });
+
+  it("reports each timer started", () => {
+    analytics.trackWebEvent.mockReset();
+
+    startKitchenTimer({
+      durationMs: 90_000,
+      label: "1½ min",
+      recipeId: "r1",
+      recipeTitle: "Pancakes",
+      stepIndex: 1
+    });
+    startKitchenTimer({ durationMs: 600_000, label: "10 min", recipeId: "r1", recipeTitle: "R" });
+
+    expect(analytics.trackWebEvent.mock.calls.map(([event]) => event)).toEqual([
+      expect.objectContaining({
+        eventName: "cook_timer_started",
+        properties: { duration_seconds: 90, from_step: true }
+      }),
+      expect.objectContaining({
+        eventName: "cook_timer_started",
+        properties: { duration_seconds: 600, from_step: false }
+      })
+    ]);
   });
 
   it("asks for notification permission once, on the first timer", () => {

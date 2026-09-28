@@ -1,5 +1,6 @@
 import { useCallback, useMemo } from "react";
 
+import { trackWebEvent } from "../analytics/client";
 import { removeCollectionFromAllRecipes } from "../features/library/saved-recipe-store";
 import { COLLECTIONS_STORE_NAME, getLinkDishWebDb } from "../storage/linkdish-db";
 
@@ -105,7 +106,7 @@ export async function createCollection(input: CollectionInput): Promise<WebColle
   const emoji = cleanOptional(input.emoji, MAX_COLLECTION_EMOJI_LENGTH);
   const description = cleanOptional(input.description, MAX_COLLECTION_DESCRIPTION_LENGTH);
 
-  return writeCollection({
+  const created = await writeCollection({
     createdAt: now,
     id: crypto.randomUUID(),
     name,
@@ -114,6 +115,13 @@ export async function createCollection(input: CollectionInput): Promise<WebColle
     ...(emoji ? { emoji } : {}),
     ...(description ? { description } : {})
   });
+
+  trackWebEvent({
+    eventName: "collection_created",
+    properties: { collection_count: existing.length + 1, has_emoji: Boolean(emoji) },
+    routeOrScreen: window.location.pathname
+  });
+  return created;
 }
 
 export async function updateCollection(

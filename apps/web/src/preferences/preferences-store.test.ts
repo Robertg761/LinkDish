@@ -1,5 +1,5 @@
 import { act, renderHook } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   applyThemePreference,
@@ -13,6 +13,9 @@ import {
   setPreference,
   usePreferences
 } from "./preferences-store";
+
+const analytics = vi.hoisted(() => ({ trackWebEvent: vi.fn<(event: unknown) => void>() }));
+vi.mock("../analytics/client", () => ({ trackWebEvent: analytics.trackWebEvent }));
 
 const addThemeColorMetas = () => {
   document.head.innerHTML = `
@@ -54,6 +57,20 @@ describe("preferences store", () => {
     expect(JSON.parse(window.localStorage.getItem(PREFERENCES_STORAGE_KEY) ?? "{}")).toMatchObject({
       units: "metric"
     });
+  });
+
+  it("reports theme and units changes (not re-selecting the same value)", () => {
+    analytics.trackWebEvent.mockReset();
+
+    setPreference("theme", "dark");
+    setPreference("theme", "dark");
+    setPreference("units", "metric");
+    setPreference("cookTextSize", "xl");
+
+    expect(analytics.trackWebEvent.mock.calls.map(([event]) => event)).toEqual([
+      expect.objectContaining({ eventName: "theme_changed", properties: { theme: "dark" } }),
+      expect.objectContaining({ eventName: "units_changed", properties: { units: "metric" } })
+    ]);
   });
 
   it("applies a forced theme to <html> and the theme-color metas", () => {

@@ -26,6 +26,9 @@ vi.mock("../api/client", () => ({
   apiClient: {}
 }));
 
+const analytics = vi.hoisted(() => ({ trackWebEvent: vi.fn<(event: unknown) => void>() }));
+vi.mock("../analytics/client", () => ({ trackWebEvent: analytics.trackWebEvent }));
+
 const recipe = (id: string, collectionIds?: string[]): WebSavedRecipe =>
   ({
     createdAt: "2026-09-01T00:00:00.000Z",
@@ -72,6 +75,24 @@ describe("collections-store", () => {
     expect((await getCollections()).map((collection) => collection.name)).toEqual([
       "Baking",
       "Quick dinners"
+    ]);
+  });
+
+  it("reports each collection created", async () => {
+    analytics.trackWebEvent.mockReset();
+
+    await createCollection({ emoji: "🍝", name: "Weeknight" });
+    await createCollection({ name: "Baking" });
+
+    expect(analytics.trackWebEvent.mock.calls.map(([event]) => event)).toEqual([
+      expect.objectContaining({
+        eventName: "collection_created",
+        properties: { collection_count: 1, has_emoji: true }
+      }),
+      expect.objectContaining({
+        eventName: "collection_created",
+        properties: { collection_count: 2, has_emoji: false }
+      })
     ]);
   });
 
