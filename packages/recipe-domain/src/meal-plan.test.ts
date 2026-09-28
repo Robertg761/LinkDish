@@ -156,4 +156,17 @@ describe("buildShoppingInputsForPlan", () => {
     expect(merged).toHaveLength(skillet.recipe.ingredients.length);
     expect(merged.map(formatShoppingItemText)).toContain("900 g boneless skinless chicken thighs");
   });
+
+  it("skips a recipe id named like an Object.prototype member in a plain record (fuzz)", () => {
+    const entries = ["toString", "constructor", "__proto__", "valueOf", "hasOwnProperty"].map(
+      (recipeId) => ({ date: "2026-09-27", recipeId })
+    );
+
+    expect(buildShoppingInputsForPlan(entries, {})).toEqual([]);
+    expect(
+      buildShoppingInputsForPlan([...entries, { date: "2026-09-27", recipeId: pitas.id }], {
+        [pitas.id]: pitas.recipe
+      })
+    ).toHaveLength(pitas.recipe.ingredients.length);
+  });
 });

@@ -23,12 +23,14 @@ export type BracketPair = readonly [open: string, close: string];
  * Replaces each bracketed group, together with the whitespace on both sides of it, the way a
  * global replace of `\s*(?:\([^)]*\)|\[[^\]]*\])\s*` does for the pairs "()" and "[]": a group
  * runs from an opening bracket to the first matching closer after it (other brackets inside
- * included), and an opening bracket that is never closed stays as text.
+ * included), and an opening bracket that is never closed stays as text. With `keepSpaces` the
+ * whitespace around a group stays, as with `\([^)]*\)|\[[^\]]*\]`.
  */
 export const replaceBracketedGroups = (
   text: string,
   pairs: readonly BracketPair[],
-  replacement: string
+  replacement: string,
+  { keepSpaces = false }: { keepSpaces?: boolean | undefined } = {}
 ): string => {
   const closers = new Map<string, string>(pairs);
   const unclosed = new Set<string>();
@@ -52,12 +54,12 @@ export const replaceBracketedGroups = (
     }
 
     let start = index;
-    while (start > copied && isSpace(text[start - 1])) {
+    while (!keepSpaces && start > copied && isSpace(text[start - 1])) {
       start -= 1;
     }
 
     let end = closeIndex + 1;
-    while (end < text.length && isSpace(text[end])) {
+    while (!keepSpaces && end < text.length && isSpace(text[end])) {
       end += 1;
     }
 

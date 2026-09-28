@@ -17,6 +17,7 @@ import { canonicalUnit, getUnitDefinition, UNIT_ALIAS_LOOKUP } from "./units.js"
 
 import type { IngredientUnitsPreference } from "./conversion.js";
 import type { ShoppingCategoryId } from "./grocery-categories.js";
+import type { ParsedIngredientQuantity, ParsedQuantityValue } from "./ingredient-quantities.js";
 import type { Recipe } from "./recipe-schema.js";
 import type { ShoppingQuantity } from "./shopping.js";
 import type { BracketPair } from "./text-scan.js";
@@ -313,10 +314,28 @@ const toShoppingQuantity = (
 };
 
 /**
+ * The whole amount of a compound line in its first unit, as conversion reads it: "1 cup plus 2
+ * tablespoons" is 1 ⅛ cups. Lines without an added amount keep theirs.
+ */
+const amountWithAddition = (parsed: ParsedIngredientQuantity): ParsedQuantityValue => {
+  const { addition, qty } = parsed;
+  const base = getUnitDefinition(parsed.unit)?.base;
+  const additionBase = getUnitDefinition(addition?.unit)?.base;
+
+  if (!addition || qty == null || !base || !additionBase) {
+    return qty;
+  }
+
+  const added = (addition.qty * additionBase) / base;
+  return isRangeValue(qty) ? { min: qty.min + added, max: qty.max + added } : qty + added;
+};
+
+/**
  * Parses a shopping line into ShoppingItem fields, ready for the ShoppingItem schema: the text
  * is the cleaned item name (≤ 200 chars) with any package size kept ("chickpeas (15 oz)"), the
- * unit is canonical, a postfix count unit becomes the unit ("2 garlic cloves" → 2 clove garlic)
- * and ranges never start at zero. Lines without an amount keep their cleaned text only.
+ * unit is canonical, a postfix count unit becomes the unit ("2 garlic cloves" → 2 clove garlic),
+ * a compound amount is summed ("1 cup plus 2 tablespoons" → 1.125 cup) and ranges never start
+ * at zero. Lines without an amount keep their cleaned text only.
  */
 export const parseShoppingLine = (line: string): ParsedShoppingLine => {
   const trimmed = line.replace(WHITESPACE_PATTERN, " ").trim();
@@ -344,7 +363,7 @@ export const parseShoppingLine = (line: string): ParsedShoppingLine => {
     name = `${name} (${parsed.packageSize.text})`.trim();
   }
 
-  const qty = toShoppingQuantity(parsed.qty);
+  const qty = toShoppingQuantity(amountWithAddition(parsed));
 
   return {
     text: clip(name.length > 0 ? name : trimmed, MAX_SHOPPING_ITEM_TEXT_LENGTH),

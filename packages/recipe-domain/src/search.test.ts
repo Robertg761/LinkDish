@@ -155,6 +155,21 @@ describe("recipeSearchFields", () => {
     expect(recipeIndex.search("lunchbox")[0]?.record.title).toBe("Crisp Cucumber Chickpea Pitas");
     expect(recipeIndex.search("linkdish.ca")).toHaveLength(3);
   });
+
+  it("indexes the word 'constructor' like any other (fuzz)", () => {
+    const sample = SAMPLE_RECIPES[0].recipe as Recipe;
+    const recipe: Recipe = {
+      ...sample,
+      steps: [...sample.steps, { index: 99, text: "Ask the constructor for a bigger oven." }]
+    };
+    const recipeIndex = createRecipeSearchIndex([recipe], (entry) => recipeSearchFields(entry));
+
+    expect(tokenizeSearchText("Two Constructors")).toEqual(["two", "constructor"]);
+    expect(recipeIndex.search("co")).toHaveLength(1);
+    expect(recipeIndex.search("constructors")).toHaveLength(1);
+    expect(recipeIndex.search("f")).toHaveLength(1);
+    expect(recipeIndex.search("function")).toHaveLength(0);
+  });
 });
 
 describe("tokenizing and highlighting", () => {
@@ -175,6 +190,7 @@ describe("tokenizing and highlighting", () => {
       { start: 5, end: 8 }
     ]);
     expect(highlightRanges("Soup", "")).toEqual([]);
+    expect(highlightRanges("Constructor cake", "cake")).toEqual([{ start: 12, end: 16 }]);
   });
 });
 

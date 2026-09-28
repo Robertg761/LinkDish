@@ -2,7 +2,8 @@ import { z } from "zod";
 
 import { MAX_RECIPE_TITLE_LENGTH } from "./limits.js";
 
-const MAX_URL_LENGTH = 2_048;
+/** The longest URL a recipe may carry (source, image, video). */
+export const MAX_RECIPE_URL_LENGTH = 2_048;
 
 const HTTP_PROTOCOLS = new Set(["http:", "https:"]);
 
@@ -36,7 +37,7 @@ export const httpUrlSchema = z
   .string()
   .trim()
   .min(1)
-  .max(MAX_URL_LENGTH)
+  .max(MAX_RECIPE_URL_LENGTH)
   .refine(isHttpUrl, "Only http(s) URLs without embedded credentials are allowed.");
 
 /** Builds an `httpUrlSchema` that is additionally pinned to a set of hosts (and their subdomains). */

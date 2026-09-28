@@ -4,6 +4,9 @@
  * and cheap: one ordered list of precompiled word-boundary patterns, first match wins.
  */
 import { parseIngredientQuantity } from "./ingredient-quantities.js";
+import { replaceBracketedGroups } from "./text-scan.js";
+
+import type { BracketPair } from "./text-scan.js";
 
 export const SHOPPING_CATEGORY_IDS = [
   "produce",
@@ -724,7 +727,11 @@ const CATEGORY_RULES: ReadonlyArray<{ category: ShoppingCategoryId; pattern: Reg
   rule("beverages", BEVERAGES)
 ];
 
-const PARENTHETICAL_PATTERN = /\([^)]*\)|\[[^\]]*\]/gu;
+/** "(packed)" and "[large]" notes; dropped with a linear scan (see text-scan.ts). */
+const NOTE_BRACKETS: readonly BracketPair[] = [
+  ["(", ")"],
+  ["[", "]"]
+];
 const HEAD_END_PATTERN = /[,;]|\s(?:or|for|to taste|as needed)\b/iu;
 const DIACRITIC_PATTERN = /[̀-ͯ]/gu;
 const PACKAGED_UNITS = new Set(["can", "tin"]);
@@ -751,10 +758,12 @@ const matchCategory = (text: string): ShoppingCategoryId | null => {
  */
 export const categorizeIngredient = (text: string): ShoppingCategoryId => {
   const parsed = parseIngredientQuantity(text);
-  const name = (parsed.confident ? parsed.item : text)
-    .normalize("NFD")
-    .replace(DIACRITIC_PATTERN, "")
-    .replace(PARENTHETICAL_PATTERN, " ");
+  const name = replaceBracketedGroups(
+    (parsed.confident ? parsed.item : text).normalize("NFD").replace(DIACRITIC_PATTERN, ""),
+    NOTE_BRACKETS,
+    " ",
+    { keepSpaces: true }
+  );
 
   if (parsed.unit && PACKAGED_UNITS.has(parsed.unit)) {
     return "canned";
