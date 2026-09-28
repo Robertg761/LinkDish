@@ -352,23 +352,28 @@ describe("AppShell search, shortcuts and status", () => {
     expect(document.documentElement.dataset.tabbar).toBeUndefined();
   });
 
-  it("counts links waiting in the import queue on the Add tab and the rail button", () => {
+  it("counts links waiting in the import queue on the Add tab and the rail button", async () => {
     Object.assign(importQueue, { count: 3, failed: 1, pending: 2 });
 
     try {
       renderShell("/");
-      const add = screen.getByRole("link", {
+      // The count loads beside the page (it reads IndexedDB), then names itself on the link.
+      const add = await screen.findByRole("link", {
         name: "Add recipe (2 imports waiting, 1 import needs a look)"
       });
-      expect(within(add).getByTestId("import-queue-badge")).toHaveTextContent("3");
-      expect(within(add).getByTestId("import-queue-badge")).toHaveClass("is-attention");
+      const badge = await within(add).findByTestId("import-queue-badge");
+      expect(badge).toHaveTextContent("3");
+      expect(badge).toHaveClass("is-attention");
     } finally {
       Object.assign(importQueue, { count: 0, failed: 0, pending: 0 });
     }
   });
 
-  it("shows no count while the import queue is empty", () => {
+  it("shows no count while the import queue is empty", async () => {
     renderShell("/");
+    await act(async () => {
+      await import("./ImportQueueCount");
+    });
 
     expect(screen.getByRole("link", { name: "Add recipe" })).toBeInTheDocument();
     expect(screen.queryByTestId("import-queue-badge")).not.toBeInTheDocument();

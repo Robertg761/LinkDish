@@ -11,7 +11,6 @@ import { createPortal } from "react-dom";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import { preloadCommandPalette } from "../features/command-palette/CommandCenter";
-import { useImportQueueBadge } from "../features/import-queue/use-import-queue-badge";
 import { FirstRunOnboardingSheet } from "../features/onboarding/FirstRunOnboardingSheet";
 import { requestCommandPalette } from "../lib/command-palette-events";
 import { SAVE_FEEDBACK_EVENT } from "../lib/delight-events";
@@ -71,35 +70,6 @@ const prefersReducedMotion = () => {
     return false;
   }
 };
-
-/** "3 imports waiting" (or "1 import needs a look") for the Add button's accessible name. */
-const describeImportQueue = (pending: number, failed: number): string => {
-  const parts: string[] = [];
-
-  if (pending > 0) {
-    parts.push(`${pending} import${pending === 1 ? "" : "s"} waiting`);
-  }
-
-  if (failed > 0) {
-    parts.push(failed === 1 ? "1 import needs a look" : `${failed} imports need a look`);
-  }
-
-  return parts.join(", ");
-};
-
-/** The small count on the Add tab / rail button while links wait in the import queue. */
-const ImportQueueCount: React.FC<{ count: number; attention: boolean }> = ({
-  count,
-  attention
-}) => (
-  <span
-    aria-hidden="true"
-    className={`app-nav-badge num${attention ? " is-attention" : ""}`}
-    data-testid="import-queue-badge"
-  >
-    {count > 99 ? "99+" : count}
-  </span>
-);
 
 /** How long "Back online" stays up after the connection returns. */
 const BACK_ONLINE_MS = 3000;
@@ -162,6 +132,20 @@ const TimerDock = lazyWithRetry(() =>
   import("../features/cook-mode/TimerDock").then((module) => ({ default: module.TimerDock }))
 );
 
+// The import queue count on Add reads IndexedDB, so it loads beside the Cookbook, not in the entry.
+const ImportQueueCount = lazyWithRetry(() =>
+  import("./ImportQueueCount").then((module) => ({ default: module.ImportQueueCount }))
+);
+
+/** The Add tab / rail button's queue count; renders nothing while the queue is empty. */
+const AddQueueBadge: React.FC<{ onDescribe: (description: string) => void }> = ({ onDescribe }) => (
+  <OptionalChunkBoundary name="Import queue count">
+    <Suspense fallback={null}>
+      <ImportQueueCount onDescribe={onDescribe} />
+    </Suspense>
+  </OptionalChunkBoundary>
+);
+
 const TopBarActionsContext = createContext<HTMLElement | null>(null);
 
 /**
@@ -195,8 +179,7 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
   // bar and Back cover navigation.
   const pageHidesTabBar = usePageHidesTabBar();
   const hideTabBar = !isRail && (routeMeta.hideTabBar === true || pageHidesTabBar);
-  const importQueue = useImportQueueBadge();
-  const importQueueLabel = describeImportQueue(importQueue.pending, importQueue.failed);
+  const [importQueueLabel, setImportQueueLabel] = useState("");
   const addLabel = importQueueLabel ? `Add recipe (${importQueueLabel})` : "Add recipe";
 
   // Sheets, toasts and the timer dock are portaled outside the shell, so the inset they read
@@ -299,9 +282,7 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
         >
           <span className="app-nav-icon" aria-hidden="true">
             <Icon name={item.icon} size={isAdd ? 26 : 22} strokeWidth={isAdd ? 2.4 : 2} />
-            {isAdd && importQueue.count > 0 ? (
-              <ImportQueueCount attention={importQueue.failed > 0} count={importQueue.count} />
-            ) : null}
+            {isAdd ? <AddQueueBadge onDescribe={setImportQueueLabel} /> : null}
           </span>
           <span className="app-nav-label">{item.label}</span>
           {isRail && RAIL_SHORTCUTS[item.to] ? (
@@ -349,12 +330,7 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
                 >
                   <Icon name="plus" size={20} strokeWidth={2.4} />
                   Add recipe
-                  {importQueue.count > 0 ? (
-                    <ImportQueueCount
-                      attention={importQueue.failed > 0}
-                      count={importQueue.count}
-                    />
-                  ) : null}
+                  <AddQueueBadge onDescribe={setImportQueueLabel} />
                 </Link>
               ) : null}
 

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import React from "react";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it } from "vitest";
@@ -9,6 +9,7 @@ import { IconButton } from "./IconButton";
 import { LoadingState } from "./LoadingState";
 import { PageHeader } from "./PageHeader";
 import { RecipeCard } from "./RecipeCard";
+import { coverCourseRulesReady } from "./RecipeCover";
 import { RecipeImage } from "./RecipeImage";
 
 const image = { url: "https://example.com/banana-bread.jpg", source: "og" as const };
@@ -36,14 +37,16 @@ describe("RecipeImage", () => {
     expect(container.querySelector("img")).toHaveAttribute("fetchpriority", "high");
   });
 
-  it("falls back to a course-aware cover (never a lone letter) without a photo or on error", () => {
+  it("falls back to a course-aware cover (never a lone letter) without a photo or on error", async () => {
     const { container, rerender } = render(
       <RecipeImage image={null} title="Brown Butter Chocolate Chip Cookies" />
     );
 
     const cover = container.querySelector(".recipe-cover");
     expect(cover).toHaveAttribute("aria-hidden", "true");
-    expect(cover).toHaveAttribute("data-course", "dessert");
+    // The course rules load beside the page; the cover picks its art up once they're in.
+    await coverCourseRulesReady;
+    await waitFor(() => expect(cover).toHaveAttribute("data-course", "dessert"));
     expect(cover?.querySelector("[data-icon='cake-slice']")).not.toBeNull();
     expect(cover).toHaveTextContent("");
 

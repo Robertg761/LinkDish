@@ -1,12 +1,9 @@
-// The tagging module directly, not the package index: this component ships with the Cookbook,
-// and the index would pull the whole domain engine (schemas, zod) into that first download.
-import { inferRecipeTags } from "@linkdish/recipe-domain/src/tagging";
-import React from "react";
+import React, { useSyncExternalStore } from "react";
 
 import { Icon } from "./Icon";
 
 import type { IconName } from "./Icon";
-import type { RecipeCourse } from "@linkdish/recipe-domain/src/tagging";
+import type { RecipeCourse, inferRecipeTags } from "@linkdish/recipe-domain/src/tagging";
 
 import "./RecipeCover.css";
 
@@ -37,10 +34,45 @@ const toneForTitle = (title: string): CoverTone => {
   return TONES[hash % TONES.length] ?? "sage";
 };
 
+let inferTags: typeof inferRecipeTags | null = null;
+const courseRulesListeners = new Set<() => void>();
+
+/**
+ * The course rules (long word lists) load beside the Cookbook rather than in its first download:
+ * the art is decoration. The request starts as soon as this module runs, well before saved
+ * recipes come back from storage, so covers normally draw with their course straight away; until
+ * then (or if it can't load) a cover shows the neutral fork-and-knife plate. The tagging module
+ * directly, not the package index, which would bring the whole domain engine (schemas, zod).
+ */
+export const coverCourseRulesReady: Promise<void> =
+  import("@linkdish/recipe-domain/src/tagging").then(
+    (module) => {
+      inferTags = module.inferRecipeTags;
+      courseRulesListeners.forEach((listener) => listener());
+    },
+    () => undefined
+  );
+
+const subscribeToCourseRules = (listener: () => void) => {
+  courseRulesListeners.add(listener);
+  return () => {
+    courseRulesListeners.delete(listener);
+  };
+};
+
+const courseRulesLoaded = () => inferTags !== null;
+
 const courseCache = new Map<string, RecipeCourse | null>();
 
-/** The course a title names ("… Cookies" → dessert), cached: covers render in long grids. */
+/**
+ * The course a title names ("… Cookies" → dessert), cached: covers render in long grids. Null
+ * until the course rules have loaded.
+ */
 export const inferCourseFromTitle = (title: string): RecipeCourse | null => {
+  if (!inferTags) {
+    return null;
+  }
+
   const key = title.trim().toLowerCase();
   const cached = courseCache.get(key);
 
@@ -48,7 +80,7 @@ export const inferCourseFromTitle = (title: string): RecipeCourse | null => {
     return cached;
   }
 
-  const course = inferRecipeTags({ ingredients: [], steps: [], title: key }).course?.value ?? null;
+  const course = inferTags({ ingredients: [], steps: [], title: key }).course?.value ?? null;
 
   if (courseCache.size > 500) {
     courseCache.clear();
@@ -72,7 +104,14 @@ export interface RecipeCoverProps {
  * scales with it (container units), from a 32px thumbnail to the recipe hero. Decorative.
  */
 export const RecipeCover: React.FC<RecipeCoverProps> = ({ title, course, className = "" }) => {
-  const resolved = course === undefined ? inferCourseFromTitle(title) : course;
+  // Draws again once the course rules arrive (only the first covers after a cold start wait).
+  const rulesLoaded = useSyncExternalStore(
+    subscribeToCourseRules,
+    courseRulesLoaded,
+    courseRulesLoaded
+  );
+  const resolved =
+    course === undefined ? (rulesLoaded ? inferCourseFromTitle(title) : null) : course;
   const art = resolved
     ? COURSE_ART[resolved]
     : { icon: "utensils" as const, tone: toneForTitle(title.trim().toLowerCase()) };

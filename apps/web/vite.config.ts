@@ -188,8 +188,14 @@ const createManualChunks = (bootModules: readonly string[]): Rollup.GetManualChu
 
 /** The page most visits start on; see preloadLandingRoute and app/routes.ts. */
 const LANDING_ROUTE_MODULE = "/src/features/library/LibraryPage.tsx";
-/** Lazy UI the shell loads on every visit (the kitchen timer dock), grouped with the landing page. */
-const BOOT_LAZY_MODULES = ["/src/features/cook-mode/TimerDock.tsx"];
+/**
+ * Lazy UI the shell loads on every visit (the kitchen timer dock, the import queue count on Add),
+ * grouped with the landing page.
+ */
+const BOOT_LAZY_MODULES = [
+  "/src/features/cook-mode/TimerDock.tsx",
+  "/src/components/ImportQueueCount.tsx"
+];
 
 export default defineConfig({
   test: {
