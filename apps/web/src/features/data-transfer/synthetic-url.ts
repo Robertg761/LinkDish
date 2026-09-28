@@ -11,6 +11,8 @@
 
 export const SYNTHETIC_IMPORT_URL_PREFIX = "https://linkdish.app/imports/";
 export const IMAGE_IMPORT_URL_PREFIX = "https://linkdish.app/image-imports/";
+/** Pasted-text imports (`https://linkdish.app/text-imports/web-<time>-<uuid>`). */
+export const TEXT_IMPORT_URL_PREFIX = "https://linkdish.app/text-imports/";
 
 const IMPORT_APP_LABELS: Record<string, string> = {
   linkdish: "a LinkDish backup",
@@ -22,10 +24,15 @@ const IMPORT_APP_LABELS: Record<string, string> = {
 export const isSyntheticImportUrl = (url: string | null | undefined): boolean =>
   typeof url === "string" && url.startsWith(SYNTHETIC_IMPORT_URL_PREFIX);
 
-/** True for any LinkDish-made source URL (synthetic imports and photo imports): never link it. */
+/**
+ * True for any LinkDish-made source URL (synthetic, photo and pasted-text imports): never link
+ * it, and never treat two of them as the same page unless they are the same URL.
+ */
 export const isLinkDishInternalSourceUrl = (url: string | null | undefined): boolean =>
   typeof url === "string" &&
-  (url.startsWith(SYNTHETIC_IMPORT_URL_PREFIX) || url.startsWith(IMAGE_IMPORT_URL_PREFIX));
+  (url.startsWith(SYNTHETIC_IMPORT_URL_PREFIX) ||
+    url.startsWith(IMAGE_IMPORT_URL_PREFIX) ||
+    url.startsWith(TEXT_IMPORT_URL_PREFIX));
 
 /**
  * A short, human label for where an imported recipe came from ("Imported from Paprika"), or

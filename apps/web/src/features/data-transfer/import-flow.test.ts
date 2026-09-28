@@ -18,16 +18,21 @@ import {
 } from "../../storage/linkdish-db";
 import { fakeIdb } from "../../storage/testing/fake-idb";
 import {
+  duplicateSavedRecipe,
   generateDeterministicId,
   getSavedRecipeById,
   getSavedRecipes,
   LOCAL_LIMIT_FREE,
-  putSavedRecipe
+  putSavedRecipe,
+  seedStarterRecipesIfNeeded,
+  setRecipeFavorite
 } from "../library/saved-recipe-store";
 
+import { buildBackup } from "./backup-export";
 import { WEB_BACKUP_EXTRAS_KEY } from "./backup-format";
 import { prepareImport, previewImport, runImport } from "./data-transfer";
 import { DataTransferError } from "./errors";
+import { loadExportSnapshot } from "./export-snapshot";
 import {
   buildPaprikaExport,
   fileFromBytes,
@@ -442,6 +447,98 @@ describe("importing into the cookbook", () => {
     });
     expect(again.preview.membershipAdditions).toEqual([]);
     expect(again.result.plan.recipes).toEqual([]);
+  });
+
+  describe("restoring a LinkDish backup made from this app", () => {
+    /** Exports this device's cookbook, then starts over on an empty device. */
+    const exportAndWipe = async () => {
+      const { backup } = buildBackup(await loadExportSnapshot(), {
+        exportedAt: "2026-09-28T00:00:00.000Z",
+        includeImages: false
+      });
+      fakeIdb.reset();
+      resetLinkDishWebDbForTests();
+      localStorage.clear();
+      return jsonBytes(backup);
+    };
+
+    const summary = async () =>
+      (await getSavedRecipes())
+        .map((recipe) => `${recipe.recipe.title} · ${recipe.notes ?? ""}`)
+        .sort();
+
+    it("brings back every recipe, even look-alikes that share a link or a title", async () => {
+      const at = (id: string, url: string, title: string, extra: Partial<WebSavedRecipe> = {}) =>
+        record(id, {
+          recipe: { ...skillet, sourceUrl: url, title },
+          sourceHost: new URL(url).hostname.replace(/^www\./u, ""),
+          sourceUrl: url,
+          ...extra
+        });
+
+      await putSavedRecipe(at("soup", "https://example.com/soup", "Soup", { notes: "first" }));
+      // A copy made with "Duplicate" keeps the link; an older app's copy kept the title too.
+      const copy = await duplicateSavedRecipe("soup", { isPremiumUser: true });
+      await putSavedRecipe(
+        at("soup-again", "https://example.com/soup", "Soup", { notes: "second pot" })
+      );
+      // Pasted-text imports all live on linkdish.app.
+      await putSavedRecipe(
+        at("text-1", "https://linkdish.app/text-imports/web-1-aaaa", "Pancakes", {
+          notes: "classic"
+        })
+      );
+      await putSavedRecipe(
+        at("text-2", "https://linkdish.app/text-imports/web-2-bbbb", "Pancakes", {
+          notes: "vegan version"
+        })
+      );
+      // Different pages on one site that share a title.
+      await putSavedRecipe(
+        at("bread-1", "https://www.allrecipes.com/recipe/1/banana-bread/", "Banana Bread")
+      );
+      await putSavedRecipe(
+        at("bread-2", "https://www.allrecipes.com/recipe/2/best-banana-bread/", "Banana Bread")
+      );
+      const before = await summary();
+      expect(before).toHaveLength(7);
+      expect(copy).toBeDefined();
+
+      const { preview, result } = await importFile("linkdish-backup.json", await exportAndWipe(), {
+        isPremium: true
+      });
+
+      expect(preview.counts).toMatchObject({ duplicates: 0, found: 7 });
+      expect(result.plan.counts).toMatchObject({ imported: 7, skippedDuplicates: 0 });
+      expect(await summary()).toEqual(before);
+      expect(await getSavedRecipeById(copy!.id)).toMatchObject({
+        recipe: { title: "Soup (copy)" }
+      });
+    });
+
+    it("keeps a personal copy of a starter when the new device has the starters", async () => {
+      await seedStarterRecipesIfNeeded();
+      const copy = await duplicateSavedRecipe(starterId, { isPremiumUser: true });
+      await setRecipeFavorite(copy!.id, true);
+      const bytes = await exportAndWipe();
+      await seedStarterRecipesIfNeeded();
+
+      const { result } = await importFile("linkdish-backup.json", bytes, { isPremium: true });
+
+      expect(result.plan.counts).toMatchObject({ imported: 1, skippedDuplicates: 0 });
+      expect(await getSavedRecipeById(copy!.id)).toMatchObject({ favorite: true });
+    });
+
+    it("still treats a recipe that is already here (same id) as a duplicate", async () => {
+      await putSavedRecipe(record("kept", { notes: "on both devices" }));
+      const bytes = await exportAndWipe();
+      await putSavedRecipe(record("kept", { notes: "edited here" }));
+
+      const { result } = await importFile("linkdish-backup.json", bytes, { isPremium: true });
+
+      expect(result.plan.counts).toMatchObject({ imported: 0, skippedDuplicates: 1 });
+      expect(await getSavedRecipeById("kept")).toMatchObject({ notes: "edited here" });
+    });
   });
 
   it("explains a full device instead of failing with a raw error", async () => {

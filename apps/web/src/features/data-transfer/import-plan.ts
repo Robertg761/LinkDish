@@ -135,6 +135,8 @@ export async function analyzeImport(
   const existingById = new Map(existing.map((recipe) => [recipe.id, recipe]));
   const localIndex = new RecipeIndex();
   const fileIndex = new RecipeIndex();
+  /** File position of the first LinkDish backup entry with each original id. */
+  const fileIndexByOriginalId = new Map<string, number>();
 
   for (const recipe of existing) {
     localIndex.add({ id: recipe.id, sourceUrl: recipe.sourceUrl, title: recipe.recipe.title });
@@ -159,9 +161,25 @@ export async function analyzeImport(
     const preferredId =
       starterId ?? (originalId && !isStarterId(originalId) ? originalId : deterministicId);
 
-    const localById = existingById.get(preferredId) ?? existingById.get(deterministicId);
-    const duplicateOfLocalId =
-      localById?.id ?? localIndex.find(candidate.sourceUrl, candidate.recipe.title);
+    // A LinkDish backup names every recipe by its id: two entries are the same recipe only when
+    // the ids match. Look-alikes (a "Duplicate" copy, pasted-text imports with one title, pages
+    // of one site sharing a title) are distinct recipes the backup must bring back. Files from
+    // other apps have no such identity, so they are matched by link and title.
+    const matchById = parsed.source === "linkdish" && originalId !== null;
+    let duplicateOfLocalId: string | null;
+    let inFile: number | null;
+
+    if (matchById) {
+      duplicateOfLocalId = existingById.has(preferredId) ? preferredId : null;
+      inFile = fileIndexByOriginalId.get(originalId) ?? null;
+    } else {
+      const localById = existingById.get(preferredId) ?? existingById.get(deterministicId);
+      duplicateOfLocalId =
+        localById?.id ?? localIndex.find(candidate.sourceUrl, candidate.recipe.title);
+      const inFileId = fileIndex.find(candidate.sourceUrl, candidate.recipe.title);
+      inFile = inFileId === null ? null : Number(inFileId);
+    }
+
     const local = duplicateOfLocalId ? existingById.get(duplicateOfLocalId) : undefined;
     const replacesUntouchedStarter = Boolean(
       starterId &&
@@ -170,7 +188,6 @@ export async function analyzeImport(
       local.isStarter &&
       !isPersonalizedRecipe(local)
     );
-    const inFile = fileIndex.find(candidate.sourceUrl, candidate.recipe.title);
 
     items.push({
       candidate,
@@ -178,15 +195,21 @@ export async function analyzeImport(
       preferredId,
       starterId,
       duplicateOfLocalId: replacesUntouchedStarter ? null : duplicateOfLocalId,
-      duplicateOfIndex: inFile === null ? null : Number(inFile),
+      duplicateOfIndex: inFile,
       replacesUntouchedStarter
     });
 
-    fileIndex.add({
-      id: String(candidate.index),
-      sourceUrl: candidate.sourceUrl,
-      title: candidate.recipe.title
-    });
+    if (matchById) {
+      if (!fileIndexByOriginalId.has(originalId)) {
+        fileIndexByOriginalId.set(originalId, candidate.index);
+      }
+    } else {
+      fileIndex.add({
+        id: String(candidate.index),
+        sourceUrl: candidate.sourceUrl,
+        title: candidate.recipe.title
+      });
+    }
   }
 
   return {
