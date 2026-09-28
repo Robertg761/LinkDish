@@ -281,6 +281,50 @@ describe("library-store", () => {
     expect(result.current.recipes).toContain(third);
   });
 
+  it("keeps a recipe another tab deleted and put back within one batch", async () => {
+    const { result } = renderHook(() => useSavedRecipes());
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    const [first] = result.current.recipes;
+    const restored = { ...first, lastOpenedAt: "2026-09-28T11:00:00.000Z" } as WebSavedRecipe;
+
+    // Delete then Undo in the other tab land in the same debounce window; storage has it back.
+    fakeIdb.seed(SAVED_RECIPES_STORE_NAME, [restored]);
+    act(() => {
+      channel.onmessage?.({
+        data: { deletedIds: [first?.id], topic: "savedRecipes", v: 1 }
+      } as MessageEvent);
+      channel.onmessage?.({
+        data: { topic: "savedRecipes", upsertedIds: [first?.id], v: 1 }
+      } as MessageEvent);
+    });
+
+    await waitFor(() =>
+      expect(getCachedSavedRecipe(first?.id ?? "")?.lastOpenedAt).toBe("2026-09-28T11:00:00.000Z")
+    );
+    expect(result.current.recipes.map((recipe) => recipe.id)).toContain(first?.id);
+  });
+
+  it("drops a recipe another tab saved and then deleted within one batch", async () => {
+    const { result } = renderHook(() => useSavedRecipes());
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    const [first] = result.current.recipes;
+    const db = await (await import("../storage/linkdish-db")).getLinkDishWebDb();
+    await db.delete(SAVED_RECIPES_STORE_NAME, first?.id ?? "");
+
+    act(() => {
+      channel.onmessage?.({
+        data: { topic: "savedRecipes", upsertedIds: [first?.id], v: 1 }
+      } as MessageEvent);
+      channel.onmessage?.({
+        data: { deletedIds: [first?.id], topic: "savedRecipes", v: 1 }
+      } as MessageEvent);
+    });
+
+    await waitFor(() =>
+      expect(result.current.recipes.map((recipe) => recipe.id)).not.toContain(first?.id)
+    );
+  });
+
   it("keeps unchanged objects when another tab forces a full reload", async () => {
     const { result } = renderHook(() => useSavedRecipes());
     await waitFor(() => expect(result.current.status).toBe("ready"));

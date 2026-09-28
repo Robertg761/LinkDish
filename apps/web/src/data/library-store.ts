@@ -95,14 +95,19 @@ const applySavedRecipeChange = (current: WebSavedRecipe[], change: DataChange): 
     change.deletedIds
   );
 
-/** Another tab wrote these recipes: re-read just them (a missing one was deleted). */
+/**
+ * Another tab wrote these recipes: re-read just them (a missing one was deleted). A batch can
+ * hold a delete and a later save of the same id (delete, then Undo), so every written id is
+ * re-read and storage decides, rather than letting any delete in the batch win.
+ */
 const applyRemoteSavedRecipeChanges = async (
   current: WebSavedRecipe[],
   changes: readonly DataChange[]
 ): Promise<WebSavedRecipe[]> => {
-  const deleted = new Set(changes.flatMap((change) => change.deletedIds ?? []));
-  const ids = [...new Set(changes.flatMap((change) => change.upsertedIds ?? []))].filter(
-    (id) => !deleted.has(id)
+  const ids = [...new Set(changes.flatMap((change) => change.upsertedIds ?? []))];
+  const written = new Set(ids);
+  const deleted = new Set(
+    changes.flatMap((change) => change.deletedIds ?? []).filter((id) => !written.has(id))
   );
   const upserted: WebSavedRecipe[] = [];
 
