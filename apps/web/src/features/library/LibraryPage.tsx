@@ -30,6 +30,7 @@ import {
 } from "../../data/library-store";
 import { retryLinkDishStorage } from "../../data/storage-status";
 import { useMediaQuery } from "../../lib/use-media-query";
+import { holdAutoApplyUpdate, UNDO_UPDATE_HOLD_MS } from "../../platform/app-update";
 import { lazyWithRetry } from "../../platform/lazy";
 import { OptionalChunkBoundary } from "../../platform/OptionalChunkBoundary";
 import { getWebBillingTier } from "../billing/web-billing";
@@ -348,6 +349,12 @@ export const LibraryPage: React.FC = () => {
     }
 
     const restorable = snapshot;
+
+    if (restorable) {
+      // Undo lives in memory: a waiting app update must not reload the page on the next tap.
+      holdAutoApplyUpdate(UNDO_UPDATE_HOLD_MS);
+    }
+
     showToast({
       action: restorable
         ? {

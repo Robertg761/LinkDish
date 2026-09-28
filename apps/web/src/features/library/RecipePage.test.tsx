@@ -3,10 +3,17 @@ import React from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { AppUpdatePrompt } from "../../app/AppUpdatePrompt";
 import { ToastProvider } from "../../components/Toast";
 import { resetDataChangeFeedForTests, setDataChannelFactoryForTests } from "../../data/change-feed";
 import { resetCookSessionStoreForTests } from "../../data/cook-session-store";
 import { resetLibraryStoreForTests } from "../../data/library-store";
+import {
+  AUTO_APPLY_UPDATE_AFTER_MS,
+  markUpdateReady,
+  resetAppUpdateForTests,
+  startAppUpdates
+} from "../../platform/app-update";
 import { resetPreferencesForTests } from "../../preferences/preferences-store";
 import {
   COOK_SESSIONS_STORE_NAME,
@@ -34,6 +41,10 @@ import type { Recipe } from "@linkdish/recipe-domain";
 type ApiClientModule = typeof ApiClientModuleNamespace;
 
 vi.mock("idb", async () => (await import("../../storage/testing/fake-idb")).fakeIdbModule);
+
+const pwa = vi.hoisted(() => ({ updateSW: vi.fn() }));
+
+vi.mock("virtual:pwa-register", () => ({ registerSW: () => pwa.updateSW }));
 
 const apiMocks = vi.hoisted(() => ({
   createSharedRecipe: vi.fn(),
@@ -410,6 +421,48 @@ describe("RecipePage saved route", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Undo" }));
     await waitFor(() => expect(stored("recipe_local")?.recipe.title).toBe("Weeknight Chili"));
+  });
+
+  it("keeps the Undo when an ignored app update is waiting to apply on navigation", async () => {
+    resetAppUpdateForTests();
+    pwa.updateSW.mockReset().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "serviceWorker", { configurable: true, value: {} });
+
+    try {
+      await seed([savedRecipe()]);
+      render(
+        <ToastProvider>
+          <MemoryRouter initialEntries={["/recipes/recipe_local"]}>
+            <AppUpdatePrompt />
+            <Routes>
+              <Route element={<RecipePage />} path="/recipes/:id" />
+              <Route element={<div>Cookbook route</div>} path="/" />
+            </Routes>
+          </MemoryRouter>
+        </ToastProvider>
+      );
+      await screen.findByRole("heading", { level: 1, name: "Weeknight Chili" });
+      await act(async () => {
+        await startAppUpdates();
+      });
+      act(() => {
+        markUpdateReady(Date.now() - AUTO_APPLY_UPDATE_AFTER_MS - 1);
+      });
+
+      fireEvent.click(within(openMenu()).getByRole("menuitem", { name: "Delete recipe" }));
+      expect(await screen.findByText("Cookbook route")).toBeInTheDocument();
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      // Reloading now would throw away the only way back.
+      expect(pwa.updateSW).not.toHaveBeenCalled();
+      fireEvent.click(await screen.findByRole("button", { name: "Undo" }));
+      await waitFor(() => expect(stored("recipe_local")?.recipe.title).toBe("Weeknight Chili"));
+    } finally {
+      resetAppUpdateForTests();
+      Reflect.deleteProperty(navigator, "serviceWorker");
+    }
   });
 
   it("deletes the household copy first for synced recipes", async () => {

@@ -7,10 +7,12 @@ import { ToastProvider } from "../components/Toast";
 import {
   AUTO_APPLY_UPDATE_AFTER_MS,
   getAppUpdateSnapshot,
+  holdAutoApplyUpdate,
   markUpdateReady,
   resetAppUpdateForTests,
   shouldAutoApplyUpdate,
-  startAppUpdates
+  startAppUpdates,
+  UNDO_UPDATE_HOLD_MS
 } from "../platform/app-update";
 
 import { AppUpdatePrompt } from "./AppUpdatePrompt";
@@ -142,6 +144,26 @@ describe("app update prompt", () => {
 
     expect(pwa.updateSW).not.toHaveBeenCalled();
     expect(screen.getByText("A fresh version of LinkDish is ready")).toBeInTheDocument();
+  });
+
+  it("does not reload on navigation while an Undo is pending", async () => {
+    renderPrompt();
+    await register();
+
+    act(() => {
+      markUpdateReady(Date.now() - AUTO_APPLY_UPDATE_AFTER_MS - 1);
+    });
+    // e.g. a recipe was deleted and the page moved on, leaving an in-memory Undo behind.
+    holdAutoApplyUpdate(UNDO_UPDATE_HOLD_MS);
+    expect(shouldAutoApplyUpdate()).toBe(false);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Go to plan" }));
+      await Promise.resolve();
+    });
+
+    expect(pwa.updateSW).not.toHaveBeenCalled();
+    expect(shouldAutoApplyUpdate(Date.now() + UNDO_UPDATE_HOLD_MS)).toBe(true);
   });
 
   it("checks for new versions hourly in long-lived tabs", async () => {

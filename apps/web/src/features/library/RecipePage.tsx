@@ -32,6 +32,7 @@ import { buildRecipeImageUrl } from "../../lib/recipe-image";
 import { createShareCardBlob } from "../../lib/share-card";
 import { useDocumentTitle } from "../../lib/use-document-title";
 import { RAIL_MEDIA_QUERY, useMediaQuery } from "../../lib/use-media-query";
+import { holdAutoApplyUpdate, UNDO_UPDATE_HOLD_MS } from "../../platform/app-update";
 import { LazyCookMode, preloadCookMode } from "../cook-mode/LazyCookMode";
 import { useRecipeMenuExtras } from "../recipe-view/recipe-menu-extras";
 import { useRecipeScaling } from "../recipe-view/recipe-scaling";
@@ -611,6 +612,8 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
     const snapshot = (await getSavedRecipeById(record.id).catch(() => undefined)) ?? record;
 
     await removeSavedRecipe(record.id);
+    // Undo lives in memory: a waiting app update must not reload the page on this navigation.
+    holdAutoApplyUpdate(UNDO_UPDATE_HOLD_MS);
     void navigate("/");
     showToast({
       action: {
