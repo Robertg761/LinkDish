@@ -29,6 +29,10 @@ export const TagEditorSheet = lazyWithRetry(() =>
   }))
 );
 
+export const AddToPlanSheet = lazyWithRetry(() =>
+  import("../../plan/AddToPlanSheet").then((module) => ({ default: module.AddToPlanSheet }))
+);
+
 export const FamilySignInSheet = lazyWithRetry(() =>
   import("./FamilySignInSheet").then((module) => ({ default: module.FamilySignInSheet }))
 );

@@ -513,11 +513,34 @@ describe("LibraryPage", () => {
     renderPage();
 
     const meter = await screen.findByRole("region", { name: "Free cookbook" });
-    expect(within(meter).getByText("Your cookbook is nearly full")).toBeInTheDocument();
-    expect(within(meter).getByText("12 of 15 recipes saved")).toBeInTheDocument();
+    expect(within(meter).getByText("Almost full")).toBeInTheDocument();
+    expect(meter).toHaveTextContent("12 of 15 saved · 3 left. The starter recipe doesn't count.");
+    // The header adds up with the meter: saved recipes and starters are counted apart.
+    expect(screen.getByText("12 recipes + 1 starter")).toBeInTheDocument();
 
     fireEvent.click(within(meter).getByRole("button", { name: "Get Plus" }));
     expect(upgradeMocks.requestUpgradeSheet).toHaveBeenCalledWith("save_limit");
+  });
+
+  it("never clamps the count: a cookbook over the free limit says so", async () => {
+    seedRecipes(
+      Array.from({ length: 17 }, (_, index) =>
+        makeRecipe(`recipe-${index}`, { title: `Recipe ${index}` })
+      )
+    );
+
+    renderPage();
+
+    const meter = await screen.findByRole("region", { name: "Free cookbook" });
+    expect(within(meter).getByText("Over the free limit")).toBeInTheDocument();
+    expect(meter).toHaveTextContent(
+      "17 of 15 saved · 2 over the free limit. Everything stays; new saves need Plus."
+    );
+    expect(within(meter).getByRole("progressbar")).toHaveAttribute(
+      "aria-valuetext",
+      "17 of 15 saved"
+    );
+    expect(screen.getByText("17 recipes")).toBeInTheDocument();
   });
 
   it("hides the quota meter for Plus cooks", async () => {
@@ -841,9 +864,6 @@ describe("LibraryPage", () => {
       "/account"
     );
     expect(screen.getByRole("radio", { name: "Personal" })).toHaveAttribute("aria-checked", "true");
-    expect(
-      screen.getByText("Sign in to create or join an active Family household.")
-    ).toBeInTheDocument();
 
     fireEvent.click(within(sheet).getByRole("button", { name: "Cancel" }));
     await waitFor(() =>
@@ -854,7 +874,7 @@ describe("LibraryPage", () => {
     expect(apiMocks.getSharedRecipes).not.toHaveBeenCalled();
   });
 
-  it("keeps Family locked with an explainer when the account has no household", async () => {
+  it("opens a designed Family tab (not a system notice) when the account has no household", async () => {
     authMocks.user = { billingPlan: "plus", email: "plus@example.com", id: "user_plus" };
     apiMocks.getSharedRecipes.mockRejectedValue(
       new apiMocks.ExtractorApiError("Forbidden", 403, {
@@ -868,16 +888,23 @@ describe("LibraryPage", () => {
     await waitFor(() => expect(apiMocks.getSharedRecipes).toHaveBeenCalled());
     fireEvent.click(screen.getByRole("radio", { name: "Family" }));
 
+    const panel = await screen.findByRole("region", { name: "Family cookbook" });
     expect(
-      await screen.findByText(
-        "Family recipe sharing is available after you create or join an active Family household."
-      )
+      within(panel).getByRole("heading", { name: "Cook together with Family" })
     ).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Set up Family" })).toHaveAttribute(
+    expect(within(panel).getByRole("link", { name: "See the Family plan" })).toHaveAttribute(
+      "href",
+      "/pricing?upgrade=family"
+    );
+    expect(within(panel).getByRole("link", { name: "I have an invite" })).toHaveAttribute(
       "href",
       "/household"
     );
-    expect(screen.getByRole("radio", { name: "Personal" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("radio", { name: "Family" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByText("Not set up yet")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("searchbox", { name: "Search your cookbook" })
+    ).not.toBeInTheDocument();
   });
 
   it("shows Family recipes with who added them and saves personal copies", async () => {

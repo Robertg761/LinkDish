@@ -18,13 +18,6 @@ const ImportSheet = lazyWithRetry(() =>
   import("./ImportSheet").then((module) => ({ default: module.ImportSheet }))
 );
 
-const FORMATS: ReadonlyArray<{ label: string; extension: string }> = [
-  { label: "LinkDish backup", extension: ".json" },
-  { label: "Paprika", extension: ".paprikarecipes" },
-  { label: "Mela", extension: ".melarecipes" },
-  { label: "Recipe JSON-LD", extension: ".json" }
-];
-
 export const ImportCard: React.FC<ImportCardProps> = ({ isPremium }) => {
   const inputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
@@ -83,14 +76,11 @@ export const ImportCard: React.FC<ImportCardProps> = ({ isPremium }) => {
         </div>
       </div>
 
-      <ul aria-label="Files LinkDish can import" className="settings-import-formats">
-        {FORMATS.map((format) => (
-          <li className="settings-import-format" key={format.label}>
-            <span>{format.label}</span>
-            <span className="settings-import-format-extension">{format.extension}</span>
-          </li>
-        ))}
-      </ul>
+      {/* Plain words, not pills: these are the files it reads, not buttons. */}
+      <p className="settings-data-card-text settings-import-formats">
+        Works with LinkDish backups, Paprika, Mela and recipe files saved from other apps and
+        websites.
+      </p>
 
       <input
         accept={IMPORT_FILE_ACCEPT}

@@ -50,6 +50,24 @@ vi.mock("../../auth/AuthProvider", () => ({
   })
 }));
 
+const libraryMocks = vi.hoisted(() => ({
+  recipes: [] as Array<{ id: string; isStarter?: boolean }>
+}));
+
+vi.mock("../../data/library-store", () => ({
+  useSavedRecipes: () => ({
+    error: null,
+    recipes: libraryMocks.recipes,
+    retry: vi.fn(),
+    status: "ready"
+  })
+}));
+
+const cookbookOf = (saved: number, starters = 0) => [
+  ...Array.from({ length: saved }, (_, index) => ({ id: `recipe-${index}` })),
+  ...Array.from({ length: starters }, (_, index) => ({ id: `starter-${index}`, isStarter: true }))
+];
+
 const TriggerButtons = () => {
   const { requestUpgradeSheet } = useUpgradeSheet();
   const triggers: UpgradeSheetTrigger[] = ["save_limit", "import_limit", "family_share_no_plan"];
@@ -97,6 +115,7 @@ describe("UpgradeSheetProvider", () => {
     });
     authState.isAuthenticated = true;
     authState.plan = "free";
+    libraryMocks.recipes = cookbookOf(15);
     resetWebBillingAvailabilityForTests();
     resetCheckoutSessionForTests();
     sessionStorage.clear();
@@ -113,7 +132,7 @@ describe("UpgradeSheetProvider", () => {
     fireEvent.click(screen.getByRole("button", { name: "save_limit" }));
 
     const dialog = await screen.findByRole("dialog", { name: "Your free cookbook is full." });
-    expect(dialog).toHaveTextContent(/You have 15 recipes saved on Free/u);
+    expect(dialog).toHaveTextContent(/15 of 15 saved on Free\./u);
     expect(within(dialog).getByText("Unlimited saved recipes")).toBeInTheDocument();
     expect(analyticsMocks.trackWebEvent).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -145,6 +164,34 @@ describe("UpgradeSheetProvider", () => {
     await waitFor(() => {
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     });
+  });
+
+  it("matches the Cookbook meter: nearly full with the live count, starters explained", async () => {
+    libraryMocks.recipes = cookbookOf(13, 3);
+    renderUpgradeHarness();
+
+    fireEvent.click(screen.getByRole("button", { name: "save_limit" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Your cookbook is nearly full." });
+    expect(dialog).toHaveTextContent(
+      "You've saved 13 of 15 free recipes, so there's room for 2 more. 3 starter recipes don't count."
+    );
+    expect(dialog).not.toHaveTextContent(/is full/u);
+    expect(
+      within(dialog).getByText("Your 13 saved recipes stay right where they are")
+    ).toBeVisible();
+  });
+
+  it("tells an over-the-limit cook the true count instead of clamping it", async () => {
+    libraryMocks.recipes = cookbookOf(17);
+    renderUpgradeHarness();
+
+    fireEvent.click(screen.getByRole("button", { name: "save_limit" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Your free cookbook is full." });
+    expect(dialog).toHaveTextContent(
+      "17 of 15 saved on Free (2 over the limit, and they all stay)."
+    );
   });
 
   it("preselects yearly and the plan that fits the trigger, then checks out from the sheet", async () => {

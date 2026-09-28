@@ -4,73 +4,74 @@ import { Button } from "../../../components/Button";
 import { Icon } from "../../../components/Icon";
 import { ProgressBar } from "../../../components/ProgressBar";
 
+import type { FreeQuotaSummary } from "./free-quota";
+
 import "./LibraryQuotaMeter.css";
 
-/** From this many saved recipes the meter turns into a friendly upgrade prompt. */
-export const QUOTA_NEARLY_FULL_AT = 12;
-
 interface LibraryQuotaMeterProps {
-  count: number;
-  limit: number;
+  quota: FreeQuotaSummary;
   onUpgrade: () => void;
 }
 
+const PROMPT_TITLES = {
+  full: "Cookbook full",
+  nearly_full: "Almost full",
+  over: "Over the free limit"
+} as const;
+
 /**
- * Free cookbooks: "4 of 15 recipes saved" as a quiet meter, becoming an upgrade prompt when the
- * cookbook is nearly full. Starter recipes never count.
+ * Free cookbooks: "4 of 15 saved" as a quiet meter, becoming an upgrade prompt when the cookbook
+ * is nearly full. The count is the true one (never clamped), and starter recipes never count —
+ * the meter says so whenever there are any, so it always adds up with the header.
  */
-export const LibraryQuotaMeter: React.FC<LibraryQuotaMeterProps> = ({
-  count,
-  limit,
-  onUpgrade
-}) => {
-  const nearlyFull = count >= QUOTA_NEARLY_FULL_AT;
-  const full = count >= limit;
-  const remaining = Math.max(0, limit - count);
-  const valueText = `${Math.min(count, limit)} of ${limit} recipes saved`;
+export const LibraryQuotaMeter: React.FC<LibraryQuotaMeterProps> = ({ quota, onUpgrade }) => {
+  const bar = (
+    <ProgressBar
+      className="library-quota-bar"
+      label="Free recipes saved"
+      max={quota.limit}
+      size="sm"
+      tone={quota.tone}
+      value={quota.saved}
+      valueText={quota.valueText}
+    />
+  );
+
+  if (quota.state === "roomy") {
+    return (
+      <section aria-label="Free cookbook" className="library-quota">
+        <div className="library-quota-copy">
+          <p className="library-quota-text">
+            <span className="num">{quota.valueText}</span> on the free plan
+            {quota.starterNote ? (
+              <span className="library-quota-note"> · {quota.starterNote}</span>
+            ) : null}
+          </p>
+          {bar}
+        </div>
+        <Button className="library-quota-action" onClick={onUpgrade} pill size="sm" variant="ghost">
+          Go unlimited
+        </Button>
+      </section>
+    );
+  }
 
   return (
-    <section
-      aria-label="Free cookbook"
-      className={`library-quota${nearlyFull ? " is-nearly-full" : ""}`}
-    >
-      {nearlyFull ? (
-        <span aria-hidden="true" className="library-quota-icon">
-          <Icon name={full ? "lock" : "sparkles"} size={18} />
-        </span>
-      ) : null}
-      <div className="library-quota-copy">
-        {nearlyFull ? (
-          <p className="library-quota-title">
-            {full ? "Your free cookbook is full" : "Your cookbook is nearly full"}
-          </p>
+    <section aria-label="Free cookbook" className={`library-quota is-prompt is-${quota.state}`}>
+      <span aria-hidden="true" className="library-quota-icon">
+        <Icon name={quota.state === "nearly_full" ? "sparkles" : "lock"} size={18} />
+      </span>
+      <p className="library-quota-title">{PROMPT_TITLES[quota.state]}</p>
+      <p className="library-quota-text">
+        <span className="num">{quota.valueText}</span> · {quota.statusText}.
+        {quota.state === "over" ? " Everything stays; new saves need Plus." : null}
+        {quota.starterNote ? (
+          <span className="library-quota-note"> {quota.starterNote}</span>
         ) : null}
-        <p className="library-quota-text">
-          <span className="num">{valueText}</span>
-          {nearlyFull
-            ? full
-              ? ". Plus makes it unlimited."
-              : `. ${remaining} left on the free plan.`
-            : " on the free plan"}
-        </p>
-        <ProgressBar
-          className="library-quota-bar"
-          label="Free recipes saved"
-          max={limit}
-          size="sm"
-          tone={nearlyFull ? "tomato" : "primary"}
-          value={count}
-          valueText={valueText}
-        />
-      </div>
-      <Button
-        className="library-quota-action"
-        onClick={onUpgrade}
-        pill
-        size="sm"
-        variant={nearlyFull ? "primary" : "ghost"}
-      >
-        {nearlyFull ? "Get Plus" : "Go unlimited"}
+      </p>
+      {bar}
+      <Button className="library-quota-action" onClick={onUpgrade} pill size="sm">
+        Get Plus
       </Button>
     </section>
   );

@@ -6,8 +6,8 @@ import { Menu } from "../../../components/Menu";
 import { RecipeCard } from "../../../components/RecipeCard";
 
 import { HighlightedText } from "./HighlightedText";
-import { formatRecipeMeta, isStarterRecipe, normalizeText } from "./library-model";
-import { CompactRecipeMeta } from "./RecipeMeta";
+import { isStarterRecipe, normalizeText } from "./library-model";
+import { CompactRecipeMeta, RecipeMetaLine } from "./RecipeMeta";
 
 import type { TextHighlighter } from "./HighlightedText";
 import type { LibraryView } from "./library-model";
@@ -17,6 +17,7 @@ import type { WebSavedRecipe } from "../saved-recipe-types";
 export type LibraryRecipeAction =
   | "collections"
   | "tags"
+  | "plan"
   | "shopping"
   | "family"
   | "duplicate"
@@ -44,19 +45,25 @@ interface StatusBadge {
   icon?: "users" | "chef-hat" | "alert-circle" | "refresh" | "sparkles" | undefined;
 }
 
-const getStatusBadges = (recipe: WebSavedRecipe): StatusBadge[] => {
+/**
+ * Household sync states only mean something to a cook with a household, and they use the same
+ * plain words as the card's menu ("Share changes with Family").
+ */
+const getStatusBadges = (recipe: WebSavedRecipe, showSync: boolean): StatusBadge[] => {
   const badges: StatusBadge[] = [];
 
   if (isStarterRecipe(recipe)) {
     badges.push({ icon: "sparkles", key: "starter", label: "Starter", tone: "butter" });
   }
 
-  if (recipe.sync?.status === "synced") {
+  if (!showSync) {
+    // Nothing to say about sync without a household.
+  } else if (recipe.sync?.status === "synced") {
     badges.push({ icon: "users", key: "sync", label: "Family", tone: "primary" });
   } else if (recipe.sync?.status === "dirty") {
-    badges.push({ icon: "refresh", key: "sync", label: "Edits to sync", tone: "butter" });
+    badges.push({ icon: "refresh", key: "sync", label: "Edits not shared", tone: "butter" });
   } else if (recipe.sync?.status === "sync_failed") {
-    badges.push({ icon: "alert-circle", key: "sync", label: "Sync failed", tone: "danger" });
+    badges.push({ icon: "alert-circle", key: "sync", label: "Not shared", tone: "danger" });
   }
 
   const timesCooked = recipe.timesCooked ?? 0;
@@ -78,9 +85,9 @@ const familyMenuLabel = (recipe: WebSavedRecipe): string | null => {
     case "synced":
       return null;
     case "dirty":
-      return "Sync changes to Family";
+      return "Share changes with Family";
     case "sync_failed":
-      return "Retry Family sync";
+      return "Try sharing with Family again";
     default:
       return "Share to Family";
   }
@@ -100,7 +107,10 @@ const LibraryRecipeTileComponent: React.FC<LibraryRecipeTileProps> = ({
   const title = normalizeText(recipe.recipe.title);
   const isList = view === "list";
   const favorite = Boolean(recipe.favorite);
-  const badges = useMemo(() => getStatusBadges(recipe), [recipe]);
+  const badges = useMemo(
+    () => getStatusBadges(recipe, canShareToFamily),
+    [canShareToFamily, recipe]
+  );
 
   const menuItems = useMemo<MenuEntry[]>(() => {
     const familyLabel =
@@ -114,6 +124,12 @@ const LibraryRecipeTileComponent: React.FC<LibraryRecipeTileProps> = ({
         onSelect: () => onAction("collections", recipe)
       },
       { icon: "tag", id: "tags", label: "Edit tags…", onSelect: () => onAction("tags", recipe) },
+      {
+        icon: "calendar-plus",
+        id: "plan",
+        label: "Add to meal plan…",
+        onSelect: () => onAction("plan", recipe)
+      },
       {
         icon: "shopping-basket",
         id: "shopping",
@@ -196,7 +212,7 @@ const LibraryRecipeTileComponent: React.FC<LibraryRecipeTileProps> = ({
       mediaBadges={!isList && badgeNodes.length ? badgeNodes.slice(0, 2) : undefined}
       meta={
         isList ? (
-          formatRecipeMeta(recipe.recipe, { includeSource: true })
+          <RecipeMetaLine recipe={recipe.recipe} />
         ) : (
           <CompactRecipeMeta recipe={recipe.recipe} />
         )

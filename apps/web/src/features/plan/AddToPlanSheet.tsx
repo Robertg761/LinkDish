@@ -17,6 +17,7 @@ import {
   type MealPlanEntry,
   type MealPlanSlot
 } from "../../data/meal-plan-store";
+import { useRovingRadioGroup } from "../../lib/use-roving-radio";
 import { usePreference } from "../../preferences/preferences-store";
 
 import {
@@ -39,6 +40,8 @@ export interface AddToPlanSheetProps {
   defaultServings?: number | undefined;
   /** Called after the entry is saved. */
   onAdded?: ((entry: MealPlanEntry) => void) | undefined;
+  /** Where the sheet was opened, for the meal_plan_entry_added event. */
+  analyticsSource?: "recipe_page" | "cookbook" | undefined;
 }
 
 const DAYS_AHEAD = 14;
@@ -53,7 +56,8 @@ export const AddToPlanSheet: React.FC<AddToPlanSheetProps> = ({
   recipeId,
   recipeTitle,
   defaultServings,
-  onAdded
+  onAdded,
+  analyticsSource = "recipe_page"
 }) => {
   const navigate = useNavigate();
   const { showToast } = useToast();
@@ -73,6 +77,7 @@ export const AddToPlanSheet: React.FC<AddToPlanSheetProps> = ({
     [plan.entries]
   );
   const slotTaken = plan.entries.some((entry) => entry.date === date && entry.slot === slot);
+  const dayRadio = useRovingRadioGroup(dates, date, setDate);
 
   const save = async () => {
     setSaving(true);
@@ -88,7 +93,7 @@ export const AddToPlanSheet: React.FC<AddToPlanSheetProps> = ({
       });
       trackWebEvent({
         eventName: "meal_plan_entry_added",
-        properties: { kind: "recipe", slot, source: "recipe_page" },
+        properties: { kind: "recipe", slot, source: analyticsSource },
         routeOrScreen: window.location.pathname
       });
       showToast({
@@ -142,7 +147,7 @@ export const AddToPlanSheet: React.FC<AddToPlanSheetProps> = ({
           Day
         </span>
         <ul aria-labelledby="plan-add-day-label" className="plan-add-days" role="radiogroup">
-          {dates.map((key) => {
+          {dates.map((key, index) => {
             const label = getDayLabel(key);
             const selected = key === date;
 
@@ -163,10 +168,11 @@ export const AddToPlanSheet: React.FC<AddToPlanSheetProps> = ({
                   onClick={() => setDate(key)}
                   role="radio"
                   type="button"
+                  {...dayRadio(index)}
                 >
-                  <span className="plan-add-day-name">
-                    {key === todayKey ? "Today" : label.weekday}
-                  </span>
+                  {/* Today keeps its weekday (a wider "TODAY" overflowed the tile); the accent
+                      colour and ring mark it. */}
+                  <span className="plan-add-day-name">{label.weekday}</span>
                   <span className="plan-add-day-date num">{label.dayOfMonth}</span>
                   <span
                     aria-hidden="true"

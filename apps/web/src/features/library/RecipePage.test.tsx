@@ -260,9 +260,7 @@ describe("RecipePage saved route", () => {
     expect(screen.queryByText("Recipe not found")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
-    expect(
-      await screen.findByRole("heading", { level: 1, name: "Weeknight Chili" })
-    ).toBeVisible();
+    expect(await screen.findByRole("heading", { level: 1, name: "Weeknight Chili" })).toBeVisible();
   });
 
   it("keeps ticked ingredients in the cook session so cook mode sees them", async () => {

@@ -5,8 +5,12 @@ import { Badge } from "../../components/Badge";
 import { Button, ButtonLink } from "../../components/Button";
 import { Icon } from "../../components/Icon";
 import { Sheet } from "../../components/Sheet";
+import { useSavedRecipes } from "../../data/library-store";
 import { useWebBillingAvailability } from "../billing/billing-availability";
 import { useWebCheckout } from "../billing/use-web-checkout";
+import { webBillingPlans } from "../billing/web-billing";
+import { describeFreeQuota } from "../library/components/free-quota";
+import { countCookbook } from "../library/components/library-model";
 import {
   getBestYearlySavings,
   getPlanPriceDisplay,
@@ -80,14 +84,68 @@ const triggerCopy: Record<UpgradeSheetTrigger, TriggerCopy> = {
     benefits: [
       "Unlimited saved recipes",
       "100 recipe imports every month",
-      "Your 15 saved recipes stay right where they are"
+      "Your saved recipes stay right where they are"
     ],
     eyebrow: "Cookbook full",
-    message: "You have 15 recipes saved on Free. Upgrade to keep every good find close.",
+    message: "Your free cookbook is full. Upgrade to keep every good find close.",
     plan: "plus",
     purchaseTrigger: "unknown",
     title: "Your free cookbook is full."
   }
+};
+
+const FREE_SAVE_LIMIT =
+  typeof webBillingPlans.free.limits.savedRecipes === "number"
+    ? webBillingPlans.free.limits.savedRecipes
+    : 15;
+
+/**
+ * The cookbook sheet says what the Cookbook's meter says: "nearly full" with the live count when
+ * there is still room (the meter's Get Plus), "full" only when it is, and that starter recipes
+ * don't count.
+ */
+const useSaveLimitCopy = (enabled: boolean, base: TriggerCopy): TriggerCopy => {
+  const library = useSavedRecipes();
+
+  if (!enabled || library.status !== "ready") {
+    return base;
+  }
+
+  const quota = describeFreeQuota(countCookbook(library.recipes), FREE_SAVE_LIMIT);
+  const starterNote = quota.starterNote ? ` ${quota.starterNote}` : "";
+  const benefits: [string, string, string] = [
+    base.benefits[0],
+    base.benefits[1],
+    `Your ${quota.saved} saved recipes stay right where they are`
+  ];
+
+  if (quota.state === "roomy") {
+    return {
+      ...base,
+      benefits,
+      eyebrow: "Free plan",
+      message: `You've saved ${quota.saved} of ${quota.limit} free recipes.${starterNote} Plus gives every good find a place, with no limit.`,
+      title: "Make your cookbook unlimited."
+    };
+  }
+
+  if (quota.state === "nearly_full") {
+    return {
+      ...base,
+      benefits,
+      eyebrow: "Almost full",
+      message: `You've saved ${quota.saved} of ${quota.limit} free recipes, so there's room for ${quota.remaining} more.${starterNote} Plus gives every good find a place.`,
+      title: "Your cookbook is nearly full."
+    };
+  }
+
+  const overNote = quota.over > 0 ? ` (${quota.over} over the limit, and they all stay)` : "";
+
+  return {
+    ...base,
+    benefits,
+    message: `${quota.valueText} on Free${overNote}.${starterNote} Upgrade to keep every good find close.`
+  };
 };
 
 export interface UpgradeSheetDialogProps {
@@ -103,7 +161,7 @@ export const UpgradeSheetDialog: React.FC<UpgradeSheetDialogProps> = ({
   onDismiss,
   trigger
 }) => {
-  const copy = triggerCopy[trigger];
+  const copy = useSaveLimitCopy(trigger === "save_limit", triggerCopy[trigger]);
   const [plan, setPlan] = useState<PaidBillingPlan>(copy.plan);
   const [period, setPeriod] = useState<BillingPeriod>("yearly");
   const availabilityView = useWebBillingAvailability();

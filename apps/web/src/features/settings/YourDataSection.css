@@ -160,10 +160,13 @@
 
 .settings-data-stat-label {
   max-width: 100%;
+  overflow: hidden;
   color: var(--color-ink-muted);
   font-size: var(--text-caption);
   font-weight: 600;
   line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .settings-data-protect {
@@ -221,33 +224,7 @@
 }
 
 .settings-import-formats {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 0;
   margin: 0;
-  list-style: none;
-}
-
-.settings-import-format {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 6px;
-  min-height: 30px;
-  padding: 5px 10px;
-  border: 1px solid var(--color-border-subtle);
-  border-radius: var(--radius-pill);
-  background: var(--color-surface-tint);
-  color: var(--color-ink);
-  font-size: var(--text-caption);
-  font-weight: 600;
-}
-
-.settings-import-format-extension {
-  color: var(--color-ink-subtle);
-  font-family: var(--font-family-mono);
-  font-size: 0.6875rem;
-  font-weight: 500;
 }
 
 .settings-import-hint {

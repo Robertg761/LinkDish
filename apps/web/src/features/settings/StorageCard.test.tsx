@@ -54,8 +54,11 @@ describe("StorageCard", () => {
     expect(screen.getByText("24")).toBeInTheDocument();
     expect(screen.getByText("Collections")).toBeInTheDocument();
     expect(
-      screen.getByText("Plus 3 starter recipes LinkDish added to get you going.")
+      screen.getByText(
+        "Plus 3 starter recipes LinkDish added to get you going. They don't count toward the free limit."
+      )
     ).toBeInTheDocument();
+    expect(screen.getByText("Meals")).toBeInTheDocument();
     expect(screen.getByText("Not protected yet")).toBeInTheDocument();
     expect(screen.getByText(/With Family, recipes you share/u)).toBeInTheDocument();
 

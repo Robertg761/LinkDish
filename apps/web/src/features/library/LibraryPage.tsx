@@ -13,9 +13,7 @@ import { trackWebEvent } from "../../analytics/client";
 import { apiClient } from "../../api/client";
 import { getFriendlyErrorMessage } from "../../api/error-message";
 import { useAuth } from "../../auth/AuthProvider";
-import { ButtonLink } from "../../components/Button";
 import { ErrorState } from "../../components/ErrorState";
-import { IconButton } from "../../components/IconButton";
 import { PageHeader } from "../../components/PageHeader";
 import { RecipeCard } from "../../components/RecipeCard";
 import { SearchField } from "../../components/SearchField";
@@ -35,11 +33,13 @@ import { OptionalChunkBoundary } from "../../platform/OptionalChunkBoundary";
 import { getWebBillingTier } from "../billing/web-billing";
 import { useUpgradeSheet } from "../upgrade/UpgradeSheet";
 
+import { FamilyLockedPanel } from "./components/FamilyLockedPanel";
+import { describeFreeQuota, formatCookbookCount } from "./components/free-quota";
 import {
   buildFilterChips,
   buildFilterPredicate,
   buildShelves,
-  countQuotaRecipes,
+  countCookbook,
   getLibrarySessionState,
   isStarterRecipe,
   QUICK_FILTER,
@@ -53,6 +53,7 @@ import {
   storeView
 } from "./components/library-model";
 import {
+  AddToPlanSheet,
   CollectionPickerSheet,
   FamilySignInSheet,
   LazyConfirmationDialog,
@@ -63,8 +64,8 @@ import {
   TagEditorSheet
 } from "./components/library-sheets";
 import { LibraryFilterBar } from "./components/LibraryFilterBar";
-import { LibraryNotice, LibraryStorageBanner } from "./components/LibraryNotice";
-import { LibraryQuotaMeter, QUOTA_NEARLY_FULL_AT } from "./components/LibraryQuotaMeter";
+import { LibraryStorageBanner } from "./components/LibraryNotice";
+import { LibraryQuotaMeter } from "./components/LibraryQuotaMeter";
 import { LibraryRecipeTile } from "./components/LibraryRecipeTile";
 import {
   LibraryNoResults,
@@ -80,11 +81,7 @@ import {
   useRecipeSearchIndex,
   useSearchEngine
 } from "./components/use-library-search";
-import {
-  FAMILY_ACCESS_MESSAGE,
-  isSharedRecipeNotFoundError,
-  useSharedRecipes
-} from "./components/use-shared-recipes";
+import { isSharedRecipeNotFoundError, useSharedRecipes } from "./components/use-shared-recipes";
 import {
   getSavedRecipeById,
   LOCAL_LIMIT_FREE,
@@ -142,14 +139,6 @@ const isTypingTarget = (target: EventTarget | null): boolean =>
     /^(input|textarea|select)$/i.test(target.tagName) ||
     target.closest("[role='menu']") !== null);
 
-const isMacLike = (): boolean => {
-  try {
-    return /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent);
-  } catch {
-    return false;
-  }
-};
-
 interface ShoppingSheetState {
   recipe: WebSavedRecipe;
   canSync: boolean;
@@ -164,7 +153,9 @@ export const LibraryPage: React.FC = () => {
   const { collections } = useCollections();
   const shared = useSharedRecipes(isAuthenticated, user?.id);
   const showShortcutHint = useMediaQuery("(hover: hover) and (pointer: fine)");
+  const compactSearch = useMediaQuery("(max-width: 479px)");
   const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const [searchStuck, setSearchStuck] = useState(false);
   const [initialSession] = useState(getLibrarySessionState);
 
   const [tab, setTab] = useState<LibraryTab>(initialSession.tab);
@@ -174,11 +165,11 @@ export const LibraryPage: React.FC = () => {
   const [direction, setDirection] = useState<LibrarySortDirection>(readStoredSortDirection);
   const [view, setView] = useState<LibraryView>(readStoredView);
 
-  const [familyExplainerVisible, setFamilyExplainerVisible] = useState(false);
   const [familySignInOpen, setFamilySignInOpen] = useState(false);
   const [collectionPickerIds, setCollectionPickerIds] = useState<string[] | null>(null);
   const [manageCollectionsOpen, setManageCollectionsOpen] = useState(false);
   const [tagEditorId, setTagEditorId] = useState<string | null>(null);
+  const [planRecipe, setPlanRecipe] = useState<WebSavedRecipe | null>(null);
   const [shoppingSheet, setShoppingSheet] = useState<ShoppingSheetState | null>(null);
   const [pendingSyncedDelete, setPendingSyncedDelete] = useState<WebSavedRecipe | null>(null);
   const [deletingSynced, setDeletingSynced] = useState(false);
@@ -192,8 +183,10 @@ export const LibraryPage: React.FC = () => {
   const isPremiumUser = isAuthenticated ? billingTier !== "free" : undefined;
   const canUseSharedRecipeBook = isAuthenticated && !shared.accessBlocked;
   const familyTabLocked = !canUseSharedRecipeBook;
-  const activeTab: LibraryTab = familyTabLocked ? "personal" : tab;
+  // Signed-in cooks can open a locked Family tab: it explains Family instead of refusing the tap.
+  const activeTab: LibraryTab = isAuthenticated ? tab : "personal";
   const isPersonal = activeTab === "personal";
+  const familyLocked = !isPersonal && familyTabLocked;
   const libraryReady = library.status === "ready";
   const isEmptyLibrary = libraryReady && recipes.length === 0;
   const isNewCook = libraryReady && recipes.length > 0 && recipes.every(isStarterRecipe);
@@ -203,15 +196,16 @@ export const LibraryPage: React.FC = () => {
     setLibrarySessionState({ filters, query, tab });
   }, [filters, query, tab]);
 
-  // Signed out, or Family became unavailable: drop back to Personal.
+  // Signed out: drop back to Personal.
   useEffect(() => {
-    if (familyTabLocked && tab === "family") {
+    if (!isAuthenticated && tab === "family") {
       setTab("personal");
     }
-  }, [familyTabLocked, tab]);
+  }, [isAuthenticated, tab]);
 
   /* ------------------------------ Keyboard ------------------------------ */
-  // "/" (outside text fields) and ⌘K / Ctrl+K jump to search.
+  // "/" (outside text fields) jumps to search. ⌘K / Ctrl+K opens the command palette (the
+  // CommandCenter claims it first); focusing search is only the fallback when it is absent.
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented) {
@@ -241,6 +235,24 @@ export const LibraryPage: React.FC = () => {
   }, []);
 
   /* ------------------------------- Search ------------------------------- */
+  // The sticky search bar turns opaque with a hairline once it is stuck, so cards scrolling under
+  // it are covered cleanly instead of being sliced by a fade.
+  const searchSentinelRef = useCallback((sentinel: HTMLDivElement | null) => {
+    if (!sentinel || typeof IntersectionObserver === "undefined") {
+      return undefined;
+    }
+
+    const observer = new IntersectionObserver(([entry]) => {
+      setSearchStuck(Boolean(entry && !entry.isIntersecting && entry.boundingClientRect.top < 0));
+    });
+    observer.observe(sentinel);
+
+    return () => {
+      observer.disconnect();
+      setSearchStuck(false);
+    };
+  }, []);
+
   const collectionNames = useMemo(
     () => new Map(collections.map((collection) => [collection.id, collection.name])),
     [collections]
@@ -493,6 +505,9 @@ export const LibraryPage: React.FC = () => {
       case "tags":
         setTagEditorId(recipe.id);
         return;
+      case "plan":
+        setPlanRecipe(recipe);
+        return;
       case "shopping":
         openShopping(recipe);
         return;
@@ -532,13 +547,11 @@ export const LibraryPage: React.FC = () => {
 
   /* ------------------------------ Controls ------------------------------ */
   const changeTab = (next: LibraryTab) => {
-    if (next === "family" && familyTabLocked) {
-      setFamilyExplainerVisible(true);
-      setFamilySignInOpen(!isAuthenticated);
+    if (next === "family" && !isAuthenticated) {
+      setFamilySignInOpen(true);
       return;
     }
 
-    setFamilyExplainerVisible(false);
     setTab(next);
   };
 
@@ -570,32 +583,33 @@ export const LibraryPage: React.FC = () => {
   }, []);
 
   /* ------------------------------- Render ------------------------------- */
-  const quotaCount = countQuotaRecipes(recipes);
+  const cookbookCounts = countCookbook(recipes);
+  const quota = describeFreeQuota(cookbookCounts, LOCAL_LIMIT_FREE);
   const showQuota =
-    isPersonal && libraryReady && billingTier === "free" && quotaCount > 0 && !searching;
-  const quotaNearlyFull = quotaCount >= QUOTA_NEARLY_FULL_AT;
+    isPersonal && libraryReady && billingTier === "free" && quota.saved > 0 && !searching;
+  const quotaNearlyFull = quota.state !== "roomy";
   const quotaMeter = showQuota ? (
     <LibraryQuotaMeter
-      count={quotaCount}
-      limit={LOCAL_LIMIT_FREE}
       onUpgrade={() => {
         if (!requestUpgradeSheet("save_limit")) {
           void navigate("/pricing?upgrade=plus");
         }
       }}
+      quota={quota}
     />
   ) : null;
 
   const subtitle = isPersonal
     ? libraryReady
-      ? recipes.length
-        ? pluralize(recipes.length, "recipe")
-        : "No recipes yet"
+      ? formatCookbookCount(cookbookCounts)
       : BLANK_SUBTITLE
-    : shared.status === "ready"
-      ? pluralize(shared.recipes.length, "family recipe")
-      : BLANK_SUBTITLE;
-  const showSearch = isPersonal ? libraryReady && recipes.length > 0 && !isNewCook : true;
+    : familyLocked
+      ? "Not set up yet"
+      : shared.status === "ready"
+        ? pluralize(shared.recipes.length, "family recipe")
+        : BLANK_SUBTITLE;
+  const showSearch = isPersonal ? libraryReady && recipes.length > 0 && !isNewCook : !familyLocked;
+  const showWelcome = isPersonal && (isEmptyLibrary || isNewCook);
   const showFilters = isPersonal && showSearch && filterChips.length > 0;
 
   const renderPersonal = () => {
@@ -710,7 +724,8 @@ export const LibraryPage: React.FC = () => {
   const tabOptions = [
     { label: "Personal", value: "personal" as const },
     {
-      icon: familyTabLocked ? ("lock" as const) : undefined,
+      // Always an icon, so the control keeps its width when the lock state resolves.
+      icon: familyTabLocked ? ("lock" as const) : ("users" as const),
       label: "Family",
       value: "family" as const
     }
@@ -736,66 +751,40 @@ export const LibraryPage: React.FC = () => {
 
         <LibraryStorageBanner />
 
-        {familyExplainerVisible ? (
-          <LibraryNotice
-            actions={
-              <>
-                {isAuthenticated ? (
-                  <ButtonLink
-                    className="library-notice-link"
-                    size="sm"
-                    to="/household"
-                    variant="secondary"
-                  >
-                    Set up Family
-                  </ButtonLink>
-                ) : (
-                  <button
-                    className="library-notice-button"
-                    onClick={() => setFamilySignInOpen(true)}
-                    type="button"
-                  >
-                    Sign in to use Family
-                  </button>
-                )}
-                <IconButton
-                  aria-label="Dismiss"
-                  icon="x"
-                  onClick={() => setFamilyExplainerVisible(false)}
-                  size="sm"
-                />
-              </>
-            }
-            icon="lock"
-          >
-            {isAuthenticated
-              ? (shared.error ?? FAMILY_ACCESS_MESSAGE)
-              : "Sign in to create or join an active Family household."}
-          </LibraryNotice>
-        ) : null}
-
-        {isPersonal && (isEmptyLibrary || isNewCook) ? (
-          <OptionalChunkBoundary name="Welcome">
-            <Suspense fallback={<div className="library-welcome-placeholder" />}>
+        {showWelcome ? (
+          // The welcome and the starter recipes appear together (one Suspense boundary), so the
+          // welcome card never lands on top of cards that are already on screen.
+          <Suspense fallback={<LibrarySkeleton view={view} />}>
+            <OptionalChunkBoundary name="Welcome">
               <LibraryWelcome variant={isEmptyLibrary ? "empty" : "starter"} />
-            </Suspense>
-          </OptionalChunkBoundary>
+            </OptionalChunkBoundary>
+            {renderPersonal()}
+          </Suspense>
         ) : null}
 
         {showSearch ? (
-          <div className="library-search-bar">
-            <SearchField
-              aria-label="Search your cookbook"
-              inputRef={searchInputRef}
-              onValueChange={setQuery}
-              placeholder={
-                isPersonal ? "Search recipes, ingredients, tags" : "Search family recipes and cooks"
-              }
-              shortcutHint={showShortcutHint ? (isMacLike() ? "⌘K" : "Ctrl K") : undefined}
-              size="lg"
-              value={query}
-            />
-          </div>
+          <>
+            <div aria-hidden="true" className="library-search-sentinel" ref={searchSentinelRef} />
+            <div className={`library-search-bar${searchStuck ? " is-stuck" : ""}`}>
+              <SearchField
+                aria-label="Search your cookbook"
+                inputRef={searchInputRef}
+                onValueChange={setQuery}
+                placeholder={
+                  isPersonal
+                    ? compactSearch
+                      ? "Search recipes"
+                      : "Search recipes, ingredients, tags"
+                    : compactSearch
+                      ? "Search family recipes"
+                      : "Search family recipes and cooks"
+                }
+                shortcutHint={showShortcutHint ? "/" : undefined}
+                size="lg"
+                value={query}
+              />
+            </div>
+          </>
         ) : null}
 
         {showFilters ? (
@@ -811,8 +800,10 @@ export const LibraryPage: React.FC = () => {
 
         {quotaNearlyFull ? quotaMeter : null}
 
-        {isPersonal ? (
+        {showWelcome ? null : isPersonal ? (
           renderPersonal()
+        ) : familyLocked ? (
+          <FamilyLockedPanel tier={billingTier} />
         ) : (
           <OptionalChunkBoundary name="Family cookbook">
             <Suspense fallback={<LibrarySkeleton view={view} />}>
@@ -864,6 +855,18 @@ export const LibraryPage: React.FC = () => {
       {tagEditorId ? (
         <LazySheet name="Tag editor" onError={() => setTagEditorId(null)}>
           <TagEditorSheet onClose={() => setTagEditorId(null)} open recipeId={tagEditorId} />
+        </LazySheet>
+      ) : null}
+
+      {planRecipe ? (
+        <LazySheet name="Add to plan" onError={() => setPlanRecipe(null)}>
+          <AddToPlanSheet
+            analyticsSource="cookbook"
+            onClose={() => setPlanRecipe(null)}
+            open
+            recipeId={planRecipe.id}
+            recipeTitle={planRecipe.recipe.title}
+          />
         </LazySheet>
       ) : null}
 
