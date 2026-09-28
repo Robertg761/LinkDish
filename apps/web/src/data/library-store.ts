@@ -9,6 +9,7 @@ import {
   logRecipeCooked,
   markRecipeOpened,
   normalizeRecipeTags,
+  setRecipeCollectionMembership,
   setRecipeCollections,
   setRecipeFavorite,
   setRecipePreferredServings,
@@ -16,6 +17,7 @@ import {
   setRecipeTags,
   toSavedRecipeListRecord,
   updateRecipeNotes,
+  type RecipeTagsUpdate,
   type SavedRecipeQuotaOptions
 } from "../features/library/saved-recipe-store";
 
@@ -255,16 +257,28 @@ export const setFavorite = (id: string, favorite: boolean) =>
 
 export const toggleFavorite = (id: string) => setFavorite(id, !getCachedSavedRecipe(id)?.favorite);
 
-export const setTags = (id: string, tags: readonly string[]) => {
-  const normalized = normalizeRecipeTags(tags);
+/**
+ * Sets a recipe's tags. Editors that add or remove a tag pass a function of the current tags:
+ * it runs on the tags as stored when the write happens, so a tag another tab added meanwhile
+ * (this tab may not have heard of it yet) is kept.
+ */
+export const setTags = (id: string, tags: RecipeTagsUpdate) => {
+  const nextTags = (current: readonly string[]) =>
+    normalizeRecipeTags(typeof tags === "function" ? tags(current) : tags);
+  const cached = getCachedSavedRecipe(id);
+  const tagCount = nextTags(cached?.tags ?? []).length;
+
   return reportWhenSaved(
     optimistic(
       id,
-      (recipe) => setOrDelete(recipe, "tags", normalized.length ? normalized : undefined),
-      () => setRecipeTags(id, normalized)
+      (recipe) => {
+        const next = nextTags(recipe.tags ?? []);
+        return setOrDelete(recipe, "tags", next.length ? next : undefined);
+      },
+      () => setRecipeTags(id, nextTags)
     ),
     "recipe_tagged",
-    { tag_count: normalized.length }
+    { tag_count: tagCount }
   );
 };
 
@@ -277,14 +291,25 @@ export const setCollections = (id: string, collectionIds: readonly string[]) => 
   );
 };
 
+/** Adds to or removes from the recipe's collections as stored (not as this tab last saw them). */
+const setMembership = (id: string, collectionId: string, member: boolean) =>
+  optimistic(
+    id,
+    (recipe) => {
+      const current = recipe.collectionIds ?? [];
+      const next = member
+        ? Array.from(new Set([...current, collectionId]))
+        : current.filter((entry) => entry !== collectionId);
+      return setOrDelete(recipe, "collectionIds", next.length ? next : undefined);
+    },
+    () => setRecipeCollectionMembership(id, collectionId, member)
+  );
+
 export const addToCollection = (id: string, collectionId: string) =>
-  setCollections(id, [...(getCachedSavedRecipe(id)?.collectionIds ?? []), collectionId]);
+  setMembership(id, collectionId, true);
 
 export const removeFromCollection = (id: string, collectionId: string) =>
-  setCollections(
-    id,
-    (getCachedSavedRecipe(id)?.collectionIds ?? []).filter((entry) => entry !== collectionId)
-  );
+  setMembership(id, collectionId, false);
 
 export const setRating = (id: string, rating: RecipeRating | null) =>
   reportWhenSaved(

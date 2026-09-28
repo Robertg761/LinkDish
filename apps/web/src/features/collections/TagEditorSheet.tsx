@@ -8,6 +8,8 @@ import { useToast } from "../../components/Toast";
 import { setTags, useSavedRecipes } from "../../data/library-store";
 import { normalizeRecipeTags } from "../library/saved-recipe-store";
 
+import type { RecipeTagsUpdate } from "../library/saved-recipe-store";
+
 import "./CollectionsSheets.css";
 
 export interface TagEditorSheetProps {
@@ -128,7 +130,8 @@ export const TagEditorSheet: React.FC<TagEditorSheetProps> = ({ open, onClose, r
     return { ownTags: own, suggestions: inferred };
   }, [recipe, recipes, tagKeys]);
 
-  const saveTags = async (next: readonly string[]) => {
+  // Changes to the tags as stored (not as last shown): another tab may have added one meanwhile.
+  const saveTags = async (next: RecipeTagsUpdate) => {
     try {
       await setTags(recipeId, next);
     } catch {
@@ -143,11 +146,11 @@ export const TagEditorSheet: React.FC<TagEditorSheetProps> = ({ open, onClose, r
       return;
     }
 
-    void saveTags(normalizeRecipeTags([...tags, ...incoming]));
+    void saveTags((current) => [...current, ...incoming]);
   };
 
   const removeTag = (tag: string) => {
-    void saveTags(tags.filter((entry) => entry !== tag));
+    void saveTags((current) => current.filter((entry) => entry !== tag));
   };
 
   const commitDraft = () => {

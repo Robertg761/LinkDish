@@ -51,13 +51,11 @@ import {
   getSharedRecipeOwnerLabel,
   getSourceHost,
   LOCAL_LIMIT_FREE,
-  putSavedRecipe,
   restoreSavedRecipe,
   SavedRecipeLimitError,
   saveSharedRecipeCopy,
   sharedRecipeToWebSavedRecipe,
   syncRecipeToHousehold,
-  toSavedRecipeListRecord,
   updateSavedRecipe
 } from "./saved-recipe-store";
 
@@ -721,21 +719,15 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
       return;
     }
 
+    // One write for the edit and the link, so a cook or favorite saved meanwhile is kept.
     const updated = await updateSavedRecipe(record.id, {
       notes: values.notes ?? undefined,
-      recipe: values.recipe
+      recipe: values.recipe,
+      ...(values.sourceUrl ? { sourceUrl: values.sourceUrl } : {})
     });
 
     if (!updated) {
       throw new Error("This saved recipe is no longer available.");
-    }
-
-    if (values.sourceUrl) {
-      await putSavedRecipe({
-        ...toSavedRecipeListRecord(updated),
-        sourceHost: getSourceHost(values.sourceUrl),
-        sourceUrl: values.sourceUrl
-      });
     }
 
     if (updated.sync?.sharedRecipeId && isAuthenticated) {
