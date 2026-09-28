@@ -2,6 +2,7 @@ import React from "react";
 
 import { Icon } from "../../components/Icon";
 import { RecipeImage } from "../../components/RecipeImage";
+import { useRovingRadioGroup } from "../../lib/use-roving-radio";
 
 import { formatCookedLine, getRecipeMetaItems } from "./recipe-view-format";
 
@@ -63,7 +64,12 @@ interface RatingStarsProps {
   className?: string | undefined;
 }
 
-/** Five stars: read-only, or a radiogroup where tapping the current star clears the rating. */
+const STARS: readonly RecipeRating[] = [1, 2, 3, 4, 5];
+
+/**
+ * Five stars: read-only, or a radiogroup where tapping the current star clears the rating. The
+ * group is one Tab stop; Arrow keys, Home and End move between stars and rate as they go.
+ */
 export const RatingStars: React.FC<RatingStarsProps> = ({
   value,
   onChange,
@@ -71,8 +77,9 @@ export const RatingStars: React.FC<RatingStarsProps> = ({
   label = "Your rating",
   className = ""
 }) => {
-  const stars = [1, 2, 3, 4, 5] as const;
+  const stars = STARS;
   const current = value ?? 0;
+  const radio = useRovingRadioGroup(stars, value ?? null, (star) => onChange?.(star));
 
   if (!onChange) {
     return current > 0 ? (
@@ -95,8 +102,9 @@ export const RatingStars: React.FC<RatingStarsProps> = ({
 
   return (
     <span aria-label={label} className={`rating-stars ${className}`} role="radiogroup">
-      {stars.map((star) => (
+      {stars.map((star, index) => (
         <button
+          {...radio(index)}
           aria-checked={current === star}
           aria-label={`${star} star${star === 1 ? "" : "s"}`}
           className={`rating-star${star <= current ? " is-filled" : ""}`}

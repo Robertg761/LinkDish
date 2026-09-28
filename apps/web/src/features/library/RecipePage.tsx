@@ -863,13 +863,10 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
     </Button>
   );
 
+  // A starter needs no chip of its own: the source chip beside these already says "LinkDish
+  // kitchen". Sync labels match the Cookbook cards'.
   const statusChips = (
     <>
-      {record.isStarter ? (
-        <Chip icon="sparkles" size="sm" variant="butter">
-          Starter recipe
-        </Chip>
-      ) : null}
       {shared ? (
         <Chip icon="users" size="sm" variant="accent">
           Shared by {getSharedRecipeOwnerLabel(shared)}
@@ -879,8 +876,8 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
           Synced
         </Chip>
       ) : record.sync?.status === "dirty" ? (
-        <Chip size="sm" variant="butter">
-          Local edits
+        <Chip icon="refresh" size="sm" variant="butter">
+          Edits not shared
         </Chip>
       ) : record.sync?.status === "sync_failed" ? (
         <Chip size="sm" variant="tomato">

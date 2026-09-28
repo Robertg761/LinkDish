@@ -359,6 +359,46 @@ describe("RecipePage saved route", () => {
     expect(within(menu).getAllByRole("separator")).toHaveLength(3);
   });
 
+  it("labels a starter once and unshared household edits in the Cookbook's words", async () => {
+    await seed([
+      savedRecipe({ id: "starter-pitas", isStarter: true }),
+      savedRecipe({ id: "recipe_dirty", sync: { sharedRecipeId: "shared_9", status: "dirty" } })
+    ]);
+    const starterPage = renderAt("/recipes/starter-pitas");
+
+    await screen.findByRole("heading", { level: 1, name: "Weeknight Chili" });
+    expect(screen.getByText("LinkDish kitchen")).toBeInTheDocument();
+    expect(screen.queryByText("Starter recipe")).not.toBeInTheDocument();
+    starterPage.unmount();
+
+    renderAt("/recipes/recipe_dirty");
+    await screen.findByRole("heading", { level: 1, name: "Weeknight Chili" });
+    expect(screen.getByText("Edits not shared")).toBeInTheDocument();
+    expect(screen.queryByText("Local edits")).not.toBeInTheDocument();
+  });
+
+  it("rates from the keyboard, with the stars as one Tab stop", async () => {
+    await seed([savedRecipe({ rating: 3 })]);
+    renderAt("/recipes/recipe_local");
+    await screen.findByRole("heading", { level: 1, name: "Weeknight Chili" });
+
+    const stars = within(screen.getByRole("radiogroup", { name: "Your rating" })).getAllByRole(
+      "radio"
+    );
+    expect(stars.map((star) => star.tabIndex)).toEqual([-1, -1, 0, -1, -1]);
+
+    fireEvent.keyDown(screen.getByRole("radio", { name: "3 stars" }), { key: "ArrowRight" });
+    await waitFor(() => expect(stored("recipe_local")?.rating).toBe(4));
+    expect(screen.getByRole("radio", { name: "4 stars" })).toHaveFocus();
+    await waitFor(() =>
+      expect(screen.getByRole("radio", { name: "4 stars" })).toHaveAttribute("aria-checked", "true")
+    );
+
+    fireEvent.keyDown(screen.getByRole("radio", { name: "4 stars" }), { key: "Home" });
+    await waitFor(() => expect(stored("recipe_local")?.rating).toBe(1));
+    expect(screen.getByRole("radio", { name: "1 star" })).toHaveFocus();
+  });
+
   it("duplicates into a new recipe and opens it", async () => {
     await seed([savedRecipe()]);
     renderAt("/recipes/recipe_local");
