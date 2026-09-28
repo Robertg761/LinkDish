@@ -1,0 +1,557 @@
+.settings-data {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.settings-data-card {
+  gap: 14px;
+  padding: 18px;
+}
+
+/* Icon + title on one row; on phones the description runs the full card width below. */
+.settings-data-card-header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px 14px;
+}
+
+.settings-data-card-heading {
+  display: contents;
+}
+
+.settings-data-card-header .settings-data-card-text {
+  grid-column: 1 / -1;
+}
+
+.settings-data-option {
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  background: var(--color-canvas);
+}
+
+.settings-data-card-icon {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
+  background: var(--color-primary-soft);
+  color: var(--color-on-primary-soft);
+}
+
+.settings-data-card-icon-butter {
+  background: var(--color-butter-soft);
+  color: var(--color-on-butter-soft);
+}
+
+.settings-data-card-title {
+  color: var(--color-ink);
+  font-family: var(--font-family-serif);
+  font-size: var(--text-title-sm);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+}
+
+.settings-data-card-text {
+  color: var(--color-ink-muted);
+  font-size: var(--text-small);
+  line-height: var(--text-small-line-height);
+}
+
+.settings-data-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.settings-data-actions > .btn {
+  flex: 1 1 auto;
+}
+
+.settings-data-footnote {
+  color: var(--color-ink-subtle);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line-height);
+}
+
+.settings-data-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--color-danger-soft);
+  color: var(--color-on-danger-soft);
+  font-size: var(--text-small);
+  line-height: var(--text-small-line-height);
+}
+
+.settings-data-error > svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+/* Storage card ----------------------------------------------------------------------------- */
+
+.settings-data-alert {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 10px 12px;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  background: var(--color-warning-soft);
+  color: var(--color-ink);
+}
+
+.settings-data-alert > svg {
+  margin-top: 2px;
+  color: var(--color-warning);
+}
+
+.settings-data-alert-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--text-small);
+  line-height: var(--text-small-line-height);
+}
+
+.settings-data-alert > .btn {
+  grid-column: 2;
+  justify-self: start;
+}
+
+.settings-data-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.settings-data-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  padding: 12px;
+  border-radius: var(--radius-md);
+  background: var(--color-surface-sunken);
+}
+
+.settings-data-stat-icon {
+  margin-bottom: 4px;
+  color: var(--color-ink-subtle);
+}
+
+.settings-data-stat-value {
+  color: var(--color-ink);
+  font-family: var(--font-family-serif);
+  font-size: 1.625rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+
+.settings-data-stat-label {
+  max-width: 100%;
+  color: var(--color-ink-muted);
+  font-size: var(--text-caption);
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.settings-data-protect {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.settings-data-protect-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.settings-data-protect-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-ink);
+  font-weight: 650;
+}
+
+.settings-data-explainer {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  background: var(--color-canvas);
+  color: var(--color-ink-muted);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line-height);
+}
+
+.settings-data-explainer > svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: var(--color-ink-subtle);
+}
+
+/* Import card ------------------------------------------------------------------------------ */
+
+.settings-import-card {
+  transition:
+    border-color var(--transition-fast),
+    background-color var(--transition-fast);
+}
+
+.settings-import-card.is-dragging {
+  border-color: var(--color-primary);
+  border-style: dashed;
+  background: color-mix(in srgb, var(--color-primary-soft) 45%, var(--color-surface));
+}
+
+.settings-import-formats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.settings-import-format {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-height: 30px;
+  padding: 5px 10px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface-tint);
+  color: var(--color-ink);
+  font-size: var(--text-caption);
+  font-weight: 600;
+}
+
+.settings-import-format-extension {
+  color: var(--color-ink-subtle);
+  font-family: var(--font-family-mono);
+  font-size: 0.6875rem;
+  font-weight: 500;
+}
+
+.settings-import-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Import sheet ----------------------------------------------------------------------------- */
+
+.settings-import-source {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.settings-import-file {
+  overflow: hidden;
+  min-width: 0;
+  color: var(--color-ink-muted);
+  font-size: var(--text-caption);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-import-status {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 28px 8px;
+  color: var(--color-ink);
+  text-align: center;
+}
+
+.settings-import-spinner {
+  color: var(--color-primary);
+  animation: settings-import-spin 900ms linear infinite;
+}
+
+@keyframes settings-import-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.settings-import-muted {
+  color: var(--color-ink-muted);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line-height);
+}
+
+.settings-import-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px;
+  border-radius: var(--radius-md);
+  background: var(--color-danger-soft);
+  color: var(--color-on-danger-soft);
+  line-height: 1.45;
+}
+
+.settings-import-error-icon {
+  flex-shrink: 0;
+}
+
+.settings-import-hero {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.settings-import-hero-count {
+  color: var(--color-ink);
+  font-family: var(--font-family-serif);
+  font-size: 3rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
+
+.settings-import-hero-label {
+  color: var(--color-ink-muted);
+  font-family: var(--font-family-serif);
+  font-size: var(--text-title-sm);
+  font-style: italic;
+  font-weight: 600;
+}
+
+.settings-import-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.settings-import-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--color-border-subtle);
+  color: var(--color-ink);
+  font-size: var(--text-small);
+  line-height: var(--text-small-line-height);
+}
+
+.settings-import-row:last-child {
+  border-bottom: 0;
+}
+
+.settings-import-row-icon {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 9px;
+  background: var(--color-primary-soft);
+  color: var(--color-on-primary-soft);
+}
+
+.settings-import-row-muted .settings-import-row-icon {
+  background: var(--color-surface-tint);
+  color: var(--color-ink-muted);
+}
+
+.settings-import-row-warning .settings-import-row-icon {
+  background: var(--color-warning-soft);
+  color: var(--color-warning);
+}
+
+.settings-import-row-text {
+  padding-top: 4px;
+}
+
+.settings-import-details-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-primary);
+  font: inherit;
+  font-size: var(--text-small);
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.settings-import-warnings {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 180px;
+  padding: 12px 14px 12px 30px;
+  margin: 4px 0 0;
+  overflow-y: auto;
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-sunken);
+  color: var(--color-ink-muted);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line-height);
+}
+
+.settings-import-choice {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settings-import-choice-label {
+  color: var(--color-ink);
+  font-size: var(--text-small);
+  font-weight: 650;
+}
+
+.settings-import-limit {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: var(--radius-md);
+  background: var(--color-butter-soft);
+  color: var(--color-on-butter-soft);
+}
+
+.settings-import-limit > svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.settings-import-limit-copy {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: var(--text-small);
+  line-height: var(--text-small-line-height);
+}
+
+.settings-import-limit-copy > .btn {
+  margin-top: 4px;
+}
+
+.settings-import-done {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding-top: 8px;
+  text-align: center;
+}
+
+.settings-import-done .settings-import-summary {
+  align-self: stretch;
+  text-align: left;
+}
+
+.settings-import-done .settings-import-limit {
+  text-align: left;
+}
+
+.settings-import-done-icon {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+  box-shadow: var(--shadow-primary);
+  animation: settings-import-pop var(--duration-slow) var(--ease-spring) both;
+}
+
+@keyframes settings-import-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+}
+
+.settings-import-done-title {
+  color: var(--color-ink);
+  font-family: var(--font-family-serif);
+  font-size: var(--text-title);
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  line-height: 1.2;
+}
+
+@media (max-width: 767px) {
+  /* Give the main action the room it needs next to Cancel. */
+  .settings-import-sheet .sheet-footer > .btn:last-child:not(:first-child) {
+    flex-grow: 1.8;
+  }
+}
+
+@media (min-width: 640px) {
+  .settings-data-card {
+    padding: 20px 22px;
+  }
+
+  .settings-data-card-header {
+    display: flex;
+    align-items: flex-start;
+  }
+
+  .settings-data-card-heading {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+    padding-top: 2px;
+  }
+
+  .settings-data-actions > .btn {
+    flex: 0 0 auto;
+  }
+
+  .settings-data-protect {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+  }
+
+  .settings-data-protect > .btn {
+    flex-shrink: 0;
+  }
+
+  .settings-data-stat {
+    padding: 14px 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-import-spinner,
+  .settings-import-done-icon {
+    animation: none;
+  }
+}
