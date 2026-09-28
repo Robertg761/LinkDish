@@ -71,12 +71,12 @@ export const LibraryToolbar: React.FC<LibraryToolbarProps> = ({
       {heading}
       <div className="library-toolbar-tools">
         {showSort ? (
-          // On phones a bottom sheet: the long list stays in thumb reach, clear of the tab bar.
+          // On phones a bottom sheet (its "Sort by" group needs no title above it): the long list
+          // stays in thumb reach, clear of the tab bar.
           <Menu
             items={items}
             label="Sort recipes"
             presentation="adaptive"
-            sheetTitle="Sort recipes"
             renderTrigger={(props) => (
               <Button
                 {...props}
