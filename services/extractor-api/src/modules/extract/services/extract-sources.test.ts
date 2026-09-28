@@ -24,6 +24,10 @@ const articleWeak = readFileSync(
   new URL("../__fixtures__/article-weak.html", import.meta.url),
   "utf8"
 );
+const youtubeTranscript = readFileSync(
+  new URL("../__fixtures__/youtube-transcript.txt", import.meta.url),
+  "utf8"
+);
 
 const htmlResult = (url: string, html: string, finalUrl = url): FetchResult => ({
   document: {
@@ -278,6 +282,94 @@ describe("Pinterest pins", () => {
     expect(logContext.cacheStatus).toBe("hit");
     expect(response).toMatchObject({ status: "success", recipe: { sourceUrl: recipeUrl } });
     expect(fetchHtmlDocument.mock.calls.map(([url]) => url)).toEqual([recipeUrl, pinUrl]);
+  });
+
+  it("reads a linked YouTube video through the YouTube path, not as a web page", async () => {
+    const videoUrl = "https://www.youtube.com/watch?v=dQw4w9WgXcQ";
+    const fetchHtmlDocument = vi.fn((url: string) =>
+      Promise.resolve(htmlResult(url, pinHtml(videoUrl)))
+    );
+    const fetchYouTubeDocument = vi.fn<ExtractorRuntime["fetchYouTubeDocument"]>((url, videoId) =>
+      Promise.resolve({
+        kind: "youtube",
+        url,
+        videoId,
+        title: "Skillet Chicken",
+        description: "A quick skillet dinner.",
+        transcript: youtubeTranscript,
+        chapters: [],
+        pageHtml: null
+      })
+    );
+
+    const runtime = createRuntime({ fetchHtmlDocument, fetchYouTubeDocument });
+
+    const direct = await extractRecipe({ url: videoUrl, attempt: "primary" }, runtime);
+    const pinned = await extractRecipe({ url: pinUrl, attempt: "primary" }, runtime);
+
+    expect(fetchHtmlDocument.mock.calls.map(([url]) => url)).toEqual([pinUrl]);
+    expect(fetchYouTubeDocument).toHaveBeenCalledTimes(2);
+    expect(fetchYouTubeDocument).toHaveBeenLastCalledWith(
+      videoUrl,
+      "dQw4w9WgXcQ",
+      expect.any(Object)
+    );
+    expect(pinned.response.status).not.toBe("failure");
+    expect(pinned.response).toEqual(direct.response);
+    expect(pinned.logContext.sourceType).toBe("youtube");
+
+    /* The explicit fallback gives the model the transcript, not the video page's HTML shell. */
+    const extract = vi.fn<FallbackRecipeExtractor["extract"]>(() =>
+      Promise.resolve(llmCandidate("Skillet Chicken"))
+    );
+    await extractRecipe(
+      { url: pinUrl, attempt: "fallback" },
+      createRuntime({
+        fetchHtmlDocument,
+        fetchYouTubeDocument,
+        fallbackExtractor: fallbackExtractor(extract)
+      })
+    );
+
+    expect(extract.mock.calls[0]?.[0]).toMatchObject({
+      sourceType: "youtube",
+      sourceDocument: { kind: "youtube", transcript: youtubeTranscript }
+    });
+  });
+
+  it("reads a linked TikTok through its caption, like a direct TikTok link", async () => {
+    const tiktokUrl = "https://www.tiktok.com/@cook/video/7234567890123456789";
+    const fetchHtmlDocument = vi.fn((url: string) =>
+      Promise.resolve(htmlResult(url, pinHtml(tiktokUrl)))
+    );
+    const fetchSocialDocument = vi.fn(() => Promise.resolve(tiktokDocument()));
+
+    const { response } = await extractRecipe(
+      { url: pinUrl, attempt: "primary" },
+      createRuntime({ fetchHtmlDocument, fetchSocialDocument })
+    );
+
+    expect(fetchHtmlDocument.mock.calls.map(([url]) => url)).toEqual([pinUrl]);
+    expect(fetchSocialDocument).toHaveBeenCalledWith(tiktokUrl, expect.any(Object));
+    expect(response).toMatchObject({
+      status: "needs_retry",
+      reason: "unsupported_primary_extraction",
+      sourceType: "social"
+    });
+  });
+
+  it("rejects a linked social or video site it cannot read without fetching it", async () => {
+    const fetchHtmlDocument = vi.fn((url: string) =>
+      Promise.resolve(htmlResult(url, pinHtml("https://www.instagram.com/p/abc123/")))
+    );
+
+    const { response } = await extractRecipe(
+      { url: pinUrl, attempt: "fallback" },
+      createRuntime({ fetchHtmlDocument })
+    );
+
+    expect(fetchHtmlDocument.mock.calls.map(([url]) => url)).toEqual([pinUrl]);
+    expect(response).toMatchObject({ status: "failure", reason: "unsupported_source" });
   });
 });
 

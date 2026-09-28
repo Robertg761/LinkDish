@@ -550,23 +550,6 @@ const readPinterestOutboundUrl = async (
   return isSourceUrlRejection(safety) ? null : outboundUrl;
 };
 
-const fetchPinterestOutbound = async (
-  outboundUrl: string,
-  context: ExtractionContext
-): Promise<FetchedSource> => {
-  const outbound = await context.runtime.fetchHtmlDocument(outboundUrl, {
-    deadline: context.deadline
-  });
-  const { detectSourceType } = await loadHtmlAnalysis();
-
-  return {
-    sourceDocument: outbound.document,
-    fetchMode: outbound.mode,
-    detection: detectSourceType(outboundUrl, outbound.document),
-    sourceUrl: outboundUrl
-  };
-};
-
 const withRuntimeSignals = (
   candidate: ExtractionCandidate | null,
   detection: DetectionResult,
@@ -1464,6 +1447,45 @@ const extractFromSocialCaption = async (
   });
 };
 
+/* Social, video and unknown links are answered from the URL alone, before anything is fetched. */
+const rejectUnsupportedSource = (
+  request: ExtractRecipeUrlRequest,
+  context: ExtractionContext,
+  hostname: string,
+  detection: DetectionResult
+): ExtractionResult | null => {
+  const sourceType = detection.sourceType;
+
+  if (!isUnsupportedInitialSource(sourceType)) {
+    return null;
+  }
+
+  const response = extractRecipeResponseSchema.parse({
+    status: "failure",
+    reason: "unsupported_source",
+    userMessage: unsupportedSourceMessages[sourceType],
+    recovery: {
+      retryable: false,
+      allowFallback: false,
+      suggestedAction: "try_another_url"
+    }
+  });
+
+  return {
+    response,
+    logContext: makeLogContext({
+      hostname,
+      detection,
+      attempt: request.attempt,
+      response,
+      strategy: "none",
+      fetchMode: "none",
+      fallbackProvider: context.runtime.fallbackExtractor.providerName,
+      browserAttempted: false
+    })
+  };
+};
+
 const extractFromUrl = async (
   request: ExtractRecipeUrlRequest,
   context: ExtractionContext
@@ -1529,31 +1551,10 @@ const extractFromUrl = async (
     return extractFromSocialCaption(request, context, hostname, initialDetection);
   }
 
-  if (isUnsupportedInitialSource(initialDetection.sourceType)) {
-    const response = extractRecipeResponseSchema.parse({
-      status: "failure",
-      reason: "unsupported_source",
-      userMessage: unsupportedSourceMessages[initialDetection.sourceType],
-      recovery: {
-        retryable: false,
-        allowFallback: false,
-        suggestedAction: "try_another_url"
-      }
-    });
+  const unsupportedSource = rejectUnsupportedSource(request, context, hostname, initialDetection);
 
-    return {
-      response,
-      logContext: makeLogContext({
-        hostname,
-        detection: initialDetection,
-        attempt: request.attempt,
-        response,
-        strategy: "none",
-        fetchMode: "none",
-        fallbackProvider: runtime.fallbackExtractor.providerName,
-        browserAttempted: false
-      })
-    };
+  if (unsupportedSource) {
+    return unsupportedSource;
   }
 
   const handoffConfigured = Boolean(runtime.fallbackHandoffStore && context.correlationId);
@@ -1605,15 +1606,18 @@ const extractFromUrl = async (
     }
   }
 
-  const fetchFailureResult = (error: unknown): ExtractionResult => {
-    const response = mapFetchErrorToResponse(error, initialDetection.sourceType);
+  const fetchFailureResult = (
+    error: unknown,
+    detection: DetectionResult = initialDetection
+  ): ExtractionResult => {
+    const response = mapFetchErrorToResponse(error, detection.sourceType);
     const metadata = getFetchErrorMetadata(error);
 
     return {
       response,
       logContext: makeLogContext({
         hostname,
-        detection: initialDetection,
+        detection,
         attempt: request.attempt,
         response,
         strategy: "none",
@@ -1641,19 +1645,42 @@ const extractFromUrl = async (
   const pinOutboundUrl = await readPinterestOutboundUrl(fetchedSource, context);
 
   if (pinOutboundUrl) {
+    /*
+     * The pin's link takes the same path a direct link to it would: YouTube through its
+     * transcript, TikTok through its caption, other social and video sites are rejected
+     * before anything is fetched, and web pages are fetched as HTML.
+     */
+    const outboundRequest: ExtractRecipeUrlRequest = { ...request, url: pinOutboundUrl };
+    const outboundDetection = detectSourceTypeFromUrl(pinOutboundUrl);
+
+    if (isSupportedSocialSource(outboundDetection, runtime)) {
+      return extractFromSocialCaption(outboundRequest, context, hostname, outboundDetection);
+    }
+
+    const unsupportedOutbound = rejectUnsupportedSource(
+      outboundRequest,
+      context,
+      hostname,
+      outboundDetection
+    );
+
+    if (unsupportedOutbound) {
+      return unsupportedOutbound;
+    }
+
     /* The pin's recipe page may already be cached from a direct import. */
-    const cached = isCacheLookupEnabled(context, initialDetection)
+    const cached = isCacheLookupEnabled(context, outboundDetection)
       ? await readCachedExtraction(context, pinOutboundUrl)
       : null;
 
     if (cached) {
-      return buildCacheHitResult({ ...request, url: pinOutboundUrl }, cached, runtime, hostname);
+      return buildCacheHitResult(outboundRequest, cached, runtime, hostname);
     }
 
     try {
-      fetchedSource = await fetchPinterestOutbound(pinOutboundUrl, context);
+      fetchedSource = await fetchSourceDocument(pinOutboundUrl, outboundDetection, context);
     } catch (error) {
-      return fetchFailureResult(error);
+      return fetchFailureResult(error, outboundDetection);
     }
   }
 

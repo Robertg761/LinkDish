@@ -122,8 +122,11 @@ platforms map onto them and are told apart internally by the detection `adapterK
   the player response (og:description is truncated). The channel becomes `author`.
 - **Pinterest** pins (and pin.it links that land on one): the pin's outbound link
   (`og:see_also`, else `"link"` in the pin's app state) is validated with the same SSRF
-  checks and extracted instead. The recipe's `sourceUrl` is that page, and the result is
-  cached under its URL, so a later direct import of the same recipe hits the cache.
+  checks and extracted instead, through the same path a direct link to it takes: YouTube
+  through the transcript path, TikTok through its caption, and other social or video
+  sites are rejected as `unsupported_source` before anything is fetched. The recipe's
+  `sourceUrl` is that page, and the result is cached under its URL, so a later direct
+  import of the same recipe hits the cache.
 - **TikTok**: the caption is read through the public oEmbed endpoint
   (`fetchers/fetch-tiktok-document.ts`; short links are resolved hop by hop, TikTok hosts
   only, each hop SSRF-validated, with the request deadline and a byte cap). A caption with
