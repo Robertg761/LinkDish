@@ -99,6 +99,26 @@ describe("cook-session-store", () => {
     expect(sanitized).toMatchObject({ scale: 1, stepIndex: 0 });
   });
 
+  it("keeps both of two concurrent updates (say, from two tabs)", async () => {
+    fakeIdb.isolateTransactions();
+    await updateCookSession("r4", { stepIndex: 1 }, NOW);
+
+    // Each tab has its own write queue, so nothing but IndexedDB orders these two.
+    await Promise.all([
+      updateCookSession("r4", { stepIndex: 2 }, NOW + 1000),
+      updateCookSession(
+        "r4",
+        (session) => ({ checkedIngredients: [...session.checkedIngredients, "eggs"] }),
+        NOW + 1000
+      )
+    ]);
+
+    expect(fakeIdb.record(COOK_SESSIONS_STORE_NAME, "r4")).toMatchObject({
+      checkedIngredients: ["eggs"],
+      stepIndex: 2
+    });
+  });
+
   it("expires sessions after 24 hours", async () => {
     await saveCookSession(
       { checkedIngredients: [], recipeId: "old", scale: 1, stepIndex: 2, timers: [] },
