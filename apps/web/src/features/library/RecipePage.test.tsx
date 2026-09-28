@@ -496,6 +496,57 @@ describe("RecipePage saved route", () => {
     expect(screen.getByText("Saved here. Sync to update your household’s copy.")).toBeVisible();
   });
 
+  describe("'Sync now' after an edit", () => {
+    const editTitleAndSave = async (title: string) => {
+      fireEvent.click(within(openMenu()).getByRole("menuitem", { name: "Edit recipe" }));
+      const editor = screen.getByRole("dialog", { name: "Edit recipe" });
+      fireEvent.change(within(editor).getByLabelText("Title"), { target: { value: title } });
+      fireEvent.click(within(editor).getByRole("button", { name: "Save changes" }));
+      await screen.findByRole("heading", { level: 1, name: title });
+      await screen.findByText("Saved here. Sync to update your household’s copy.");
+    };
+
+    beforeEach(() => {
+      authMocks.user = { billingPlan: "family", email: "a@example.com", id: "user_1" };
+      apiMocks.getHousehold.mockResolvedValue({ household: { id: "household_1" } });
+      apiMocks.updateSharedRecipe.mockResolvedValue({
+        recipe: { id: "shared_9", updatedAt: "2026-09-28T00:00:00.000Z" }
+      });
+    });
+
+    it("sends the edit for a recipe that was in sync before it", async () => {
+      await seed([savedRecipe({ sync: { sharedRecipeId: "shared_9", status: "synced" } })]);
+      renderAt("/recipes/recipe_local");
+      await screen.findByRole("heading", { level: 1, name: "Weeknight Chili" });
+      await editTitleAndSave("Best Chili");
+
+      fireEvent.click(screen.getByRole("button", { name: "Sync now" }));
+
+      await waitFor(() => expect(stored("recipe_local")?.sync?.status).toBe("synced"));
+      expect(apiMocks.updateSharedRecipe).toHaveBeenCalledOnce();
+      expect(apiMocks.updateSharedRecipe.mock.calls[0]?.[1]).toMatchObject({
+        recipe: { title: "Best Chili" }
+      });
+      expect(await screen.findByText("Synced to your household.")).toBeVisible();
+    });
+
+    it("keeps the edit (and sends it) for a recipe that already had unsynced changes", async () => {
+      await seed([savedRecipe({ sync: { sharedRecipeId: "shared_9", status: "dirty" } })]);
+      renderAt("/recipes/recipe_local");
+      await screen.findByRole("heading", { level: 1, name: "Weeknight Chili" });
+      await editTitleAndSave("Best Chili");
+
+      fireEvent.click(screen.getByRole("button", { name: "Sync now" }));
+
+      await waitFor(() => expect(stored("recipe_local")?.sync?.status).toBe("synced"));
+      expect(apiMocks.updateSharedRecipe.mock.calls[0]?.[1]).toMatchObject({
+        recipe: { title: "Best Chili" }
+      });
+      expect(stored("recipe_local")?.recipe.title).toBe("Best Chili");
+      expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Best Chili");
+    });
+  });
+
   it("opens the editor for ?edit=1 links", async () => {
     await seed([savedRecipe()]);
     renderAt("/recipes/recipe_local?edit=1");

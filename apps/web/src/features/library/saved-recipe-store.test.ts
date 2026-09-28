@@ -647,6 +647,94 @@ describe("saved-recipe-store v4 behaviour", () => {
     expect(await getSavedRecipeSourceImages(saved!.id)).toEqual([scan(1)]);
   });
 
+  /** A household sync whose create call waits until `release` is called. */
+  const holdHouseholdSync = () => {
+    let release: () => void = () => undefined;
+    apiMocks.getHousehold.mockResolvedValue({ household: { id: "house_1" } });
+    apiMocks.createSharedRecipe.mockReturnValue(
+      new Promise((resolve) => {
+        release = () =>
+          resolve({ recipe: { id: "shared_9", updatedAt: "2026-09-04T00:00:00.000Z" } });
+      })
+    );
+
+    return {
+      release: () => release(),
+      started: () => vi.waitFor(() => expect(apiMocks.createSharedRecipe).toHaveBeenCalled())
+    };
+  };
+
+  it("keeps personal metadata written while a household sync is in flight", async () => {
+    const { recipe: saved } = await saveRecipe(createSaveInput(1), true);
+    const hold = holdHouseholdSync();
+
+    const syncing = syncRecipeToHousehold(saved!);
+    await hold.started();
+    await setRecipeFavorite(saved!.id, true);
+    await setRecipeTags(saved!.id, ["weeknight"]);
+    await logRecipeCooked(saved!.id);
+    await markRecipeOpened(saved!.id);
+    hold.release();
+    const synced = await syncing;
+
+    const stored = await getSavedRecipeById(saved!.id);
+    expect(stored).toMatchObject({
+      favorite: true,
+      sync: { sharedRecipeId: "shared_9", status: "synced" },
+      tags: ["weeknight"],
+      timesCooked: 1
+    });
+    expect(stored?.lastOpenedAt).toEqual(expect.any(String));
+    expect(synced).toMatchObject({ favorite: true, tags: ["weeknight"] });
+  });
+
+  it("does not bring back a recipe deleted while a household sync is in flight", async () => {
+    const { recipe: saved } = await saveRecipe(createSaveInput(1), true);
+    const hold = holdHouseholdSync();
+
+    const syncing = syncRecipeToHousehold(saved!);
+    await hold.started();
+    await deleteSavedRecipe(saved!.id);
+    hold.release();
+    await syncing;
+
+    expect(await getSavedRecipes()).toEqual([]);
+  });
+
+  it("sends the recipe as stored, not the caller's older copy", async () => {
+    const { recipe: saved } = await saveRecipe(createSaveInput(1), true);
+    const edited = { ...saved!.recipe, title: "Grandma's Best Cookies" };
+    await updateSavedRecipe(saved!.id, { recipe: edited });
+    apiMocks.getHousehold.mockResolvedValue({ household: { id: "house_1" } });
+    apiMocks.createSharedRecipe.mockResolvedValue({
+      recipe: { id: "shared_9", updatedAt: "2026-09-04T00:00:00.000Z" }
+    });
+
+    // `saved` predates the edit (e.g. a toast action created before the editor saved).
+    const synced = await syncRecipeToHousehold(saved!);
+
+    const payload = apiMocks.createSharedRecipe.mock.calls[0]?.[0] as { recipe: Recipe };
+    expect(payload.recipe.title).toBe("Grandma's Best Cookies");
+    expect(synced.recipe.title).toBe("Grandma's Best Cookies");
+    expect((await getSavedRecipeById(saved!.id))?.recipe.title).toBe("Grandma's Best Cookies");
+  });
+
+  it("leaves a recipe edited while its household sync was in flight marked dirty", async () => {
+    const { recipe: saved } = await saveRecipe(createSaveInput(1), true);
+    const hold = holdHouseholdSync();
+
+    const syncing = syncRecipeToHousehold(saved!);
+    await hold.started();
+    await updateSavedRecipe(saved!.id, { recipe: { ...saved!.recipe, title: "Newer" } });
+    hold.release();
+    await syncing;
+
+    const stored = await getSavedRecipeById(saved!.id);
+    expect(stored?.recipe.title).toBe("Newer");
+    // The household copy has the older content, so the next sync must still send this edit.
+    expect(stored?.sync).toMatchObject({ sharedRecipeId: "shared_9", status: "dirty" });
+  });
+
   it("tells subscribers in this tab about writes", async () => {
     const changes: unknown[] = [];
     subscribeDataChanges("savedRecipes", (change, source) => {

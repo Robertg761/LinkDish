@@ -549,15 +549,23 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
   };
 
   const handleSync = async () => {
-    if (!isSaved || !canSync) {
+    if (!isSaved || !isAuthenticated) {
+      return;
+    }
+
+    // Toast actions ("Sync now" after an edit, "Retry") keep the render they were created in, so
+    // decide from the recipe as stored now rather than this render's `record` and `canSync`.
+    const latest = await getSavedRecipeById(record.id).catch(() => undefined);
+
+    if (!latest || latest.isStarter || latest.sync?.status === "synced") {
       return;
     }
 
     setBusy("sync");
-    const wasAlreadyShared = Boolean(record.sync?.sharedRecipeId);
+    const wasAlreadyShared = Boolean(latest.sync?.sharedRecipeId);
 
     try {
-      const synced = await syncRecipeToHousehold(record);
+      const synced = await syncRecipeToHousehold(latest);
 
       if (synced.sync?.status === "synced") {
         if (!wasAlreadyShared) {
