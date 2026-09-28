@@ -50,14 +50,41 @@ describe("AppShell destination navigation", () => {
     }
   );
 
-  it("keeps the back button on recipe detail pages and marks Cookbook active", () => {
-    renderShell("/recipes/recipe_1");
+  it.each(["/recipes/recipe_1", "/recipes/shared/abc"])(
+    "hides the phone tab bar on recipe detail page %s but keeps Back",
+    (path) => {
+      renderShell(path);
 
-    expect(screen.getByRole("button", { name: "Go back" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Go to Cookbook" })).toHaveAttribute(
-      "aria-current",
-      "page"
-    );
+      expect(screen.getByRole("button", { name: "Go back" })).toBeInTheDocument();
+      expect(screen.queryByRole("navigation", { name: "Primary" })).not.toBeInTheDocument();
+      expect(document.documentElement.dataset.tabbar).toBe("hidden");
+    }
+  );
+
+  it("brings the tab bar back when leaving a recipe page", () => {
+    const Leave = () => {
+      const navigate = useNavigate();
+      return (
+        <button onClick={() => void navigate("/shopping")} type="button">
+          Leave recipe
+        </button>
+      );
+    };
+
+    renderShell("/recipes/recipe_1", <Leave />);
+    expect(document.documentElement.dataset.tabbar).toBe("hidden");
+
+    fireEvent.click(screen.getByRole("button", { name: "Leave recipe" }));
+
+    expect(screen.getByRole("navigation", { name: "Primary" })).toHaveClass("app-nav-tabs");
+    expect(document.documentElement.dataset.tabbar).toBeUndefined();
+  });
+
+  it("keeps the tab bar on other secondary pages such as featured recipes", () => {
+    renderShell("/featured/banana-bread");
+
+    expect(screen.getByRole("navigation", { name: "Primary" })).toBeInTheDocument();
+    expect(document.documentElement.dataset.tabbar).toBeUndefined();
   });
 
   it("renders the primary nav as links in a bottom tab bar on phones", () => {
@@ -182,5 +209,18 @@ describe("AppShell side rail", () => {
     expect(onOpenPalette).toHaveBeenCalledTimes(1);
 
     window.removeEventListener(OPEN_COMMAND_PALETTE_EVENT, onOpenPalette);
+  });
+
+  it("keeps the rail on recipe detail pages and marks Cookbook active", () => {
+    mockMatchMedia((query) => query.includes("min-width: 1024px"));
+
+    renderShell("/recipes/recipe_1");
+
+    expect(screen.getByRole("navigation", { name: "Primary" })).toHaveClass("app-nav-rail");
+    expect(screen.getByRole("link", { name: "Go to Cookbook" })).toHaveAttribute(
+      "aria-current",
+      "page"
+    );
+    expect(document.documentElement.dataset.tabbar).toBeUndefined();
   });
 });

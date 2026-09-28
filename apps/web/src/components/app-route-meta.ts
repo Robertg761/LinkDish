@@ -7,6 +7,11 @@ export interface AppRouteMeta {
   isDestination: boolean;
   /** Which primary nav item is highlighted. */
   section: AppSection | null;
+  /**
+   * Hides the phone tab bar so the page's own sticky actions have the room (recipe detail).
+   * The desktop rail stays.
+   */
+  hideTabBar?: boolean | undefined;
 }
 
 const DESTINATIONS: Record<string, AppRouteMeta> = {
@@ -20,11 +25,11 @@ const DESTINATIONS: Record<string, AppRouteMeta> = {
 const SECONDARY: Array<{ match: (pathname: string) => boolean; meta: AppRouteMeta }> = [
   {
     match: (pathname) => pathname.startsWith("/recipes/shared/"),
-    meta: { title: "Shared recipe", isDestination: false, section: "cookbook" }
+    meta: { title: "Shared recipe", isDestination: false, section: "cookbook", hideTabBar: true }
   },
   {
     match: (pathname) => pathname.startsWith("/recipes/"),
-    meta: { title: "Recipe", isDestination: false, section: "cookbook" }
+    meta: { title: "Recipe", isDestination: false, section: "cookbook", hideTabBar: true }
   },
   {
     match: (pathname) => pathname.startsWith("/featured/"),

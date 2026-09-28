@@ -119,6 +119,11 @@ hr {
   }
 }
 
+/* Recipe detail pages hide the phone tab bar (AppShell sets data-tabbar on <html>). */
+:root[data-tabbar="hidden"] {
+  --app-bottom-inset: env(safe-area-inset-bottom, 0px);
+}
+
 /* ------------------------------------------------------------------------ */
 /* Utilities                                                                 */
 /* ------------------------------------------------------------------------ */

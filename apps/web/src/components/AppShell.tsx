@@ -1,4 +1,11 @@
-import React, { createContext, Suspense, useContext, useEffect, useState } from "react";
+import React, {
+  createContext,
+  Suspense,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useState
+} from "react";
 import { createPortal } from "react-dom";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
@@ -98,6 +105,24 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
   const isRail = useMediaQuery(RAIL_MEDIA_QUERY);
   const addItem = NAV_ITEMS.find((item) => item.section === "add");
   const listItems = isRail ? NAV_ITEMS.filter((item) => item.section !== "add") : NAV_ITEMS;
+  // Recipe detail pages drop the phone tab bar; their action bar and Back cover navigation.
+  const hideTabBar = !isRail && routeMeta.hideTabBar === true;
+
+  // Sheets, toasts and the timer dock are portaled outside the shell, so the inset they read
+  // (--app-bottom-inset) is switched on the root element rather than on .app-shell.
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+
+    if (!hideTabBar) {
+      return;
+    }
+
+    root.dataset.tabbar = "hidden";
+
+    return () => {
+      delete root.dataset.tabbar;
+    };
+  }, [hideTabBar]);
 
   useEffect(() => {
     const handleSaveFeedback = () => {
@@ -194,7 +219,8 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
       className={[
         "app-shell",
         isRail ? "app-shell-rail" : "app-shell-tabs",
-        showTopBar ? "app-shell-has-topbar" : ""
+        showTopBar ? "app-shell-has-topbar" : "",
+        hideTabBar ? "app-shell-tabbar-hidden" : ""
       ]
         .filter(Boolean)
         .join(" ")}
@@ -203,65 +229,67 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
         Skip to content
       </a>
 
-      <nav className={`app-nav ${isRail ? "app-nav-rail" : "app-nav-tabs"}`} aria-label="Primary">
-        {isRail ? (
-          <>
-            <Link className="app-nav-brand" to="/" aria-label="LinkDish home">
-              <span className="app-nav-brand-tile" aria-hidden="true">
-                <BrandMark size={28} />
-              </span>
-              <span className="app-nav-brand-word">LinkDish</span>
-            </Link>
-
-            {addItem ? (
-              <Link
-                aria-current={routeMeta.section === "add" ? "page" : undefined}
-                aria-label={addItem.ariaLabel}
-                className={`app-nav-add-button${routeMeta.section === "add" ? " is-active" : ""}`}
-                to={addItem.to}
-              >
-                <Icon name="plus" size={20} strokeWidth={2.4} />
-                Add recipe
+      {hideTabBar ? null : (
+        <nav className={`app-nav ${isRail ? "app-nav-rail" : "app-nav-tabs"}`} aria-label="Primary">
+          {isRail ? (
+            <>
+              <Link className="app-nav-brand" to="/" aria-label="LinkDish home">
+                <span className="app-nav-brand-tile" aria-hidden="true">
+                  <BrandMark size={28} />
+                </span>
+                <span className="app-nav-brand-word">LinkDish</span>
               </Link>
-            ) : null}
 
-            <button
-              className="app-nav-search"
-              onClick={() => requestCommandPalette({ source: "rail_search" })}
-              type="button"
-            >
-              <Icon name="search" size={18} />
-              <span className="app-nav-search-label">Search recipes</span>
-              <kbd className="app-nav-search-kbd" aria-hidden="true">
-                {shortcutLabel}
-              </kbd>
-            </button>
-          </>
-        ) : null}
+              {addItem ? (
+                <Link
+                  aria-current={routeMeta.section === "add" ? "page" : undefined}
+                  aria-label={addItem.ariaLabel}
+                  className={`app-nav-add-button${routeMeta.section === "add" ? " is-active" : ""}`}
+                  to={addItem.to}
+                >
+                  <Icon name="plus" size={20} strokeWidth={2.4} />
+                  Add recipe
+                </Link>
+              ) : null}
 
-        <ul className="app-nav-list">{listItems.map(renderNavItem)}</ul>
+              <button
+                className="app-nav-search"
+                onClick={() => requestCommandPalette({ source: "rail_search" })}
+                type="button"
+              >
+                <Icon name="search" size={18} />
+                <span className="app-nav-search-label">Search recipes</span>
+                <kbd className="app-nav-search-kbd" aria-hidden="true">
+                  {shortcutLabel}
+                </kbd>
+              </button>
+            </>
+          ) : null}
 
-        {isRail ? (
-          <div className="app-nav-footer">
-            <Link
-              aria-current={location.pathname === "/settings" ? "page" : undefined}
-              className={`app-nav-footer-link${location.pathname === "/settings" ? " is-active" : ""}`}
-              to="/settings"
-            >
-              <Icon name="settings" size={18} />
-              Settings
-            </Link>
-            <Link
-              aria-current={location.pathname === "/install" ? "page" : undefined}
-              className={`app-nav-footer-link${location.pathname === "/install" ? " is-active" : ""}`}
-              to="/install"
-            >
-              <Icon name="smartphone-download" size={18} />
-              Install app
-            </Link>
-          </div>
-        ) : null}
-      </nav>
+          <ul className="app-nav-list">{listItems.map(renderNavItem)}</ul>
+
+          {isRail ? (
+            <div className="app-nav-footer">
+              <Link
+                aria-current={location.pathname === "/settings" ? "page" : undefined}
+                className={`app-nav-footer-link${location.pathname === "/settings" ? " is-active" : ""}`}
+                to="/settings"
+              >
+                <Icon name="settings" size={18} />
+                Settings
+              </Link>
+              <Link
+                aria-current={location.pathname === "/install" ? "page" : undefined}
+                className={`app-nav-footer-link${location.pathname === "/install" ? " is-active" : ""}`}
+                to="/install"
+              >
+                <Icon name="smartphone-download" size={18} />
+                Install app
+              </Link>
+            </div>
+          ) : null}
+        </nav>
+      )}
 
       <div className="app-main-column">
         {showTopBar ? (
