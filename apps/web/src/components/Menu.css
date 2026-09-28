@@ -82,6 +82,20 @@
   background: var(--color-danger-soft);
 }
 
+.menu-item-copy {
+  flex: 1 1 auto;
+}
+
+.menu-item-check {
+  flex-shrink: 0;
+  margin-left: auto;
+  color: var(--color-primary);
+}
+
+.menu-item.is-checked .menu-item-label {
+  font-weight: 700;
+}
+
 .menu-separator {
   height: 1px;
   margin: 6px 8px;

@@ -75,4 +75,34 @@ describe("Menu", () => {
 
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
+
+  it("renders selectable options as checked radio and checkbox items", () => {
+    const onSelect = vi.fn();
+    render(
+      <Menu
+        items={[
+          { id: "recent", label: "Recently added", checked: true, onSelect },
+          { id: "az", label: "A–Z", checked: false, onSelect },
+          { id: "sep", type: "separator" },
+          { id: "reverse", label: "Reverse order", checked: false, selection: "checkbox", onSelect }
+        ]}
+        label="Sort"
+        renderTrigger={(props) => <IconButton aria-label="Sort" icon="sort" {...props} />}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Sort" }));
+
+    expect(screen.getByRole("menuitemradio", { name: "Recently added" })).toHaveAttribute(
+      "aria-checked",
+      "true"
+    );
+    expect(screen.getByRole("menuitemradio", { name: "Recently added" })).toHaveFocus();
+    expect(screen.getByRole("menuitemradio", { name: "A–Z" })).toHaveAttribute(
+      "aria-checked",
+      "false"
+    );
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Reverse order" }));
+    expect(onSelect).toHaveBeenCalledTimes(1);
+  });
 });
