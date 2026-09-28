@@ -141,7 +141,6 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
   const [topBarScrolled, setTopBarScrolled] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
-  const online = useOnlineStatus();
   const routeMeta = getAppRouteMeta(location.pathname);
   const showTopBar = !routeMeta.isDestination;
   const shortcutLabel = paletteShortcutLabel();
@@ -253,8 +252,7 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
       className={[
         "app-shell",
         isRail ? "app-shell-rail" : "app-shell-tabs",
-        showTopBar ? "app-shell-has-topbar" : "",
-        online ? "" : "app-shell-offline"
+        showTopBar ? "app-shell-has-topbar" : ""
       ]
         .filter(Boolean)
         .join(" ")}
