@@ -14,12 +14,16 @@ import { AppState } from "react-native";
 
 import { trackMobileEvent } from "../../analytics/client";
 import { mobileEnv } from "../../config/env";
+import { createDebouncedWriter } from "../../lib/debouncedWriter";
 import { useAccount } from "../account/AccountContext";
 
 import {
   addShoppingItemsToList,
   applyRemoteShoppingItems,
+  clearCheckedShoppingItemsInList,
   deleteShoppingItemInList,
+  getSyncableDirtyItems,
+  markShoppingItemsSynced,
   markShoppingItemsSyncFailed,
   readShoppingItems,
   serializeShoppingItems,
@@ -30,22 +34,38 @@ import {
   type MobileShoppingItem
 } from "./store";
 
+import type { ShoppingItem } from "@linkdish/recipe-domain";
+
 const SHOPPING_ITEMS_STORAGE_KEY = "linkdish.shoppingItems.v1";
 const SHOPPING_ITEMS_CORRUPT_BACKUP_STORAGE_KEY = "linkdish.shoppingItems.corrupt.v1";
+/** Rapid check-offs are pushed together once the list has been quiet for this long. */
+export const SHOPPING_SYNC_DEBOUNCE_MS = 400;
+/** The list blob is written once edits settle (and immediately when the app backgrounds). */
+export const SHOPPING_PERSIST_DEBOUNCE_MS = 250;
+/** A mutation push reuses the household id for this long before asking the API again. */
+const HOUSEHOLD_ID_CACHE_MS = 5 * 60 * 1000;
 
-interface ShoppingListContextValue {
-  addItems: (inputs: AddShoppingItemInput[]) => void;
+export interface ShoppingListState {
   canSyncShoppingList: boolean;
-  deleteItem: (id: string) => void;
   hasLoadedShoppingItems: boolean;
   isRefreshingShoppingList: boolean;
-  refreshShoppingList: () => Promise<void>;
-  setItemChecked: (id: string, checked: boolean) => void;
   shoppingError: string | null;
+  /** Live items (delete tombstones waiting to sync are hidden). */
   shoppingItems: MobileShoppingItem[];
 }
 
-const ShoppingListContext = createContext<ShoppingListContextValue | null>(null);
+export interface ShoppingListActions {
+  addItems: (inputs: AddShoppingItemInput[]) => void;
+  clearCheckedItems: () => void;
+  deleteItem: (id: string) => void;
+  refreshShoppingList: () => Promise<void>;
+  setItemChecked: (id: string, checked: boolean) => void;
+}
+
+export type ShoppingListContextValue = ShoppingListState & ShoppingListActions;
+
+const ShoppingListStateContext = createContext<ShoppingListState | null>(null);
+const ShoppingListActionsContext = createContext<ShoppingListActions | null>(null);
 
 const getShoppingErrorMessage = (error: unknown): string => {
   if (error instanceof ExtractorApiError && typeof error.details === "object" && error.details) {
@@ -59,12 +79,15 @@ const getShoppingErrorMessage = (error: unknown): string => {
   return error instanceof Error ? error.message : "Shopping list sync failed.";
 };
 
-const getSyncableDirtyItems = (items: MobileShoppingItem[]): MobileShoppingItem[] =>
-  items.filter(
-    (item) =>
-      item.sync.status !== "local_only" &&
-      (item.sync.status === "dirty" || item.sync.status === "sync_failed")
-  );
+/** The household is gone or no longer ours: forget the cached id so the next sync re-checks. */
+const isHouseholdAccessError = (error: unknown): boolean =>
+  error instanceof ExtractorApiError && (error.statusCode === 403 || error.statusCode === 404);
+
+interface SyncLoopState {
+  loop: Promise<void> | null;
+  pending: boolean;
+  pendingPull: boolean;
+}
 
 export const ShoppingListProvider = ({ children }: PropsWithChildren) => {
   const { getAuthHeaders, isSignedIn, user } = useAccount();
@@ -74,8 +97,10 @@ export const ShoppingListProvider = ({ children }: PropsWithChildren) => {
   const [shoppingError, setShoppingError] = useState<string | null>(null);
   const [shoppingItems, setShoppingItems] = useState<MobileShoppingItem[]>([]);
   const [hasUnreadableStoredItems, setHasUnreadableStoredItems] = useState(false);
-  const isRefreshingRef = useRef(false);
   const shoppingItemsRef = useRef<MobileShoppingItem[]>([]);
+  const householdIdRef = useRef<{ fetchedAt: number; id: string | null } | null>(null);
+  const syncLoopRef = useRef<SyncLoopState>({ loop: null, pending: false, pendingPull: false });
+  const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const client = useMemo(
     () =>
       createExtractorApiClient({
@@ -85,10 +110,43 @@ export const ShoppingListProvider = ({ children }: PropsWithChildren) => {
     [getAuthHeaders]
   );
   const canSyncShoppingList = Boolean(isSignedIn && user && activeHouseholdId);
+  const latestRef = useRef({
+    canSyncShoppingList,
+    client,
+    hasLoadedShoppingItems,
+    isSignedIn,
+    userId: user?.id
+  });
+  latestRef.current = {
+    canSyncShoppingList,
+    client,
+    hasLoadedShoppingItems,
+    isSignedIn,
+    userId: user?.id
+  };
+  const writer = useMemo(
+    () =>
+      createDebouncedWriter<MobileShoppingItem[]>(async (items) => {
+        try {
+          await AsyncStorage.setItem(SHOPPING_ITEMS_STORAGE_KEY, serializeShoppingItems(items));
+        } catch (error) {
+          console.warn("Failed to persist shopping list.", error);
+        }
+      }, SHOPPING_PERSIST_DEBOUNCE_MS),
+    []
+  );
 
-  useEffect(() => {
-    shoppingItemsRef.current = shoppingItems;
-  }, [shoppingItems]);
+  /**
+   * Every list change goes through here. The ref is updated synchronously, so a sync pass or
+   * a second mutation in the same tick always sees the latest items even before React renders.
+   */
+  const commitShoppingItems = useCallback(
+    (update: (items: MobileShoppingItem[]) => MobileShoppingItem[]) => {
+      shoppingItemsRef.current = update(shoppingItemsRef.current);
+      setShoppingItems(shoppingItemsRef.current);
+    },
+    []
+  );
 
   useEffect(() => {
     let isMounted = true;
@@ -116,7 +174,7 @@ export const ShoppingListProvider = ({ children }: PropsWithChildren) => {
           return;
         }
 
-        setShoppingItems(sortShoppingItems(items));
+        commitShoppingItems(() => sortShoppingItems(items));
       } catch (error) {
         console.warn("Failed to load shopping list.", error);
       } finally {
@@ -131,7 +189,7 @@ export const ShoppingListProvider = ({ children }: PropsWithChildren) => {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [commitShoppingItems]);
 
   useEffect(() => {
     if (!hasLoadedShoppingItems) {
@@ -144,34 +202,40 @@ export const ShoppingListProvider = ({ children }: PropsWithChildren) => {
       return;
     }
 
-    const persistShoppingItems = async () => {
-      try {
-        await AsyncStorage.setItem(SHOPPING_ITEMS_STORAGE_KEY, serializeShoppingItems(shoppingItems));
-      } catch (error) {
-        console.warn("Failed to persist shopping list.", error);
+    writer.schedule(shoppingItems);
+  }, [hasLoadedShoppingItems, hasUnreadableStoredItems, shoppingItems, writer]);
+
+  /** One pass: push dirty items (and tombstones), then pull when asked or when needed. */
+  const runSyncPass = useCallback(
+    async (pull: boolean): Promise<void> => {
+      const { client: apiClient, isSignedIn: signedIn, userId } = latestRef.current;
+
+      if (!signedIn || !userId) {
+        householdIdRef.current = null;
+        setActiveHouseholdId(null);
+        setShoppingError(null);
+        return;
       }
-    };
 
-    void persistShoppingItems();
-  }, [hasLoadedShoppingItems, hasUnreadableStoredItems, shoppingItems]);
+      let householdId: string | null;
 
-  const refreshShoppingList = useCallback(async () => {
-    if (!hasLoadedShoppingItems || isRefreshingRef.current) {
-      return;
-    }
+      try {
+        const cached = householdIdRef.current;
 
-    if (!isSignedIn || !user) {
-      setActiveHouseholdId(null);
-      setShoppingError(null);
-      return;
-    }
+        if (!pull && cached?.id && Date.now() - cached.fetchedAt < HOUSEHOLD_ID_CACHE_MS) {
+          householdId = cached.id;
+        } else {
+          const householdResponse = await apiClient.getHousehold();
+          householdId = householdResponse.household?.id ?? null;
+          householdIdRef.current = { fetchedAt: Date.now(), id: householdId };
+        }
+      } catch (error) {
+        householdIdRef.current = null;
+        setActiveHouseholdId(null);
+        setShoppingError(getShoppingErrorMessage(error));
+        return;
+      }
 
-    isRefreshingRef.current = true;
-    setIsRefreshingShoppingList(true);
-
-    try {
-      const householdResponse = await client.getHousehold();
-      const householdId = householdResponse.household?.id ?? null;
       setActiveHouseholdId(householdId);
 
       if (!householdId) {
@@ -182,18 +246,27 @@ export const ShoppingListProvider = ({ children }: PropsWithChildren) => {
       const syncableDirtyItems = getSyncableDirtyItems(shoppingItemsRef.current);
       const dirtyUpserts = syncableDirtyItems.filter((item) => !item.isDeleted);
       const dirtyDeletes = syncableDirtyItems.filter((item) => item.isDeleted);
+
+      if (!pull && syncableDirtyItems.length === 0) {
+        return;
+      }
+
+      const pushedVersions = new Map(dirtyUpserts.map((item) => [item.id, item.updatedAt]));
       const failedIds = new Set(syncableDirtyItems.map((item) => item.id));
 
       try {
+        let remoteItems: ShoppingItem[] | null = null;
+        let deletedItemIds: string[] = [];
+
         if (dirtyUpserts.length > 0) {
-          await client.upsertShoppingItems({
+          const upserted = await apiClient.upsertShoppingItems({
             items: dirtyUpserts.map(toApiShoppingItem)
           });
+          remoteItems = upserted.items;
         }
 
-        let deletedItemIds: string[] = [];
         if (dirtyDeletes.length > 0) {
-          const deleted = await client.deleteShoppingItems({
+          const deleted = await apiClient.deleteShoppingItems({
             items: dirtyDeletes.map((item) => ({
               id: item.id,
               updatedAt: item.updatedAt
@@ -202,29 +275,105 @@ export const ShoppingListProvider = ({ children }: PropsWithChildren) => {
           deletedItemIds = deleted.deletedItemIds;
         }
 
-        const response = await client.getShoppingList();
-        setShoppingItems((current) =>
-          sortShoppingItems(
-            applyRemoteShoppingItems(
-              current.filter((item) => !deletedItemIds.includes(item.id)),
-              response.items
-            )
-          )
-        );
+        if (pull && remoteItems == null) {
+          remoteItems = (await apiClient.getShoppingList()).items;
+        }
+
+        const syncedAt = new Date().toISOString();
+        const deletedIds = new Set(deletedItemIds);
+        const remoteAfterDeletes = remoteItems?.filter((item) => !deletedIds.has(item.id)) ?? null;
+
+        commitShoppingItems((current) => {
+          const withoutDeleted = current.filter((item) => !deletedIds.has(item.id));
+          const marked = markShoppingItemsSynced(withoutDeleted, pushedVersions, syncedAt);
+          return sortShoppingItems(
+            remoteAfterDeletes ? applyRemoteShoppingItems(marked, remoteAfterDeletes) : marked
+          );
+        });
         setShoppingError(null);
       } catch (syncError) {
+        if (isHouseholdAccessError(syncError)) {
+          householdIdRef.current = null;
+        }
+
         const message = getShoppingErrorMessage(syncError);
-        setShoppingItems((current) => markShoppingItemsSyncFailed(current, failedIds, message));
+        commitShoppingItems((current) => markShoppingItemsSyncFailed(current, failedIds, message));
         setShoppingError(message);
       }
-    } catch (error) {
+    },
+    [commitShoppingItems]
+  );
+
+  /**
+   * Runs sync passes one at a time. A request that arrives while a pass is in flight is not
+   * dropped: it queues exactly one follow-up pass (which pulls if any queued request asked
+   * to), so edits made during a refresh are pushed as soon as it finishes.
+   */
+  const requestSync = useCallback(
+    (pull: boolean): Promise<void> => {
+      const state = syncLoopRef.current;
+      state.pending = true;
+      state.pendingPull = state.pendingPull || pull;
+
+      if (state.loop) {
+        return state.loop;
+      }
+
+      state.loop = (async () => {
+        try {
+          while (state.pending) {
+            const shouldPull = state.pendingPull;
+            state.pending = false;
+            state.pendingPull = false;
+            await runSyncPass(shouldPull);
+          }
+        } finally {
+          state.loop = null;
+        }
+      })();
+
+      return state.loop;
+    },
+    [runSyncPass]
+  );
+
+  const clearScheduledSync = useCallback(() => {
+    if (syncTimerRef.current != null) {
+      clearTimeout(syncTimerRef.current);
+      syncTimerRef.current = null;
+    }
+  }, []);
+
+  /** Coalesces a burst of mutations into one push. */
+  const scheduleSync = useCallback(() => {
+    clearScheduledSync();
+    syncTimerRef.current = setTimeout(() => {
+      syncTimerRef.current = null;
+      void requestSync(false);
+    }, SHOPPING_SYNC_DEBOUNCE_MS);
+  }, [clearScheduledSync, requestSync]);
+
+  const refreshShoppingList = useCallback(async () => {
+    if (!hasLoadedShoppingItems) {
+      return;
+    }
+
+    if (!isSignedIn || !user) {
+      householdIdRef.current = null;
       setActiveHouseholdId(null);
-      setShoppingError(getShoppingErrorMessage(error));
+      setShoppingError(null);
+      return;
+    }
+
+    clearScheduledSync();
+    setIsRefreshingShoppingList(true);
+
+    try {
+      await requestSync(true);
     } finally {
-      isRefreshingRef.current = false;
       setIsRefreshingShoppingList(false);
     }
-  }, [client, hasLoadedShoppingItems, isSignedIn, user]);
+  }, [clearScheduledSync, hasLoadedShoppingItems, isSignedIn, requestSync, user]);
 
   useEffect(() => {
     void refreshShoppingList();
@@ -234,111 +383,165 @@ export const ShoppingListProvider = ({ children }: PropsWithChildren) => {
     const subscription = AppState.addEventListener("change", (state) => {
       if (state === "active") {
         void refreshShoppingList();
+        return;
+      }
+
+      // Leaving the foreground: write the list now and push any check-offs still waiting for
+      // the debounce, so nothing is lost if the OS stops the app in the background.
+      void writer.flush().catch(() => undefined);
+
+      if (syncTimerRef.current != null) {
+        clearScheduledSync();
+        void requestSync(false);
       }
     });
 
     return () => {
       subscription.remove();
     };
-  }, [refreshShoppingList]);
+  }, [clearScheduledSync, refreshShoppingList, requestSync, writer]);
 
-  const addItems = (inputs: AddShoppingItemInput[]) => {
-    const filteredInputs = inputs.filter((input) => input.text.trim());
+  useEffect(
+    () => () => {
+      clearScheduledSync();
+      void writer.flush().catch(() => undefined);
+    },
+    [clearScheduledSync, writer]
+  );
 
-    if (filteredInputs.length === 0) {
-      return;
-    }
+  const applyMutation = useCallback(
+    (mutate: (items: MobileShoppingItem[]) => MobileShoppingItem[]) => {
+      commitShoppingItems(mutate);
 
-    setShoppingItems((current) =>
-      sortShoppingItems(
-        addShoppingItemsToList(current, filteredInputs, {
-          canSync: canSyncShoppingList,
-          userId: user?.id
-        })
-      )
-    );
-
-    trackMobileEvent({
-      eventName: "shopping_item_added",
-      routeOrScreen: "shopping",
-      properties: {
-        count: filteredInputs.length,
-        recipeTagged: filteredInputs.some((input) => Boolean(input.recipeId))
+      if (latestRef.current.canSyncShoppingList) {
+        scheduleSync();
       }
-    });
+    },
+    [commitShoppingItems, scheduleSync]
+  );
 
-    if (canSyncShoppingList) {
-      setTimeout(() => {
-        void refreshShoppingList();
-      }, 0);
-    }
-  };
+  const addItems = useCallback(
+    (inputs: AddShoppingItemInput[]) => {
+      const filteredInputs = inputs.filter((input) => input.text.trim());
 
-  const setItemChecked = (id: string, checked: boolean) => {
-    setShoppingItems((current) =>
-      setShoppingItemCheckedInList(current, id, checked, {
-        canSync: canSyncShoppingList,
-        userId: user?.id
-      })
-    );
+      if (filteredInputs.length === 0) {
+        return;
+      }
 
-    if (checked) {
+      const { canSyncShoppingList: canSync, userId } = latestRef.current;
+      applyMutation((current) =>
+        sortShoppingItems(addShoppingItemsToList(current, filteredInputs, { canSync, userId }))
+      );
+
       trackMobileEvent({
-        eventName: "shopping_item_checked",
+        eventName: "shopping_item_added",
         routeOrScreen: "shopping",
         properties: {
-          itemId: id
+          count: filteredInputs.length,
+          recipeTagged: filteredInputs.some((input) => Boolean(input.recipeId))
         }
       });
-    }
+    },
+    [applyMutation]
+  );
 
-    if (canSyncShoppingList) {
-      setTimeout(() => {
-        void refreshShoppingList();
-      }, 0);
-    }
-  };
+  const setItemChecked = useCallback(
+    (id: string, checked: boolean) => {
+      const { canSyncShoppingList: canSync, userId } = latestRef.current;
+      applyMutation((current) =>
+        setShoppingItemCheckedInList(current, id, checked, { canSync, userId })
+      );
 
-  const deleteItem = (id: string) => {
-    setShoppingItems((current) =>
-      deleteShoppingItemInList(current, id, {
-        canSync: canSyncShoppingList,
-        userId: user?.id
-      })
-    );
+      if (checked) {
+        trackMobileEvent({
+          eventName: "shopping_item_checked",
+          routeOrScreen: "shopping",
+          properties: {
+            itemId: id
+          }
+        });
+      }
+    },
+    [applyMutation]
+  );
 
-    if (canSyncShoppingList) {
-      setTimeout(() => {
-        void refreshShoppingList();
-      }, 0);
-    }
-  };
+  const deleteItem = useCallback(
+    (id: string) => {
+      const { canSyncShoppingList: canSync, userId } = latestRef.current;
+      applyMutation((current) => deleteShoppingItemInList(current, id, { canSync, userId }));
+    },
+    [applyMutation]
+  );
+
+  const clearCheckedItems = useCallback(() => {
+    const { canSyncShoppingList: canSync, userId } = latestRef.current;
+    applyMutation((current) => clearCheckedShoppingItemsInList(current, { canSync, userId }));
+  }, [applyMutation]);
+
+  const visibleShoppingItems = useMemo(
+    () => shoppingItems.filter((item) => !item.isDeleted),
+    [shoppingItems]
+  );
+
+  const state = useMemo<ShoppingListState>(
+    () => ({
+      canSyncShoppingList,
+      hasLoadedShoppingItems,
+      isRefreshingShoppingList,
+      shoppingError,
+      shoppingItems: visibleShoppingItems
+    }),
+    [
+      canSyncShoppingList,
+      hasLoadedShoppingItems,
+      isRefreshingShoppingList,
+      shoppingError,
+      visibleShoppingItems
+    ]
+  );
+
+  const actions = useMemo<ShoppingListActions>(
+    () => ({
+      addItems,
+      clearCheckedItems,
+      deleteItem,
+      refreshShoppingList,
+      setItemChecked
+    }),
+    [addItems, clearCheckedItems, deleteItem, refreshShoppingList, setItemChecked]
+  );
 
   return (
-    <ShoppingListContext.Provider
-      value={{
-        addItems,
-        canSyncShoppingList,
-        deleteItem,
-        hasLoadedShoppingItems,
-        isRefreshingShoppingList,
-        refreshShoppingList,
-        setItemChecked,
-        shoppingError,
-        shoppingItems: shoppingItems.filter((item) => !item.isDeleted)
-      }}
-    >
-      {children}
-    </ShoppingListContext.Provider>
+    <ShoppingListActionsContext.Provider value={actions}>
+      <ShoppingListStateContext.Provider value={state}>
+        {children}
+      </ShoppingListStateContext.Provider>
+    </ShoppingListActionsContext.Provider>
   );
 };
 
-export const useShoppingList = () => {
-  const context = useContext(ShoppingListContext);
+/** Actions only: components that add or check items without rendering the list skip re-renders. */
+export const useShoppingListActions = (): ShoppingListActions => {
+  const actions = useContext(ShoppingListActionsContext);
 
-  if (!context) {
+  if (!actions) {
+    throw new Error("useShoppingListActions must be used within ShoppingListProvider.");
+  }
+
+  return actions;
+};
+
+export const useShoppingList = (): ShoppingListContextValue => {
+  const state = useContext(ShoppingListStateContext);
+  const actions = useContext(ShoppingListActionsContext);
+  const value = useMemo(
+    () => (state && actions ? { ...state, ...actions } : null),
+    [actions, state]
+  );
+
+  if (!value) {
     throw new Error("useShoppingList must be used within ShoppingListProvider.");
   }
 
-  return context;
+  return value;
 };

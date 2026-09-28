@@ -1,9 +1,24 @@
-import { parseIngredientQuantity, scaleQuantity } from "@linkdish/recipe-domain";
+import {
+  formatShoppingItemText,
+  getDisplayIngredientText,
+  groupByShoppingCategory,
+  mergeShoppingItemLists,
+  parseShoppingLine as parseDomainShoppingLine,
+  recipeIngredientsToShoppingInputs as buildDomainShoppingInputs
+} from "@linkdish/recipe-domain";
 
-import type { Recipe, ShoppingItem, ShoppingQuantity } from "@linkdish/recipe-domain";
+import type {
+  IngredientUnitsPreference,
+  MergeShoppingOptions,
+  Recipe,
+  ShoppingCategoryId,
+  ShoppingItem,
+  ShoppingQuantity
+} from "@linkdish/recipe-domain";
 
 export type ShoppingSyncStatus = "local_only" | "dirty" | "synced" | "sync_failed";
-export type ShoppingUnitMode = "metric" | "original";
+/** How ingredient amounts are shown when a recipe is added: as written, or in US/metric units. */
+export type ShoppingUnitMode = IngredientUnitsPreference;
 
 export interface MobileShoppingItem extends ShoppingItem {
   createdAt: string;
@@ -36,39 +51,16 @@ export interface RecipeShoppingScaling {
 
 const LOCAL_SHOPPING_USER = "local";
 
-const normalizeItemText = (text: string): string => text.trim().replace(/\s+/gu, " ").toLowerCase();
-
-const normalizeUnit = (unit: string | null | undefined): string => unit?.trim().toLowerCase() ?? "";
-
-const isRangeQuantity = (
-  value: Exclude<ShoppingQuantity, number>
-): value is { min: number; max: number } => typeof value === "object" && value !== null;
-
-const addQuantities = (
-  left: ShoppingQuantity | null | undefined,
-  right: ShoppingQuantity | null | undefined
-): ShoppingQuantity | null | undefined => {
-  if (left == null) {
-    return right;
-  }
-
-  if (right == null) {
-    return left;
-  }
-
-  if (typeof left === "number" && typeof right === "number") {
-    return left + right;
-  }
-
-  if (typeof left !== "number" && typeof right !== "number") {
-    return {
-      min: left.min + right.min,
-      max: left.max + right.max
-    };
-  }
-
-  return undefined;
-};
+/**
+ * Items merge when they are the same thing to buy (the domain's canonical ingredient key:
+ * "2 large eggs" and "1 egg", "scallions" and "green onions") and their amounts can be added.
+ *
+ * Unit conversion is on deliberately: a shopping list is about what to buy, so "2 tsp cumin"
+ * and "1 Tbsp cumin", or "1 cup milk" and "250 ml milk", belong on one line. The domain never
+ * converts between volume and weight (no density guesses) or between counts and measures, so
+ * "2 cups flour" and "100 g flour" still stay separate lines.
+ */
+export const SHOPPING_MERGE_OPTIONS: MergeShoppingOptions = { convertUnits: true };
 
 const isRemoteNewer = (remoteUpdatedAt: string, localUpdatedAt: string): boolean =>
   new Date(remoteUpdatedAt).getTime() > new Date(localUpdatedAt).getTime();
@@ -76,32 +68,33 @@ const isRemoteNewer = (remoteUpdatedAt: string, localUpdatedAt: string): boolean
 const createShoppingItemId = (timestamp: string, index: number): string =>
   `shopping_${timestamp.replace(/\D/gu, "")}_${index}_${Math.random().toString(36).slice(2, 10)}`;
 
+/**
+ * Display text for a stored item: friendly fractions and ranges ("⅔ cup milk", "1–2 tsp
+ * salt", "3 large eggs") instead of raw floats such as "0.6666666666666666 cup".
+ */
 export const shoppingTextFromQuantity = (
   qty: ShoppingQuantity | null | undefined,
   unit: string | null | undefined,
   text: string
-): string => {
-  if (qty == null) {
-    return text;
-  }
+): string => formatShoppingItemText({ qty, text, unit });
 
-  const quantityText = typeof qty === "number" ? String(qty) : `${qty.min}-${qty.max}`;
-  return `${quantityText}${unit ? ` ${unit}` : ""} ${text}`.trim();
-};
+export const getShoppingItemDisplayText = (
+  item: Pick<MobileShoppingItem, "qty" | "text" | "unit">
+): string => formatShoppingItemText(item);
 
+/**
+ * Parses a typed or recipe line into the stored item fields (see the domain's
+ * parseShoppingLine): the cleaned item name, a positive quantity (ranges kept) and a
+ * canonical unit. "1 (15-ounce) can chickpeas, drained" becomes 1 can "chickpeas (15-ounce)".
+ */
 export const parseShoppingLine = (
   line: string
 ): Pick<MobileShoppingItem, "qty" | "text" | "unit"> => {
-  const trimmed = line.trim();
-  const parsed = parseIngredientQuantity(trimmed);
-
-  if (!parsed.confident) {
-    return { text: trimmed };
-  }
+  const parsed = parseDomainShoppingLine(line);
 
   return {
     ...(parsed.qty == null ? {} : { qty: parsed.qty }),
-    text: parsed.item,
+    text: parsed.text,
     ...(parsed.unit == null ? {} : { unit: parsed.unit })
   };
 };
@@ -109,44 +102,23 @@ export const parseShoppingLine = (
 export const getScaledShoppingIngredientText = (
   text: string,
   scaling: RecipeShoppingScaling
-): string => {
-  const parsed = parseIngredientQuantity(text);
-
-  if (!parsed.confident) {
-    return text;
-  }
-
-  if (scaling.unitMode === "metric" && parsed.altQty != null && parsed.altUnit) {
-    return scaleQuantity(
-      {
-        ...parsed,
-        altQty: null,
-        altUnit: null,
-        qty: parsed.altQty,
-        unit: parsed.altUnit
-      },
-      scaling.scaleFactor
-    );
-  }
-
-  if (scaling.scaleFactor === 1 && (scaling.unitMode ?? "original") === "original") {
-    return text;
-  }
-
-  return scaleQuantity(parsed, scaling.scaleFactor);
-};
+): string =>
+  getDisplayIngredientText(text, {
+    keepOriginalText: true,
+    scale: scaling.scaleFactor,
+    units: scaling.unitMode ?? "original"
+  });
 
 export const recipeIngredientsToShoppingInputs = (
   recipe: Recipe,
   recipeId: string,
   scaling: RecipeShoppingScaling
 ): AddShoppingItemInput[] =>
-  recipe.ingredients.map((ingredient) => ({
+  buildDomainShoppingInputs(recipe, {
     recipeId,
-    recipeTitle: recipe.title,
-    ...(ingredient.section ? { section: ingredient.section } : {}),
-    text: getScaledShoppingIngredientText(ingredient.text, scaling)
-  }));
+    scale: scaling.scaleFactor,
+    units: scaling.unitMode ?? "original"
+  });
 
 export const toApiShoppingItem = (item: MobileShoppingItem): ShoppingItem => ({
   id: item.id,
@@ -165,36 +137,15 @@ export const toApiShoppingItem = (item: MobileShoppingItem): ShoppingItem => ({
 export const mergeShoppingItems = (
   existingItems: MobileShoppingItem[],
   incomingItems: MobileShoppingItem[]
-): MobileShoppingItem[] => {
-  const mergedItems = [...existingItems];
-
-  for (const incoming of incomingItems) {
-    const matchingIndex = mergedItems.findIndex(
-      (item) =>
-        !item.isDeleted &&
-        !incoming.isDeleted &&
-        normalizeItemText(item.text) === normalizeItemText(incoming.text) &&
-        normalizeUnit(item.unit) === normalizeUnit(incoming.unit)
-    );
-
-    if (matchingIndex === -1) {
-      mergedItems.push(incoming);
-      continue;
-    }
-
-    const existing = mergedItems[matchingIndex];
-
-    if (!existing) {
-      mergedItems.push(incoming);
-      continue;
-    }
-
-    const nextQty = addQuantities(existing.qty, incoming.qty);
-    mergedItems[matchingIndex] = {
+): MobileShoppingItem[] =>
+  mergeShoppingItemLists(
+    existingItems,
+    incomingItems,
+    (existing, incoming, merged): MobileShoppingItem => ({
       ...existing,
       checked: false,
       checkedBy: null,
-      qty: nextQty,
+      qty: merged.qty ?? null,
       recipeId: existing.recipeId ?? incoming.recipeId,
       recipeTitle: existing.recipeTitle ?? incoming.recipeTitle,
       section: existing.section ?? incoming.section,
@@ -202,15 +153,15 @@ export const mergeShoppingItems = (
         existing.sync.status === "local_only" && incoming.sync.status === "local_only"
           ? { status: "local_only" }
           : { status: "dirty" },
+      text: merged.text,
+      unit: merged.unit ?? null,
       updatedAt:
         new Date(incoming.updatedAt).getTime() > new Date(existing.updatedAt).getTime()
           ? incoming.updatedAt
           : existing.updatedAt
-    };
-  }
-
-  return mergedItems;
-};
+    }),
+    SHOPPING_MERGE_OPTIONS
+  );
 
 export const addShoppingItemsToList = (
   existingItems: MobileShoppingItem[],
@@ -282,21 +233,25 @@ export const markShoppingItemsSyncFailed = (
       : item
   );
 
-export const deleteShoppingItemInList = (
+/**
+ * Removes items: local-only items (or any item when the list does not sync) disappear, synced
+ * items become dirty tombstones so the household list learns about the delete.
+ */
+export const deleteShoppingItemsInList = (
   items: MobileShoppingItem[],
-  id: string,
+  ids: ReadonlySet<string>,
   options: ShoppingMutationOptions
-): MobileShoppingItem[] =>
-  items.flatMap((item) => {
-    if (item.id !== id) {
+): MobileShoppingItem[] => {
+  const timestamp = options.now ?? new Date().toISOString();
+
+  return items.flatMap((item) => {
+    if (!ids.has(item.id)) {
       return [item];
     }
 
     if (!options.canSync || item.sync.status === "local_only") {
       return [];
     }
-
-    const timestamp = options.now ?? new Date().toISOString();
 
     return [
       {
@@ -308,6 +263,34 @@ export const deleteShoppingItemInList = (
       }
     ];
   });
+};
+
+export const deleteShoppingItemInList = (
+  items: MobileShoppingItem[],
+  id: string,
+  options: ShoppingMutationOptions
+): MobileShoppingItem[] => deleteShoppingItemsInList(items, new Set([id]), options);
+
+/** "Clear checked": removes every checked, not-yet-deleted item in one mutation. */
+export const clearCheckedShoppingItemsInList = (
+  items: MobileShoppingItem[],
+  options: ShoppingMutationOptions
+): MobileShoppingItem[] =>
+  deleteShoppingItemsInList(
+    items,
+    new Set(items.filter((item) => item.checked && !item.isDeleted).map((item) => item.id)),
+    options
+  );
+
+export interface ShoppingAisleGroup {
+  category: ShoppingCategoryId;
+  items: MobileShoppingItem[];
+  label: string;
+}
+
+/** Groups items by grocery aisle in store-walk order (Produce, Meat & Seafood, Dairy & Eggs...). */
+export const groupShoppingItemsByAisle = (items: MobileShoppingItem[]): ShoppingAisleGroup[] =>
+  groupByShoppingCategory(items, (item) => getShoppingItemDisplayText(item));
 
 export const applyRemoteShoppingItems = (
   localItems: MobileShoppingItem[],
@@ -319,10 +302,15 @@ export const applyRemoteShoppingItems = (
   for (const remoteItem of remoteItems) {
     const localItem = localById.get(remoteItem.id);
 
+    // The server stores the client's updatedAt, so a remote copy with the same timestamp as a
+    // dirty local item is that exact edit coming back: it is synced now, not still "Syncing".
+    // A local tombstone waits for its delete to go through unless the remote edit is newer.
     if (
       localItem &&
-      (localItem.sync.status === "dirty" || localItem.isDeleted) &&
-      !isRemoteNewer(remoteItem.updatedAt, localItem.updatedAt)
+      (localItem.isDeleted
+        ? !isRemoteNewer(remoteItem.updatedAt, localItem.updatedAt)
+        : (localItem.sync.status === "dirty" || localItem.sync.status === "sync_failed") &&
+          isRemoteNewer(localItem.updatedAt, remoteItem.updatedAt))
     ) {
       continue;
     }
@@ -339,6 +327,26 @@ export const applyRemoteShoppingItems = (
 
   return Array.from(nextById.values());
 };
+
+/**
+ * Marks items the server accepted as synced. `pushedVersions` maps each pushed id to the
+ * updatedAt that was sent; an item edited again while the push was in flight keeps its newer,
+ * still-dirty version so the follow-up sync sends it.
+ */
+export const markShoppingItemsSynced = (
+  items: MobileShoppingItem[],
+  pushedVersions: ReadonlyMap<string, string>,
+  syncedAt: string
+): MobileShoppingItem[] =>
+  items.map((item) =>
+    pushedVersions.get(item.id) === item.updatedAt && !item.isDeleted
+      ? { ...item, sync: { lastSyncedAt: syncedAt, status: "synced" } }
+      : item
+  );
+
+/** Items waiting to be pushed to the household list (edits and delete tombstones). */
+export const getSyncableDirtyItems = (items: MobileShoppingItem[]): MobileShoppingItem[] =>
+  items.filter((item) => item.sync.status === "dirty" || item.sync.status === "sync_failed");
 
 export const sortShoppingItems = (items: MobileShoppingItem[]): MobileShoppingItem[] =>
   [...items].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
@@ -412,6 +420,3 @@ export const parseShoppingItems = (serializedItems: string | null): MobileShoppi
 
 export const serializeShoppingItems = (items: MobileShoppingItem[]): string =>
   JSON.stringify(items);
-
-export const hasShoppingQuantityRange = (item: MobileShoppingItem): boolean =>
-  item.qty != null && typeof item.qty !== "number" && isRangeQuantity(item.qty);

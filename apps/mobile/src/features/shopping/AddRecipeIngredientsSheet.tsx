@@ -6,7 +6,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { appColors, appSpacing } from "../../theme/tokens";
 
-import { useShoppingList } from "./ShoppingListContext";
+import { useShoppingListActions } from "./ShoppingListContext";
 import { recipeIngredientsToShoppingInputs, type ShoppingUnitMode } from "./store";
 
 import type { Recipe } from "@linkdish/recipe-domain";
@@ -31,7 +31,7 @@ export const AddRecipeIngredientsSheet = ({
   unitMode,
   visible
 }: AddRecipeIngredientsSheetProps) => {
-  const { addItems } = useShoppingList();
+  const { addItems } = useShoppingListActions();
   const inputs = useMemo(
     () => recipeIngredientsToShoppingInputs(recipe, recipeId, { scaleFactor, unitMode }),
     [recipe, recipeId, scaleFactor, unitMode]
@@ -96,7 +96,12 @@ export const AddRecipeIngredientsSheet = ({
   };
 
   return (
-    <Modal animationType="slide" onRequestClose={onClose} presentationStyle="pageSheet" visible={visible}>
+    <Modal
+      animationType="slide"
+      onRequestClose={onClose}
+      presentationStyle="pageSheet"
+      visible={visible}
+    >
       <SafeAreaView style={styles.screen}>
         <View style={styles.header}>
           <View style={styles.headerCopy}>
@@ -157,7 +162,12 @@ export const AddRecipeIngredientsSheet = ({
         </ScrollView>
 
         <View style={styles.footer}>
-          <AppButton label="Cancel" onPress={onClose} style={styles.footerButton} variant="outline" />
+          <AppButton
+            label="Cancel"
+            onPress={onClose}
+            style={styles.footerButton}
+            variant="outline"
+          />
           <AppButton
             disabled={selectedCount === 0}
             label={selectedCount === 1 ? "Add 1 item" : `Add ${selectedCount} items`}
