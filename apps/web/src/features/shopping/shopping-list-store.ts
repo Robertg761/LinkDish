@@ -467,13 +467,8 @@ const notifyOtherTabs = () => {
   }
 };
 
-/** Applies written records to the cache (and tells other tabs). */
-const commitToCache = (
-  upserted: readonly WebShoppingItem[],
-  deletedIds: readonly string[] = []
-) => {
-  notifyOtherTabs();
-
+/** Applies records as they are stored now (and ids no longer stored) to this tab's cache. */
+const applyToCache = (upserted: readonly WebShoppingItem[], deletedIds: readonly string[] = []) => {
   if (snapshot.status !== "ready") {
     return;
   }
@@ -493,6 +488,15 @@ const commitToCache = (
   }
 
   emit({ items: sortItems(Array.from(byId.values())) });
+};
+
+/** Applies written (committed) records to the cache and tells other tabs. */
+const commitToCache = (
+  upserted: readonly WebShoppingItem[],
+  deletedIds: readonly string[] = []
+) => {
+  notifyOtherTabs();
+  applyToCache(upserted, deletedIds);
 };
 
 export const getShoppingListSnapshot = (): ShoppingListSnapshot => snapshot;
@@ -615,23 +619,28 @@ export function resetShoppingListStoreForTests(): void {
 /* IndexedDB                                                                                   */
 /* ------------------------------------------------------------------------------------------ */
 
-/**
- * The list as this device shows it. Other households' records (see setShoppingListHousehold)
- * only come with `includeOtherHouseholds`.
- */
-export async function getShoppingItems(
-  options: { includeDeleted?: boolean; includeOtherHouseholds?: boolean } = {}
-): Promise<WebShoppingItem[]> {
-  const db = await getLinkDishWebDb();
-  const items = (await db.getAll(STORE_NAME)) as WebShoppingItem[];
+interface ListFilter {
+  includeDeleted?: boolean;
+  includeOtherHouseholds?: boolean;
+}
 
-  return sortItems(
-    items.filter(
+/** `records` as the list shows them (see getShoppingItems), in list order. */
+const listed = (records: WebShoppingItem[], options: ListFilter = {}): WebShoppingItem[] =>
+  sortItems(
+    records.filter(
       (item) =>
         (options.includeDeleted || !item.isDeleted) &&
         (options.includeOtherHouseholds || !belongsToOtherHousehold(item, listScope))
     )
   );
+
+/**
+ * The list as this device shows it. Other households' records (see setShoppingListHousehold)
+ * only come with `includeOtherHouseholds`.
+ */
+export async function getShoppingItems(options: ListFilter = {}): Promise<WebShoppingItem[]> {
+  const db = await getLinkDishWebDb();
+  return listed((await db.getAll(STORE_NAME)) as WebShoppingItem[], options);
 }
 
 /**
@@ -644,31 +653,84 @@ export async function hasShoppingItemsOutOfView(): Promise<boolean> {
   return items.some((item) => !item.isDeleted && belongsToOtherHousehold(item, listScope));
 }
 
-/** Writes records and removes ids in one transaction. */
-async function writeShoppingRecords(
-  records: readonly WebShoppingItem[],
-  deletedIds: readonly string[] = []
-): Promise<void> {
-  if (records.length === 0 && deletedIds.length === 0) {
-    return;
-  }
+/** Reads in a shopping transaction (requests of that transaction only). */
+interface ShoppingRecordReader {
+  get(id: string): Promise<WebShoppingItem | undefined>;
+  getAll(): Promise<WebShoppingItem[]>;
+}
 
+/** What a shopping transaction writes once it has read, and what its caller gets back. */
+interface ShoppingChanges<Result> {
+  deletedIds?: readonly string[] | undefined;
+  result: Result;
+  upserted?: readonly WebShoppingItem[] | undefined;
+}
+
+/**
+ * Reads, decides and writes in ONE readwrite transaction. A read in one transaction and a write
+ * in another let a change made in between (by this tab or another one, or a household pull) be
+ * overwritten with records built from what was read before it. IndexedDB runs readwrite
+ * transactions on a store one at a time, so a change made meanwhile now waits for this one and
+ * then applies to what it wrote.
+ *
+ * `read` may only await requests of the transaction it is given (anything else lets it commit
+ * before the writes), and `decide` is synchronous. The cache is updated, and other tabs told,
+ * once the transaction has committed and only when it wrote something.
+ */
+async function changeShoppingRecords<Current, Result>(
+  read: (records: ShoppingRecordReader) => Promise<Current>,
+  decide: (current: Current) => ShoppingChanges<Result>
+): Promise<Result> {
   const db = await getLinkDishWebDb();
   const tx = db.transaction(STORE_NAME, "readwrite");
+  const done = tx.done;
+  // A failed request rejects below; keep `done` from also surfacing as an unhandled rejection.
+  done.catch(() => undefined);
   const store = tx.objectStore(STORE_NAME);
+  const current = await read({
+    get: (id) => store.get(id) as Promise<WebShoppingItem | undefined>,
+    getAll: () => store.getAll() as Promise<WebShoppingItem[]>
+  });
+  // Nothing is pending while `decide` runs, so a throw here commits the transaction unchanged.
+  const { deletedIds = [], result, upserted = [] } = decide(current);
 
   await Promise.all([
-    ...records.map((record) => store.put(record)),
+    ...upserted.map((record) => store.put(record)),
     ...deletedIds.map((id) => store.delete(id)),
-    tx.done
+    done
   ]);
+
+  if (upserted.length > 0 || deletedIds.length > 0) {
+    commitToCache(upserted, deletedIds);
+  }
+
+  return result;
 }
 
-/** Writes the given records (only those) in one transaction and updates the cache. */
+/** Writes the given records as they are (only those) in one transaction and updates the cache. */
 export async function putShoppingItems(items: WebShoppingItem[]): Promise<void> {
-  await writeShoppingRecords(items);
-  commitToCache(items);
+  await changeShoppingRecords(
+    () => Promise.resolve(),
+    () => ({ result: undefined, upserted: items })
+  );
 }
+
+/** Reads the records stored under `ids` (in the same order; undefined where there is none). */
+const readByIds =
+  (ids: readonly string[]) =>
+  (records: ShoppingRecordReader): Promise<Array<WebShoppingItem | undefined>> =>
+    Promise.all(ids.map((id) => records.get(id)));
+
+const readAll = (records: ShoppingRecordReader): Promise<WebShoppingItem[]> => records.getAll();
+
+const isStored = (item: WebShoppingItem | undefined): item is WebShoppingItem => item !== undefined;
+
+/** True when a write for `options` may change `item`: on the list (not deleted), and in scope. */
+const isEditable = (
+  item: WebShoppingItem | undefined,
+  options: Pick<ShoppingWriteOptions, "householdId" | "userId">
+): item is WebShoppingItem =>
+  item !== undefined && !item.isDeleted && !belongsToOtherHousehold(item, writeScope(options));
 
 /**
  * Whose unsent change a record holds (`sync.householdId` and `sync.changedBy`), spread into a new
@@ -860,7 +922,10 @@ export interface AddShoppingItemsResult {
   mergedCount: number;
 }
 
-/** Adds items whose amounts are already parsed; writes only the changed records. */
+/**
+ * Adds items whose amounts are already parsed; writes only the changed records. The list is read,
+ * merged into and written in one transaction, so a check-off or edit made meanwhile is kept.
+ */
 export async function addParsedShoppingItems(
   inputs: readonly ParsedShoppingItemInput[],
   options: ShoppingWriteOptions
@@ -874,15 +939,16 @@ export async function addParsedShoppingItems(
     return { changed: [], mergedCount: 0 };
   }
 
-  const existing = await getShoppingItems();
-  const { changedIds, items } = mergeIncomingShoppingItems(existing, incoming, options);
-  const changed = items.filter((item) => changedIds.has(item.id));
-  const createdCount = incoming.filter((item) => changedIds.has(item.id)).length;
+  return changeShoppingRecords(readAll, (records) => {
+    const { changedIds, items } = mergeIncomingShoppingItems(listed(records), incoming, options);
+    const changed = items.filter((item) => changedIds.has(item.id));
+    const createdCount = incoming.filter((item) => changedIds.has(item.id)).length;
 
-  await writeShoppingRecords(changed);
-  commitToCache(changed);
-
-  return { changed, mergedCount: incoming.length - createdCount };
+    return {
+      result: { changed, mergedCount: incoming.length - createdCount },
+      upserted: changed
+    };
+  });
 }
 
 const toParsedInput = (input: AddShoppingItemInput): ParsedShoppingItemInput | null => {
@@ -919,29 +985,32 @@ export async function addShoppingItems(
   return getShoppingItems();
 }
 
+/**
+ * Checks an item off (or puts it back). Resolves with the item as written, or undefined when it
+ * isn't on the list (deleted, or kept for another household).
+ */
 export async function setShoppingItemChecked(
   id: string,
   checked: boolean,
   options: ShoppingWriteOptions
 ): Promise<WebShoppingItem | undefined> {
-  const db = await getLinkDishWebDb();
-  const existing = (await db.get(STORE_NAME, id)) as WebShoppingItem | undefined;
+  return changeShoppingRecords(
+    (records) => records.get(id),
+    (existing): ShoppingChanges<WebShoppingItem | undefined> => {
+      if (!isEditable(existing, options)) {
+        return { result: undefined };
+      }
 
-  if (!existing || existing.isDeleted || belongsToOtherHousehold(existing, writeScope(options))) {
-    return undefined;
-  }
-
-  const updated: WebShoppingItem = {
-    ...existing,
-    checked,
-    checkedBy: checked ? (options.userId ?? LOCAL_SHOPPING_USER) : null,
-    sync: syncStateFor(options, existing),
-    updatedAt: nowIso()
-  };
-
-  await db.put(STORE_NAME, updated);
-  commitToCache([updated]);
-  return updated;
+      const updated: WebShoppingItem = {
+        ...existing,
+        checked,
+        checkedBy: checked ? (options.userId ?? LOCAL_SHOPPING_USER) : null,
+        sync: syncStateFor(options, existing),
+        updatedAt: nowIso()
+      };
+      return { result: updated, upserted: [updated] };
+    }
+  );
 }
 
 export interface ShoppingItemPatch {
@@ -950,43 +1019,45 @@ export interface ShoppingItemPatch {
   unit?: string | null | undefined;
 }
 
-/** Edits an item's words and/or amount. `null` clears qty/unit. */
+/**
+ * Edits an item's words and/or amount (`null` clears qty/unit), on the item as stored when the
+ * edit is written. Resolves with the item as written, or undefined when it isn't on the list.
+ */
 export async function updateShoppingItem(
   id: string,
   patch: ShoppingItemPatch,
   options: ShoppingWriteOptions
 ): Promise<WebShoppingItem | undefined> {
-  const db = await getLinkDishWebDb();
-  const existing = (await db.get(STORE_NAME, id)) as WebShoppingItem | undefined;
+  return changeShoppingRecords(
+    (records) => records.get(id),
+    (existing): ShoppingChanges<WebShoppingItem | undefined> => {
+      if (!isEditable(existing, options)) {
+        return { result: undefined };
+      }
 
-  if (!existing || existing.isDeleted || belongsToOtherHousehold(existing, writeScope(options))) {
-    return undefined;
-  }
+      const text =
+        patch.text === undefined ? existing.text : clipText(patch.text, SHOPPING_SYNC_LIMITS.text);
 
-  const text =
-    patch.text === undefined ? existing.text : clipText(patch.text, SHOPPING_SYNC_LIMITS.text);
+      if (!text) {
+        return { result: existing };
+      }
 
-  if (!text) {
-    return existing;
-  }
-
-  const updated = applyAmount(
-    { ...existing, sync: syncStateFor(options, existing), updatedAt: nowIso() },
-    {
-      qty: patch.qty === undefined ? existing.qty : patch.qty,
-      text,
-      unit:
-        patch.unit === undefined
-          ? (existing.unit ?? null)
-          : patch.unit
-            ? clipText(patch.unit, SHOPPING_SYNC_LIMITS.unit)
-            : null
+      const updated = applyAmount(
+        { ...existing, sync: syncStateFor(options, existing), updatedAt: nowIso() },
+        {
+          qty: patch.qty === undefined ? existing.qty : patch.qty,
+          text,
+          unit:
+            patch.unit === undefined
+              ? (existing.unit ?? null)
+              : patch.unit
+                ? clipText(patch.unit, SHOPPING_SYNC_LIMITS.unit)
+                : null
+        }
+      );
+      return { result: updated, upserted: [updated] };
     }
   );
-
-  await db.put(STORE_NAME, updated);
-  commitToCache([updated]);
-  return updated;
 }
 
 /** Replaces an item's words and amount from an edited line ("3 cups oat milk"). */
@@ -1008,28 +1079,23 @@ export async function updateShoppingItemFromLine(
   );
 }
 
+type RemoveOptions = Pick<ShoppingWriteOptions, "canSync" | "householdId" | "userId">;
+
 /**
- * Removes items: local-only ones are deleted, household ones become tombstones for the next
- * sync. Returns the records as they were, for Undo.
+ * Removes `items` (as read in the transaction that writes this): local-only ones are deleted,
+ * household ones become tombstones for the next sync. The result is the records as they were,
+ * each stamped with `deletedAt` (when it was removed) so Undo can tell this removal's tombstone
+ * from a later one.
  */
-export async function deleteShoppingItems(
-  ids: readonly string[],
-  options: Pick<ShoppingWriteOptions, "canSync" | "householdId" | "userId">
-): Promise<WebShoppingItem[]> {
-  const db = await getLinkDishWebDb();
-  const existingItems = (
-    await Promise.all(
-      ids.map((id) => db.get(STORE_NAME, id) as Promise<WebShoppingItem | undefined>)
-    )
-  ).filter(
-    (item): item is WebShoppingItem =>
-      item !== undefined && !item.isDeleted && !belongsToOtherHousehold(item, writeScope(options))
-  );
+const removal = (
+  items: readonly WebShoppingItem[],
+  options: RemoveOptions
+): ShoppingChanges<WebShoppingItem[]> => {
   const timestamp = nowIso();
   const deletedIds: string[] = [];
   const tombstones: WebShoppingItem[] = [];
 
-  for (const item of existingItems) {
+  for (const item of items) {
     if (!options.canSync || item.sync.status === "local_only") {
       deletedIds.push(item.id);
     } else {
@@ -1043,58 +1109,116 @@ export async function deleteShoppingItems(
     }
   }
 
-  await writeShoppingRecords(tombstones, deletedIds);
-  commitToCache(tombstones, deletedIds);
-  return existingItems;
+  return {
+    deletedIds,
+    result: items.map((item) => ({ ...item, deletedAt: timestamp })),
+    upserted: tombstones
+  };
+};
+
+/**
+ * Removes items: local-only ones are deleted, household ones become tombstones for the next
+ * sync. Returns the records as they were (stamped with `deletedAt`), for Undo.
+ */
+export async function deleteShoppingItems(
+  ids: readonly string[],
+  options: RemoveOptions
+): Promise<WebShoppingItem[]> {
+  return changeShoppingRecords(readByIds(ids), (stored) =>
+    removal(
+      stored.filter((item): item is WebShoppingItem => isEditable(item, options)),
+      options
+    )
+  );
 }
 
 export async function deleteShoppingItem(id: string, options: { canSync: boolean }): Promise<void> {
   await deleteShoppingItems([id], options);
 }
 
-/** Undo for deletes: puts the records back as they were (newer, so household sync keeps them). */
+/**
+ * True when Undo may put `snapshot` (a record deleteShoppingItems returned) back over `stored`,
+ * the record kept under its id now: the tombstone its own removal left, or anything else written
+ * no later than that removal. A record written after it (a newer copy from the household,
+ * restored elsewhere, or deleted again) is newer than the snapshot and stays. A snapshot without
+ * `deletedAt` only goes back over a tombstone.
+ */
+const canRestoreOver = (stored: WebShoppingItem, snapshot: WebShoppingItem): boolean =>
+  snapshot.deletedAt
+    ? timeOf(stored.updatedAt) <= timeOf(snapshot.deletedAt)
+    : stored.isDeleted === true;
+
+/**
+ * Undo for deletes: puts the records back as they were (newer, so household sync keeps them).
+ * Each id is checked in the transaction that writes: one whose item was written again since the
+ * removal (back from the household, restored in another tab, deleted again) keeps that newer
+ * record. Returns the records put back.
+ */
 export async function restoreShoppingItems(
   items: readonly WebShoppingItem[]
 ): Promise<WebShoppingItem[]> {
-  const timestamp = nowIso();
-  const restored = items.map((item) => {
-    const record: WebShoppingItem = {
-      ...item,
-      sync:
-        item.sync.status === "local_only"
-          ? { status: "local_only" }
-          : { status: "dirty", ...pendingSyncOf(item) },
-      updatedAt: timestamp
-    };
-    delete record.isDeleted;
-    delete record.deletedAt;
-    return record;
-  });
+  const { kept, restored } = await changeShoppingRecords(
+    readByIds(items.map((item) => item.id)),
+    (stored) => {
+      const timestamp = nowIso();
+      const keptRecords: WebShoppingItem[] = [];
+      const restoredRecords: WebShoppingItem[] = [];
 
-  await writeShoppingRecords(restored);
-  commitToCache(restored);
+      items.forEach((item, index) => {
+        const current = stored[index];
+
+        if (current && !canRestoreOver(current, item)) {
+          keptRecords.push(current);
+          return;
+        }
+
+        const record: WebShoppingItem = {
+          ...item,
+          sync:
+            item.sync.status === "local_only"
+              ? { status: "local_only" }
+              : { status: "dirty", ...pendingSyncOf(item) },
+          updatedAt: timestamp
+        };
+        delete record.isDeleted;
+        delete record.deletedAt;
+        restoredRecords.push(record);
+      });
+
+      return {
+        result: { kept: keptRecords, restored: restoredRecords },
+        upserted: restoredRecords
+      };
+    }
+  );
+
+  if (kept.length > 0) {
+    // This tab may not show the newer records yet (another tab's write announces itself later).
+    applyToCache(kept);
+  }
+
   return restored;
 }
 
 /** Removes everything in the cart. Returns the removed records for Undo. */
 export async function clearCheckedShoppingItems(
-  options: Pick<ShoppingWriteOptions, "canSync" | "householdId" | "userId">
+  options: RemoveOptions
 ): Promise<WebShoppingItem[]> {
-  const items = await getShoppingItems();
-  return deleteShoppingItems(
-    items.filter((item) => item.checked).map((item) => item.id),
-    options
+  return changeShoppingRecords(readAll, (records) =>
+    removal(
+      listed(records).filter((item) => item.checked && isEditable(item, options)),
+      options
+    )
   );
 }
 
 /** Removes every item. Returns the removed records for Undo. */
-export async function clearAllShoppingItems(
-  options: Pick<ShoppingWriteOptions, "canSync" | "householdId" | "userId">
-): Promise<WebShoppingItem[]> {
-  const items = await getShoppingItems();
-  return deleteShoppingItems(
-    items.map((item) => item.id),
-    options
+export async function clearAllShoppingItems(options: RemoveOptions): Promise<WebShoppingItem[]> {
+  return changeShoppingRecords(readAll, (records) =>
+    removal(
+      listed(records).filter((item) => isEditable(item, options)),
+      options
+    )
   );
 }
 
@@ -1163,13 +1287,38 @@ const keepLocalAttribution = (
  * household stay for it, and ones that name no household yet for whichever claims them.
  * `householdId` is the household the items came from, recorded on each one (and on unsent changes
  * to them that don't name a household yet).
+ *
+ * The local records are read, compared and written in one transaction, so a check-off or edit
+ * made meanwhile (in this tab or another) is never replaced by an older household copy.
  */
 export async function applyRemoteShoppingItems(
   remoteItems: ShoppingItem[],
   options: { householdId?: string | undefined; prune?: boolean } = {}
 ): Promise<void> {
   const { householdId } = options;
-  const localItems = await getShoppingItems({ includeDeleted: true, includeOtherHouseholds: true });
+  const adoptedIds = await changeShoppingRecords(readAll, (localItems) =>
+    mergeRemoteShoppingItems(localItems, remoteItems, options)
+  );
+
+  if (householdId && adoptedIds.size > 0) {
+    await recordShoppingHousehold(
+      householdId,
+      (item): item is WebShoppingItem =>
+        item !== undefined && adoptedIds.has(item.id) && needsPush(item) && !item.sync.householdId
+    );
+  }
+}
+
+/**
+ * What applying `remoteItems` to `localItems` writes (see applyRemoteShoppingItems). The result
+ * is the ids of unsent changes to this household's items that don't name a household yet.
+ */
+const mergeRemoteShoppingItems = (
+  localItems: readonly WebShoppingItem[],
+  remoteItems: readonly ShoppingItem[],
+  options: { householdId?: string | undefined; prune?: boolean }
+): ShoppingChanges<Set<string>> => {
+  const { householdId } = options;
   const localById = new Map(localItems.map((item) => [item.id, item]));
   const remoteIds = new Set(remoteItems.map((item) => item.id));
   const writes: WebShoppingItem[] = [];
@@ -1229,20 +1378,15 @@ export async function applyRemoteShoppingItems(
     }
   }
 
-  // Only when something changed: the 30-second poll mostly writes, re-renders and reloads nothing.
-  if (writes.length > 0 || deletedIds.length > 0) {
-    await writeShoppingRecords(writes, deletedIds);
-    commitToCache(writes, deletedIds);
-  }
+  // Only what changed: the 30-second poll mostly writes, re-renders and reloads nothing.
+  return { deletedIds, result: adoptedIds, upserted: writes };
+};
 
-  if (householdId && adoptedIds.size > 0) {
-    await recordShoppingHousehold(
-      householdId,
-      (item): item is WebShoppingItem =>
-        item !== undefined && adoptedIds.has(item.id) && needsPush(item) && !item.sync.householdId
-    );
-  }
-}
+/** A change the household refused because it has a newer copy, marked as stored now. */
+const withConflict = (item: WebShoppingItem): WebShoppingItem => ({
+  ...item,
+  sync: { ...pendingSyncOf(item), lastError: CONFLICT_MESSAGE, status: "sync_failed" }
+});
 
 export async function handleUpsertShoppingSyncResult(
   result: UpsertShoppingItemsResponse,
@@ -1254,43 +1398,32 @@ export async function handleUpsertShoppingSyncResult(
     return;
   }
 
-  const db = await getLinkDishWebDb();
-  const conflicts: WebShoppingItem[] = [];
-
-  for (const ignored of result.ignored) {
-    const localItem = (await db.get(STORE_NAME, ignored.id)) as WebShoppingItem | undefined;
-
-    if (localItem) {
-      conflicts.push({
-        ...localItem,
-        sync: { ...pendingSyncOf(localItem), lastError: CONFLICT_MESSAGE, status: "sync_failed" }
-      });
-    }
-  }
-
-  await writeShoppingRecords(conflicts);
-  commitToCache(conflicts);
+  await changeShoppingRecords(readByIds(result.ignored.map((ignored) => ignored.id)), (stored) => ({
+    result: undefined,
+    upserted: stored.filter(isStored).map(withConflict)
+  }));
 }
 
 export async function handleDeleteShoppingSyncResult(
   result: DeleteShoppingItemsResponse
 ): Promise<void> {
-  const db = await getLinkDishWebDb();
-  const conflicts: WebShoppingItem[] = [];
+  const ignoredIds = result.ignored.map((ignored) => ignored.id);
 
-  for (const ignored of result.ignored) {
-    const localItem = (await db.get(STORE_NAME, ignored.id)) as WebShoppingItem | undefined;
-
-    if (localItem) {
-      conflicts.push({
-        ...localItem,
-        sync: { ...pendingSyncOf(localItem), lastError: CONFLICT_MESSAGE, status: "sync_failed" }
-      });
-    }
+  if (ignoredIds.length === 0 && result.deletedItemIds.length === 0) {
+    return;
   }
 
-  await writeShoppingRecords(conflicts, result.deletedItemIds);
-  commitToCache(conflicts, result.deletedItemIds);
+  await changeShoppingRecords(
+    (records) =>
+      Promise.all([readByIds(ignoredIds)(records), readByIds(result.deletedItemIds)(records)]),
+    ([ignored, deleted]) => ({
+      // The household deleted these. An item put back meanwhile (Undo) is a newer change: it
+      // stays, to be sent again.
+      deletedIds: deleted.flatMap((item) => (item?.isDeleted ? [item.id] : [])),
+      result: undefined,
+      upserted: ignored.filter(isStored).map(withConflict)
+    })
+  );
 }
 
 /**
@@ -1304,26 +1437,22 @@ export async function pruneStaleShoppingRecords(
   options: { householdId?: string | undefined; now?: number | undefined } = {}
 ): Promise<number> {
   const { householdId, now = Date.now() } = options;
-  const items = await getShoppingItems({ includeDeleted: true, includeOtherHouseholds: true });
-  const stale = items
-    .filter((item) =>
-      item.isDeleted
-        ? item.sync.status === "local_only" ||
-          item.sync.status === "synced" ||
-          now - timeOf(item.deletedAt ?? item.updatedAt) > STALE_CHANGE_TTL_MS
-        : Boolean(householdId) &&
-          needsPush(item) &&
-          belongsToOtherHousehold(item, { householdId }) &&
-          now - timeOf(item.updatedAt) > STALE_CHANGE_TTL_MS
-    )
-    .map((item) => item.id);
+  const isStale = (item: WebShoppingItem): boolean =>
+    item.isDeleted
+      ? item.sync.status === "local_only" ||
+        item.sync.status === "synced" ||
+        now - timeOf(item.deletedAt ?? item.updatedAt) > STALE_CHANGE_TTL_MS
+      : Boolean(householdId) &&
+        needsPush(item) &&
+        belongsToOtherHousehold(item, { householdId }) &&
+        now - timeOf(item.updatedAt) > STALE_CHANGE_TTL_MS;
 
-  if (stale.length > 0) {
-    await writeShoppingRecords([], stale);
-    commitToCache([], stale);
-  }
-
-  return stale.length;
+  // Chosen in the transaction that deletes, so a record changed meanwhile (put back by Undo,
+  // claimed by a household) is judged as it is now.
+  return changeShoppingRecords(readAll, (items) => {
+    const stale = items.filter(isStale).map((item) => item.id);
+    return { deletedIds: stale, result: stale.length };
+  });
 }
 
 export async function pullShoppingItemsFromApi(
@@ -1438,27 +1567,33 @@ async function setAsideShoppingItems(
     return;
   }
 
-  const db = await getLinkDishWebDb();
-  const records = (
-    await Promise.all(
-      [...ids].map((id) => db.get(STORE_NAME, id) as Promise<WebShoppingItem | undefined>)
-    )
-  ).filter((item): item is WebShoppingItem => item !== undefined);
-  const kept = await Promise.all(
-    records
-      .filter((item) => !item.isDeleted)
-      .map(
-        async (item): Promise<WebShoppingItem> => ({
-          ...item,
-          id: await setAsideId(item.id, householdId),
-          sync: { status: "local_only" }
-        })
-      )
+  // The copies' ids are worked out first: the transaction may only wait on its own requests.
+  const refused = await Promise.all(
+    [...ids].map(async (id) => ({ copyId: await setAsideId(id, householdId), id }))
   );
-  const removedIds = records.map((item) => item.id);
 
-  await writeShoppingRecords(kept, removedIds);
-  commitToCache(kept, removedIds);
+  // Each record is read and moved in the transaction that writes, so an edit made meanwhile
+  // moves with it (or, made after, finds the item gone) instead of bringing the refused id back.
+  await changeShoppingRecords(readByIds(refused.map(({ id }) => id)), (stored) => {
+    const records = refused.flatMap(({ copyId }, index) => {
+      const item = stored[index];
+      return item ? [{ copyId, item }] : [];
+    });
+
+    return {
+      deletedIds: records.map(({ item }) => item.id),
+      result: undefined,
+      upserted: records
+        .filter(({ item }) => !item.isDeleted)
+        .map(
+          ({ copyId, item }): WebShoppingItem => ({
+            ...item,
+            id: copyId,
+            sync: { status: "local_only" }
+          })
+        )
+    };
+  });
 }
 
 const OTHER_HOUSEHOLD_ITEM_PATTERN = /item belongs to another household/iu;
@@ -1556,37 +1691,42 @@ export async function syncShoppingItems(options: {
       throw new ShoppingSyncCancelledError();
     }
   };
+  const isPending = (item: WebShoppingItem) =>
+    needsPush(item) &&
+    !belongsToOtherHousehold(item, { householdId }) &&
+    !isAnotherAccountsChange(item, userId);
+  /** A pending edit the household can't take (see toApiShoppingItem), not marked as such yet. */
+  const isUnsendable = (item: WebShoppingItem) =>
+    isPending(item) &&
+    !item.isDeleted &&
+    item.sync.status !== "sync_failed" &&
+    toApiShoppingItem(item) === null;
   const pending = (
     await getShoppingItems({ includeDeleted: true, includeOtherHouseholds: true })
-  ).filter(
-    (item) =>
-      needsPush(item) &&
-      !belongsToOtherHousehold(item, { householdId }) &&
-      !isAnotherAccountsChange(item, userId)
-  );
-  const unsendable: WebShoppingItem[] = [];
-  const payload: ShoppingItem[] = [];
+  ).filter(isPending);
+  const payload = pending
+    .filter((item) => !item.isDeleted)
+    .map(toApiShoppingItem)
+    .filter((item): item is ShoppingItem => item !== null);
+  const unsendableIds = pending.filter(isUnsendable).map((item) => item.id);
 
-  for (const item of pending.filter((pendingItem) => !pendingItem.isDeleted)) {
-    const apiItem = toApiShoppingItem(item);
-
-    if (apiItem) {
-      payload.push(apiItem);
-    } else if (item.sync.status !== "sync_failed") {
-      unsendable.push({
-        ...item,
-        sync: {
-          ...pendingSyncOf(item),
-          lastError: "This item can't be shared with your household.",
-          status: "sync_failed"
-        }
-      });
-    }
-  }
-
-  if (unsendable.length > 0) {
-    await writeShoppingRecords(unsendable);
-    commitToCache(unsendable);
+  if (unsendableIds.length > 0) {
+    // Marked as stored now (checked again): an edit made since the read above is kept.
+    await changeShoppingRecords(readByIds(unsendableIds), (stored) => ({
+      result: undefined,
+      upserted: stored
+        .filter((item): item is WebShoppingItem => item !== undefined && isUnsendable(item))
+        .map(
+          (item): WebShoppingItem => ({
+            ...item,
+            sync: {
+              ...pendingSyncOf(item),
+              lastError: "This item can't be shared with your household.",
+              status: "sync_failed"
+            }
+          })
+        )
+    }));
   }
 
   const refusedUpserts = await sendIsolatingOtherHouseholdItems(payload, async (batch) => {

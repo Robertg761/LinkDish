@@ -5,6 +5,8 @@
  * fake database; see `fake-idb-isolation.ts` for the IndexedDB-like transaction isolation.
  */
 
+import { fakeIdb } from "./fake-idb";
+
 export interface FakeBroadcastChannel {
   close: () => void;
   onmessage: ((event: MessageEvent) => void) | null;
@@ -127,5 +129,25 @@ export function writeInOtherTabAfterNextRead<Result>(
         store: watch(names[0] ?? "", tx.store)
       };
     }) as Method;
+  });
+}
+
+/**
+ * Like {@link writeInOtherTabAfterNextRead}, for a read of a whole store: right after the next
+ * `getAll` of `storeName` (in any tab, as a shortcut or inside a transaction) has read the store,
+ * `write` starts in the other tab (`otherConnection`), and that read only answers once the write
+ * has opened its transaction. Resolves with what `write` resolves with.
+ */
+export function writeInOtherTabAfterNextGetAll<Result>(
+  storeName: string,
+  otherConnection: FakeConnection,
+  write: () => Promise<Result>
+): Promise<Result> {
+  return new Promise<Result>((resolve, reject) => {
+    fakeIdb.afterNextGetAll(storeName, async () => {
+      const started = nextTransaction(otherConnection);
+      write().then(resolve, reject);
+      await started;
+    });
   });
 }

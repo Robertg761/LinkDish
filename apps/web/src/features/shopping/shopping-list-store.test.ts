@@ -664,12 +664,19 @@ describe("shopping-list-store", () => {
     await putShoppingItems([
       makeItem({ id: "bread", sync: { changedBy: "u1", status: "dirty" }, text: "bread" })
     ]);
-    // The check-off lands after the claim has read the list, before it writes.
-    fakeIdb.afterNextGetAll("shoppingItems", async () => {
-      await setShoppingItemChecked("bread", true, { canSync: true, userId: "u1" });
+    // The check-off starts after the claim has read the list, before it writes. (It waits for the
+    // claim's transaction, so awaiting it in there would never finish.)
+    let checkOff: Promise<unknown> = Promise.resolve();
+    fakeIdb.afterNextGetAll("shoppingItems", () => {
+      checkOff = setShoppingItemChecked("bread", true, {
+        canSync: true,
+        householdId: "h1",
+        userId: "u1"
+      });
     });
 
     await claimShoppingChanges("h1", { userId: "u1" });
+    await checkOff;
 
     expect(fakeIdb.record<WebShoppingItem>("shoppingItems", "bread")).toMatchObject({
       checked: true,
