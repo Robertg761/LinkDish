@@ -1,37 +1,78 @@
 <!doctype html>
-<html lang="en">
+<html lang="en-CA">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#f4efe7" />
-    <title>A Clean Paprika Alternative for Saving Recipes | LinkDish</title>
+    <title>Paprika Alternative: LinkDish vs Paprika Compared | LinkDish</title>
     <meta
       name="description"
-      content="Looking for a Paprika alternative? LinkDish turns recipe links into a clean cookbook with cook mode, timers, serving scaling, and shared shopping lists."
+      content="An honest comparison of LinkDish and Paprika: platforms, pricing, import sources, meal planning, shopping lists and sharing. Bring your Paprika recipes with you."
     />
-    <link
-      rel="canonical"
-      href="https://linkdish.ca/paprika-alternative/"
-    />
+    <link rel="canonical" href="https://linkdish.ca/paprika-alternative/" />
+    <meta name="theme-color" content="#f4efe7" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#1a1816" media="(prefers-color-scheme: dark)" />
+    <meta name="color-scheme" content="light dark" />
+    <meta property="og:site_name" content="LinkDish" />
     <meta property="og:type" content="website" />
-    <meta
-      property="og:title"
-      content="A clean alternative for saving and cooking recipes"
-    />
+    <meta property="og:title" content="Looking for a Paprika alternative? An honest comparison" />
     <meta
       property="og:description"
-      content="Import recipe links, cook from focused steps, scale servings, and build shopping lists with LinkDish."
+      content="An honest comparison of LinkDish and Paprika: platforms, pricing, import sources, meal planning, shopping lists and sharing. Bring your Paprika recipes with you."
     />
+    <meta property="og:url" content="https://linkdish.ca/paprika-alternative/" />
+    <meta property="og:image" content="https://linkdish.ca/assets/social-card-20260928.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
     <meta
-      property="og:url"
-      content="https://linkdish.ca/paprika-alternative/"
+      property="og:image:alt"
+      content="LinkDish: Paste a link. Get cooking. Save recipes from websites, YouTube, TikTok, Pinterest and photos."
     />
+    <meta property="og:locale" content="en_CA" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Looking for a Paprika alternative? An honest comparison" />
     <meta
-      property="og:image"
-      content="https://linkdish.ca/assets/social-card-20260729.png"
+      name="twitter:description"
+      content="An honest comparison of LinkDish and Paprika: platforms, pricing, import sources, meal planning, shopping lists and sharing. Bring your Paprika recipes with you."
     />
-    <link rel="icon" href="/assets/linkdish-icon.png" />
-    <link rel="stylesheet" href="/seo.css" />
+    <meta name="twitter:image" content="https://linkdish.ca/assets/social-card-20260928.png" />
+    <meta
+      name="twitter:image:alt"
+      content="LinkDish: Paste a link. Get cooking. Save recipes from websites, YouTube, TikTok, Pinterest and photos."
+    />
+    <link rel="icon" href="/favicon.ico" sizes="48x48" />
+    <link rel="icon" href="/assets/favicon-32.png" type="image/png" sizes="32x32" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link
+      rel="preload"
+      href="/assets/fonts/Fraunces-Bold.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
+    <link
+      rel="preload"
+      href="/assets/fonts/Fraunces-SemiBoldItalic.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
+    <script>
+      (function (root) {
+        root.classList.add("js");
+        if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+          root.classList.add("motion-ready");
+          // If site.js never runs, show everything instead of leaving it hidden.
+          window.setTimeout(function () {
+            if (!root.classList.contains("site-ready")) {
+              root.classList.remove("motion-ready");
+            }
+          }, 3000);
+        }
+      })(document.documentElement);
+    </script>
+    <link rel="stylesheet" href="/base.css" />
+    <link rel="stylesheet" href="/marketing.css" />
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
@@ -40,188 +81,642 @@
         "applicationCategory": "LifestyleApplication",
         "operatingSystem": "Android, Web",
         "url": "https://linkdish.ca/paprika-alternative/",
-        "description": "A recipe manager focused on importing recipe links, clean cook mode, timers, serving scaling, and personal or shared shopping lists.",
-        "offers": {
-          "@type": "Offer",
-          "price": "0",
-          "priceCurrency": "CAD"
-        }
+        "downloadUrl": "https://play.google.com/store/apps/details?id=com.linkdish.app",
+        "image": "https://linkdish.ca/assets/linkdish-icon.png",
+        "description": "A recipe manager for Android and the web with link, video, social, photo and text imports, a meal planner, an aisle-sorted shopping list and Family households.",
+        "offers": [
+          {
+            "@type": "Offer",
+            "name": "Free",
+            "price": "0",
+            "priceCurrency": "CAD"
+          },
+          {
+            "@type": "Offer",
+            "name": "Plus (monthly)",
+            "price": "2.99",
+            "priceCurrency": "CAD"
+          },
+          {
+            "@type": "Offer",
+            "name": "Plus (yearly)",
+            "price": "24.99",
+            "priceCurrency": "CAD"
+          },
+          {
+            "@type": "Offer",
+            "name": "Family (monthly)",
+            "price": "4.99",
+            "priceCurrency": "CAD"
+          },
+          {
+            "@type": "Offer",
+            "name": "Family (yearly)",
+            "price": "44.99",
+            "priceCurrency": "CAD"
+          }
+        ]
+      }
+    </script>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+          {
+            "@type": "ListItem",
+            "position": 1,
+            "name": "Home",
+            "item": "https://linkdish.ca/"
+          },
+          {
+            "@type": "ListItem",
+            "position": 2,
+            "name": "Paprika alternative",
+            "item": "https://linkdish.ca/paprika-alternative/"
+          }
+        ]
+      }
+    </script>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "FAQPage",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "Can I import my recipes from Paprika?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes. Export your recipes from Paprika and import the export in LinkDish. Titles, ingredients, steps and notes come across, plus favorites and ratings when the export includes them."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Can I test LinkDish without paying?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes. The Free plan includes 3 recipe imports and up to 15 saved recipes, and no card is required."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Does LinkDish work on iPhone?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "There is no native iPhone app yet. The LinkDish web app works in Safari and can be added to the Home Screen, and a native iPhone app is on the way."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Is LinkDish affiliated with Paprika?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "No. LinkDish is an independent recipe app and is not affiliated with or endorsed by Paprika or Hindsight Labs."
+            }
+          }
+        ]
       }
     </script>
   </head>
-  <body>
+  <body class="landing-page has-dock">
     <a class="skip-link" href="#main-content">Skip to content</a>
-    <header class="site-header">
-      <a class="brand" href="/">
-        <img src="/assets/linkdish-icon.png" alt="" width="40" height="40" />
+    <svg
+      class="icon-sprite"
+      aria-hidden="true"
+      focusable="false"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <symbol id="i-phone" viewBox="0 0 24 24">
+        <rect x="6.5" y="2.5" width="11" height="19" rx="2.5" />
+        <path d="M11 18.5h2" />
+      </symbol>
+      <symbol id="i-play" viewBox="0 0 24 24">
+        <rect x="2.5" y="5" width="19" height="14" rx="4" />
+        <path d="m10 9.2 5 2.8-5 2.8z" fill="currentColor" />
+      </symbol>
+      <symbol id="i-camera" viewBox="0 0 24 24">
+        <path
+          d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"
+        />
+        <circle cx="12" cy="13.5" r="3.5" />
+      </symbol>
+      <symbol id="i-users" viewBox="0 0 24 24">
+        <circle cx="9" cy="8.5" r="3.5" />
+        <path d="M2.5 20a6.5 6.5 0 0 1 13 0" />
+        <path d="M16 5.2a3.5 3.5 0 0 1 0 6.6M18.5 14.2A6.5 6.5 0 0 1 21.5 20" />
+      </symbol>
+      <symbol id="i-scale" viewBox="0 0 24 24"><path d="M4 8h13l-3-3M20 16H7l3 3" /></symbol>
+      <symbol id="i-timer" viewBox="0 0 24 24">
+        <circle cx="12" cy="13.5" r="7.5" />
+        <path d="M12 13.5V10M9.5 2.5h5M18.5 6.5l1.5-1.5" />
+      </symbol>
+      <symbol id="i-globe" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="9" />
+        <path
+          d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z"
+        />
+      </symbol>
+      <symbol id="i-arrow-right" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6" /></symbol>
+    </svg>
+    <header class="site-header" data-header>
+      <a class="brand" href="/" aria-label="LinkDish home">
+        <img
+          src="/assets/linkdish-icon-64.png"
+          srcset="/assets/linkdish-icon-64.png 1x, /assets/linkdish-icon-128.png 2x"
+          alt=""
+          width="38"
+          height="38"
+        />
         <span>LinkDish</span>
       </a>
-      <nav class="site-nav" aria-label="Primary navigation">
+
+      <button
+        class="menu-toggle"
+        type="button"
+        aria-expanded="false"
+        aria-controls="site-navigation"
+        data-menu-toggle
+      >
+        <span class="sr-only">Open navigation</span>
+        <span aria-hidden="true"></span>
+        <span aria-hidden="true"></span>
+      </button>
+
+      <nav class="site-nav" id="site-navigation" aria-label="Primary" data-site-nav>
         <a href="/#how-it-works">How it works</a>
-        <a href="/#plans">Plans</a>
-        <a class="button" href="https://app.linkdish.ca">Open LinkDish</a>
+        <a href="/#features">Features</a>
+        <a href="/#plans">Pricing</a>
+        <a href="/support/">Support</a>
+        <a
+          class="button button-small button-primary"
+          href="https://app.linkdish.ca/"
+          data-cta="nav"
+        >
+          Open LinkDish
+        </a>
       </nav>
     </header>
 
     <main id="main-content">
-      <div class="page-shell">
-        <nav class="breadcrumbs" aria-label="Breadcrumb">
-          <a href="/">Home</a> / Paprika alternative
+      <section class="lp-hero" aria-labelledby="page-title">
+        <nav class="shell breadcrumbs" aria-label="Breadcrumb">
+          <ol>
+            <li><a href="/">Home</a></li>
+            <li aria-current="page">Paprika alternative</li>
+          </ol>
         </nav>
-        <section class="seo-hero">
+        <div class="lp-hero-inner">
           <div>
             <p class="eyebrow">Paprika alternative</p>
-            <h1>A recipe manager<br />built for <em>the counter.</em></h1>
-            <p class="lede">
-              If you are comparing recipe managers, LinkDish offers a clean,
-              modern way to import recipe links, cook from focused steps, and
-              keep personal or household shopping lists.
+            <h1 id="page-title">LinkDish vs Paprika,<br /><em>honestly.</em></h1>
+            <p class="hero-lede">
+              Paprika is a well-loved recipe manager. If you want a web app, imports from YouTube,
+              TikTok, Pinterest and photos, or a household that shares one shopping list, LinkDish
+              may suit your kitchen better. Here is how they compare, including where Paprika is the
+              better fit.
             </p>
-            <div class="hero-actions">
-              <a class="button" href="https://app.linkdish.ca">Try LinkDish free</a>
+            <div class="cta-row hero-actions" data-dock-sentinel>
+              <a class="button button-primary" href="https://app.linkdish.ca/" data-cta="hero-web"
+                >Try LinkDish free</a
+              >
               <a
                 class="button button-secondary"
                 href="https://play.google.com/store/apps/details?id=com.linkdish.app"
-                >Get the Android app</a
+                data-cta="hero-android"
               >
+                <svg class="icon" aria-hidden="true"><use href="#i-phone" /></svg>
+                Get the Android app
+              </a>
             </div>
-          </div>
-          <figure class="hero-phone">
-            <img
-              src="/assets/screen-cookmode.png"
-              alt="Focused recipe cook mode in LinkDish"
-              width="720"
-              height="1482"
-            />
-          </figure>
-        </section>
-      </div>
-
-      <section class="content-section">
-        <div class="page-shell">
-          <div class="section-heading">
-            <p class="eyebrow">What LinkDish emphasizes</p>
-            <h2>From importing to cooking, without the detour.</h2>
-            <p>
-              LinkDish is designed around the path from finding a recipe to
-              making it. You can start free and decide whether its workflow fits
-              your kitchen.
+            <p class="hero-note">
+              Free plan <span aria-hidden="true">·</span> No card required
+              <span aria-hidden="true">·</span> Imports Paprika exports
             </p>
           </div>
-          <div class="comparison-grid">
-            <article class="card">
-              <h3>Fast recipe imports</h3>
-              <p>
-                Paste or share a public recipe link to pull its useful details
-                into a consistent cookbook entry.
-              </p>
-            </article>
-            <article class="card">
-              <h3>Focused cook mode</h3>
-              <p>
-                Read large individual steps, keep relevant ingredients nearby,
-                and start timers parsed from the method.
-              </p>
-            </article>
-            <article class="card">
-              <h3>Household sharing</h3>
-              <p>
-                Family plans keep a shared cookbook and shopping list in sync
-                for everyone planning dinner.
-              </p>
-            </article>
+          <div class="lp-visual">
+            <figure class="shot-frame">
+              <picture class="shot-crop">
+                <source
+                  type="image/avif"
+                  srcset="
+                    /assets/screen-cookmode-360.avif 360w,
+                    /assets/screen-cookmode-720.avif 720w
+                  "
+                  sizes="(max-width: 560px) 80vw, 320px"
+                />
+                <source
+                  type="image/webp"
+                  srcset="
+                    /assets/screen-cookmode-360.webp 360w,
+                    /assets/screen-cookmode-720.webp 720w
+                  "
+                  sizes="(max-width: 560px) 80vw, 320px"
+                />
+                <img
+                  src="/assets/screen-cookmode.png"
+                  alt="LinkDish cook mode with one large step, its ingredient and a running timer"
+                  width="720"
+                  height="1482"
+                  fetchpriority="high"
+                />
+              </picture>
+            </figure>
           </div>
         </div>
       </section>
 
-      <section class="content-section">
-        <div class="page-shell feature-split">
-          <div class="feature-copy">
-            <p class="eyebrow">Try before upgrading</p>
-            <h2>See whether it fits your cooking routine.</h2>
-            <p>
-              The LinkDish free plan includes three imports and up to fifteen
-              saved recipes. It is enough to test importing, organizing,
-              scaling, cook mode, and shopping before choosing a paid plan.
+      <section class="section section-surface" id="comparison" aria-labelledby="compare-title">
+        <div class="shell">
+          <div class="section-head" data-reveal>
+            <p class="eyebrow">Side by side</p>
+            <h2 class="section-title" id="compare-title">How they<br /><em>compare.</em></h2>
+            <p class="section-lede">
+              The short version: Paprika is a one-time purchase with native apps on every platform
+              and free sync. LinkDish is free to start, runs in any browser, imports from more kinds
+              of sources and is built around sharing with a household.
             </p>
-            <ul>
-              <li>Available on Android and the web</li>
-              <li>No credit card required to start</li>
-              <li>Original recipe sources stay attached</li>
-              <li>Plus and Family include unlimited saved recipes</li>
+          </div>
+          <div class="compare-wrap" data-reveal>
+            <table class="compare-table">
+              <caption class="sr-only">
+                LinkDish compared with Paprika Recipe Manager 3
+              </caption>
+              <thead>
+                <tr>
+                  <th scope="col">What matters</th>
+                  <th scope="col">LinkDish</th>
+                  <th scope="col">Paprika 3</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th scope="row">Where it runs</th>
+                  <td data-label="LinkDish">Android app, plus a web app for any modern browser</td>
+                  <td data-label="Paprika 3">
+                    Separate apps for iPhone and iPad, Mac, Android and Windows
+                  </td>
+                </tr>
+                <tr>
+                  <th scope="row">Native iPhone app</th>
+                  <td data-label="LinkDish">
+                    Not yet. Use the web app from Safari; an iPhone app is on the way
+                  </td>
+                  <td data-label="Paprika 3"><span class="yes">Yes</span></td>
+                </tr>
+                <tr>
+                  <th scope="row">Works in a web browser</th>
+                  <td data-label="LinkDish"><span class="yes">Yes, at app.linkdish.ca</span></td>
+                  <td data-label="Paprika 3">No, it's app-only</td>
+                </tr>
+                <tr>
+                  <th scope="row">How you pay</th>
+                  <td data-label="LinkDish">
+                    Free plan. Plus: $2.99 CAD a month or $24.99 CAD a year. Family: $4.99 CAD a
+                    month or $44.99 CAD a year
+                  </td>
+                  <td data-label="Paprika 3">
+                    One-time purchase for each platform, no subscription
+                  </td>
+                </tr>
+                <tr>
+                  <th scope="row">Your recipes on several devices</th>
+                  <td data-label="LinkDish">
+                    Personal recipes are stored on each device; move them with backup and export
+                  </td>
+                  <td data-label="Paprika 3">Free cloud sync between your devices</td>
+                </tr>
+                <tr>
+                  <th scope="row">Sharing with a household</th>
+                  <td data-label="LinkDish">
+                    Family plan: up to 6 people share one cookbook and one synced shopping list
+                  </td>
+                  <td data-label="Paprika 3">
+                    Usually done by signing in to the same sync account
+                  </td>
+                </tr>
+                <tr>
+                  <th scope="row">Save from recipe websites</th>
+                  <td data-label="LinkDish"><span class="yes">Paste or share a link</span></td>
+                  <td data-label="Paprika 3">
+                    <span class="yes">Built-in browser that downloads recipes</span>
+                  </td>
+                </tr>
+                <tr>
+                  <th scope="row">Meal planner</th>
+                  <td data-label="LinkDish">
+                    <span class="yes">Weekly plan that builds your list</span>
+                  </td>
+                  <td data-label="Paprika 3"><span class="yes">Yes</span></td>
+                </tr>
+                <tr>
+                  <th scope="row">Grocery list</th>
+                  <td data-label="LinkDish">
+                    <span class="yes">Sorted by aisle, amounts combined</span>
+                  </td>
+                  <td data-label="Paprika 3">
+                    <span class="yes">Yes, with aisle categories</span>
+                  </td>
+                </tr>
+                <tr>
+                  <th scope="row">Moving your recipes</th>
+                  <td data-label="LinkDish">Imports Paprika exports and exports a full backup</td>
+                  <td data-label="Paprika 3">Exports recipes in its own format</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="compare-note">
+            Paprika details describe Paprika Recipe Manager 3 as publicly described by its developer
+            as of September 2026. Features and prices can change, so check paprikaapp.com before you
+            decide. Paprika is a trademark of Hindsight Labs LLC. LinkDish is independent and is not
+            affiliated with or endorsed by Paprika.
+          </p>
+        </div>
+      </section>
+
+      <section class="section" aria-labelledby="different-title">
+        <div class="shell">
+          <div class="section-head" data-reveal>
+            <p class="eyebrow">What LinkDish adds</p>
+            <h2 class="section-title" id="different-title">
+              Built for how recipes<br /><em>are found today.</em>
+            </h2>
+          </div>
+          <ul class="card-grid" role="list">
+            <li class="info-card" data-reveal>
+              <span class="source-icon tone-tomato"
+                ><svg class="icon" aria-hidden="true"><use href="#i-play" /></svg
+              ></span>
+              <h3>Video and social links</h3>
+              <p>
+                Save from YouTube and Shorts descriptions, TikTok captions and Pinterest pins, not
+                just recipe websites.
+              </p>
+            </li>
+            <li class="info-card" data-reveal>
+              <span class="source-icon tone-sage"
+                ><svg class="icon" aria-hidden="true"><use href="#i-camera" /></svg
+              ></span>
+              <h3>Photos and pasted text</h3>
+              <p>
+                Scan cookbook pages, recipe cards and screenshots (up to 4 photos per recipe), or
+                paste recipe text from anywhere.
+              </p>
+            </li>
+            <li class="info-card" data-reveal>
+              <span class="source-icon tone-butter"
+                ><svg class="icon" aria-hidden="true"><use href="#i-users" /></svg
+              ></span>
+              <h3>A real household</h3>
+              <p>
+                Family members each use their own account and share one cookbook and one shopping
+                list that stays in sync.
+              </p>
+            </li>
+            <li class="info-card" data-reveal>
+              <span class="source-icon tone-sage"
+                ><svg class="icon" aria-hidden="true"><use href="#i-scale" /></svg
+              ></span>
+              <h3>US and metric, oven included</h3>
+              <p>
+                Switch any recipe between US and metric measurements. 350°F becomes 175°C, and
+                servings scale with clean fractions.
+              </p>
+            </li>
+            <li class="info-card" data-reveal>
+              <span class="source-icon tone-tomato"
+                ><svg class="icon" aria-hidden="true"><use href="#i-timer" /></svg
+              ></span>
+              <h3>Cook mode that keeps up</h3>
+              <p>
+                Big steps, timers from the method that keep running between steps, and your place
+                saved if you step away.
+              </p>
+            </li>
+            <li class="info-card" data-reveal>
+              <span class="source-icon tone-butter"
+                ><svg class="icon" aria-hidden="true"><use href="#i-globe" /></svg
+              ></span>
+              <h3>Any browser</h3>
+              <p>
+                Use LinkDish on a work laptop, a Chromebook or a borrowed tablet without installing
+                anything.
+              </p>
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="section section-surface" aria-labelledby="switch-title">
+        <div class="shell lp-split">
+          <div class="feature-copy" data-reveal>
+            <p class="eyebrow">Switching</p>
+            <h2 class="section-title" id="switch-title">
+              Bring your<br /><em>Paprika recipes.</em>
+            </h2>
+            <p>
+              You don't have to start over. Export your recipes from Paprika, then import the file
+              in LinkDish. Titles, ingredients, steps and notes come across, along with favorites
+              and ratings where the export includes them.
+            </p>
+            <ul class="check-list">
+              <li>Export from Paprika on the device where your recipes live</li>
+              <li>Import the export file in LinkDish</li>
+              <li>Check a few recipes, then plan your first week</li>
             </ul>
           </div>
-          <div class="feature-visual">
-            <img
-              src="/assets/screen-recipe.png"
-              alt="LinkDish saved recipe view"
-              width="720"
-              height="1482"
-              loading="lazy"
-            />
-            <img
-              src="/assets/screen-shopping.png"
-              alt="LinkDish shared recipe shopping list"
-              width="720"
-              height="1482"
-              loading="lazy"
-            />
+          <div class="info-card" data-reveal>
+            <h3>Where Paprika may still suit you better</h3>
+            <p>
+              If you want a single one-time purchase, a native iPhone or desktop app today, or your
+              personal recipes synced across every device, Paprika does those well.
+            </p>
+            <p>
+              If you cook from links, videos and photos, want to try before paying, or share meals
+              with a household, give LinkDish a try on the Free plan.
+            </p>
           </div>
         </div>
       </section>
 
-      <section class="content-section">
-        <div class="page-shell">
-          <div class="section-heading">
+      <section class="section section-canvas" id="faq" aria-labelledby="faq-title">
+        <div class="shell faq">
+          <div class="faq-head" data-reveal>
             <p class="eyebrow">Before you switch</p>
-            <h2>Questions to ask of any recipe manager.</h2>
+            <h2 class="section-title" id="faq-title">
+              Questions to ask<br /><em>any recipe app.</em>
+            </h2>
           </div>
-          <div class="faq-list">
-            <details>
+          <div class="faq-list" data-reveal>
+            <details data-faq>
+              <summary>Can I import my recipes from Paprika?</summary>
+              <div>
+                <p>
+                  Yes. Export your recipes from Paprika and import the export in LinkDish. Titles,
+                  ingredients, steps and notes come across, plus favorites and ratings when the
+                  export includes them.
+                </p>
+              </div>
+            </details>
+            <details data-faq>
               <summary>Can I test LinkDish without paying?</summary>
-              <p>
-                Yes. You can use the free plan without entering a credit card.
-              </p>
+              <div>
+                <p>
+                  Yes. The Free plan includes 3 recipe imports and up to 15 saved recipes, and no
+                  card is required.
+                </p>
+              </div>
             </details>
-            <details>
+            <details data-faq>
               <summary>Does LinkDish work on iPhone?</summary>
-              <p>
-                LinkDish does not currently have a native iPhone app, but its
-                web app works in Safari and can be added to the Home Screen.
-              </p>
+              <div>
+                <p>
+                  There is no native iPhone app yet. The LinkDish web app works in Safari and can be
+                  added to the Home Screen, and a native iPhone app is on the way.
+                </p>
+              </div>
             </details>
-            <details>
+            <details data-faq>
               <summary>Is LinkDish affiliated with Paprika?</summary>
-              <p>
-                No. LinkDish is an independent recipe manager and is not
-                affiliated with or endorsed by Paprika.
-              </p>
+              <div>
+                <p>
+                  No. LinkDish is an independent recipe app and is not affiliated with or endorsed
+                  by Paprika or Hindsight Labs.
+                </p>
+              </div>
             </details>
           </div>
         </div>
       </section>
 
-      <section class="final-call">
-        <h2>Try a different recipe workflow.</h2>
-        <p>Import your first recipe free. No card required.</p>
-        <div class="hero-actions">
-          <a class="button" href="https://app.linkdish.ca">Open LinkDish</a>
-          <a
-            class="button button-secondary"
-            href="https://play.google.com/store/apps/details?id=com.linkdish.app"
-            >Get it on Android</a
-          >
+      <section class="section" aria-labelledby="related-title">
+        <div class="shell">
+          <h2 class="related-title" id="related-title">Keep reading</h2>
+          <ul class="related" role="list">
+            <li>
+              <a href="/recipe-saver-app/"
+                >The recipe saver app
+                <svg class="icon" aria-hidden="true"><use href="#i-arrow-right" /></svg
+              ></a>
+            </li>
+            <li>
+              <a href="/meal-planner-and-grocery-list/"
+                >Meal planner and grocery list
+                <svg class="icon" aria-hidden="true"><use href="#i-arrow-right" /></svg
+              ></a>
+            </li>
+            <li>
+              <a href="/save-recipes-from-youtube/"
+                >Save recipes from YouTube
+                <svg class="icon" aria-hidden="true"><use href="#i-arrow-right" /></svg
+              ></a>
+            </li>
+            <li>
+              <a href="/scan-recipes-from-photos/"
+                >Scan recipes from photos
+                <svg class="icon" aria-hidden="true"><use href="#i-arrow-right" /></svg
+              ></a>
+            </li>
+            <li>
+              <a href="/save-recipes-from-websites/"
+                >Save recipes from websites
+                <svg class="icon" aria-hidden="true"><use href="#i-arrow-right" /></svg
+              ></a>
+            </li>
+            <li>
+              <a href="/#plans"
+                >Plans and pricing
+                <svg class="icon" aria-hidden="true"><use href="#i-arrow-right" /></svg
+              ></a>
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="final-call" aria-labelledby="final-title">
+        <div class="final-call-inner" data-reveal>
+          <h2 id="final-title">Try a different<br /><em>recipe workflow.</em></h2>
+          <p>Import your first recipes free. No card required.</p>
+          <div class="final-actions">
+            <a class="button button-light" href="https://app.linkdish.ca/" data-cta="final-web"
+              >Open the web app</a
+            >
+            <a
+              class="button button-outline-light"
+              href="https://play.google.com/store/apps/details?id=com.linkdish.app"
+              data-cta="final-android"
+              >Get it on Android</a
+            >
+          </div>
         </div>
       </section>
     </main>
 
     <footer class="site-footer">
-      <span>© 2026 LinkDish · Made in Canada</span>
-      <span
-        ><a href="/recipe-saver-app/">Recipe saver app</a> ·
-        <a href="/save-recipes-from-websites/">Save recipes from websites</a> ·
-        <a href="/support/">Support</a></span
-      >
+      <div class="footer-brand">
+        <a class="brand" href="/">
+          <img
+            src="/assets/linkdish-icon-64.png"
+            srcset="/assets/linkdish-icon-64.png 1x, /assets/linkdish-icon-128.png 2x"
+            alt=""
+            width="38"
+            height="38"
+          />
+          <span>LinkDish</span>
+        </a>
+        <p>
+          Keep the recipe. Lose the clutter. Save from anywhere, plan the week and shop by aisle.
+        </p>
+      </div>
+      <nav class="footer-column" aria-labelledby="footer-product">
+        <h2 id="footer-product">Product</h2>
+        <a href="/#features">Features</a>
+        <a href="/#planner">Meal planner</a>
+        <a href="/#plans">Pricing</a>
+        <a href="/#iphone">iPhone &amp; iPad</a>
+        <a href="https://app.linkdish.ca/" data-cta="footer-web">Web app</a>
+        <a
+          href="https://play.google.com/store/apps/details?id=com.linkdish.app"
+          data-cta="footer-android"
+          >Android app</a
+        >
+      </nav>
+      <nav class="footer-column" aria-labelledby="footer-guides">
+        <h2 id="footer-guides">Guides</h2>
+        <a href="/recipe-saver-app/">Recipe saver app</a>
+        <a href="/save-recipes-from-websites/">Save recipes from websites</a>
+        <a href="/save-recipes-from-youtube/">Save recipes from YouTube</a>
+        <a href="/scan-recipes-from-photos/">Scan recipes from photos</a>
+        <a href="/meal-planner-and-grocery-list/">Meal planner &amp; grocery list</a>
+        <a href="/paprika-alternative/">Paprika alternative</a>
+      </nav>
+      <nav class="footer-column" aria-labelledby="footer-help">
+        <h2 id="footer-help">Help</h2>
+        <a href="/support/">Support</a>
+        <a href="/privacy/">Privacy</a>
+        <a href="mailto:support@linkdish.ca">support@linkdish.ca</a>
+        <a href="https://app.linkdish.ca/install" data-cta="footer-install">Install on iPhone</a>
+      </nav>
+      <p class="footer-bottom">
+        <span>Made in Canada</span>
+        <span>&copy; <span data-current-year>2026</span> LinkDish</span>
+      </p>
     </footer>
+
+    <div class="mobile-dock" data-mobile-dock>
+      <a class="button button-primary" href="https://app.linkdish.ca/" data-cta="dock-web"
+        >Open the web app</a
+      >
+      <a
+        class="button button-secondary"
+        href="https://play.google.com/store/apps/details?id=com.linkdish.app"
+        data-cta="dock-android"
+        >Android app</a
+      >
+    </div>
+
+    <script src="/site.js" defer></script>
+    <script src="/analytics.js" defer></script>
   </body>
 </html>

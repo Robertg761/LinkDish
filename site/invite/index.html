@@ -1,27 +1,114 @@
 <!doctype html>
-<html lang="en">
+<html lang="en-CA">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#f4efe7" />
-    <meta name="robots" content="noindex" />
+    <title>Join a LinkDish household</title>
     <meta
       name="description"
-      content="Open a LinkDish household invite in the LinkDish app."
+      content="You've been invited to a LinkDish household: one shared cookbook and one shopping list. Join on the web or in the Android app."
     />
-    <title>Join a LinkDish household</title>
+    <meta name="robots" content="noindex" />
     <link rel="canonical" href="https://linkdish.ca/invite/" />
-    <link rel="icon" href="../assets/linkdish-icon.png" />
-    <link rel="stylesheet" href="../home.css" />
-    <link rel="stylesheet" href="../info.css" />
+    <meta name="theme-color" content="#f4efe7" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#1a1816" media="(prefers-color-scheme: dark)" />
+    <meta name="color-scheme" content="light dark" />
+    <meta property="og:site_name" content="LinkDish" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="You're invited to a LinkDish household" />
+    <meta
+      property="og:description"
+      content="You've been invited to a LinkDish household: one shared cookbook and one shopping list. Join on the web or in the Android app."
+    />
+    <meta property="og:url" content="https://linkdish.ca/invite/" />
+    <meta property="og:image" content="https://linkdish.ca/assets/social-card-20260928.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="LinkDish: Paste a link. Get cooking. Save recipes from websites, YouTube, TikTok, Pinterest and photos."
+    />
+    <meta property="og:locale" content="en_CA" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="You're invited to a LinkDish household" />
+    <meta
+      name="twitter:description"
+      content="You've been invited to a LinkDish household: one shared cookbook and one shopping list. Join on the web or in the Android app."
+    />
+    <meta name="twitter:image" content="https://linkdish.ca/assets/social-card-20260928.png" />
+    <meta
+      name="twitter:image:alt"
+      content="LinkDish: Paste a link. Get cooking. Save recipes from websites, YouTube, TikTok, Pinterest and photos."
+    />
+    <link rel="icon" href="/favicon.ico" sizes="48x48" />
+    <link rel="icon" href="/assets/favicon-32.png" type="image/png" sizes="32x32" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link
+      rel="preload"
+      href="/assets/fonts/Fraunces-Bold.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
+    <link
+      rel="preload"
+      href="/assets/fonts/Fraunces-SemiBoldItalic.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
+    <script>
+      (function (root) {
+        root.classList.add("js");
+        if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+          root.classList.add("motion-ready");
+          // If site.js never runs, show everything instead of leaving it hidden.
+          window.setTimeout(function () {
+            if (!root.classList.contains("site-ready")) {
+              root.classList.remove("motion-ready");
+            }
+          }, 3000);
+        }
+      })(document.documentElement);
+    </script>
+    <link rel="stylesheet" href="/base.css" />
+    <link rel="stylesheet" href="/info.css" />
   </head>
   <body class="info-page invite-page">
     <a class="skip-link" href="#main-content">Skip to content</a>
-
+    <svg
+      class="icon-sprite"
+      aria-hidden="true"
+      focusable="false"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <symbol id="i-users" viewBox="0 0 24 24">
+        <circle cx="9" cy="8.5" r="3.5" />
+        <path d="M2.5 20a6.5 6.5 0 0 1 13 0" />
+        <path d="M16 5.2a3.5 3.5 0 0 1 0 6.6M18.5 14.2A6.5 6.5 0 0 1 21.5 20" />
+      </symbol>
+      <symbol id="i-phone" viewBox="0 0 24 24">
+        <rect x="6.5" y="2.5" width="11" height="19" rx="2.5" />
+        <path d="M11 18.5h2" />
+      </symbol>
+      <symbol id="i-share" viewBox="0 0 24 24">
+        <path d="M12 3v12M8 7l4-4 4 4" />
+        <path
+          d="M7 10.5H6a1.5 1.5 0 0 0-1.5 1.5v7.5A1.5 1.5 0 0 0 6 21h12a1.5 1.5 0 0 0 1.5-1.5V12a1.5 1.5 0 0 0-1.5-1.5h-1"
+        />
+      </symbol>
+    </svg>
     <header class="site-header" data-header>
-      <a class="brand" href="../" aria-label="LinkDish home">
-        <img src="../assets/linkdish-icon.png" alt="" width="40" height="40" />
-        <span class="brand-word">LinkDish</span>
+      <a class="brand" href="/" aria-label="LinkDish home">
+        <img
+          src="/assets/linkdish-icon-64.png"
+          srcset="/assets/linkdish-icon-64.png 1x, /assets/linkdish-icon-128.png 2x"
+          alt=""
+          width="38"
+          height="38"
+        />
+        <span>LinkDish</span>
       </a>
 
       <button
@@ -36,30 +123,31 @@
         <span aria-hidden="true"></span>
       </button>
 
-      <nav
-        class="site-nav"
-        id="site-navigation"
-        aria-label="Primary navigation"
-        data-site-nav
-      >
-        <a href="../#how-it-works">How it works</a>
-        <a href="../#plans">Plans</a>
-        <a href="../support/">Support</a>
+      <nav class="site-nav" id="site-navigation" aria-label="Primary" data-site-nav>
+        <a href="/#how-it-works">How it works</a>
+        <a href="/#features">Features</a>
+        <a href="/#plans">Pricing</a>
+        <a href="/support/">Support</a>
         <a
           class="button button-small button-primary"
-          href="https://app.linkdish.ca"
+          href="https://app.linkdish.ca/"
+          data-cta="nav"
         >
-          Open LinkDish <span aria-hidden="true">↗</span>
+          Open LinkDish
         </a>
       </nav>
     </header>
 
     <main class="invite-shell" id="main-content">
       <section class="invite-panel" aria-labelledby="invite-heading">
-        <h1 id="invite-heading">Dinner is better shared.</h1>
+        <p class="eyebrow">
+          <svg class="icon" aria-hidden="true"><use href="#i-users" /></svg> Household invite
+        </p>
+        <h1 id="invite-heading">Dinner is better<br /><em>shared.</em></h1>
         <p class="invite-copy">
-          Open this invite on the phone where LinkDish is installed. If the app
-          does not open, copy the code and paste it into Household in the app.
+          You've been invited to a LinkDish household: one shared cookbook and one shopping list
+          that stays in sync. Join on the web in any browser, including Safari on iPhone, or open
+          the invite in the Android app.
         </p>
 
         <div class="invite-code-card" id="invite-code-card" hidden>
@@ -67,90 +155,52 @@
           <code id="invite-code"></code>
         </div>
 
-        <p class="invite-copy" id="missing-code-message" hidden>
-          This invite link is missing a code. Ask the household owner to send
-          the invite again.
+        <p class="invite-copy invite-missing" id="missing-code-message" hidden>
+          This invite link is missing its code. Ask the person who invited you to send it again.
         </p>
 
-        <div class="invite-actions" aria-label="Invite actions">
+        <div class="invite-actions">
           <a
             class="button button-primary"
-            id="open-app-link"
-            href="linkdish://household"
+            id="join-web-link"
+            href="https://app.linkdish.ca/household"
+            data-cta="invite-web"
           >
-            Open LinkDish <span aria-hidden="true">↗</span>
+            Open in the web app
           </a>
-          <button
-            class="button button-secondary"
-            id="copy-code-button"
-            type="button"
-            hidden
-          >
+          <a class="button button-secondary" id="open-app-link" href="linkdish://household" hidden>
+            <svg class="icon" aria-hidden="true"><use href="#i-phone" /></svg>
+            Open in the Android app
+          </a>
+          <button class="button button-secondary" id="copy-code-button" type="button" hidden>
             Copy code
           </button>
-          <button
-            class="button button-secondary"
-            id="share-link-button"
-            type="button"
-            hidden
-          >
+          <button class="button button-secondary" id="share-link-button" type="button" hidden>
+            <svg class="icon" aria-hidden="true"><use href="#i-share" /></svg>
             Share invite
           </button>
         </div>
 
-        <p
-          class="invite-status"
-          id="invite-status"
-          role="status"
-          aria-live="polite"
-        ></p>
+        <p class="invite-status" id="invite-status" role="status" aria-live="polite"></p>
 
-        <div
-          class="store-actions"
-          aria-label="Install or get help with LinkDish"
-        >
-          <a
-            class="button button-secondary"
-            href="https://play.google.com/store/apps/details?id=com.linkdish.app"
-          >
-            Get Android app
-          </a>
-          <a class="button button-secondary" href="../support/">Get help</a>
+        <div class="store-actions">
+          <p>
+            New to LinkDish? The web app works right away. On Android you can also install the app,
+            then paste the code into Household.
+          </p>
+          <div class="cta-row">
+            <a
+              class="button button-secondary"
+              href="https://play.google.com/store/apps/details?id=com.linkdish.app"
+              data-cta="invite-android"
+            >
+              Get the Android app
+            </a>
+            <a class="button button-secondary" href="/support/">Get help</a>
+          </div>
         </div>
       </section>
     </main>
-
-    <footer class="site-footer inner-footer">
-      <div class="footer-brand-block">
-        <a class="brand brand-footer" href="../">
-          <img
-            src="../assets/linkdish-icon.png"
-            alt=""
-            width="48"
-            height="48"
-          />
-          <span class="brand-word">LinkDish</span>
-        </a>
-        <p>Keep the recipe. Lose the clutter.</p>
-      </div>
-      <div class="footer-column">
-        <h2>Help</h2>
-        <a href="../support/">Support</a>
-        <a href="../privacy/">Privacy</a>
-        <a href="mailto:support@linkdish.ca">Contact</a>
-      </div>
-      <div class="footer-column">
-        <h2>Product</h2>
-        <a href="https://app.linkdish.ca">Open web app</a>
-        <a href="https://play.google.com/store/apps/details?id=com.linkdish.app"
-          >Android</a
-        >
-      </div>
-      <div class="footer-bottom">
-        <span>&copy; <span data-current-year>2026</span> LinkDish</span>
-        <span>Made in Canada · Set in Fraunces</span>
-      </div>
-    </footer>
 
     <script>
       (function () {
@@ -161,7 +211,8 @@
           window.location.hash.replace(/^#\/?/, "") ||
           "";
         var inviteCode = rawCode.trim();
-        var deepLink = "linkdish://household";
+        var isAndroid = /Android/i.test(window.navigator.userAgent);
+        var joinLink = document.getElementById("join-web-link");
         var openLink = document.getElementById("open-app-link");
         var copyButton = document.getElementById("copy-code-button");
         var shareButton = document.getElementById("share-link-button");
@@ -169,28 +220,46 @@
         var codeValue = document.getElementById("invite-code");
         var missingMessage = document.getElementById("missing-code-message");
         var status = document.getElementById("invite-status");
+        var playUrl = "https://play.google.com/store/apps/details?id=com.linkdish.app";
 
-        if (inviteCode) {
-          deepLink += "?invite=" + encodeURIComponent(inviteCode);
-          openLink.href = deepLink;
-          copyButton.hidden = false;
-          codeCard.hidden = false;
-          codeValue.textContent = inviteCode;
-
-          if (navigator.share) {
-            shareButton.hidden = false;
-          }
-
-          if (/Android|iPhone|iPad|iPod/i.test(window.navigator.userAgent)) {
-            window.setTimeout(function () {
-              window.location.href = deepLink;
-            }, 350);
-          }
-        } else {
+        if (!inviteCode) {
           missingMessage.hidden = false;
+          return;
+        }
+
+        var encoded = encodeURIComponent(inviteCode);
+        var deepLink = "linkdish://household?invite=" + encoded;
+
+        joinLink.href = "https://app.linkdish.ca/household?invite=" + encoded;
+        codeValue.textContent = inviteCode;
+        codeCard.hidden = false;
+        copyButton.hidden = false;
+
+        if (navigator.share) {
+          shareButton.hidden = false;
+        }
+
+        // There is no iPhone app, so only Android gets the app link. The intent URL opens the
+        // installed app and falls back to Google Play when LinkDish isn't installed.
+        if (isAndroid) {
+          openLink.hidden = false;
+          openLink.href =
+            "intent://household?invite=" +
+            encoded +
+            "#Intent;scheme=linkdish;package=com.linkdish.app;S.browser_fallback_url=" +
+            encodeURIComponent(playUrl) +
+            ";end";
+          window.setTimeout(function () {
+            window.location.href = deepLink;
+          }, 350);
         }
 
         copyButton.addEventListener("click", function () {
+          if (!navigator.clipboard) {
+            status.textContent = "Select and copy the invite code above.";
+            return;
+          }
+
           navigator.clipboard
             .writeText(inviteCode)
             .then(function () {
@@ -206,7 +275,7 @@
             .share({
               title: "Join my LinkDish household",
               text: "Use this invite to join my LinkDish household.",
-              url: window.location.href,
+              url: window.location.href
             })
             .catch(function () {
               status.textContent = "";
@@ -214,7 +283,59 @@
         });
       })();
     </script>
-    <script src="../site.js" defer></script>
-    <script src="../analytics.js" defer></script>
+
+    <footer class="site-footer">
+      <div class="footer-brand">
+        <a class="brand" href="/">
+          <img
+            src="/assets/linkdish-icon-64.png"
+            srcset="/assets/linkdish-icon-64.png 1x, /assets/linkdish-icon-128.png 2x"
+            alt=""
+            width="38"
+            height="38"
+          />
+          <span>LinkDish</span>
+        </a>
+        <p>
+          Keep the recipe. Lose the clutter. Save from anywhere, plan the week and shop by aisle.
+        </p>
+      </div>
+      <nav class="footer-column" aria-labelledby="footer-product">
+        <h2 id="footer-product">Product</h2>
+        <a href="/#features">Features</a>
+        <a href="/#planner">Meal planner</a>
+        <a href="/#plans">Pricing</a>
+        <a href="/#iphone">iPhone &amp; iPad</a>
+        <a href="https://app.linkdish.ca/" data-cta="footer-web">Web app</a>
+        <a
+          href="https://play.google.com/store/apps/details?id=com.linkdish.app"
+          data-cta="footer-android"
+          >Android app</a
+        >
+      </nav>
+      <nav class="footer-column" aria-labelledby="footer-guides">
+        <h2 id="footer-guides">Guides</h2>
+        <a href="/recipe-saver-app/">Recipe saver app</a>
+        <a href="/save-recipes-from-websites/">Save recipes from websites</a>
+        <a href="/save-recipes-from-youtube/">Save recipes from YouTube</a>
+        <a href="/scan-recipes-from-photos/">Scan recipes from photos</a>
+        <a href="/meal-planner-and-grocery-list/">Meal planner &amp; grocery list</a>
+        <a href="/paprika-alternative/">Paprika alternative</a>
+      </nav>
+      <nav class="footer-column" aria-labelledby="footer-help">
+        <h2 id="footer-help">Help</h2>
+        <a href="/support/">Support</a>
+        <a href="/privacy/">Privacy</a>
+        <a href="mailto:support@linkdish.ca">support@linkdish.ca</a>
+        <a href="https://app.linkdish.ca/install" data-cta="footer-install">Install on iPhone</a>
+      </nav>
+      <p class="footer-bottom">
+        <span>Made in Canada</span>
+        <span>&copy; <span data-current-year>2026</span> LinkDish</span>
+      </p>
+    </footer>
+
+    <script src="/site.js" defer></script>
+    <script src="/analytics.js" defer></script>
   </body>
 </html>

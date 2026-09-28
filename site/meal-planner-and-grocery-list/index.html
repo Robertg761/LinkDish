@@ -1,0 +1,715 @@
+<!doctype html>
+<html lang="en-CA">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Meal Planner and Grocery List App, Sorted by Aisle | LinkDish</title>
+    <meta
+      name="description"
+      content="Plan the week from your saved recipes and get one grocery list, grouped by aisle with matching ingredients combined. Share it with your household on the Family plan."
+    />
+    <link rel="canonical" href="https://linkdish.ca/meal-planner-and-grocery-list/" />
+    <meta name="theme-color" content="#f4efe7" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#1a1816" media="(prefers-color-scheme: dark)" />
+    <meta name="color-scheme" content="light dark" />
+    <meta property="og:site_name" content="LinkDish" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="A meal planner that writes your grocery list" />
+    <meta
+      property="og:description"
+      content="Plan the week from your saved recipes and get one grocery list, grouped by aisle with matching ingredients combined. Share it with your household on the Family plan."
+    />
+    <meta property="og:url" content="https://linkdish.ca/meal-planner-and-grocery-list/" />
+    <meta property="og:image" content="https://linkdish.ca/assets/social-card-20260928.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="LinkDish: Paste a link. Get cooking. Save recipes from websites, YouTube, TikTok, Pinterest and photos."
+    />
+    <meta property="og:locale" content="en_CA" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="A meal planner that writes your grocery list" />
+    <meta
+      name="twitter:description"
+      content="Plan the week from your saved recipes and get one grocery list, grouped by aisle with matching ingredients combined. Share it with your household on the Family plan."
+    />
+    <meta name="twitter:image" content="https://linkdish.ca/assets/social-card-20260928.png" />
+    <meta
+      name="twitter:image:alt"
+      content="LinkDish: Paste a link. Get cooking. Save recipes from websites, YouTube, TikTok, Pinterest and photos."
+    />
+    <link rel="icon" href="/favicon.ico" sizes="48x48" />
+    <link rel="icon" href="/assets/favicon-32.png" type="image/png" sizes="32x32" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link
+      rel="preload"
+      href="/assets/fonts/Fraunces-Bold.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
+    <link
+      rel="preload"
+      href="/assets/fonts/Fraunces-SemiBoldItalic.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
+    <script>
+      (function (root) {
+        root.classList.add("js");
+        if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+          root.classList.add("motion-ready");
+          // If site.js never runs, show everything instead of leaving it hidden.
+          window.setTimeout(function () {
+            if (!root.classList.contains("site-ready")) {
+              root.classList.remove("motion-ready");
+            }
+          }, 3000);
+        }
+      })(document.documentElement);
+    </script>
+    <link rel="stylesheet" href="/base.css" />
+    <link rel="stylesheet" href="/marketing.css" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "LinkDish",
+        "applicationCategory": "LifestyleApplication",
+        "operatingSystem": "Android, Web",
+        "url": "https://linkdish.ca/meal-planner-and-grocery-list/",
+        "downloadUrl": "https://play.google.com/store/apps/details?id=com.linkdish.app",
+        "image": "https://linkdish.ca/assets/linkdish-icon.png",
+        "description": "A weekly meal planner that turns planned recipes into one grocery list grouped by aisle, shared with the household on the Family plan.",
+        "offers": [
+          {
+            "@type": "Offer",
+            "name": "Free",
+            "price": "0",
+            "priceCurrency": "CAD"
+          },
+          {
+            "@type": "Offer",
+            "name": "Plus (monthly)",
+            "price": "2.99",
+            "priceCurrency": "CAD"
+          },
+          {
+            "@type": "Offer",
+            "name": "Plus (yearly)",
+            "price": "24.99",
+            "priceCurrency": "CAD"
+          },
+          {
+            "@type": "Offer",
+            "name": "Family (monthly)",
+            "price": "4.99",
+            "priceCurrency": "CAD"
+          },
+          {
+            "@type": "Offer",
+            "name": "Family (yearly)",
+            "price": "44.99",
+            "priceCurrency": "CAD"
+          }
+        ]
+      }
+    </script>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+          {
+            "@type": "ListItem",
+            "position": 1,
+            "name": "Home",
+            "item": "https://linkdish.ca/"
+          },
+          {
+            "@type": "ListItem",
+            "position": 2,
+            "name": "Meal planner and grocery list",
+            "item": "https://linkdish.ca/meal-planner-and-grocery-list/"
+          }
+        ]
+      }
+    </script>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "FAQPage",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "How does the LinkDish meal planner work?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Add recipes from your cookbook to the days of the week you plan to cook them. When the week looks right, LinkDish builds one shopping list for all of them."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Does the grocery list combine the same ingredient from different recipes?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes. Matching ingredients are combined into one line with the total amount, and the list is grouped by aisle."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Can my family share the shopping list?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes, with the Family plan. Up to 6 people share one cookbook and one shopping list that stays in sync for everyone."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Can I switch between US and metric amounts?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes. Recipes can be shown in US or metric measurements, including oven temperatures, and servings can be scaled up or down."
+            }
+          }
+        ]
+      }
+    </script>
+  </head>
+  <body class="landing-page has-dock">
+    <a class="skip-link" href="#main-content">Skip to content</a>
+    <svg
+      class="icon-sprite"
+      aria-hidden="true"
+      focusable="false"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <symbol id="i-calendar" viewBox="0 0 24 24">
+        <rect x="3.5" y="5" width="17" height="15.5" rx="2.5" />
+        <path d="M8 3v4M16 3v4M3.5 10h17" />
+        <path d="M8 14h.01M12 14h.01M16 14h.01M8 17.5h.01M12 17.5h.01" stroke-width="2.6" />
+      </symbol>
+      <symbol id="i-phone" viewBox="0 0 24 24">
+        <rect x="6.5" y="2.5" width="11" height="19" rx="2.5" />
+        <path d="M11 18.5h2" />
+      </symbol>
+      <symbol id="food-noodles" viewBox="0 0 120 90">
+        <rect width="120" height="90" fill="#cfdccf" />
+        <circle cx="60" cy="46" r="36" fill="#2f3b35" opacity=".12" />
+        <circle cx="60" cy="44" r="35" fill="#fbf7f0" />
+        <circle cx="60" cy="44" r="28" fill="#e2a94f" />
+        <path
+          d="M40 42c5-6 10 5 15 0s10-6 15 0 10 5 12 0M38 50c5-6 10 5 15 0s10-6 15 0 10 5 14 0M43 35c5-5 9 5 14 0s9-5 14 0 8 4 10 0"
+          stroke="#f5d493"
+          stroke-width="3.2"
+          fill="none"
+          stroke-linecap="round"
+        />
+        <circle cx="71" cy="38" r="5" fill="#b95233" />
+        <circle cx="49" cy="55" r="4" fill="#b95233" />
+        <circle cx="66" cy="55" r="3.2" fill="#b95233" />
+        <path
+          d="M50 32l7-4M69 50l8 2M44 46l-6 2"
+          stroke="#4f7a52"
+          stroke-width="3.2"
+          stroke-linecap="round"
+        />
+        <circle cx="58" cy="44" r="6" fill="#fff7e0" />
+        <circle cx="58" cy="44" r="3" fill="#f0b53c" />
+      </symbol>
+      <symbol id="food-salad" viewBox="0 0 120 90">
+        <rect width="120" height="90" fill="#dde7df" />
+        <circle cx="60" cy="46" r="36" fill="#2f3b35" opacity=".1" />
+        <circle cx="60" cy="44" r="35" fill="#fbf7f0" />
+        <g fill="#6f9a5b">
+          <ellipse cx="46" cy="36" rx="13" ry="7" transform="rotate(-24 46 36)" />
+          <ellipse cx="72" cy="52" rx="13" ry="7" transform="rotate(18 72 52)" />
+          <ellipse cx="50" cy="56" rx="11" ry="6" transform="rotate(30 50 56)" />
+        </g>
+        <g fill="#8fb870">
+          <ellipse cx="70" cy="33" rx="12" ry="6.5" transform="rotate(20 70 33)" />
+          <ellipse cx="42" cy="47" rx="10" ry="5.5" transform="rotate(-40 42 47)" />
+        </g>
+        <g fill="#cfe3b0" stroke="#6f9a5b" stroke-width="1.6">
+          <circle cx="61" cy="42" r="6" />
+          <circle cx="78" cy="42" r="5" />
+        </g>
+        <g fill="#c9543a">
+          <circle cx="52" cy="44" r="5" />
+          <circle cx="66" cy="60" r="4.5" />
+          <circle cx="58" cy="30" r="4" />
+        </g>
+        <g fill="#e8c27b">
+          <circle cx="45" cy="60" r="3" />
+          <circle cx="74" cy="60" r="3" />
+          <circle cx="80" cy="50" r="2.6" />
+          <circle cx="40" cy="38" r="2.6" />
+        </g>
+      </symbol>
+      <symbol id="food-soup" viewBox="0 0 120 90">
+        <rect width="120" height="90" fill="#f3ddd3" />
+        <circle cx="60" cy="46" r="36" fill="#5c2a1a" opacity=".1" />
+        <circle cx="60" cy="44" r="35" fill="#fbf7f0" />
+        <circle cx="60" cy="44" r="27" fill="#d9772f" />
+        <path
+          d="M44 46c6-8 14 6 20-2s12 2 14 0"
+          stroke="#f7d9b5"
+          stroke-width="3.4"
+          fill="none"
+          stroke-linecap="round"
+        />
+        <g fill="#4f7a52">
+          <circle cx="52" cy="36" r="2.6" />
+          <circle cx="70" cy="52" r="2.6" />
+          <circle cx="66" cy="34" r="2.2" />
+        </g>
+        <path
+          d="M86 18c6 3 9 10 6 16"
+          stroke="#6f9a5b"
+          stroke-width="4"
+          fill="none"
+          stroke-linecap="round"
+        />
+      </symbol>
+      <symbol id="food-pizza" viewBox="0 0 120 90">
+        <rect width="120" height="90" fill="#e9dfd0" />
+        <circle cx="60" cy="45" r="36" fill="#c98640" />
+        <circle cx="60" cy="45" r="30" fill="#b9432e" />
+        <g fill="#f4e2b8">
+          <circle cx="48" cy="36" r="7" />
+          <circle cx="70" cy="34" r="6" />
+          <circle cx="72" cy="55" r="7.5" />
+          <circle cx="49" cy="56" r="6" />
+          <circle cx="60" cy="46" r="5" />
+        </g>
+        <g fill="#4f7a52">
+          <ellipse cx="58" cy="30" rx="4" ry="2.4" transform="rotate(-30 58 30)" />
+          <ellipse cx="82" cy="45" rx="4" ry="2.4" transform="rotate(40 82 45)" />
+          <ellipse cx="40" cy="46" rx="4" ry="2.4" transform="rotate(10 40 46)" />
+          <ellipse cx="61" cy="62" rx="4" ry="2.4" transform="rotate(-20 61 62)" />
+        </g>
+        <path
+          d="M60 45 60 9M60 45l31 18M60 45 29 63"
+          stroke="#a56430"
+          stroke-width="1.4"
+          opacity=".35"
+        />
+      </symbol>
+      <symbol id="i-basket" viewBox="0 0 24 24">
+        <path d="M4 10h16l-1.6 8.2a2 2 0 0 1-2 1.6H7.6a2 2 0 0 1-2-1.6z" />
+        <path d="m8.5 10 3.5-6 3.5 6M9.5 13.5v3M14.5 13.5v3" />
+      </symbol>
+      <symbol id="i-refresh" viewBox="0 0 24 24">
+        <path d="M20 11a8 8 0 0 0-14.3-4.5L4 8M4 4v4h4M4 13a8 8 0 0 0 14.3 4.5L20 16M20 20v-4h-4" />
+      </symbol>
+      <symbol id="i-arrow-right" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6" /></symbol>
+    </svg>
+    <header class="site-header" data-header>
+      <a class="brand" href="/" aria-label="LinkDish home">
+        <img
+          src="/assets/linkdish-icon-64.png"
+          srcset="/assets/linkdish-icon-64.png 1x, /assets/linkdish-icon-128.png 2x"
+          alt=""
+          width="38"
+          height="38"
+        />
+        <span>LinkDish</span>
+      </a>
+
+      <button
+        class="menu-toggle"
+        type="button"
+        aria-expanded="false"
+        aria-controls="site-navigation"
+        data-menu-toggle
+      >
+        <span class="sr-only">Open navigation</span>
+        <span aria-hidden="true"></span>
+        <span aria-hidden="true"></span>
+      </button>
+
+      <nav class="site-nav" id="site-navigation" aria-label="Primary" data-site-nav>
+        <a href="/#how-it-works">How it works</a>
+        <a href="/#features">Features</a>
+        <a href="/#plans">Pricing</a>
+        <a href="/support/">Support</a>
+        <a
+          class="button button-small button-primary"
+          href="https://app.linkdish.ca/"
+          data-cta="nav"
+        >
+          Open LinkDish
+        </a>
+      </nav>
+    </header>
+
+    <main id="main-content">
+      <section class="lp-hero" aria-labelledby="page-title">
+        <nav class="shell breadcrumbs" aria-label="Breadcrumb">
+          <ol>
+            <li><a href="/">Home</a></li>
+            <li aria-current="page">Meal planner and grocery list</li>
+          </ol>
+        </nav>
+        <div class="lp-hero-inner">
+          <div>
+            <p class="eyebrow">Meal planner &amp; grocery list</p>
+            <h1 id="page-title">Plan the week.<br /><em>The list writes itself.</em></h1>
+            <p class="hero-lede">
+              Put recipes from your LinkDish cookbook on the days you'll cook them. LinkDish turns
+              the whole week into one grocery list, grouped by aisle, with matching ingredients
+              combined and amounts you can actually read.
+            </p>
+            <div class="cta-row hero-actions" data-dock-sentinel>
+              <a
+                class="button button-tomato"
+                href="https://app.linkdish.ca/plan"
+                data-cta="hero-plan"
+              >
+                <svg class="icon" aria-hidden="true"><use href="#i-calendar" /></svg>
+                Plan this week
+              </a>
+              <a
+                class="button button-primary"
+                href="https://play.google.com/store/apps/details?id=com.linkdish.app"
+                data-cta="hero-android"
+              >
+                <svg class="icon" aria-hidden="true"><use href="#i-phone" /></svg>
+                Get it on Android
+              </a>
+            </div>
+            <p class="hero-note">
+              Free to start <span aria-hidden="true">·</span> Shared household list on the Family
+              plan
+            </p>
+          </div>
+          <div class="lp-visual" aria-hidden="true">
+            <div class="mock-card mock-plan">
+              <div class="mock-plan-head">
+                <span class="mock-eyebrow">Meal plan</span>
+                <b>This <em>week</em></b>
+              </div>
+              <ol class="mock-days">
+                <li>
+                  <span class="mock-day">Mon</span
+                  ><svg class="mock-thumb" viewBox="0 0 120 90"><use href="#food-noodles" /></svg
+                  ><span>Ginger-Sesame Noodles</span>
+                </li>
+                <li>
+                  <span class="mock-day">Tue</span
+                  ><svg class="mock-thumb" viewBox="0 0 120 90"><use href="#food-salad" /></svg
+                  ><span>Chickpea Pita Salad</span>
+                </li>
+                <li>
+                  <span class="mock-day">Wed</span
+                  ><svg class="mock-thumb" viewBox="0 0 120 90"><use href="#food-soup" /></svg
+                  ><span>Roasted Squash Soup</span>
+                </li>
+                <li class="is-open">
+                  <span class="mock-day">Thu</span><span class="mock-empty">Leftovers night</span>
+                </li>
+                <li>
+                  <span class="mock-day">Fri</span
+                  ><svg class="mock-thumb" viewBox="0 0 120 90"><use href="#food-pizza" /></svg
+                  ><span>Pizza Night</span>
+                </li>
+              </ol>
+              <span class="mock-button"
+                ><svg class="icon"><use href="#i-basket" /></svg> Shop for this week</span
+              >
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section section-surface" aria-labelledby="how-title">
+        <div class="shell">
+          <div class="section-head" data-reveal>
+            <p class="eyebrow">How it works</p>
+            <h2 class="section-title" id="how-title">
+              From Sunday plan<br /><em>to Monday dinner.</em>
+            </h2>
+          </div>
+          <ol class="steps" aria-label="How meal planning works in LinkDish">
+            <li data-reveal>
+              <span class="step-number num">01</span>
+              <h3>Save what you want to cook</h3>
+              <p>From recipe sites, YouTube, TikTok, Pinterest, photos or pasted text.</p>
+            </li>
+            <li data-reveal>
+              <span class="step-number num">02</span>
+              <h3>Drop recipes on days</h3>
+              <p>See every dinner for the week at a glance, and change it when plans change.</p>
+            </li>
+            <li data-reveal>
+              <span class="step-number num">03</span>
+              <h3>Build one list</h3>
+              <p>One tap turns the plan into a shopping list sorted by aisle.</p>
+            </li>
+          </ol>
+        </div>
+      </section>
+
+      <section class="section" aria-labelledby="list-title">
+        <div class="shell lp-split">
+          <div class="feature-copy" data-reveal>
+            <p class="eyebrow">Smart shopping list</p>
+            <h2 class="section-title" id="list-title">
+              Shop the way<br /><em>the store is laid out.</em>
+            </h2>
+            <p>
+              Produce with produce, dairy with dairy, pantry with pantry. When two recipes need
+              butter, you see one line with the combined amount, written as a clean fraction.
+            </p>
+            <ul class="check-list">
+              <li>Grouped by aisle, in the order you walk the store</li>
+              <li>Matching ingredients combined across recipes</li>
+              <li>Clean amounts like 1 ½ cups, in US or metric</li>
+              <li>Add your own items, like coffee or paper towels</li>
+            </ul>
+          </div>
+          <div class="feature-visual tone-sage-bg" aria-hidden="true" data-reveal>
+            <div class="mock-card mock-list">
+              <div class="mock-list-head">
+                <b>Shopping list</b>
+                <span class="mock-sync"
+                  ><svg class="icon"><use href="#i-refresh" /></svg> Synced with your
+                  household</span
+                >
+              </div>
+              <div class="mock-aisle">
+                <span class="mock-aisle-name">Produce</span>
+                <span class="mock-item is-done"
+                  ><i></i><span><b class="num">2</b> lemons</span></span
+                >
+                <span class="mock-item"
+                  ><i></i><span><b class="num">1 ½ cups</b> snap peas</span
+                  ><small>2 recipes</small></span
+                >
+              </div>
+              <div class="mock-aisle">
+                <span class="mock-aisle-name">Dairy &amp; Eggs</span>
+                <span class="mock-item"
+                  ><i></i><span><b class="num">½ cup</b> butter</span><small>2 recipes</small></span
+                >
+              </div>
+              <div class="mock-aisle">
+                <span class="mock-aisle-name">Pantry</span>
+                <span class="mock-item"
+                  ><i></i><span><b class="num">1 ½ cups</b> rolled oats</span></span
+                >
+                <span class="mock-item"
+                  ><i></i><span><b class="num">¼ cup</b> honey</span></span
+                >
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section section-surface" aria-labelledby="family-title">
+        <div class="shell">
+          <div class="section-head" data-reveal>
+            <p class="eyebrow">Family plan</p>
+            <h2 class="section-title" id="family-title">
+              One list for<br /><em>the whole household.</em>
+            </h2>
+            <p class="section-lede">
+              With Family, up to 6 people share one cookbook and one shopping list. Anyone can add
+              what's running low, and whoever is at the store sees items get checked off as they go.
+            </p>
+          </div>
+          <div class="cta-row" data-reveal>
+            <a
+              class="button button-primary"
+              href="https://app.linkdish.ca/pricing"
+              data-cta="family-plans"
+              >See the Family plan</a
+            >
+            <a class="button button-secondary" href="/#plans">Compare plans</a>
+          </div>
+        </div>
+      </section>
+
+      <section class="section section-canvas" id="faq" aria-labelledby="faq-title">
+        <div class="shell faq">
+          <div class="faq-head" data-reveal>
+            <p class="eyebrow">Questions</p>
+            <h2 class="section-title" id="faq-title">Planning<br /><em>questions.</em></h2>
+          </div>
+          <div class="faq-list" data-reveal>
+            <details data-faq>
+              <summary>How does the LinkDish meal planner work?</summary>
+              <div>
+                <p>
+                  Add recipes from your cookbook to the days of the week you plan to cook them. When
+                  the week looks right, LinkDish builds one shopping list for all of them.
+                </p>
+              </div>
+            </details>
+            <details data-faq>
+              <summary>
+                Does the grocery list combine the same ingredient from different recipes?
+              </summary>
+              <div>
+                <p>
+                  Yes. Matching ingredients are combined into one line with the total amount, and
+                  the list is grouped by aisle.
+                </p>
+              </div>
+            </details>
+            <details data-faq>
+              <summary>Can my family share the shopping list?</summary>
+              <div>
+                <p>
+                  Yes, with the Family plan. Up to 6 people share one cookbook and one shopping list
+                  that stays in sync for everyone.
+                </p>
+              </div>
+            </details>
+            <details data-faq>
+              <summary>Can I switch between US and metric amounts?</summary>
+              <div>
+                <p>
+                  Yes. Recipes can be shown in US or metric measurements, including oven
+                  temperatures, and servings can be scaled up or down.
+                </p>
+              </div>
+            </details>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" aria-labelledby="related-title">
+        <div class="shell">
+          <h2 class="related-title" id="related-title">Keep reading</h2>
+          <ul class="related" role="list">
+            <li>
+              <a href="/recipe-saver-app/"
+                >The recipe saver app
+                <svg class="icon" aria-hidden="true"><use href="#i-arrow-right" /></svg
+              ></a>
+            </li>
+            <li>
+              <a href="/save-recipes-from-websites/"
+                >Save recipes from websites
+                <svg class="icon" aria-hidden="true"><use href="#i-arrow-right" /></svg
+              ></a>
+            </li>
+            <li>
+              <a href="/save-recipes-from-youtube/"
+                >Save recipes from YouTube
+                <svg class="icon" aria-hidden="true"><use href="#i-arrow-right" /></svg
+              ></a>
+            </li>
+            <li>
+              <a href="/scan-recipes-from-photos/"
+                >Scan recipes from photos
+                <svg class="icon" aria-hidden="true"><use href="#i-arrow-right" /></svg
+              ></a>
+            </li>
+            <li>
+              <a href="/paprika-alternative/"
+                >LinkDish vs Paprika
+                <svg class="icon" aria-hidden="true"><use href="#i-arrow-right" /></svg
+              ></a>
+            </li>
+            <li>
+              <a href="/#plans"
+                >Plans and pricing
+                <svg class="icon" aria-hidden="true"><use href="#i-arrow-right" /></svg
+              ></a>
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="final-call" aria-labelledby="final-title">
+        <div class="final-call-inner" data-reveal>
+          <h2 id="final-title">Plan once.<br /><em>Shop once.</em></h2>
+          <p>Save a few recipes, put them on the week, and let the list write itself.</p>
+          <div class="final-actions">
+            <a class="button button-light" href="https://app.linkdish.ca/plan" data-cta="final-plan"
+              >Open the planner</a
+            >
+            <a
+              class="button button-outline-light"
+              href="https://play.google.com/store/apps/details?id=com.linkdish.app"
+              data-cta="final-android"
+              >Get it on Android</a
+            >
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-brand">
+        <a class="brand" href="/">
+          <img
+            src="/assets/linkdish-icon-64.png"
+            srcset="/assets/linkdish-icon-64.png 1x, /assets/linkdish-icon-128.png 2x"
+            alt=""
+            width="38"
+            height="38"
+          />
+          <span>LinkDish</span>
+        </a>
+        <p>
+          Keep the recipe. Lose the clutter. Save from anywhere, plan the week and shop by aisle.
+        </p>
+      </div>
+      <nav class="footer-column" aria-labelledby="footer-product">
+        <h2 id="footer-product">Product</h2>
+        <a href="/#features">Features</a>
+        <a href="/#planner">Meal planner</a>
+        <a href="/#plans">Pricing</a>
+        <a href="/#iphone">iPhone &amp; iPad</a>
+        <a href="https://app.linkdish.ca/" data-cta="footer-web">Web app</a>
+        <a
+          href="https://play.google.com/store/apps/details?id=com.linkdish.app"
+          data-cta="footer-android"
+          >Android app</a
+        >
+      </nav>
+      <nav class="footer-column" aria-labelledby="footer-guides">
+        <h2 id="footer-guides">Guides</h2>
+        <a href="/recipe-saver-app/">Recipe saver app</a>
+        <a href="/save-recipes-from-websites/">Save recipes from websites</a>
+        <a href="/save-recipes-from-youtube/">Save recipes from YouTube</a>
+        <a href="/scan-recipes-from-photos/">Scan recipes from photos</a>
+        <a href="/meal-planner-and-grocery-list/">Meal planner &amp; grocery list</a>
+        <a href="/paprika-alternative/">Paprika alternative</a>
+      </nav>
+      <nav class="footer-column" aria-labelledby="footer-help">
+        <h2 id="footer-help">Help</h2>
+        <a href="/support/">Support</a>
+        <a href="/privacy/">Privacy</a>
+        <a href="mailto:support@linkdish.ca">support@linkdish.ca</a>
+        <a href="https://app.linkdish.ca/install" data-cta="footer-install">Install on iPhone</a>
+      </nav>
+      <p class="footer-bottom">
+        <span>Made in Canada</span>
+        <span>&copy; <span data-current-year>2026</span> LinkDish</span>
+      </p>
+    </footer>
+
+    <div class="mobile-dock" data-mobile-dock>
+      <a class="button button-primary" href="https://app.linkdish.ca/" data-cta="dock-web"
+        >Open the web app</a
+      >
+      <a
+        class="button button-secondary"
+        href="https://play.google.com/store/apps/details?id=com.linkdish.app"
+        data-cta="dock-android"
+        >Android app</a
+      >
+    </div>
+
+    <script src="/site.js" defer></script>
+    <script src="/analytics.js" defer></script>
+  </body>
+</html>
