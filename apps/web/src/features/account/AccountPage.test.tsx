@@ -295,15 +295,21 @@ describe("AccountPage signed in", () => {
 
     renderAccount();
 
-    expect(
-      await screen.findByRole("progressbar", { name: "Imports used this month" })
-    ).toHaveAttribute("aria-valuenow", "4");
-    expect(screen.getByText("4 of 100")).toBeVisible();
+    // The meter holds its place while the usage loads, so the plan card doesn't jump.
+    expect(screen.getByRole("progressbar", { name: "Imports used this month" })).toHaveAttribute(
+      "aria-valuetext",
+      "Loading"
+    );
+    expect(await screen.findByText("4 of 100")).toBeVisible();
+    expect(screen.getByRole("progressbar", { name: "Imports used this month" })).toHaveAttribute(
+      "aria-valuenow",
+      "4"
+    );
     expect(screen.getByText(/^Resets /u)).toBeVisible();
     expect(screen.queryByRole("progressbar", { name: "Saved recipes" })).not.toBeInTheDocument();
   });
 
-  it("points Family accounts at their household", () => {
+  it("points Family accounts at their household", async () => {
     authMocks.user = { billingPlan: "family", email: "cook@example.com", id: "user_1" };
 
     renderAccount();
@@ -313,7 +319,10 @@ describe("AccountPage signed in", () => {
       "href",
       "/household"
     );
-    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+    // Billing is off in this test, so the placeholder meter goes once usage has answered.
+    await waitFor(() => {
+      expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+    });
   });
 
   it("edits the profile in a sheet", async () => {

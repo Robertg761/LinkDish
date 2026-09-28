@@ -1157,8 +1157,9 @@
   color: var(--color-primary);
 }
 
+/* Nudged (not padded) past the check, so finishing a stage never shifts the layout. */
 .extraction-progress-stage.is-done .extraction-progress-stage-label {
-  padding-left: 18px;
+  transform: translateX(18px);
 }
 
 .extraction-progress-preview {

@@ -1,16 +1,16 @@
-import React, { useEffect, useState } from "react";
+import React from "react";
 
 import { Badge } from "../../../components/Badge";
 import { Icon } from "../../../components/Icon";
 import { Illustration } from "../../../components/illustrations";
 import { RecipeCard } from "../../../components/RecipeCard";
+import { featuredRecipes } from "../../featured/featured-recipes";
 
 import { LibraryShelf } from "./LibraryShelf";
 import { PasteLinkForm } from "./PasteLinkForm";
 import { CompactRecipeMeta } from "./RecipeMeta";
 
 import type { IconName } from "../../../components/Icon";
-import type { FeaturedRecipe } from "../../featured/types";
 
 import "./LibraryWelcome.css";
 
@@ -32,29 +32,13 @@ const HOW_IT_WORKS: ReadonlyArray<{ icon: IconName; title: string; body: string 
   }
 ];
 
-/** The sample recipes load only here, so the Cookbook's own bundle stays small. */
+/**
+ * The sample recipes ship inside this (lazy) welcome chunk rather than loading after it: the
+ * welcome, its samples and the starter recipes below all appear in one paint, so nothing on the
+ * first-run Cookbook moves once it shows. Cooks with recipes of their own never load any of it.
+ */
 const DiscoverShelf: React.FC = () => {
-  const [recipes, setRecipes] = useState<FeaturedRecipe[] | null>(null);
-
-  useEffect(() => {
-    let active = true;
-
-    import("../../featured/featured-recipes")
-      .then((module) => {
-        if (active) {
-          setRecipes(module.featuredRecipes);
-        }
-      })
-      .catch(() => {
-        // Samples are a nice-to-have; the rest of the welcome still works offline.
-      });
-
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  if (!recipes?.length) {
+  if (!featuredRecipes.length) {
     return null;
   }
 
@@ -65,7 +49,7 @@ const DiscoverShelf: React.FC = () => {
       subtitle="Real recipes, already cleaned up. Open one to see how LinkDish reads."
       title="Try a sample"
     >
-      {recipes.map((featured) => (
+      {featuredRecipes.map((featured) => (
         <li key={featured.slug}>
           <RecipeCard
             className="library-shelf-card"

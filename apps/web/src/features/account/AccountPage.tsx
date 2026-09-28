@@ -19,7 +19,7 @@ import { useSavedRecipes } from "../../data/library-store";
 import { useDocumentTitle } from "../../lib/use-document-title";
 import { useMediaQuery } from "../../lib/use-media-query";
 import { getWebBillingTier, webBillingPlans, type WebBillingTier } from "../billing/web-billing";
-import { useImportUsage } from "../extract/use-import-usage";
+import { useImportUsageState } from "../extract/use-import-usage";
 import { getInitials } from "../household/use-household-summary";
 import { describeFreeQuota } from "../library/components/free-quota";
 import { countCookbook } from "../library/components/library-model";
@@ -492,7 +492,8 @@ const ProfileSheet: React.FC<{ user: AccountUser; open: boolean; onClose: () => 
 
 interface UsageMeterProps {
   label: string;
-  used: number;
+  /** Null while the count is still loading: the meter holds its place with an empty bar. */
+  used: number | null;
   limit: number;
   tone: "primary" | "butter" | "tomato";
   note?: string | null | undefined;
@@ -500,19 +501,23 @@ interface UsageMeterProps {
 
 /** One meter shape for every plan: what's used, filling toward the limit, coloured by urgency. */
 const UsageMeter: React.FC<UsageMeterProps> = ({ label, used, limit, tone, note }) => (
-  <div className="account-plan-meter">
+  <div aria-busy={used === null ? true : undefined} className="account-plan-meter">
     <div className="account-plan-meter-row">
       <span>{label}</span>
-      <strong className="num">
-        {used} of {limit}
-      </strong>
+      {used === null ? (
+        <Skeleton height={16} width={48} />
+      ) : (
+        <strong className="num">
+          {used} of {limit}
+        </strong>
+      )}
     </div>
     <ProgressBar
       label={label}
       max={limit}
       tone={tone}
-      value={used}
-      valueText={`${used} of ${limit} used`}
+      value={used ?? 0}
+      valueText={used === null ? "Loading" : `${used} of ${limit} used`}
     />
     {note ? <p className="account-plan-meter-note">{note}</p> : null}
   </div>
@@ -533,7 +538,8 @@ const PlanCardSection: React.FC<{ tier: WebBillingTier }> = ({ tier }) => {
   const counts = useMemo(() => countCookbook(recipes), [recipes]);
   const limit = webBillingPlans.free.limits.savedRecipes;
   const quota = typeof limit === "number" ? describeFreeQuota(counts, limit) : null;
-  const importUsage = useImportUsage(null, 0);
+  const { pending: importsPending, usage: importUsage } = useImportUsageState(null, 0);
+  const planImports = webBillingPlans[tier].limits.monthlyImports;
   const importsUsed = importUsage ? Math.max(0, importUsage.limit - importUsage.remaining) : 0;
   const resetsOn = formatResetDate(importUsage?.resetsAt ?? null);
   const copy = planContent[tier];
@@ -555,6 +561,11 @@ const PlanCardSection: React.FC<{ tier: WebBillingTier }> = ({ tier }) => {
         </div>
       </div>
 
+      {/* The meters hold their place while the counts load, so the card never jumps. */}
+      {tier === "free" && quota && status === "loading" ? (
+        <UsageMeter label="Saved recipes" limit={quota.limit} tone="primary" used={null} />
+      ) : null}
+
       {tier === "free" && quota && status === "ready" ? (
         <UsageMeter
           label="Saved recipes"
@@ -571,6 +582,15 @@ const PlanCardSection: React.FC<{ tier: WebBillingTier }> = ({ tier }) => {
             .join(" ")}
           tone={quota.tone}
           used={quota.saved}
+        />
+      ) : null}
+
+      {importsPending && planImports > 0 ? (
+        <UsageMeter
+          label={tier === "free" ? "Free imports used" : "Imports used this month"}
+          limit={planImports}
+          tone="primary"
+          used={null}
         />
       ) : null}
 
