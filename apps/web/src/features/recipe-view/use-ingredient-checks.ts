@@ -78,8 +78,12 @@ export const useIngredientChecks = (sessionKey: string | null | undefined): Ingr
     }
   }, [sessionKey, storedSet]);
 
+  /**
+   * Shows `next` and saves it; with `change`, saves `change` applied to the ticks as stored when
+   * the write happens instead, so a line another tab ticked meanwhile stays ticked.
+   */
   const commit = useCallback(
-    (next: ReadonlySet<string>) => {
+    (next: ReadonlySet<string>, change?: (stored: readonly string[]) => string[]) => {
       setLocal({ key: sessionKey ?? null, set: next });
 
       if (!sessionKey) {
@@ -87,7 +91,12 @@ export const useIngredientChecks = (sessionKey: string | null | undefined): Ingr
       }
 
       pendingWritesRef.current += 1;
-      void queueCookSessionUpdate(sessionKey, { checkedIngredients: Array.from(next) })
+      void queueCookSessionUpdate(
+        sessionKey,
+        change
+          ? (session) => ({ checkedIngredients: change(session.checkedIngredients) })
+          : { checkedIngredients: Array.from(next) }
+      )
         .catch((error: unknown) => {
           console.warn("Could not save ticked ingredients.", error);
         })
@@ -101,14 +110,19 @@ export const useIngredientChecks = (sessionKey: string | null | undefined): Ingr
   const toggle = useCallback(
     (key: string) => {
       const next = new Set(checkedRef.current);
+      const tick = !next.has(key);
 
-      if (next.has(key)) {
-        next.delete(key);
-      } else {
+      if (tick) {
         next.add(key);
+      } else {
+        next.delete(key);
       }
 
-      commit(next);
+      commit(next, (stored) =>
+        tick
+          ? Array.from(new Set([...stored, key]))
+          : stored.filter((storedKey) => storedKey !== key)
+      );
     },
     [commit]
   );
