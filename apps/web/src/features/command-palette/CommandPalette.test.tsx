@@ -28,16 +28,23 @@ vi.mock("../../data/library-store", () => ({
 const shoppingMocks = vi.hoisted(() => ({
   addParsedShoppingItems: vi.fn(),
   requestShoppingSync: vi.fn(),
-  useShoppingAccount: vi.fn()
+  setShoppingAccount: vi.fn()
 }));
 vi.mock("../shopping/shopping-list-store", async (importOriginal) => ({
   ...(await importOriginal<typeof ShoppingListStore>()),
   addParsedShoppingItems: shoppingMocks.addParsedShoppingItems
 }));
 vi.mock("../shopping/shopping-sync", () => ({
-  getShoppingWriteOptions: () => ({ canSync: false }),
+  getShoppingWriteOptions: () => ({ canSync: true, userId: "user_1" }),
   requestShoppingSync: shoppingMocks.requestShoppingSync,
-  useShoppingAccount: shoppingMocks.useShoppingAccount
+  setShoppingAccount: shoppingMocks.setShoppingAccount
+}));
+vi.mock("../../auth/AuthProvider", () => ({
+  useAuth: () => ({
+    isAuthenticated: true,
+    loading: false,
+    user: { billingPlan: "family", email: "cook@example.com", id: "user_1" }
+  })
 }));
 
 const recipe = (id: string, title: string, extra: Partial<WebSavedRecipe> = {}): WebSavedRecipe =>
@@ -113,6 +120,7 @@ describe("command palette", () => {
       .mockReset()
       .mockResolvedValue({ changed: [], mergedCount: 0 });
     shoppingMocks.requestShoppingSync.mockReset();
+    shoppingMocks.setShoppingAccount.mockReset();
     libraryMocks.recipes = [
       recipe("lemon-chicken", "Weeknight Lemon Chicken", {
         lastOpenedAt: "2026-09-27T10:00:00.000Z"
@@ -248,9 +256,16 @@ describe("command palette", () => {
     fireEvent.click(screen.getByRole("option", { name: /Add “oat milk” to the shopping list/ }));
 
     await waitFor(() => expect(shoppingMocks.addParsedShoppingItems).toHaveBeenCalled());
-    expect(shoppingMocks.addParsedShoppingItems.mock.calls[0]?.[0]).toEqual([
-      expect.objectContaining({ text: "oat milk" })
+    expect(shoppingMocks.addParsedShoppingItems.mock.calls[0]).toEqual([
+      [expect.objectContaining({ text: "oat milk" })],
+      { canSync: true, userId: "user_1" }
     ]);
+    // The household list syncs for the signed-in cook.
+    expect(shoppingMocks.setShoppingAccount).toHaveBeenCalledWith({
+      isAuthenticated: true,
+      loading: false,
+      userId: "user_1"
+    });
     expect(shoppingMocks.requestShoppingSync).toHaveBeenCalled();
     expect(await screen.findByText("Added “oat milk” to your shopping list")).toBeInTheDocument();
     expect(analyticsMocks.trackWebEvent).toHaveBeenCalledWith(

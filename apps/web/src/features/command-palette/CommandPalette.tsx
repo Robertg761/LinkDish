@@ -9,6 +9,7 @@ import { createPortal } from "react-dom";
 import { useLocation, useNavigate } from "react-router-dom";
 
 import { trackWebEvent } from "../../analytics/client";
+import { useAuth } from "../../auth/AuthProvider";
 import { Icon } from "../../components/Icon";
 import { RecipeImage } from "../../components/RecipeImage";
 import { useToast } from "../../components/Toast";
@@ -18,14 +19,9 @@ import { useSavedRecipes } from "../../data/library-store";
 import { isMacLike } from "../../lib/shortcuts";
 import { useMediaQuery } from "../../lib/use-media-query";
 import { resolveTheme, setPreference, usePreference } from "../../preferences/preferences-store";
-import { addParsedShoppingItems, parseManualShoppingLine } from "../shopping/shopping-list-store";
-import {
-  getShoppingWriteOptions,
-  requestShoppingSync,
-  useShoppingAccount
-} from "../shopping/shopping-sync";
 
 import { buildPaletteSections, flattenSections, stepGroup } from "./palette-model";
+import { addTextToShoppingList } from "./palette-shopping";
 
 import type { PaletteAction, PaletteItem } from "./palette-model";
 import type { OpenCommandPaletteDetail } from "../../lib/command-palette-events";
@@ -126,7 +122,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
   const mac = isMacLike();
   const roomy = useMediaQuery("(min-width: 768px)");
 
-  useShoppingAccount();
+  const { isAuthenticated, loading: authLoading, user } = useAuth();
   useModalFocusTrap({ active: true, containerRef: panelRef, onEscape: onClose });
   useBodyScrollLock(true);
 
@@ -212,16 +208,19 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
         onShowShortcuts();
         return;
       case "add-shopping": {
-        const parsed = parseManualShoppingLine(action.text);
         onClose();
 
-        if (!parsed) {
-          return;
-        }
-
         try {
-          await addParsedShoppingItems([parsed], getShoppingWriteOptions());
-          requestShoppingSync();
+          const added = await addTextToShoppingList(action.text, {
+            isAuthenticated,
+            loading: authLoading,
+            userId: user?.id ?? null
+          });
+
+          if (!added) {
+            return;
+          }
+
           trackWebEvent({
             eventName: "shopping_item_added",
             properties: { count: 1, method: "command_palette", source: "manual" },
@@ -231,7 +230,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
             action: { label: "View list", onClick: () => void navigate("/shopping") },
             icon: "shopping-basket",
             id: "palette-shopping-added",
-            message: `Added “${parsed.text}” to your shopping list`,
+            message: `Added “${added}” to your shopping list`,
             tone: "success"
           });
         } catch {
