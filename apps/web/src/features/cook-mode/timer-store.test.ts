@@ -2,8 +2,13 @@ import { act } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { resetDataChangeFeedForTests, setDataChannelFactoryForTests } from "../../data/change-feed";
-import { getCookSession, resetCookSessionStoreForTests } from "../../data/cook-session-store";
-import { resetLinkDishWebDbForTests } from "../../storage/linkdish-db";
+import {
+  getCookSession,
+  resetCookSessionStoreForTests,
+  startCookTimer,
+  updateCookSession
+} from "../../data/cook-session-store";
+import { getLinkDishWebDb, resetLinkDishWebDbForTests } from "../../storage/linkdish-db";
 import { fakeIdb } from "../../storage/testing/fake-idb";
 
 import { flushCookSessionWrites } from "./cook-session-writer";
@@ -178,6 +183,110 @@ describe("kitchen timers", () => {
     expect(getKitchenTimers()).toEqual([
       expect.objectContaining({ href: "/recipes/r1", label: "5 min", recipeId: "r1" })
     ]);
+  });
+
+  describe("with the app open in another tab", () => {
+    beforeEach(async () => {
+      // Open the database up front (its upgrade waits on timers, which are fake here).
+      const opening = getLinkDishWebDb();
+      await vi.advanceTimersByTimeAsync(0);
+      await opening;
+    });
+
+    /** The BroadcastChannel stand-in: `deliver` is another tab's write notification. */
+    const crossTab = () => {
+      const channel = {
+        close: vi.fn(),
+        onmessage: null as ((event: MessageEvent) => void) | null,
+        postMessage: vi.fn()
+      };
+      setDataChannelFactoryForTests(() => channel);
+
+      return {
+        deliver: async () => {
+          channel.onmessage?.({ data: { topic: "cookSessions", v: 1 } } as MessageEvent);
+          await flushAsync();
+          await flushCookSessionWrites();
+          await flushAsync();
+        }
+      };
+    };
+
+    const storedTimer = (id: string, extra: Record<string, unknown> = {}) => ({
+      ...startCookTimer({ durationMs: 60_000, id, label: "1 min" }),
+      recipeTitle: "Chili",
+      ...extra
+    });
+
+    const storedIds = async (recipeId: string) =>
+      ((await getCookSession(recipeId))?.timers ?? []).map((timer) => timer.id);
+
+    it("drops a timer dismissed in the other tab and never writes it back", async () => {
+      const other = crossTab();
+      await updateCookSession("r1", { timers: [storedTimer("t1")] });
+      await hydrateKitchenTimers();
+      expect(getKitchenTimers().map((timer) => timer.id)).toEqual(["t1"]);
+
+      // The other tab dismisses t1.
+      await updateCookSession("r1", { timers: [] });
+      await other.deliver();
+      expect(getKitchenTimers()).toEqual([]);
+
+      const id = startKitchenTimer({
+        durationMs: 30_000,
+        label: "Rest",
+        recipeId: "r1",
+        recipeTitle: "Chili"
+      });
+      await flushAsync();
+      await flushCookSessionWrites();
+
+      expect(await storedIds("r1")).toEqual([id]);
+    });
+
+    it("keeps a timer the other tab started when this tab changes its own", async () => {
+      const other = crossTab();
+      const id = startKitchenTimer({
+        durationMs: 60_000,
+        label: "Boil",
+        recipeId: "r1",
+        recipeTitle: "Chili"
+      });
+      await flushAsync();
+      await flushCookSessionWrites();
+
+      // The other tab starts t2 before this tab has heard about it.
+      const session = await getCookSession("r1");
+      await updateCookSession("r1", { timers: [...(session?.timers ?? []), storedTimer("t2")] });
+      pauseKitchenTimer(id);
+      await flushAsync();
+      await flushCookSessionWrites();
+
+      expect(await storedIds("r1")).toEqual([id, "t2"]);
+
+      await other.deliver();
+      expect(getKitchenTimers().map((timer) => timer.id)).toEqual([id, "t2"]);
+      expect(getKitchenTimers()[0]).toMatchObject({ paused: true });
+    });
+
+    it("lets only one tab announce a finished timer", async () => {
+      crossTab();
+      await updateCookSession("r1", { timers: [storedTimer("t1")] });
+      await hydrateKitchenTimers();
+
+      // The other tab noticed (and announced) the finish first.
+      await vi.advanceTimersByTimeAsync(59_000);
+      await updateCookSession("r1", {
+        timers: [storedTimer("t1", { doneAt: NOW + 60_000, endsAt: NOW + 60_000 })]
+      });
+      await vi.advanceTimersByTimeAsync(1_000);
+      await flushAsync();
+      await flushCookSessionWrites();
+
+      expect(getKitchenTimers()[0]?.doneAt).toBeDefined();
+      expect(oscillatorStart).not.toHaveBeenCalled();
+      expect(document.title).not.toContain("Timer done");
+    });
   });
 });
 
