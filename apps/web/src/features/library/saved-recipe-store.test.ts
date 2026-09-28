@@ -468,6 +468,47 @@ describe("saved-recipe-store v4 behaviour", () => {
     expect(fakeIdb.record("cookSessions", saved.id)).toBeUndefined();
   });
 
+  it("treats an older app's copy of a starter as the personal recipe the limit counts", async () => {
+    // Before the redesign, "Duplicate" on a starter kept isStarter under a fresh id.
+    const legacyCopy = {
+      ...createSaveInput(99),
+      createdAt: "2026-06-01T00:00:00.000Z",
+      id: "0f0f0f0f-0000-4000-8000-000000000001",
+      isStarter: true,
+      sync: { status: "local_only" as const },
+      sourceHost: "example.com",
+      timesCooked: 0,
+      updatedAt: "2026-06-01T00:00:00.000Z"
+    };
+    fakeIdb.seed(SAVED_RECIPES_STORE_NAME, [legacyCopy]);
+
+    for (let i = 0; i < LOCAL_LIMIT_FREE - 1; i += 1) {
+      expect((await saveRecipe(createSaveInput(i), false)).success).toBe(true);
+    }
+
+    // What screens show agrees with what the limit enforces: 15 of 15, and no "starter" copy.
+    const listed = await getSavedRecipes();
+    expect(listed.filter((recipe) => !recipe.isStarter)).toHaveLength(LOCAL_LIMIT_FREE);
+    expect(listed.find((recipe) => recipe.id === legacyCopy.id)).not.toHaveProperty("isStarter");
+    expect(await getSavedRecipeById(legacyCopy.id)).not.toHaveProperty("isStarter");
+    expect(await countQuotaSavedRecipes()).toBe(LOCAL_LIMIT_FREE);
+    expect((await saveRecipe(createSaveInput(LOCAL_LIMIT_FREE), false)).error).toBe(
+      "limit_exceeded"
+    );
+
+    // The next write stores it that way too.
+    await setRecipeFavorite(legacyCopy.id, true);
+    expect(fakeIdb.record(SAVED_RECIPES_STORE_NAME, legacyCopy.id)).not.toHaveProperty("isStarter");
+  });
+
+  it("keeps the seeded starters as starters", async () => {
+    await seedStarterRecipesIfNeeded();
+
+    const starters = (await getSavedRecipes()).filter((recipe) => recipe.id.startsWith("starter-"));
+    expect(starters.length).toBeGreaterThan(0);
+    expect(starters.every((recipe) => recipe.isStarter)).toBe(true);
+  });
+
   it("counts quota from keys without reading whole records", async () => {
     await seedStarterRecipesIfNeeded();
     await saveRecipe(createSaveInput(1), false);

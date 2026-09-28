@@ -79,8 +79,28 @@ interface SplitRecord {
   record: WebSavedRecipe;
 }
 
+const isStarterRecipeId = (id: IDBValidKey): boolean =>
+  typeof id === "string" && id.startsWith(STARTER_RECIPE_ID_PREFIX);
+
+/**
+ * Only the seeded starters (ids "starter-…") are starter recipes, which is also how the free
+ * limit counts. Older versions' "Duplicate" of a starter kept `isStarter` under a fresh id; that
+ * copy is a personal recipe, so every read and write drops the flag from it.
+ */
+const withStarterFlagById = (recipe: WebSavedRecipe): WebSavedRecipe => {
+  if (!recipe.isStarter || isStarterRecipeId(recipe.id)) {
+    return recipe;
+  }
+
+  const personal: WebSavedRecipe = { ...recipe };
+  delete personal.isStarter;
+  return personal;
+};
+
 /** Separates the heavy `sourceImages` payload from the record that goes into `savedRecipes`. */
-const splitSourceImages = (recipe: WebSavedRecipe): SplitRecord => {
+const splitSourceImages = (input: WebSavedRecipe): SplitRecord => {
+  const recipe = withStarterFlagById(input);
+
   if (!("sourceImages" in recipe)) {
     return { images: undefined, record: recipe };
   }
@@ -126,9 +146,6 @@ const imagesRecordFor = (
   updatedAt: string
 ): WebRecipeSourceImagesRecord => ({ images, recipeId, updatedAt });
 
-const isStarterRecipeId = (id: IDBValidKey): boolean =>
-  typeof id === "string" && id.startsWith(STARTER_RECIPE_ID_PREFIX);
-
 /* ------------------------------------------------------------------------------------------------
  * Reads
  * ---------------------------------------------------------------------------------------------- */
@@ -166,18 +183,20 @@ export async function getSavedRecipeSourceImages(id: string): Promise<ExtractRec
 /** One saved recipe with its `sourceImages` hydrated (backward compatible detail read). */
 export async function getSavedRecipeById(id: string): Promise<WebSavedRecipe | undefined> {
   const db = await getDb();
-  const record = (await db.get(STORE_NAME, id)) as WebSavedRecipe | undefined;
+  const stored = (await db.get(STORE_NAME, id)) as WebSavedRecipe | undefined;
 
-  if (!record) {
+  if (!stored) {
     return undefined;
   }
+
+  const record = withStarterFlagById(stored);
 
   if (record.sourceImages?.length) {
     return record;
   }
 
-  const stored = (await db.get(IMAGES_STORE_NAME, id)) as WebRecipeSourceImagesRecord | undefined;
-  return withImages(record, stored?.images);
+  const images = (await db.get(IMAGES_STORE_NAME, id)) as WebRecipeSourceImagesRecord | undefined;
+  return withImages(record, images?.images);
 }
 
 /** Alias of {@link getSavedRecipeById}. */
