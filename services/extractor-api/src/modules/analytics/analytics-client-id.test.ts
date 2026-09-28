@@ -120,7 +120,7 @@ describe("POST /analytics/events client identity", () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({ accepted: 0 });
+    expect(response.json()).toEqual({ accepted: 0, dropped: 0 });
     await app.close();
   });
 });

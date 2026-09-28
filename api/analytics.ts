@@ -1,17 +1,9 @@
-import { analyticsEventBatchRequestSchema } from "../packages/api-contracts/src/index.js";
 import { corsJson, corsPreflight } from "../services/extractor-api/src/http/vercel-cors.js";
-import {
-  hashAnalyticsUserId,
-  normalizeAnalyticsClientId,
-  sanitizeAnalyticsProperties
-} from "../services/extractor-api/src/modules/analytics/analytics-privacy.js";
-import { writeAnalyticsEvents } from "../services/extractor-api/src/modules/analytics/analytics-store.js";
-import { getAuthenticatedUser } from "../services/extractor-api/src/modules/auth/auth-service.js";
+import { ingestAnalyticsBatch } from "../services/extractor-api/src/modules/analytics/ingest-analytics-batch.js";
 import {
   checkPublicEndpointRateLimit,
   RateLimitUnavailableError
 } from "../services/extractor-api/src/modules/rate-limit/enforce-rate-limit.js";
-import { getHeader } from "../services/extractor-api/src/modules/request-identity.js";
 
 import { getVercelRequestIdentity } from "./_lib/vercel-request-identity.js";
 
@@ -24,6 +16,12 @@ const analyticsRateLimitPolicy = {
   scope: "analytics",
   windowMs: 60 * 1_000
 } as const;
+
+const logger = {
+  warn: (message: string, details: Record<string, unknown>) => {
+    console.warn(message, JSON.stringify(details));
+  }
+};
 
 export function OPTIONS(request: Request) {
   return corsPreflight(request);
@@ -67,14 +65,18 @@ export async function POST(request: Request) {
     );
   }
 
-  const parsed = analyticsEventBatchRequestSchema.safeParse(await request.json().catch(() => null));
+  const result = await ingestAnalyticsBatch(
+    await request.json().catch(() => null),
+    request.headers,
+    logger
+  );
 
-  if (!parsed.success) {
+  if (result.kind === "invalid") {
     return corsJson(
       request,
       {
-        message: "Invalid analytics event batch.",
-        issues: parsed.error.issues
+        message: result.message,
+        issues: result.issues
       },
       {
         status: 400
@@ -82,24 +84,5 @@ export async function POST(request: Request) {
     );
   }
 
-  const session = await getAuthenticatedUser(request.headers).catch(() => null);
-  const accountUserHash = session ? hashAnalyticsUserId(session.user.id) : undefined;
-  const clientId = normalizeAnalyticsClientId(getHeader(request.headers, "x-linkdish-client-id"));
-
-  const events = parsed.data.events.map((event) => ({
-    ...event,
-    ...((event.anonymousId ?? clientId) ? { anonymousId: event.anonymousId ?? clientId } : {}),
-    ...(accountUserHash ? { accountUserHash } : {}),
-    properties: sanitizeAnalyticsProperties(event.properties)
-  }));
-
-  /* A storage failure must not lose (or 500) the whole batch. */
-  const accepted = await writeAnalyticsEvents(events).catch((error: unknown) => {
-    console.warn("Failed to write analytics events.", error);
-    return 0;
-  });
-
-  return corsJson(request, {
-    accepted
-  });
+  return corsJson(request, result.body);
 }
