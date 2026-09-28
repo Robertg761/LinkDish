@@ -33,7 +33,7 @@ const SECONDARY: Array<{ match: (pathname: string) => boolean; meta: AppRouteMet
   },
   {
     match: (pathname) => pathname.startsWith("/featured/"),
-    meta: { title: "Featured recipe", isDestination: false, section: "cookbook" }
+    meta: { title: "Featured recipe", isDestination: false, section: "cookbook", hideTabBar: true }
   },
   {
     match: (pathname) => pathname === "/household",

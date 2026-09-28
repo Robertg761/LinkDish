@@ -50,7 +50,7 @@ describe("AppShell destination navigation", () => {
     }
   );
 
-  it.each(["/recipes/recipe_1", "/recipes/shared/abc"])(
+  it.each(["/recipes/recipe_1", "/recipes/shared/abc", "/featured/banana-bread"])(
     "hides the phone tab bar on recipe detail page %s but keeps Back",
     (path) => {
       renderShell(path);
@@ -80,8 +80,8 @@ describe("AppShell destination navigation", () => {
     expect(document.documentElement.dataset.tabbar).toBeUndefined();
   });
 
-  it("keeps the tab bar on other secondary pages such as featured recipes", () => {
-    renderShell("/featured/banana-bread");
+  it("keeps the tab bar on other secondary pages such as settings", () => {
+    renderShell("/settings");
 
     expect(screen.getByRole("navigation", { name: "Primary" })).toBeInTheDocument();
     expect(document.documentElement.dataset.tabbar).toBeUndefined();
