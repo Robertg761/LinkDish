@@ -56,8 +56,6 @@ export interface AnalyzedCandidate {
   duplicateOfLocalId: string | null;
   /** The earlier recipe in the same file this one duplicates, if any. */
   duplicateOfIndex: number | null;
-  /** The local copy is a starter nobody touched: restoring the backup's version replaces it. */
-  replacesUntouchedStarter: boolean;
 }
 
 export interface ImportAnalysis {
@@ -67,6 +65,8 @@ export interface ImportAnalysis {
   quotaUsed: number;
   /** Collections each cookbook recipe already belongs to (only recipes that have some). */
   existingCollectionIds: ReadonlyMap<string, readonly string[]>;
+  /** Starters on this device nobody had made their own when the analysis ran. */
+  untouchedStarterIds: ReadonlySet<string>;
 }
 
 interface ExistingIndexEntry {
@@ -126,6 +126,14 @@ const setIfAbsent = (map: Map<string, string>, key: string, value: string): void
 const isStarterId = (id: string): boolean => id.startsWith(STARTER_ID_PREFIX);
 
 /**
+ * A stored starter recipe nobody has made their own (no notes, favorite, cooks, edits...):
+ * restoring a backup's version of it replaces it. The writer applies this rule again to the
+ * record as stored when it writes, so a starter personalized after the preview is kept.
+ */
+export const isUntouchedStarter = (recipe: WebSavedRecipe | undefined): recipe is WebSavedRecipe =>
+  Boolean(recipe?.isStarter && isStarterId(recipe.id) && !isPersonalizedRecipe(recipe));
+
+/**
  * Compares each candidate with the cookbook (and earlier candidates in the same file): same id,
  * same deterministic id, or the same recipe per `isLikelySameRecipe`.
  */
@@ -181,23 +189,13 @@ export async function analyzeImport(
       inFile = inFileId === null ? null : Number(inFileId);
     }
 
-    const local = duplicateOfLocalId ? existingById.get(duplicateOfLocalId) : undefined;
-    const replacesUntouchedStarter = Boolean(
-      starterId &&
-      local &&
-      local.id === starterId &&
-      local.isStarter &&
-      !isPersonalizedRecipe(local)
-    );
-
     items.push({
       candidate,
       deterministicId,
       preferredId,
       starterId,
-      duplicateOfLocalId: replacesUntouchedStarter ? null : duplicateOfLocalId,
-      duplicateOfIndex: inFile,
-      replacesUntouchedStarter
+      duplicateOfLocalId,
+      duplicateOfIndex: inFile
     });
 
     if (matchById) {
@@ -221,7 +219,8 @@ export async function analyzeImport(
       existing
         .filter((recipe) => recipe.collectionIds?.length)
         .map((recipe) => [recipe.id, recipe.collectionIds ?? []])
-    )
+    ),
+    untouchedStarterIds: new Set(existing.filter(isUntouchedStarter).map((recipe) => recipe.id))
   };
 }
 
@@ -236,6 +235,8 @@ export interface ImportPlanContext {
   existingRecipeIds: ReadonlySet<string>;
   /** Personal recipes stored right now (starters excluded). */
   quotaUsed: number;
+  /** Starters stored right now that nobody has made their own (see {@link isUntouchedStarter}). */
+  untouchedStarterIds: ReadonlySet<string>;
   existingCollections: readonly WebCollection[];
   existingMealPlan: readonly MealPlanEntry[];
   now: string;
@@ -489,13 +490,12 @@ export function buildImportPlan(analysis: ImportAnalysis, context: ImportPlanCon
       }
     };
 
-    // A starter from the backup: replace an untouched local copy, or restore a missing one.
+    // A starter from the backup: replace an untouched local copy, or restore a missing one. A
+    // local copy someone made their own is a duplicate like any other recipe.
     if (
       item.starterId &&
       !restoredStarterIds.has(item.starterId) &&
-      (item.replacesUntouchedStarter
-        ? context.existingRecipeIds.has(item.starterId)
-        : !taken.has(item.starterId))
+      (context.untouchedStarterIds.has(item.starterId) || !taken.has(item.starterId))
     ) {
       taken.add(item.starterId);
       restoredStarterIds.add(item.starterId);

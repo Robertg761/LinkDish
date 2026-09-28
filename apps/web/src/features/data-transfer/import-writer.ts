@@ -1,8 +1,9 @@
 /**
  * Writes an import in ONE IndexedDB transaction across saved recipes, their scans, collections
  * and the meal plan, so a restore either lands completely or not at all. The plan is rebuilt
- * inside the transaction from freshly read state, so the free limit and id collisions are
- * checked against what is really stored (another tab may have saved something meanwhile).
+ * inside the transaction from freshly read state, so the free limit, id collisions and which
+ * starters may be replaced are checked against what is really stored (another tab may have saved
+ * something, or made a starter its own, since the preview).
  */
 import { emitDataChange } from "../../data/change-feed";
 import {
@@ -15,7 +16,7 @@ import {
 import { toSavedRecipeListRecord } from "../library/saved-recipe-store";
 
 import { DataTransferError, isStorageFullError } from "./errors";
-import { buildImportPlan } from "./import-plan";
+import { buildImportPlan, isUntouchedStarter } from "./import-plan";
 
 import type { DuplicateMode, ImportAnalysis, ImportPlan } from "./import-plan";
 import type { ImportProgress } from "./import-sources";
@@ -81,14 +82,27 @@ export async function commitImport(
 
   try {
     const keys = (await recipesStore.getAllKeys()).map(String);
+    const existingRecipeIds = new Set(keys);
     const existingCollections = (await collectionsStore.getAll()) as WebCollection[];
     const existingMealPlan = (await mealPlanStore.getAll()) as MealPlanEntry[];
+    // The starters in the file as stored now: one someone made their own is kept.
+    const starterIds = new Set(
+      analysis.items.flatMap((item) =>
+        item.starterId && existingRecipeIds.has(item.starterId) ? [item.starterId] : []
+      )
+    );
+    const storedStarters = await Promise.all(
+      Array.from(starterIds, (id) => recipesStore.get(id) as Promise<WebSavedRecipe | undefined>)
+    );
 
     plan = buildImportPlan(analysis, {
       duplicateMode: options.duplicateMode,
       isPremium: options.isPremium,
-      existingRecipeIds: new Set(keys),
+      existingRecipeIds,
       quotaUsed: keys.filter((key) => !key.startsWith(STARTER_ID_PREFIX)).length,
+      untouchedStarterIds: new Set(
+        storedStarters.filter(isUntouchedStarter).map((recipe) => recipe.id)
+      ),
       existingCollections,
       existingMealPlan,
       now: options.now?.() ?? new Date().toISOString(),
