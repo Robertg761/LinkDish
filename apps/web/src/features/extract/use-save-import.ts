@@ -4,7 +4,7 @@ import { trackWebV2AnalyticsEvent } from "../../analytics/client";
 import { getFriendlyErrorMessage } from "../../api/error-message";
 import { useAuth } from "../../auth/AuthProvider";
 import { requestSaveFeedback } from "../../lib/delight-events";
-import { safeSetItem } from "../../platform/safe-storage";
+import { markRecipeSaved } from "../install/install-eligibility";
 import {
   forceSaveRecipe,
   generateDeterministicId,
@@ -41,8 +41,6 @@ export interface ImportSave {
   retryShare: () => void;
   dismissDuplicate: () => void;
 }
-
-export const HAS_EXTRACTED_RECIPE_STORAGE_KEY = "linkdish:web:has-extracted-recipe";
 
 export const getImportSourceType = (
   input: Pick<SaveRecipeInput, "sourceImages" | "sourceUrl">
@@ -142,7 +140,7 @@ export function useSaveImport(
         properties: { source_type: getImportSourceType(current), surface: "import_result" },
         routeOrScreen: "/import"
       });
-      safeSetItem(HAS_EXTRACTED_RECIPE_STORAGE_KEY, "true");
+      markRecipeSaved();
 
       try {
         requestSaveFeedback();

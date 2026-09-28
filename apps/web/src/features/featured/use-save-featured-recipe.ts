@@ -5,7 +5,7 @@ import { getFriendlyErrorMessage } from "../../api/error-message";
 import { useAuth } from "../../auth/AuthProvider";
 import { useSavedRecipe } from "../../data/library-store";
 import { requestSaveFeedback } from "../../lib/delight-events";
-import { safeSetItem } from "../../platform/safe-storage";
+import { markRecipeSaved } from "../install/install-eligibility";
 import {
   forceSaveRecipe,
   generateDeterministicId,
@@ -83,7 +83,7 @@ export const useSaveFeaturedRecipe = (featured: FeaturedRecipe): FeaturedSave =>
     }
 
     setStatus("saved");
-    safeSetItem("linkdish:web:has-extracted-recipe", "true");
+    markRecipeSaved();
 
     try {
       requestSaveFeedback();
