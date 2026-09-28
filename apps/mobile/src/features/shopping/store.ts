@@ -32,8 +32,10 @@ export interface MobileShoppingItem extends ShoppingItem {
      * household's account is signed in it stays on this device, out of that account's list, until
      * its own household syncs again. Unsent changes stored before it existed get the household
      * the signed-in account's next check confirms (claimShoppingChanges), or, for an item another
-     * account added, that account's (or the household whose list has the item). Unsent changes
-     * kept for another household are dropped after 30 days (pruneStaleShoppingRecords).
+     * account added, that account's (or the household whose list has the item). An item goes
+     * with the account that added it when that account is in another household now, and so do
+     * that account's unsent changes when it moves (claimShoppingChanges). Unsent changes kept for
+     * another household are dropped after 30 days (pruneStaleShoppingRecords).
      */
     householdId?: string | undefined;
     lastError?: string | undefined;
@@ -554,9 +556,12 @@ export const getPendingShoppingChanges = (
 /**
  * Records `householdId` (signed-in account `userId`'s, just confirmed) on unsent changes that
  * don't name a household yet: stored before items recorded one. Another account's item that
- * names none waits for that account (see isAnotherAccountsChange). With `from`, this account has
- * moved from that household, so its changes for it can only go to the new one now. Other
- * households' changes are left alone. Returns `items` itself when nothing changes.
+ * names none waits for that account (see isAnotherAccountsChange). Items `userId` added that name
+ * another household are its lines of a household it has left (an account is in one household at
+ * a time, and a household's list drops a member's lines when it leaves): they are this one's now,
+ * with any change to them, as they were before items recorded their household. With `from`, this
+ * account has moved from that household, so its changes for it can only go to the new one now.
+ * Other households' items and changes are left alone. Returns `items` itself when nothing changes.
  */
 export const claimShoppingChanges = (
   items: MobileShoppingItem[],
@@ -564,10 +569,11 @@ export const claimShoppingChanges = (
   options: { from?: string | undefined; userId: string }
 ): MobileShoppingItem[] => {
   const claims = (item: MobileShoppingItem) =>
-    needsPush(item) &&
-    (item.sync.householdId
-      ? options.from !== undefined && item.sync.householdId === options.from
-      : !isAnotherAccountsChange(item, options.userId));
+    item.sync.householdId
+      ? item.sync.householdId !== householdId &&
+        (item.addedBy.trim() === options.userId ||
+          (needsPush(item) && item.sync.householdId === options.from))
+      : needsPush(item) && !isAnotherAccountsChange(item, options.userId);
 
   return items.some(claims)
     ? items.map((item) => (claims(item) ? { ...item, sync: { ...item.sync, householdId } } : item))

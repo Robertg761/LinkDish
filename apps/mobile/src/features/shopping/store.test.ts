@@ -467,13 +467,22 @@ describe("shopping store helpers", () => {
       buildItem({ id: "unknown", sync: { status: "dirty" } }),
       buildItem({ id: "synced", sync: { status: "synced" } }),
       buildItem({ id: "local", sync: { status: "local_only" } }),
-      buildItem({ id: "old-home", sync: { householdId: "household_1", status: "dirty" } }),
-      buildItem({ id: "other", sync: { householdId: "household_3", status: "sync_failed" } })
+      // Changes to lines other members added.
+      buildItem({
+        addedBy: "user_3",
+        id: "old-home",
+        sync: { householdId: "household_1", status: "dirty" }
+      }),
+      buildItem({
+        addedBy: "user_3",
+        id: "other",
+        sync: { householdId: "household_3", status: "sync_failed" }
+      })
     ];
     const households = (list: MobileShoppingItem[]) =>
       Object.fromEntries(list.map((item) => [item.id, item.sync.householdId]));
 
-    // Added by this account (buildItem's addedBy), so they are its changes.
+    // The rest were added by this account (buildItem's addedBy), so they are its changes.
     const claimed = claimShoppingChanges(items, "household_2", { userId: "user_1" });
     expect(households(claimed)).toEqual({
       local: undefined,
@@ -498,6 +507,68 @@ describe("shopping store helpers", () => {
       synced: undefined,
       unknown: "household_2"
     });
+  });
+
+  it("takes the lines an account added along when it is in another household now", () => {
+    // user_1 added these in household_1, which it has since left (the household list drops a
+    // member's lines when it leaves); two it changed while in no household. user_3's lines, and
+    // its change to one, stay household_1's.
+    const items = [
+      buildItem({
+        id: "own",
+        sync: { householdId: "household_1", lastSyncedAt: now, status: "synced" }
+      }),
+      buildItem({
+        checked: true,
+        id: "own-checked",
+        sync: { householdId: "household_1", status: "local_only" }
+      }),
+      buildItem({ id: "own-more", qty: 3, sync: { householdId: "household_1", status: "dirty" } }),
+      buildItem({
+        addedBy: "user_3",
+        id: "theirs",
+        sync: { householdId: "household_1", lastSyncedAt: now, status: "synced" }
+      }),
+      buildItem({
+        addedBy: "user_3",
+        checked: true,
+        id: "theirs-checked",
+        sync: { householdId: "household_1", status: "sync_failed" }
+      }),
+      buildItem({
+        id: "current",
+        sync: { householdId: "household_2", lastSyncedAt: now, status: "synced" }
+      })
+    ];
+    const households = (list: MobileShoppingItem[]) =>
+      Object.fromEntries(list.map((item) => [item.id, item.sync.householdId]));
+    const ids = (list: MobileShoppingItem[]) => list.map((item) => item.id);
+
+    const claimed = claimShoppingChanges(items, "household_2", { userId: "user_1" });
+    expect(households(claimed)).toEqual({
+      current: "household_2",
+      own: "household_2",
+      "own-checked": "household_2",
+      "own-more": "household_2",
+      theirs: "household_1",
+      "theirs-checked": "household_1"
+    });
+    expect(claimed[0]?.sync).toEqual({
+      householdId: "household_2",
+      lastSyncedAt: now,
+      status: "synced"
+    });
+    expect(ids(getShoppingListItems(claimed, "household_2"))).toEqual([
+      "own",
+      "own-checked",
+      "own-more",
+      "current"
+    ]);
+    expect(ids(getPendingShoppingChanges(claimed, "household_2", "user_1"))).toEqual(["own-more"]);
+    expect(claimShoppingChanges(claimed, "household_2", { userId: "user_1" })).toBe(claimed);
+
+    // Another account in household_2 leaves them where they are.
+    expect(claimShoppingChanges(items, "household_2", { userId: "user_2" })).toBe(items);
   });
 
   it("leaves another account's unsent items that name no household for that account", () => {
@@ -545,12 +616,13 @@ describe("shopping store helpers", () => {
       "their-stamped"
     ]);
 
-    // user_1 claims them when it syncs here again.
+    // user_1 claims them when it syncs here again (in household_1 now, so the item it added in
+    // household_2 comes along too).
     expect(households(claimShoppingChanges(claimed, "household_1", { userId: "user_1" }))).toEqual({
       mine: "household_2",
       "signed-out": "household_2",
       "their-deletion": "household_1",
-      "their-stamped": "household_2",
+      "their-stamped": "household_1",
       theirs: "household_1"
     });
 

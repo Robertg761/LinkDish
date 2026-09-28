@@ -159,6 +159,11 @@ class ShoppingSyncCancelledError extends Error {
 interface HouseholdCheck {
   checkedAt: number;
   id: string | null;
+  /**
+   * The last household a check found the account in: `id`, or while it is in none, the one it
+   * was in before. If it joins another later, its changes for that one go along.
+   */
+  lastId: string | null;
   userId: string;
 }
 
@@ -311,9 +316,10 @@ export const ShoppingListProvider = ({ children }: PropsWithChildren) => {
   /**
    * The household a pass syncs with: this account's cached answer, or a fresh check (always for
    * a pull). Unsent changes that don't name a household yet are recorded as this one's (unless
-   * another account added the item), and if the account moved household, its changes for the old
-   * one move with it. Other households' changes older than 30 days are dropped. Resolves null when
-   * the account isn't in a household or the check failed (shown as the list's error).
+   * another account added the item), so are items this account added in a household it has left,
+   * and if the account moved household (even with no household in between), its changes for the
+   * old one move with it. Other households' changes older than 30 days are dropped. Resolves null
+   * when the account isn't in a household or the check failed (shown as the list's error).
    */
   const resolveHousehold = useCallback(
     async (
@@ -352,7 +358,12 @@ export const ShoppingListProvider = ({ children }: PropsWithChildren) => {
 
       // An answer that arrives after the account signed out is not the next account's.
       ensureCurrent();
-      const check: HouseholdCheck = { checkedAt: Date.now(), id: householdId, userId };
+      const check: HouseholdCheck = {
+        checkedAt: Date.now(),
+        id: householdId,
+        lastId: householdId ?? last?.lastId ?? null,
+        userId
+      };
       householdCheckRef.current = check;
       setCheckedHousehold(check);
 
@@ -361,7 +372,7 @@ export const ShoppingListProvider = ({ children }: PropsWithChildren) => {
         return null;
       }
 
-      claim(householdId, last?.id && last.id !== householdId ? last.id : undefined);
+      claim(householdId, last?.lastId && last.lastId !== householdId ? last.lastId : undefined);
       return householdId;
     },
     [commitShoppingItems]
