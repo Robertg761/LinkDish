@@ -357,7 +357,7 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
   const shared = props.kind === "shared" ? props.shared : null;
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { isAuthenticated, loading: authLoading, user } = useAuth();
+  const { credentialsKey, isAuthenticated, loading: authLoading, user } = useAuth();
   const { requestUpgradeSheet } = useUpgradeSheet();
   const { showToast } = useToast();
   const isDesktop = useMediaQuery(RAIL_MEDIA_QUERY);
@@ -442,7 +442,7 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
     setShoppingCanSync(isAuthenticated ? undefined : false);
     // Offline (or when the check fails) a household member's items must still be marked for the
     // household list: the sheet then falls back to the shopping sync layer's (cached) mode.
-    setShoppingAccount({ isAuthenticated, loading: authLoading, userId: user?.id });
+    setShoppingAccount({ credentialsKey, isAuthenticated, loading: authLoading, userId: user?.id });
 
     if (isAuthenticated) {
       try {
@@ -454,7 +454,7 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
     }
 
     setShoppingOpen(true);
-  }, [authLoading, isAuthenticated, user?.id]);
+  }, [authLoading, credentialsKey, isAuthenticated, user?.id]);
 
   const handleShare = async () => {
     const title = recipe.title;

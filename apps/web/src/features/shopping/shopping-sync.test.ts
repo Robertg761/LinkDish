@@ -1,4 +1,4 @@
-import { waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { resetLinkDishWebDbForTests } from "../../storage/linkdish-db";
@@ -16,7 +16,8 @@ import {
   resetShoppingSyncForTests,
   setShoppingAccount,
   SHOPPING_HOUSEHOLD_CACHE_KEY,
-  syncShoppingNow
+  syncShoppingNow,
+  useShoppingSync
 } from "./shopping-sync";
 
 import type { UpsertShoppingItemsRequest } from "@linkdish/api-contracts";
@@ -28,7 +29,17 @@ const apiMocks = vi.hoisted(() => ({
   upsertShoppingItems: vi.fn()
 }));
 
+const authMocks = vi.hoisted(() => ({
+  auth: {
+    credentialsKey: null as string | null,
+    isAuthenticated: true,
+    loading: false,
+    user: { id: "u1" } as { id: string } | null
+  }
+}));
+
 vi.mock("../../api/client", () => ({ apiClient: apiMocks }));
+vi.mock("../../auth/AuthProvider", () => ({ useAuth: () => authMocks.auth }));
 vi.mock("idb", async () => (await import("../../storage/testing/fake-idb")).fakeIdbModule);
 
 const cacheHousehold = (household: boolean, ageMs = 0) => {
@@ -53,6 +64,12 @@ describe("shopping-sync", () => {
     resetLinkDishWebDbForTests();
     resetShoppingListStoreForTests();
     resetShoppingSyncForTests();
+    authMocks.auth = {
+      credentialsKey: null,
+      isAuthenticated: true,
+      loading: false,
+      user: { id: "u1" }
+    };
     Object.values(apiMocks).forEach((mock) => mock.mockReset());
     apiMocks.getShoppingList.mockResolvedValue({ items: [] });
     apiMocks.upsertShoppingItems.mockImplementation((input: UpsertShoppingItemsRequest) =>
@@ -94,6 +111,64 @@ describe("shopping-sync", () => {
 
     expect(getShoppingSyncState()).toMatchObject({ mode: "household", userId: "u1" });
     expect(apiMocks.getHousehold).not.toHaveBeenCalled();
+  });
+
+  it("waits for a signed-in session's credentials before checking or syncing", async () => {
+    cacheHousehold(true, 10 * 60_000);
+    apiMocks.getHousehold.mockResolvedValue({ household: { id: "h1" } });
+
+    // Auth has settled, but a cached Clerk user's session can't be read yet.
+    setShoppingAccount({
+      credentialsKey: null,
+      isAuthenticated: true,
+      loading: false,
+      userId: "u1"
+    });
+    await syncShoppingNow();
+
+    expect(getShoppingSyncState()).toMatchObject({ mode: "household", userId: "u1" });
+    expect(apiMocks.getHousehold).not.toHaveBeenCalled();
+    expect(apiMocks.getShoppingList).not.toHaveBeenCalled();
+
+    // A caller that doesn't track credentials doesn't open the gate early.
+    setShoppingAccount({ isAuthenticated: true, loading: false, userId: "u1" });
+    expect(apiMocks.getHousehold).not.toHaveBeenCalled();
+
+    setShoppingAccount({
+      credentialsKey: "clerk:u1",
+      isAuthenticated: true,
+      loading: false,
+      userId: "u1"
+    });
+
+    expect(apiMocks.getHousehold).toHaveBeenCalledTimes(1);
+    // The sync asked for while waiting runs now.
+    await waitFor(() => expect(getShoppingSyncState().phase).toBe("synced"));
+    expect(apiMocks.getShoppingList).toHaveBeenCalledTimes(1);
+  });
+
+  it("checks and syncs again when Clerk signs in after the wait ran out", async () => {
+    cacheHousehold(true);
+    apiMocks.getHousehold.mockResolvedValue({ household: { id: "h1" } });
+    // The wait for Clerk ran out, so the first sync went out with the legacy session: refused.
+    apiMocks.getShoppingList.mockRejectedValueOnce(new Error("Unauthorized"));
+    authMocks.auth = {
+      credentialsKey: "session:u1",
+      isAuthenticated: true,
+      loading: false,
+      user: { id: "u1" }
+    };
+    const { rerender } = renderHook(() => useShoppingSync());
+
+    await waitFor(() => expect(getShoppingSyncState().phase).toBe("error"));
+    expect(apiMocks.getHousehold).not.toHaveBeenCalled();
+
+    authMocks.auth = { ...authMocks.auth, credentialsKey: "clerk:u1" };
+    act(() => rerender());
+
+    await waitFor(() => expect(getShoppingSyncState().phase).toBe("synced"));
+    expect(apiMocks.getHousehold).toHaveBeenCalledTimes(1);
+    expect(apiMocks.getShoppingList).toHaveBeenCalledTimes(2);
   });
 
   it("keeps signed-out lists on this device without any network", async () => {

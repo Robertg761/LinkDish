@@ -36,6 +36,12 @@ export interface ShoppingAccount {
   loading: boolean;
   isAuthenticated: boolean;
   userId?: string | null | undefined;
+  /**
+   * `useAuth().credentialsKey`: null while a signed-in session's credentials can't be read yet
+   * (a request would go out without them and be turned away). Callers that leave it out keep the
+   * last key reported.
+   */
+  credentialsKey?: string | null | undefined;
 }
 
 export const SHOPPING_HOUSEHOLD_CACHE_KEY = "linkdish:web:shopping-household:v1";
@@ -69,6 +75,14 @@ let syncInflight: Promise<void> | null = null;
 let syncAgain = false;
 let lifecycleUsers = 0;
 let detachLifecycle: (() => void) | null = null;
+/** The last `credentialsKey` reported (undefined: no caller has reported one). */
+let credentialsKey: string | null | undefined;
+/** The credentials the household check in flight was sent with. */
+let householdInflightKey: string | null | undefined;
+/** Auth is still settling: nothing goes to the network until it has. */
+let credentialsPending = false;
+/** A sync was asked for while auth was settling; it runs once it has. */
+let syncWhenReady = false;
 
 const setState = (patch: Partial<ShoppingSyncState>) => {
   state = { ...state, ...patch };
@@ -120,7 +134,7 @@ export const getShoppingWriteOptions = (): ShoppingWriteOptions => ({
 export function refreshShoppingHousehold(options: { force?: boolean } = {}): Promise<void> {
   const userId = state.userId;
 
-  if (!userId) {
+  if (!userId || credentialsPending) {
     return Promise.resolve();
   }
 
@@ -136,9 +150,13 @@ export function refreshShoppingHousehold(options: { force?: boolean } = {}): Pro
   }
 
   if (householdInflight) {
-    return householdInflight;
+    // A check sent with older credentials may be turned away: ask again once it's done.
+    return householdInflightKey === credentialsKey
+      ? householdInflight
+      : householdInflight.then(() => refreshShoppingHousehold(options));
   }
 
+  householdInflightKey = credentialsKey;
   const run = apiClient
     .getHousehold()
     .then(
@@ -173,7 +191,17 @@ export function refreshShoppingHousehold(options: { force?: boolean } = {}): Pro
 
 /** Tells the sync layer who is signed in. Cheap to call on every render. */
 export function setShoppingAccount(account: ShoppingAccount): void {
-  if (account.loading) {
+  const previousKey = credentialsKey;
+
+  if (account.credentialsKey !== undefined) {
+    credentialsKey = account.credentialsKey;
+  }
+
+  // Until auth settles, and a signed-in session's credentials can be read, a household check or
+  // sync would be refused and not retried until the next focus: hold them until then.
+  credentialsPending = account.loading || credentialsKey === null;
+
+  if (credentialsPending) {
     if (!accountConfigured) {
       // Until auth settles, assume the last account seen on this device.
       const cache = readHouseholdCache();
@@ -195,12 +223,22 @@ export function setShoppingAccount(account: ShoppingAccount): void {
   const userId = account.isAuthenticated ? (account.userId ?? null) : null;
 
   if (!userId) {
+    syncWhenReady = false;
+
     if (state.userId !== null || !state.modeResolved || state.mode !== "local") {
       setState({ error: null, mode: "local", modeResolved: true, phase: "idle", userId: null });
     }
 
     return;
   }
+
+  // The same account with new credentials (Clerk finished loading after the wait ran out): what
+  // was asked with the old ones may have been refused, so check and sync again.
+  const newCredentials =
+    state.userId === userId &&
+    typeof previousKey === "string" &&
+    typeof credentialsKey === "string" &&
+    previousKey !== credentialsKey;
 
   if (state.userId !== userId || !state.modeResolved) {
     const cache = readHouseholdCache();
@@ -220,6 +258,16 @@ export function setShoppingAccount(account: ShoppingAccount): void {
     }
 
     void refreshShoppingHousehold();
+  } else if (newCredentials) {
+    void refreshShoppingHousehold({ force: true });
+  }
+
+  if (syncWhenReady || (newCredentials && lifecycleUsers > 0)) {
+    syncWhenReady = false;
+
+    if (state.mode === "household") {
+      void syncShoppingNow();
+    }
   }
 }
 
@@ -234,6 +282,11 @@ export function syncShoppingNow(): Promise<void> {
   }
 
   if (state.mode !== "household") {
+    return loadShoppingList();
+  }
+
+  if (credentialsPending) {
+    syncWhenReady = true;
     return loadShoppingList();
   }
 
@@ -343,12 +396,14 @@ export function useShoppingSyncState(): ShoppingSyncState {
 
 /** Keeps the sync layer told about the signed-in account; returns the sync state. */
 export function useShoppingAccount(): ShoppingSyncState {
-  const { isAuthenticated, loading, user } = useAuth();
+  const { credentialsKey: authCredentialsKey, isAuthenticated, loading, user } = useAuth();
   const userId = user?.id ?? null;
 
+  // Keyed on the credentials (like use-import-usage and use-shared-recipes): nothing is asked
+  // before a cached Clerk user's session can be read, and it is asked again when Clerk signs in.
   useEffect(() => {
-    setShoppingAccount({ isAuthenticated, loading, userId });
-  }, [isAuthenticated, loading, userId]);
+    setShoppingAccount({ credentialsKey: authCredentialsKey, isAuthenticated, loading, userId });
+  }, [authCredentialsKey, isAuthenticated, loading, userId]);
 
   return useShoppingSyncState();
 }
@@ -396,6 +451,10 @@ export function resetShoppingSyncForTests(): void {
   syncInflight = null;
   syncAgain = false;
   householdInflight = null;
+  householdInflightKey = undefined;
+  credentialsKey = undefined;
+  credentialsPending = false;
+  syncWhenReady = false;
   accountConfigured = false;
   state = initialState;
   listeners.forEach((listener) => {
