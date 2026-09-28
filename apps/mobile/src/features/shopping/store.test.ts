@@ -1,3 +1,4 @@
+import { MAX_SHOPPING_ITEM_TEXT_LENGTH, shoppingItemSchema } from "@linkdish/recipe-domain";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -273,6 +274,30 @@ describe("shopping store helpers", () => {
     expect(
       applyRemoteShoppingItems([failedLocal], [{ ...newerRemote, qty: 9, updatedAt: now }])[0]
     ).toMatchObject({ qty: 1, sync: { status: "sync_failed" } });
+  });
+
+  it("keeps merged item names within the household list's text limit", () => {
+    // Parsing clips names to the limit; re-inflecting a clipped name for the new total used to
+    // push it one character past it, and the household list rejected the whole sync batch.
+    const line = `1 ${"very ".repeat(38)}ripe tomato`;
+    const options = { canSync: true, now, userId: "user_1" };
+    const once = addShoppingItemsToList([], [{ text: line }], options);
+    const twice = addShoppingItemsToList(once, [{ text: line }], options);
+
+    expect(once[0]?.text).toHaveLength(MAX_SHOPPING_ITEM_TEXT_LENGTH);
+    expect(twice).toHaveLength(1);
+    expect(twice[0]?.qty).toBe(2);
+    expect(twice[0]?.text.length).toBeLessThanOrEqual(MAX_SHOPPING_ITEM_TEXT_LENGTH);
+    expect(shoppingItemSchema.safeParse(toApiShoppingItem(twice[0]!)).success).toBe(true);
+  });
+
+  it("clips over-long names stored by older app versions before pushing them", () => {
+    const legacy = buildItem({ text: `${"very ".repeat(40)}ripe tomatoes` });
+    const apiItem = toApiShoppingItem(legacy);
+
+    expect(apiItem.text.length).toBeLessThanOrEqual(MAX_SHOPPING_ITEM_TEXT_LENGTH);
+    expect(apiItem.text.startsWith("very very")).toBe(true);
+    expect(shoppingItemSchema.safeParse(apiItem).success).toBe(true);
   });
 
   it("marks check-off transitions dirty with the acting user", () => {
