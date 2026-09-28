@@ -44,7 +44,7 @@
 
 .badge-butter {
   --badge-bg: var(--color-butter-soft);
-  --badge-fg: var(--color-on-butter);
+  --badge-fg: var(--color-on-butter-soft);
   --badge-solid-bg: var(--color-butter);
   --badge-solid-fg: var(--color-on-butter);
 }

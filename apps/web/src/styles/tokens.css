@@ -198,6 +198,7 @@
   --color-butter: #e9bd5a;
   --color-butter-soft: #f7e9c8;
   --color-on-butter: #3b2f12;
+  --color-on-butter-soft: #5c4613;
 
   /* Status */
   --color-success: #2f6b4a;
@@ -299,6 +300,8 @@
     --color-butter: #e9bd5a;
     --color-butter-soft: #3a3020;
     --color-on-butter: #2a200a;
+  --color-on-butter-soft: #f2d387;
+    --color-on-butter-soft: #f2d387;
 
     --color-success: #8fd0a8;
     --color-success-soft: #22352a;

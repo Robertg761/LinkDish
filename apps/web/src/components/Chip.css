@@ -36,7 +36,7 @@
 
 .chip-butter {
   background-color: var(--color-butter-soft);
-  color: var(--color-on-butter);
+  color: var(--color-on-butter-soft);
 }
 
 .chip-outline {

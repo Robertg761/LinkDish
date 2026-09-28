@@ -165,11 +165,6 @@
   font-weight: 650;
 }
 
-/* Soft butter badges use --color-on-butter, which is too dark on the dark theme. */
-.badge.household-owner-badge {
-  --badge-fg: var(--color-ink);
-}
-
 .household-member-name-text {
   overflow: hidden;
   max-width: 100%;

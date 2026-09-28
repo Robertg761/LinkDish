@@ -11,10 +11,6 @@
   min-width: 108px;
 }
 
-.badge.billing-period-savings {
-  --badge-fg: var(--color-ink);
-}
-
 .billing-period-savings {
   min-height: 26px;
   padding: 4px 10px;
