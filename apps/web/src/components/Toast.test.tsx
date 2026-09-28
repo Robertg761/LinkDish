@@ -85,6 +85,78 @@ describe("Toast", () => {
     expect(screen.getByText("Removed recipe 4")).toBeInTheDocument();
   });
 
+  it("gives an Undo toast 10 seconds after a tap", () => {
+    const onUndo = vi.fn();
+    render(
+      <ToastProvider>
+        <Trigger onUndo={onUndo} />
+      </ToastProvider>
+    );
+
+    fireEvent.pointerDown(document.body);
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+
+    act(() => {
+      vi.advanceTimersByTime(9000);
+    });
+    expect(screen.getByRole("button", { name: "Undo" })).toBeInTheDocument();
+
+    act(() => {
+      vi.advanceTimersByTime(1100);
+    });
+    expect(screen.queryByRole("button", { name: "Undo" })).not.toBeInTheDocument();
+  });
+
+  it("keeps an Undo toast after keyboard use and runs it with Ctrl/⌘+Z", () => {
+    const onUndo = vi.fn();
+    render(
+      <ToastProvider>
+        <Trigger onUndo={onUndo} />
+      </ToastProvider>
+    );
+
+    fireEvent.keyDown(document.body, { key: "Tab" });
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+
+    act(() => {
+      vi.advanceTimersByTime(60_000);
+    });
+    const undo = screen.getByRole("button", { name: "Undo" });
+    expect(undo).toHaveAttribute("aria-keyshortcuts");
+
+    // Text fields keep their own undo.
+    const field = document.createElement("input");
+    document.body.append(field);
+    fireEvent.keyDown(field, { ctrlKey: true, key: "z" });
+    expect(onUndo).not.toHaveBeenCalled();
+    field.remove();
+
+    fireEvent.keyDown(document.body, { ctrlKey: true, key: "z" });
+    expect(onUndo).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("Removed recipe 1")).not.toBeInTheDocument();
+  });
+
+  it("moves focus into the newest toast with F6 and gives it back afterwards", () => {
+    const onUndo = vi.fn();
+    render(
+      <ToastProvider>
+        <Trigger onUndo={onUndo} />
+      </ToastProvider>
+    );
+
+    const trigger = screen.getByRole("button", { name: "Remove" });
+    trigger.focus();
+    fireEvent.click(trigger);
+    fireEvent.keyDown(trigger, { key: "F6" });
+
+    const undo = screen.getByRole("button", { name: "Undo" });
+    expect(undo).toHaveFocus();
+
+    fireEvent.click(undo);
+    expect(onUndo).toHaveBeenCalledTimes(1);
+    expect(trigger).toHaveFocus();
+  });
+
   it("is a harmless no-op outside a provider", () => {
     render(<Trigger />);
 

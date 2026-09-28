@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import React, { useState } from "react";
-import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
+import { MemoryRouter, Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { focusPageHeading, pageNameFromTitle } from "./route-focus";
@@ -69,6 +69,24 @@ describe("route focus and announcements", () => {
   it("leaves focus alone on the first page of a visit", () => {
     renderApp();
 
+    expect(document.body).toHaveFocus();
+  });
+
+  it("treats a redirect on arrival as the first page, not a navigation", () => {
+    render(
+      <MemoryRouter initialEntries={["/this-page-does-not-exist"]}>
+        <ScrollManager />
+        <main id="main-content" tabIndex={-1}>
+          <Routes>
+            <Route element={<h1>Cookbook</h1>} path="/" />
+            <Route element={<Navigate replace to="/" />} path="*" />
+          </Routes>
+        </main>
+      </MemoryRouter>
+    );
+
+    expect(screen.getByRole("heading", { name: "Cookbook" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Cookbook" })).not.toHaveFocus();
     expect(document.body).toHaveFocus();
   });
 

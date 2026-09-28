@@ -6,6 +6,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { OPEN_COMMAND_PALETTE_EVENT } from "../lib/command-palette-events";
 
 import { AppShell, AppTopBarActions } from "./AppShell";
+import { useHideTabBar } from "./tab-bar-visibility";
+
+const importQueue = vi.hoisted(() => ({ count: 0, failed: 0, pending: 0 }));
+
+vi.mock("../features/import-queue/use-import-queue-badge", () => ({
+  useImportQueueBadge: () => ({ ...importQueue })
+}));
 
 const LocationProbe = () => {
   const location = useLocation();
@@ -314,5 +321,56 @@ describe("AppShell search, shortcuts and status", () => {
 
     fireEvent.click(screen.getByRole("link", { name: "Plan" }));
     expect(main).not.toHaveAttribute("data-initial-view");
+  });
+
+  it("lets a page hide the phone tab bar while its own action bar is on screen", () => {
+    const ImportResult = () => {
+      useHideTabBar();
+      return <p>Result</p>;
+    };
+    const ImportPage = () => {
+      const [showResult, setShowResult] = React.useState(true);
+
+      return (
+        <>
+          {showResult ? <ImportResult /> : null}
+          <button onClick={() => setShowResult(false)} type="button">
+            Import another
+          </button>
+        </>
+      );
+    };
+
+    renderShell("/import", <ImportPage />);
+
+    expect(screen.queryByRole("navigation", { name: "Primary" })).not.toBeInTheDocument();
+    expect(document.documentElement.dataset.tabbar).toBe("hidden");
+
+    fireEvent.click(screen.getByRole("button", { name: "Import another" }));
+
+    expect(screen.getByRole("navigation", { name: "Primary" })).toBeInTheDocument();
+    expect(document.documentElement.dataset.tabbar).toBeUndefined();
+  });
+
+  it("counts links waiting in the import queue on the Add tab and the rail button", () => {
+    Object.assign(importQueue, { count: 3, failed: 1, pending: 2 });
+
+    try {
+      renderShell("/");
+      const add = screen.getByRole("link", {
+        name: "Add recipe (2 imports waiting, 1 import needs a look)"
+      });
+      expect(within(add).getByTestId("import-queue-badge")).toHaveTextContent("3");
+      expect(within(add).getByTestId("import-queue-badge")).toHaveClass("is-attention");
+    } finally {
+      Object.assign(importQueue, { count: 0, failed: 0, pending: 0 });
+    }
+  });
+
+  it("shows no count while the import queue is empty", () => {
+    renderShell("/");
+
+    expect(screen.getByRole("link", { name: "Add recipe" })).toBeInTheDocument();
+    expect(screen.queryByTestId("import-queue-badge")).not.toBeInTheDocument();
   });
 });

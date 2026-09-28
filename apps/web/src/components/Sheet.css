@@ -53,6 +53,13 @@
   justify-content: space-between;
   gap: 12px;
   padding: 12px 20px 8px;
+  border-bottom: 1px solid transparent;
+  transition: border-color var(--transition-fast);
+}
+
+/* Once the body scrolls under it, a hairline separates the header from the content. */
+.sheet-header.is-scrolled {
+  border-bottom-color: var(--color-divider);
 }
 
 .sheet-header-hidden-title {
@@ -99,9 +106,16 @@
     color var(--transition-fast);
 }
 
-.sheet-close:hover:not(:disabled) {
-  background: var(--color-border);
-  color: var(--color-ink);
+.sheet-close:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+@media (hover: hover) {
+  .sheet-close:hover:not(:disabled) {
+    background: var(--color-border);
+    color: var(--color-ink);
+  }
 }
 
 .sheet-body {
@@ -122,7 +136,7 @@
   justify-content: flex-end;
   gap: 10px;
   padding: 14px 20px calc(14px + env(safe-area-inset-bottom, 0px));
-  border-top: 1px solid var(--color-border-subtle);
+  border-top: 1px solid var(--color-divider);
   background: var(--color-surface-raised);
 }
 

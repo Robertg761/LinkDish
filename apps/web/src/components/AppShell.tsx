@@ -11,6 +11,7 @@ import { createPortal } from "react-dom";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import { preloadCommandPalette } from "../features/command-palette/CommandCenter";
+import { useImportQueueBadge } from "../features/import-queue/use-import-queue-badge";
 import { FirstRunOnboardingSheet } from "../features/onboarding/FirstRunOnboardingSheet";
 import { requestCommandPalette } from "../lib/command-palette-events";
 import { SAVE_FEEDBACK_EVENT } from "../lib/delight-events";
@@ -23,6 +24,7 @@ import { OptionalChunkBoundary } from "../platform/OptionalChunkBoundary";
 import { getAppRouteMeta } from "./app-route-meta";
 import { BrandMark } from "./BrandMark";
 import { Icon } from "./Icon";
+import { usePageHidesTabBar } from "./tab-bar-visibility";
 
 import type { AppSection } from "./app-route-meta";
 import type { IconName } from "./Icon";
@@ -69,6 +71,35 @@ const prefersReducedMotion = () => {
     return false;
   }
 };
+
+/** "3 imports waiting" (or "1 import needs a look") for the Add button's accessible name. */
+const describeImportQueue = (pending: number, failed: number): string => {
+  const parts: string[] = [];
+
+  if (pending > 0) {
+    parts.push(`${pending} import${pending === 1 ? "" : "s"} waiting`);
+  }
+
+  if (failed > 0) {
+    parts.push(failed === 1 ? "1 import needs a look" : `${failed} imports need a look`);
+  }
+
+  return parts.join(", ");
+};
+
+/** The small count on the Add tab / rail button while links wait in the import queue. */
+const ImportQueueCount: React.FC<{ count: number; attention: boolean }> = ({
+  count,
+  attention
+}) => (
+  <span
+    aria-hidden="true"
+    className={`app-nav-badge num${attention ? " is-attention" : ""}`}
+    data-testid="import-queue-badge"
+  >
+    {count > 99 ? "99+" : count}
+  </span>
+);
 
 /** How long "Back online" stays up after the connection returns. */
 const BACK_ONLINE_MS = 3000;
@@ -160,8 +191,13 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
   const isRail = useMediaQuery(RAIL_MEDIA_QUERY);
   const addItem = NAV_ITEMS.find((item) => item.section === "add");
   const listItems = isRail ? NAV_ITEMS.filter((item) => item.section !== "add") : NAV_ITEMS;
-  // Recipe detail pages drop the phone tab bar; their action bar and Back cover navigation.
-  const hideTabBar = !isRail && routeMeta.hideTabBar === true;
+  // Recipe detail pages (and an import result on screen) drop the phone tab bar; their action
+  // bar and Back cover navigation.
+  const pageHidesTabBar = usePageHidesTabBar();
+  const hideTabBar = !isRail && (routeMeta.hideTabBar === true || pageHidesTabBar);
+  const importQueue = useImportQueueBadge();
+  const importQueueLabel = describeImportQueue(importQueue.pending, importQueue.failed);
+  const addLabel = importQueueLabel ? `Add recipe (${importQueueLabel})` : "Add recipe";
 
   // Sheets, toasts and the timer dock are portaled outside the shell, so the inset they read
   // (--app-bottom-inset) is switched on the root element rather than on .app-shell.
@@ -249,7 +285,7 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
         <Link
           aria-current={active ? "page" : undefined}
           aria-keyshortcuts={isRail ? RAIL_SHORTCUTS[item.to]?.aria : undefined}
-          aria-label={item.ariaLabel}
+          aria-label={isAdd ? addLabel : item.ariaLabel}
           className={[
             "app-nav-link",
             isAdd ? "app-nav-link-add" : "",
@@ -263,6 +299,9 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
         >
           <span className="app-nav-icon" aria-hidden="true">
             <Icon name={item.icon} size={isAdd ? 26 : 22} strokeWidth={isAdd ? 2.4 : 2} />
+            {isAdd && importQueue.count > 0 ? (
+              <ImportQueueCount attention={importQueue.failed > 0} count={importQueue.count} />
+            ) : null}
           </span>
           <span className="app-nav-label">{item.label}</span>
           {isRail && RAIL_SHORTCUTS[item.to] ? (
@@ -303,13 +342,19 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
                 <Link
                   aria-current={routeMeta.section === "add" ? "page" : undefined}
                   aria-keyshortcuts="N"
-                  aria-label={addItem.ariaLabel}
+                  aria-label={addLabel}
                   className={`app-nav-add-button${routeMeta.section === "add" ? " is-active" : ""}`}
                   title="Add recipe (N)"
                   to={addItem.to}
                 >
                   <Icon name="plus" size={20} strokeWidth={2.4} />
                   Add recipe
+                  {importQueue.count > 0 ? (
+                    <ImportQueueCount
+                      attention={importQueue.failed > 0}
+                      count={importQueue.count}
+                    />
+                  ) : null}
                 </Link>
               ) : null}
 

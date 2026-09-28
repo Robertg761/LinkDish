@@ -1,27 +1,25 @@
-/* First-run welcome (inside <Sheet>) */
+/* First-run welcome (inside <Sheet>). "Skip" in the footer is the way out on every frame (plus
+   Escape and the grabber), so there is no × perched on the sheet's edge. */
 
 .first-run-sheet .sheet-header {
-  position: absolute;
-  top: 8px;
-  right: 16px;
-  z-index: 2;
   padding: 0;
-}
-
-.first-run-sheet .sheet-close {
-  background: color-mix(in srgb, var(--color-surface-raised) 88%, transparent);
-  box-shadow: var(--shadow-xs);
 }
 
 .first-run-sheet .sheet-body {
   padding-top: 14px;
 }
 
+/* Every frame is the same height, so the sheet (and its grabber) never jumps between steps. */
 .first-run-frame {
   display: flex;
   flex-direction: column;
   gap: 18px;
+  min-height: 492px;
   animation: first-run-in var(--duration-slow) var(--ease-out) both;
+}
+
+.first-run-title:focus {
+  outline: none;
 }
 
 .first-run-copy {
@@ -536,11 +534,6 @@
 }
 
 @media (min-width: 768px) {
-  .first-run-sheet .sheet-header {
-    top: 16px;
-    right: 18px;
-  }
-
   .first-run-sheet .sheet-body {
     padding-top: 20px;
   }

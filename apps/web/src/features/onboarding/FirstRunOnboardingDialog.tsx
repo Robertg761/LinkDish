@@ -1,5 +1,5 @@
 import { extractFirstUrl } from "@linkdish/recipe-domain";
-import React, { useId, useState } from "react";
+import React, { useEffect, useId, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { Button } from "../../components/Button";
@@ -219,8 +219,18 @@ export interface FirstRunOnboardingDialogProps {
 export const FirstRunOnboardingDialog: React.FC<FirstRunOnboardingDialogProps> = ({ onFinish }) => {
   const navigate = useNavigate();
   const [frameIndex, setFrameIndex] = useState(0);
+  const frameTitleRef = useRef<HTMLParagraphElement>(null);
+  const movedRef = useRef(false);
   const frame = FRAMES[frameIndex] ?? FRAMES[0];
   const finalFrame = frameIndex === FRAMES.length - 1;
+
+  // After Next, land on the new frame's title: a screen reader reads it, and focus never falls
+  // to the page when the last frame swaps Next out of the footer.
+  useEffect(() => {
+    if (movedRef.current) {
+      frameTitleRef.current?.focus({ preventScroll: true });
+    }
+  }, [frameIndex]);
 
   const goTo = (path: string) => {
     onFinish();
@@ -250,27 +260,26 @@ export const FirstRunOnboardingDialog: React.FC<FirstRunOnboardingDialogProps> =
             Step {frameIndex + 1} of {FRAMES.length}
           </span>
           <div className="first-run-footer-actions">
-            {finalFrame ? (
-              <Button onClick={onFinish} variant="ghost">
-                Maybe later
+            <Button onClick={onFinish} variant="ghost">
+              Skip
+            </Button>
+            {finalFrame ? null : (
+              <Button
+                onClick={() => {
+                  movedRef.current = true;
+                  setFrameIndex((current) => current + 1);
+                }}
+                trailingIcon="arrow-right"
+              >
+                Next
               </Button>
-            ) : (
-              <>
-                <Button onClick={onFinish} variant="ghost">
-                  Skip
-                </Button>
-                <Button
-                  onClick={() => setFrameIndex((current) => current + 1)}
-                  trailingIcon="arrow-right"
-                >
-                  Next
-                </Button>
-              </>
             )}
           </div>
         </div>
       }
+      hideCloseButton
       hideTitle
+      initialFocus="dialog"
       onClose={onFinish}
       open
       size="md"
@@ -280,7 +289,7 @@ export const FirstRunOnboardingDialog: React.FC<FirstRunOnboardingDialogProps> =
       <div className={`first-run-frame is-${frame.id}`} key={frame.id}>
         {art[frame.id]}
         <div className="first-run-copy">
-          <p aria-hidden="true" className="first-run-title">
+          <p className="first-run-title" ref={frameTitleRef} tabIndex={-1}>
             {frame.title}
           </p>
           <p className="first-run-body">{frame.body}</p>

@@ -18,7 +18,7 @@
 .app-shell-content {
   flex: 1;
   min-width: 0;
-  padding-bottom: calc(var(--app-bottom-inset) + 24px);
+  padding-bottom: calc(var(--app-bottom-inset) + 24px + var(--timer-dock-reserve, 0px));
   outline: none;
 }
 
@@ -45,11 +45,12 @@
     border-color var(--transition-normal);
 }
 
+/* A solid bar: the page's big display type scrolling underneath used to ghost through a
+   translucent one ("$24.99" behind "Plans"). The hairline marks the edge instead. */
 .app-topbar.is-scrolled {
-  border-bottom-color: var(--color-border-subtle);
-  background: var(--color-overlay);
-  backdrop-filter: blur(16px) saturate(1.3);
-  -webkit-backdrop-filter: blur(16px) saturate(1.3);
+  border-bottom-color: var(--color-border);
+  background: var(--color-bar);
+  box-shadow: var(--shadow-topbar);
 }
 
 .app-topbar-back {
@@ -141,25 +142,24 @@
   }
 }
 
-/* ---------------------------- Offline banner ----------------------------- */
+/* ---------------------------- Offline notice ----------------------------- */
+/*
+ * A floating pill above the bottom bars (and the timer dock or a recipe's action bar), not a
+ * strip in the page flow: going offline mid-recipe no longer shoves what you're reading down.
+ */
 .app-offline-banner {
-  position: sticky;
-  top: 0;
-  z-index: calc(var(--z-nav) + 1);
-}
-
-.app-offline-banner.is-visible {
-  padding-top: env(safe-area-inset-top, 0px);
-  border-bottom: 1px solid color-mix(in srgb, var(--color-butter) 45%, transparent);
-  background: var(--color-butter-soft);
-  color: var(--color-on-butter-soft);
-  animation: app-offline-banner-in var(--duration-base) var(--ease-out) both;
-}
-
-.app-offline-banner.is-online.is-visible {
-  border-bottom-color: color-mix(in srgb, var(--color-primary) 25%, transparent);
-  background: var(--color-primary-soft);
-  color: var(--color-on-primary-soft);
+  position: fixed;
+  right: 0;
+  bottom: calc(
+    var(--app-bottom-inset) + 12px + var(--app-fab-clearance) + var(--timer-dock-reserve, 0px) +
+      var(--timer-dock-lift, 0px)
+  );
+  left: 0;
+  z-index: calc(var(--z-toast) - 1);
+  display: flex;
+  justify-content: center;
+  padding: 0 12px;
+  pointer-events: none;
 }
 
 .app-offline-banner-text {
@@ -167,41 +167,41 @@
   align-items: center;
   justify-content: center;
   gap: 8px;
-  min-height: var(--app-offline-banner-height);
-  padding: 6px var(--page-gutter);
+  min-height: 36px;
+  padding: 6px 14px;
+  border: 1px solid color-mix(in srgb, var(--color-butter) 55%, transparent);
+  border-radius: var(--radius-pill);
+  background: var(--color-butter-soft);
+  box-shadow: var(--shadow-md);
+  color: var(--color-on-butter-soft);
   font-size: var(--text-caption);
   font-weight: 650;
   line-height: 1.3;
   text-align: center;
+  animation: app-offline-banner-in var(--duration-base) var(--ease-out) both;
 }
 
-/*
- * --app-sticky-top: where sticky page UI (the top bar, a page's sticky search or toolbar)
- * should stick. It is 0 normally and clears the offline banner while it shows.
- */
+.app-offline-banner.is-online .app-offline-banner-text {
+  border-color: color-mix(in srgb, var(--color-primary) 30%, transparent);
+  background: var(--color-primary-soft);
+  color: var(--color-on-primary-soft);
+}
+
+/* Sticky page UI (the top bar, a page's sticky toolbar) sticks here; nothing sits above it. */
 :root {
-  --app-offline-banner-height: 36px;
   --app-sticky-top: 0px;
 }
 
-:root:has(.app-offline-banner.is-visible) {
-  --app-sticky-top: calc(var(--app-offline-banner-height) + env(safe-area-inset-top, 0px));
-}
-
-/* The banner takes over the status-bar inset; the bar and page below tuck in under it. */
-.app-shell:has(.app-offline-banner.is-visible) .app-topbar {
-  min-height: var(--topbar-height);
-  padding-top: 0;
-}
-
-.app-shell-tabs:has(.app-offline-banner.is-visible):not(.app-shell-has-topbar) .app-shell-content {
-  padding-top: 0;
+@media (min-width: 1024px) {
+  .app-offline-banner {
+    left: var(--rail-width);
+  }
 }
 
 @keyframes app-offline-banner-in {
   from {
     opacity: 0;
-    transform: translateY(-100%);
+    transform: translateY(12px);
   }
 }
 
@@ -237,10 +237,8 @@
   left: 0;
   z-index: var(--z-nav);
   padding-bottom: env(safe-area-inset-bottom, 0px);
-  background: var(--color-overlay);
+  background: var(--color-bar);
   box-shadow: var(--shadow-nav);
-  backdrop-filter: blur(18px) saturate(1.4);
-  -webkit-backdrop-filter: blur(18px) saturate(1.4);
 }
 
 .app-nav-tabs .app-nav-list {
@@ -272,9 +270,11 @@
   -webkit-tap-highlight-color: transparent;
 }
 
-.app-nav-tabs .app-nav-link:hover {
-  color: var(--color-ink);
-  text-decoration: none;
+@media (hover: hover) {
+  .app-nav-tabs .app-nav-link:hover {
+    color: var(--color-ink);
+    text-decoration: none;
+  }
 }
 
 .app-nav-tabs .app-nav-link:focus-visible {
@@ -346,6 +346,38 @@
 
 .app-nav-tabs .app-nav-link-add .app-nav-label {
   margin-top: -1px;
+}
+
+/* Import queue count on Add: links waiting to be imported (tomato ring = needs a look). */
+.app-nav-badge {
+  display: inline-grid;
+  place-items: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: var(--radius-pill);
+  background: var(--color-butter);
+  color: var(--color-on-butter);
+  font-family: var(--font-family-sans);
+  font-size: 0.6875rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.app-nav-badge.is-attention {
+  background: var(--color-inverse-surface);
+  color: var(--color-on-inverse);
+}
+
+.app-nav-tabs .app-nav-link-add .app-nav-icon {
+  position: relative;
+}
+
+.app-nav-tabs .app-nav-badge {
+  position: absolute;
+  top: -6px;
+  right: -8px;
+  box-shadow: 0 0 0 2px var(--color-canvas);
 }
 
 /* ---------------------------- Side rail (desktop) ------------------------ */
@@ -427,6 +459,10 @@
 
 .app-nav-add-button:active {
   transform: scale(0.98);
+}
+
+.app-nav-add-button .app-nav-badge {
+  margin-left: 2px;
 }
 
 .app-nav-search {
@@ -624,6 +660,7 @@
 @media print {
   .app-nav,
   .app-topbar,
+  .app-offline-banner,
   .skip-link {
     display: none !important;
   }

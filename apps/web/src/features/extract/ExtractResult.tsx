@@ -8,6 +8,7 @@ import { Icon } from "../../components/Icon";
 import { IconButton } from "../../components/IconButton";
 import { Menu } from "../../components/Menu";
 import { Sheet } from "../../components/Sheet";
+import { useHideTabBar } from "../../components/tab-bar-visibility";
 import { useDocumentTitle } from "../../lib/use-document-title";
 import { RAIL_MEDIA_QUERY, useMediaQuery } from "../../lib/use-media-query";
 import { lazyWithRetry } from "../../platform/lazy";
@@ -169,6 +170,9 @@ export const ExtractResult: React.FC<ExtractResultProps> = ({
   );
 
   useDocumentTitle(recipe.title);
+  // Like the recipe page: the floating action bar replaces the phone tab bar while the result
+  // is on screen ("Import another" goes back), so two bottom bars never stack.
+  useHideTabBar();
 
   const openRecipe = useCallback(() => {
     if (saving.recipeId) {
