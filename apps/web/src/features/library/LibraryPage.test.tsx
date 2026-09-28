@@ -3,6 +3,7 @@ import React from "react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { MENU_SHEET_MEDIA_QUERY } from "../../components/Menu";
 import { ToastProvider } from "../../components/Toast";
 import { resetDataChangeFeedForTests, setDataChannelFactoryForTests } from "../../data/change-feed";
 import { resetCollectionsStoreForTests } from "../../data/collections-store";
@@ -727,6 +728,58 @@ describe("LibraryPage", () => {
     fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Reverse order" }));
     expect(gridTitles()).toEqual(["Ziti Bake", "Miso Soup", "Apple Salad"]);
     expect(localStorage.getItem("linkdish:web:cookbook-sort-direction:v1")).toBe("reverse");
+  });
+
+  it("opens the sort and card menus as action sheets on touch phones", async () => {
+    const mediaQuery = (matches: (query: string) => boolean) => (query: string) => ({
+      addEventListener: vi.fn(),
+      addListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+      matches: matches(query),
+      media: query,
+      onchange: null,
+      removeEventListener: vi.fn(),
+      removeListener: vi.fn()
+    });
+    vi.mocked(window.matchMedia).mockImplementation(
+      mediaQuery((query) => query === MENU_SHEET_MEDIA_QUERY)
+    );
+
+    try {
+      seedRecipes([
+        makeRecipe("apple", { daysAgo: 9, title: "Apple Salad" }),
+        makeRecipe("ziti", { daysAgo: 1, title: "Ziti Bake" })
+      ]);
+
+      renderPage();
+      await screen.findByText("Ziti Bake");
+      expect(gridTitles()).toEqual(["Ziti Bake", "Apple Salad"]);
+
+      fireEvent.click(screen.getByRole("button", { name: /^Sort recipes\. Current:/ }), {
+        detail: 1
+      });
+      const sortMenu = screen.getByRole("menu", { name: "Sort recipes" });
+      expect(sortMenu).toHaveClass("menu-in-sheet");
+      expect(within(sortMenu).getByRole("group", { name: "Sort by" })).toContainElement(
+        screen.getByRole("menuitemradio", { name: "A–Z" })
+      );
+      fireEvent.click(screen.getByRole("menuitemradio", { name: "A–Z" }));
+      expect(gridTitles()).toEqual(["Apple Salad", "Ziti Bake"]);
+
+      fireEvent.click(screen.getByRole("button", { name: "More actions for Ziti Bake" }), {
+        detail: 1
+      });
+      const cardMenu = screen.getByRole("menu", { name: "Actions for Ziti Bake" });
+      expect(cardMenu).toHaveClass("menu-in-sheet");
+      expect(cardMenu.closest(".menu-sheet")).toHaveTextContent("Ziti Bake");
+      expect(
+        within(within(cardMenu).getByRole("group", { name: "Plan & organise" }))
+          .getAllByRole("menuitem")
+          .map((item) => item.textContent)
+      ).toEqual(["Add to collection…", "Edit tags…", "Add to meal plan…", "Add to shopping list"]);
+    } finally {
+      vi.mocked(window.matchMedia).mockImplementation(mediaQuery(() => false));
+    }
   });
 
   it("switches between grid and list and remembers the layout", async () => {

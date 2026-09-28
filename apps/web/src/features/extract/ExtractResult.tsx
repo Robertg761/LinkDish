@@ -249,6 +249,7 @@ export const ExtractResult: React.FC<ExtractResultProps> = ({
       align="end"
       items={moreItems}
       label="More for this recipe"
+      presentation="adaptive"
       renderTrigger={(triggerProps) => (
         <IconButton
           {...triggerProps}
@@ -258,6 +259,7 @@ export const ExtractResult: React.FC<ExtractResultProps> = ({
           variant="tonal"
         />
       )}
+      sheetTitle={recipe.title}
     />
   );
 

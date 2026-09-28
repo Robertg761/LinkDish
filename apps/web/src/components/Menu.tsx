@@ -113,12 +113,88 @@ const TRIGGER_GAP = 6;
 /** Below this there is no sensible room on either side, so the menu may cover its trigger. */
 const MIN_POPOVER_HEIGHT = 160;
 
-interface PopoverPosition {
+export interface PopoverPosition {
   top: number;
   left: number;
   placement: "top" | "bottom";
   maxHeight: number | undefined;
 }
+
+export interface PopoverLayoutInput {
+  trigger: { top: number; bottom: number; left: number; right: number };
+  menuWidth: number;
+  /** The menu's full content height, whatever max-height currently applies. */
+  naturalHeight: number;
+  viewportWidth: number;
+  viewportHeight: number;
+  /**
+   * Height of the fixed bars along the bottom edge (the phone tab bar and its raised Add button,
+   * plus the safe area) that the menu must not cover.
+   */
+  bottomInset: number;
+  align: "start" | "end";
+}
+
+/**
+ * Where an anchored menu goes: below its trigger when it fits, otherwise on whichever side has
+ * more room, capped to that room so every item stays reachable. The bottom bars count as
+ * off-screen, so a long menu flips up or scrolls instead of spilling over the tab bar.
+ */
+export const computePopoverPosition = ({
+  trigger,
+  menuWidth,
+  naturalHeight,
+  viewportWidth,
+  viewportHeight,
+  bottomInset,
+  align
+}: PopoverLayoutInput): PopoverPosition => {
+  const insetFloor = viewportHeight - Math.max(0, bottomInset);
+  // A very short screen (a landscape phone) keeps its whole height rather than no room at all.
+  const floor =
+    insetFloor >= MIN_POPOVER_HEIGHT + VIEWPORT_MARGIN * 2 ? insetFloor : viewportHeight;
+  const spaceBelow = floor - trigger.bottom - TRIGGER_GAP - VIEWPORT_MARGIN;
+  const spaceAbove = trigger.top - TRIGGER_GAP - VIEWPORT_MARGIN;
+  const placeAbove = naturalHeight > spaceBelow && spaceAbove > spaceBelow;
+  const room = placeAbove ? spaceAbove : spaceBelow;
+  const maxHeight = Math.min(floor - VIEWPORT_MARGIN * 2, Math.max(MIN_POPOVER_HEIGHT, room));
+  const height = Math.min(naturalHeight, maxHeight);
+  const preferredTop = placeAbove
+    ? trigger.top - TRIGGER_GAP - height
+    : trigger.bottom + TRIGGER_GAP;
+  const top = Math.min(
+    Math.max(VIEWPORT_MARGIN, preferredTop),
+    Math.max(VIEWPORT_MARGIN, floor - height - VIEWPORT_MARGIN)
+  );
+  const preferredLeft = align === "end" ? trigger.right - menuWidth : trigger.left;
+  const left = Math.min(
+    Math.max(VIEWPORT_MARGIN, preferredLeft),
+    Math.max(VIEWPORT_MARGIN, viewportWidth - menuWidth - VIEWPORT_MARGIN)
+  );
+
+  return {
+    top,
+    left,
+    placement: placeAbove ? "top" : "bottom",
+    maxHeight: naturalHeight > maxHeight ? maxHeight : undefined
+  };
+};
+
+/**
+ * The room the fixed bottom bars take: --app-bottom-inset (the tab bar plus the safe area; 0 on
+ * desktop) and --app-fab-clearance (the raised Add button). They mix calc() and env(), so a probe
+ * element resolves them.
+ */
+const readBottomInset = (): number => {
+  const probe = document.createElement("div");
+  probe.style.cssText =
+    "position:fixed;bottom:0;left:0;width:0;visibility:hidden;pointer-events:none;" +
+    "height:calc(var(--app-bottom-inset, 0px) + var(--app-fab-clearance, 0px))";
+  document.body.appendChild(probe);
+  const inset = probe.getBoundingClientRect().height;
+  probe.remove();
+  return Number.isFinite(inset) ? inset : 0;
+};
 
 type OpenedWith = "keyboard-first" | "keyboard-last" | "pointer";
 
@@ -207,40 +283,18 @@ export const Menu: React.FC<MenuProps> = ({
       return;
     }
 
-    const triggerRect = trigger.getBoundingClientRect();
-    const menuWidth = menu.offsetWidth;
-    // The full content height, whatever max-height currently applies.
-    const naturalHeight = menu.scrollHeight + (menu.offsetHeight - menu.clientHeight);
-    const viewportWidth = window.innerWidth;
-    const viewportHeight = window.innerHeight;
-    const spaceBelow = viewportHeight - triggerRect.bottom - TRIGGER_GAP - VIEWPORT_MARGIN;
-    const spaceAbove = triggerRect.top - TRIGGER_GAP - VIEWPORT_MARGIN;
-    const placeAbove = naturalHeight > spaceBelow && spaceAbove > spaceBelow;
-    const room = placeAbove ? spaceAbove : spaceBelow;
-    const maxHeight = Math.min(
-      viewportHeight - VIEWPORT_MARGIN * 2,
-      Math.max(MIN_POPOVER_HEIGHT, room)
+    setPosition(
+      computePopoverPosition({
+        align,
+        bottomInset: readBottomInset(),
+        menuWidth: menu.offsetWidth,
+        // The full content height, whatever max-height currently applies.
+        naturalHeight: menu.scrollHeight + (menu.offsetHeight - menu.clientHeight),
+        trigger: trigger.getBoundingClientRect(),
+        viewportHeight: window.innerHeight,
+        viewportWidth: window.innerWidth
+      })
     );
-    const height = Math.min(naturalHeight, maxHeight);
-    const preferredTop = placeAbove
-      ? triggerRect.top - TRIGGER_GAP - height
-      : triggerRect.bottom + TRIGGER_GAP;
-    const top = Math.min(
-      Math.max(VIEWPORT_MARGIN, preferredTop),
-      Math.max(VIEWPORT_MARGIN, viewportHeight - height - VIEWPORT_MARGIN)
-    );
-    const preferredLeft = align === "end" ? triggerRect.right - menuWidth : triggerRect.left;
-    const left = Math.min(
-      Math.max(VIEWPORT_MARGIN, preferredLeft),
-      Math.max(VIEWPORT_MARGIN, viewportWidth - menuWidth - VIEWPORT_MARGIN)
-    );
-
-    setPosition({
-      top,
-      left,
-      placement: placeAbove ? "top" : "bottom",
-      maxHeight: naturalHeight > maxHeight ? maxHeight : undefined
-    });
   }, [align, asSheet]);
 
   useLayoutEffect(() => {

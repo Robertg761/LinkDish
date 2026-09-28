@@ -68,6 +68,8 @@ const SharedRecipeTileComponent: React.FC<SharedRecipeTileProps> = ({
         <Menu
           items={menuItems}
           label={`Actions for ${title}`}
+          presentation="adaptive"
+          sheetTitle={title}
           renderTrigger={(props) => (
             <IconButton
               aria-label={`More actions for ${title}`}

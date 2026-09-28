@@ -3,7 +3,67 @@ import React from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import { IconButton } from "./IconButton";
-import { Menu, MENU_SHEET_MEDIA_QUERY } from "./Menu";
+import { computePopoverPosition, Menu, MENU_SHEET_MEDIA_QUERY } from "./Menu";
+
+import type { PopoverLayoutInput } from "./Menu";
+
+// A 390×844 phone with a 64px tab bar plus the 24px raised Add button along the bottom.
+const phoneLayout = (overrides: Partial<PopoverLayoutInput> = {}): PopoverLayoutInput => ({
+  align: "end",
+  bottomInset: 88,
+  menuWidth: 240,
+  naturalHeight: 400,
+  trigger: { bottom: 330, left: 250, right: 374, top: 294 },
+  viewportHeight: 844,
+  viewportWidth: 390,
+  ...overrides
+});
+
+describe("computePopoverPosition", () => {
+  it("opens below the trigger when the menu fits above the tab bar", () => {
+    const position = computePopoverPosition(phoneLayout({ naturalHeight: 300 }));
+
+    expect(position).toEqual({ left: 134, maxHeight: undefined, placement: "bottom", top: 336 });
+  });
+
+  it("flips up rather than spilling over the tab bar", () => {
+    // 360px would fit before the screen's bottom edge (844) but not above the tab bar (756).
+    const layout = phoneLayout({
+      naturalHeight: 360,
+      trigger: { bottom: 420, left: 250, right: 374, top: 384 }
+    });
+
+    expect(computePopoverPosition({ ...layout, bottomInset: 0 }).placement).toBe("bottom");
+
+    const position = computePopoverPosition(layout);
+    expect(position.placement).toBe("top");
+    expect(position.maxHeight).toBeUndefined();
+    expect(position.top + 360).toBeLessThanOrEqual(384);
+  });
+
+  it("caps a long menu to the room above the tab bar and scrolls the rest", () => {
+    const position = computePopoverPosition(
+      phoneLayout({ naturalHeight: 600, trigger: { bottom: 176, left: 250, right: 374, top: 140 } })
+    );
+
+    expect(position.placement).toBe("bottom");
+    expect(position.maxHeight).toBe(844 - 88 - 176 - 6 - 8);
+    expect(position.top + (position.maxHeight ?? 0)).toBeLessThanOrEqual(844 - 88 - 8);
+  });
+
+  it("keeps the full height on a screen too short to spare the inset", () => {
+    const position = computePopoverPosition(
+      phoneLayout({
+        naturalHeight: 150,
+        trigger: { bottom: 40, left: 250, right: 374, top: 4 },
+        viewportHeight: 240
+      })
+    );
+
+    expect(position.placement).toBe("bottom");
+    expect(position.maxHeight).toBeUndefined();
+  });
+});
 
 const renderMenu = (onEdit = vi.fn(), onDelete = vi.fn()) =>
   render(

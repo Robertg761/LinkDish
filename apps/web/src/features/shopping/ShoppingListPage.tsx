@@ -522,6 +522,7 @@ export const ShoppingListPage: React.FC = () => {
   };
 
   const menuItems: MenuEntry[] = [
+    { id: "group-share", label: "Share & print", type: "separator" },
     {
       disabled: toBuyCount === 0,
       icon: "share-up",
@@ -530,6 +531,7 @@ export const ShoppingListPage: React.FC = () => {
       onSelect: () => void shareList()
     },
     { icon: "printer", id: "print", label: "Print", onSelect: () => window.print() },
+    { id: "group-view", type: "separator" },
     {
       description: "Salt, pepper, water and friends",
       icon: hideStaples ? "eye" : "eye-off",
@@ -586,6 +588,8 @@ export const ShoppingListPage: React.FC = () => {
           <Menu
             items={menuItems}
             label="List options"
+            presentation="adaptive"
+            sheetTitle="Shopping list"
             renderTrigger={(props) => (
               <IconButton
                 aria-label="List options"
