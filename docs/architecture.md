@@ -34,7 +34,7 @@
   after deploys). The Cookbook chunk is modulepreloaded from `index.html`, and
   Clerk loads through a lazy sibling bridge (`auth/ClerkBridge.tsx`) only when a
   Clerk session hint exists or sign-in starts. `pnpm --filter @linkdish/web
-  size` checks the budgets after a build (entry ≤ 115 KB gzip, landing JS ≤
+size` checks the budgets after a build (entry ≤ 115 KB gzip, landing JS ≤
   150 KB, landing CSS ≤ 24 KB).
 - **Local data.** IndexedDB `linkdish-web` v4 (`storage/linkdish-db.ts`)
   holds `savedRecipes`, `recipeSourceImages` (scan images, kept out of list
