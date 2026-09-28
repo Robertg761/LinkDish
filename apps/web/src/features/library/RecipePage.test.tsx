@@ -728,6 +728,23 @@ describe("RecipePage saved route", () => {
       expect(stored("recipe_local")?.recipe.title).toBe("Best Chili");
       expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Best Chili");
     });
+
+    it("isn't offered when a save changed nothing and the recipe is still in sync", async () => {
+      await seed([savedRecipe({ sync: { sharedRecipeId: "shared_9", status: "synced" } })]);
+      renderAt("/recipes/recipe_local");
+      await screen.findByRole("heading", { level: 1, name: "Weeknight Chili" });
+
+      fireEvent.click(within(openMenu()).getByRole("menuitem", { name: "Edit recipe" }));
+      const editor = screen.getByRole("dialog", { name: "Edit recipe" });
+      fireEvent.click(within(editor).getByRole("button", { name: "Save changes" }));
+
+      expect(await screen.findByText("Recipe updated.")).toBeVisible();
+      expect(
+        screen.queryByText("Saved here. Sync to update your household’s copy.")
+      ).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Sync now" })).not.toBeInTheDocument();
+      expect(stored("recipe_local")?.sync?.status).toBe("synced");
+    });
   });
 
   it("adds a household member's ingredients to the household list even when the check fails", async () => {

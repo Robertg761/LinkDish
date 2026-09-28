@@ -736,7 +736,8 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
       throw new Error("This saved recipe is no longer available.");
     }
 
-    if (updated.sync?.sharedRecipeId && isAuthenticated) {
+    // A save that changed nothing leaves a synced recipe synced: there is nothing to sync then.
+    if (updated.sync?.sharedRecipeId && updated.sync.status !== "synced" && isAuthenticated) {
       showToast({
         action: { label: "Sync now", onClick: () => void handleSync() },
         message: "Saved here. Sync to update your household’s copy."
