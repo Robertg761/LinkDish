@@ -143,7 +143,10 @@ const COURSE_RULES: ReadonlyArray<{ course: RecipeCourse; pattern: RegExp }> = [
       "cannoli",
       "baklava",
       "desserts?",
-      "sweets?"
+      // "Sweets" or "sweet treats", not the adjective: "Sweet Potato Curry" and "Sweet and Sour
+      // Pork" are dinners.
+      "sweets",
+      "sweet treats?"
     ])
   },
   {

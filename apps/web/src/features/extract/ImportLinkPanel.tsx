@@ -105,9 +105,13 @@ export const ImportLinkPanel: React.FC<ImportLinkPanelProps> = ({
     }
   }, [focusRequest]);
 
-  // The field grows with a pasted list of links and shrinks back for a single one.
+  // The field grows with a pasted list of links and shrinks back for a single one. Each link keeps
+  // its own line (no mid-word wrapping); after a paste the field shows where the links start.
+  const previousLengthRef = useRef(value.length);
   useEffect(() => {
     const element = inputRef.current;
+    const pasted = value.length - previousLengthRef.current > 1;
+    previousLengthRef.current = value.length;
 
     if (!element) {
       return;
@@ -117,6 +121,10 @@ export const ImportLinkPanel: React.FC<ImportLinkPanelProps> = ({
 
     if (multiline) {
       element.style.height = `${Math.min(element.scrollHeight, 220)}px`;
+
+      if (pasted) {
+        element.scrollLeft = 0;
+      }
     }
   }, [multiline, value]);
 

@@ -32,13 +32,18 @@ export const LIBRARY_SORT_STORAGE_KEY = "linkdish:web:cookbook-sort:v1";
 export const LIBRARY_SORT_DIRECTION_STORAGE_KEY = "linkdish:web:cookbook-sort-direction:v1";
 export const LIBRARY_VIEW_STORAGE_KEY = "linkdish:web:cookbook-view:v1";
 
-export const LIBRARY_SORT_OPTIONS: ReadonlyArray<{ value: LibrarySort; label: string }> = [
-  { value: "recent", label: "Recently added" },
-  { value: "recentlyCooked", label: "Recently cooked" },
-  { value: "az", label: "A–Z" },
-  { value: "mostCooked", label: "Most cooked" },
-  { value: "quickest", label: "Quickest" },
-  { value: "topRated", label: "Top rated" }
+export const LIBRARY_SORT_OPTIONS: ReadonlyArray<{
+  value: LibrarySort;
+  label: string;
+  /** For the phone toolbar, where the full label doesn't fit beside the view toggle. */
+  shortLabel: string;
+}> = [
+  { value: "recent", label: "Recently added", shortLabel: "Newest" },
+  { value: "recentlyCooked", label: "Recently cooked", shortLabel: "Last cooked" },
+  { value: "az", label: "A–Z", shortLabel: "A–Z" },
+  { value: "mostCooked", label: "Most cooked", shortLabel: "Most cooked" },
+  { value: "quickest", label: "Quickest", shortLabel: "Quickest" },
+  { value: "topRated", label: "Top rated", shortLabel: "Top rated" }
 ];
 
 /** Family recipes carry no personal cooking history or ratings. */
@@ -74,6 +79,9 @@ export const storeView = (view: LibraryView): void => {
 
 export const getSortLabel = (sort: LibrarySort): string =>
   LIBRARY_SORT_OPTIONS.find((option) => option.value === sort)?.label ?? "Recently added";
+
+export const getShortSortLabel = (sort: LibrarySort): string =>
+  LIBRARY_SORT_OPTIONS.find((option) => option.value === sort)?.shortLabel ?? "Newest";
 
 /* ------------------------------------------------------------------------------------------------
  * Derived, render-ready data per recipe

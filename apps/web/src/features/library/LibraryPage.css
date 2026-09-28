@@ -56,14 +56,19 @@
   margin: -8px calc(-1 * var(--page-gutter)) -4px;
   padding: calc(8px + env(safe-area-inset-top, 0px)) var(--page-gutter) 8px;
   border-bottom: 1px solid transparent;
-  background: var(--color-bg);
+  background: transparent;
   transition:
+    background-color var(--transition-fast),
     border-color var(--transition-fast),
     box-shadow var(--transition-fast);
 }
 
+/* Opaque once stuck, painted with the page's own (viewport-fixed) backdrop so it matches it. */
 .library-search-bar.is-stuck {
   border-bottom-color: var(--color-border-subtle);
+  background:
+    radial-gradient(1100px 520px at 50% -8%, var(--color-canvas) 0%, var(--color-bg) 58%) fixed,
+    var(--color-bg);
   box-shadow: var(--shadow-xs);
 }
 

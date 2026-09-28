@@ -90,7 +90,10 @@ export const formatCookbookCount = ({ saved, starters }: CookbookCounts): string
     return starters > 0 ? pluralize(starters, "starter recipe") : "No recipes yet";
   }
 
+  // Non-breaking spaces inside each half, so a narrow header wraps as "13 recipes" / "+ 3 starters".
+  const keep = (text: string) => text.replace(/ /gu, " ");
+
   return starters > 0
-    ? `${pluralize(saved, "recipe")} + ${pluralize(starters, "starter")}`
+    ? `${keep(pluralize(saved, "recipe"))} ${keep(`+ ${pluralize(starters, "starter")}`)}`
     : pluralize(saved, "recipe");
 };

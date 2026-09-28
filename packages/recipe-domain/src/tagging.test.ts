@@ -37,6 +37,22 @@ describe("inferRecipeTags on the starter recipes", () => {
 });
 
 describe("inferRecipeTags fixtures", () => {
+  it("keeps sweet potato and sweet-and-sour dinners out of dessert", () => {
+    const curry = inferRecipeTags(
+      fixture(
+        "Thai Red Curry with Sweet Potato and Chickpeas",
+        ["2 tbsp red curry paste", "1 can coconut milk", "1 large sweet potato"],
+        ["Simmer."]
+      )
+    );
+    const pork = inferRecipeTags(fixture("Sweet and Sour Pork", ["1 lb pork"], ["Fry."]));
+    const treats = inferRecipeTags(fixture("Christmas Sweets", ["1 cup sugar"], ["Mix."]));
+
+    expect(curry.course?.value).not.toBe("dessert");
+    expect(pork.course?.value).not.toBe("dessert");
+    expect(treats.course?.value).toBe("dessert");
+  });
+
   it("reads courses from titles and schema.org categories", () => {
     const courses = [
       fixture("Classic Chocolate Chip Cookies", ["2 cups flour"], ["Bake."]),

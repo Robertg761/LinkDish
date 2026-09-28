@@ -1,4 +1,4 @@
-import React, { memo } from "react";
+import React, { memo, useLayoutEffect, useRef } from "react";
 
 import { FilterChip } from "../../../components/Chip";
 import { Icon } from "../../../components/Icon";
@@ -36,10 +36,22 @@ const LibraryFilterBarComponent: React.FC<LibraryFilterBarProps> = ({
     ...selected.flatMap((key) => visible.filter((chip) => chip.key === key)),
     ...visible.filter((chip) => !selectedSet.has(chip.key))
   ];
+  const trackRef = useRef<HTMLDivElement | null>(null);
+  const selectionKey = selected.join("|");
+
+  // A chip picked at the far end moves to the front: bring the front (Clear and the active
+  // chips) into view with it, instead of leaving the row scrolled past them.
+  useLayoutEffect(() => {
+    const track = trackRef.current;
+
+    if (track && track.scrollLeft > 0) {
+      track.scrollLeft = 0;
+    }
+  }, [selectionKey]);
 
   return (
     <div aria-label="Filter recipes" className="library-filters" role="group">
-      <div className="library-filters-track">
+      <div className="library-filters-track" ref={trackRef}>
         <button className="library-filters-manage" onClick={onManageCollections} type="button">
           <Icon name={hasCollections ? "folder" : "folder-plus"} size={15} />
           {hasCollections ? "Collections" : "New collection"}
