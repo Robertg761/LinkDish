@@ -4,8 +4,9 @@
  *
  *   vi.mock("idb", async () => (await import("../../storage/testing/fake-idb")).fakeIdbModule);
  *
- * It models object stores with key paths and indexes, multi-store transactions with `done`,
- * the upgrade callback (including its versionchange transaction), and `abort()` rolling the whole
+ * It models object stores with key paths and indexes, multi-store transactions with `done`
+ * (readwrite ones over the same stores run one at a time, so a read-then-write in one is atomic
+ * across "tabs" sharing the fake), the upgrade callback (including its versionchange transaction), and `abort()` rolling the whole
  * upgrade back — enough to test migrations without fake-indexeddb.
  */
 
@@ -32,6 +33,8 @@ interface FakeIdbState {
   oldVersion: number;
   openCalls: FakeOpenCall[];
   records: Map<string, Map<string, unknown>>;
+  /** Readwrite transactions not yet committed, oldest first. */
+  writers: Array<{ done: Promise<void>; stores: readonly string[] }>;
 }
 
 const state: FakeIdbState = {
@@ -44,7 +47,8 @@ const state: FakeIdbState = {
   openHold: null,
   oldVersion: 0,
   openCalls: [],
-  records: new Map()
+  records: new Map(),
+  writers: []
 };
 
 const clone = <T>(value: T): T => {
@@ -80,89 +84,174 @@ const tick = async <T>(run: () => T): Promise<T> => {
   return run();
 };
 
-const createStoreApi = (name: string, track: <T>(promise: Promise<T>) => Promise<T>) => {
+/** A request's optional follow-up, run before it answers (and, in a transaction, while it is still pending). */
+type AfterRequest<T> = (value: T) => Promise<T>;
+
+type RunRequest = <T>(run: () => T, after?: AfterRequest<T>) => Promise<T>;
+
+const withAfter = <T>(promise: Promise<T>, after?: AfterRequest<T>): Promise<T> =>
+  after ? promise.then(after) : promise;
+
+/** The hook `fakeIdb.afterNextGetAll` set for `name`, if any; it runs once. */
+const afterGetAllOn =
+  (name: string): AfterRequest<unknown[]> =>
+  async (records) => {
+    const afterGetAll = state.afterGetAll.get(name);
+
+    if (afterGetAll) {
+      state.afterGetAll.delete(name);
+      await afterGetAll();
+    }
+
+    return records;
+  };
+
+const createStoreApi = (name: string, request: RunRequest) => {
   const indexApi = (indexName: string) => ({
     count: (key: unknown) =>
-      track(
-        tick(() => {
-          const { definition, records } = requireStore(name);
-          const keyPath = definition.indexes.get(indexName);
+      request(() => {
+        const { definition, records } = requireStore(name);
+        const keyPath = definition.indexes.get(indexName);
 
-          if (!keyPath) {
-            throw new DOMException(`No index named ${indexName}`, "NotFoundError");
-          }
+        if (!keyPath) {
+          throw new DOMException(`No index named ${indexName}`, "NotFoundError");
+        }
 
-          return Array.from(records.values()).filter((record) => readPath(record, keyPath) === key)
-            .length;
-        })
-      ),
+        return Array.from(records.values()).filter((record) => readPath(record, keyPath) === key)
+          .length;
+      }),
     getAll: (key?: unknown) =>
-      track(
-        tick(() => {
-          const { definition, records } = requireStore(name);
-          const keyPath = definition.indexes.get(indexName) ?? indexName;
+      request(() => {
+        const { definition, records } = requireStore(name);
+        const keyPath = definition.indexes.get(indexName) ?? indexName;
 
-          return Array.from(records.values())
-            .filter((record) => key === undefined || readPath(record, keyPath) === key)
-            .map(clone);
-        })
-      )
+        return Array.from(records.values())
+          .filter((record) => key === undefined || readPath(record, keyPath) === key)
+          .map(clone);
+      })
   });
 
   return {
-    clear: () => track(tick(() => requireStore(name).records.clear())),
-    count: () => track(tick(() => requireStore(name).records.size)),
+    clear: () => request(() => requireStore(name).records.clear()),
+    count: () => request(() => requireStore(name).records.size),
     delete: (key: string) =>
-      track(
-        tick(() => {
-          requireStore(name).records.delete(String(key));
-        })
-      ),
-    get: (key: string) => track(tick(() => clone(requireStore(name).records.get(String(key))))),
+      request(() => {
+        requireStore(name).records.delete(String(key));
+      }),
+    get: (key: string) => request(() => clone(requireStore(name).records.get(String(key)))),
     getAll: () =>
-      track(
-        tick(() => Array.from(requireStore(name).records.values()).map(clone)).then(
-          async (records) => {
-            const afterGetAll = state.afterGetAll.get(name);
-
-            if (afterGetAll) {
-              state.afterGetAll.delete(name);
-              await afterGetAll();
-            }
-
-            return records;
-          }
-        )
+      request(
+        () => Array.from(requireStore(name).records.values()).map(clone),
+        afterGetAllOn(name)
       ),
-    getAllKeys: () => track(tick(() => Array.from(requireStore(name).records.keys()))),
+    getAllKeys: () => request(() => Array.from(requireStore(name).records.keys())),
     index: indexApi,
     put: (value: unknown) =>
-      track(
-        tick(() => {
-          const { definition, records } = requireStore(name);
-          const key = readPath(value, definition.keyPath);
-          const failure = state.failPuts.get(name);
+      request(() => {
+        const { definition, records } = requireStore(name);
+        const key = readPath(value, definition.keyPath);
+        const failure = state.failPuts.get(name);
 
-          if (failure) {
-            state.failPuts.delete(name);
-            throw failure;
-          }
+        if (failure) {
+          state.failPuts.delete(name);
+          throw failure;
+        }
 
-          if (typeof key !== "string" && typeof key !== "number") {
-            throw new DOMException("Missing key path value", "DataError");
-          }
+        if (typeof key !== "string" && typeof key !== "number") {
+          throw new DOMException("Missing key path value", "DataError");
+        }
 
-          records.set(String(key), clone(value));
-          return key;
-        })
-      )
+        records.set(String(key), clone(value));
+        return key;
+      })
   };
 };
 
-const untracked = <T>(promise: Promise<T>) => promise;
+/**
+ * Microtask turns an idle transaction waits for its caller's next request before it commits.
+ * IndexedDB commits once no request is pending and the page returns to the event loop; the fake
+ * uses no timers (tests with fake timers still work), so it gives the caller this many turns to
+ * `await` a result and issue the next request.
+ */
+const COMMIT_TURNS = 20;
+
+/**
+ * An explicit transaction. Readwrite transactions whose stores overlap run one at a time, in the
+ * order they were created (as in IndexedDB), so a read-then-write inside one is atomic. Requests
+ * made after it committed fail with `TransactionInactiveError`. `done` resolves on commit.
+ */
+const createTransaction = (names: string[], mode: string | undefined) => {
+  const readwrite = mode === "readwrite";
+  const earlier = readwrite
+    ? state.writers.filter((writer) => writer.stores.some((name) => names.includes(name)))
+    : [];
+  const ready = Promise.all(earlier.map((writer) => writer.done)).then(() => undefined);
+  let commit: () => void = () => undefined;
+  const done = new Promise<void>((resolve) => {
+    commit = resolve;
+  });
+  const writer = { done, stores: names };
+  let pending = 0;
+  let activity = 0;
+  let finished = false;
+
+  if (readwrite) {
+    state.writers.push(writer);
+  }
+
+  const commitWhenIdle = async () => {
+    const seen = activity;
+
+    for (let turn = 0; turn < COMMIT_TURNS; turn += 1) {
+      await Promise.resolve();
+    }
+
+    if (!finished && pending === 0 && activity === seen) {
+      finished = true;
+      state.writers = state.writers.filter((entry) => entry !== writer);
+      commit();
+    }
+  };
+
+  const settle = () => {
+    pending -= 1;
+    activity += 1;
+    void commitWhenIdle();
+  };
+
+  const request = <T>(run: () => T, after?: AfterRequest<T>): Promise<T> => {
+    if (finished) {
+      return Promise.reject(
+        new DOMException("The transaction has finished.", "TransactionInactiveError")
+      );
+    }
+
+    pending += 1;
+    activity += 1;
+    const result = ready.then(() => withAfter(tick(run), after));
+    void result.then(settle, settle);
+    return result;
+  };
+
+  void ready.then(commitWhenIdle);
+  const storeApi = (name: string) => createStoreApi(name, request);
+
+  return {
+    done,
+    objectStore: (name: string) => {
+      if (!names.includes(name)) {
+        throw new DOMException(`${name} is not part of this transaction`, "NotFoundError");
+      }
+
+      return storeApi(name);
+    },
+    store: storeApi(names[0] ?? "")
+  };
+};
 
 const createDatabase = () => {
-  const storeApi = (name: string) => createStoreApi(name, untracked);
+  const storeApi = (name: string) =>
+    createStoreApi(name, <T>(run: () => T, after?: AfterRequest<T>) => withAfter(tick(run), after));
 
   return {
     close: () => undefined,
@@ -179,26 +268,14 @@ const createDatabase = () => {
       contains: (name: string) => state.definitions.has(name)
     },
     put: (storeName: string, value: unknown) => storeApi(storeName).put(value),
-    transaction: (storeNames: string | string[]) => {
+    transaction: (storeNames: string | string[], mode?: string) => {
       const names = Array.isArray(storeNames) ? storeNames : [storeNames];
 
       for (const name of names) {
         requireStore(name);
       }
 
-      const first = names[0] ?? "";
-
-      return {
-        done: Promise.resolve(),
-        objectStore: (name: string) => {
-          if (!names.includes(name)) {
-            throw new DOMException(`${name} is not part of this transaction`, "NotFoundError");
-          }
-
-          return storeApi(name);
-        },
-        store: storeApi(first)
-      };
+      return createTransaction(names, mode);
     }
   };
 };
@@ -300,7 +377,10 @@ async function openDB(name: string, version?: number, callbacks: FakeOpenCallbac
       abort: () => {
         aborted = true;
       },
-      objectStore: (storeName: string) => createStoreApi(storeName, track)
+      objectStore: (storeName: string) =>
+        createStoreApi(storeName, <T>(run: () => T, after?: AfterRequest<T>) =>
+          track(withAfter(tick(run), after))
+        )
     };
 
     callbacks.upgrade(upgradeDb, state.oldVersion, targetVersion, upgradeTransaction, {});
@@ -347,7 +427,6 @@ export const fakeIdb = {
 
   /** Clears every store and definition. `version` is the database version already on disk. */
   reset(version = 0): void {
-    state.afterGetAll = new Map();
     state.definitions = new Map();
     state.records = new Map();
     state.oldVersion = version;
@@ -357,6 +436,8 @@ export const fakeIdb = {
     state.blockedOnce = false;
     state.callbacks = null;
     state.failPuts = new Map();
+    state.writers = [];
+    state.afterGetAll = new Map();
     fakeIdb.createdStores = [];
   },
 

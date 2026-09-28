@@ -3,11 +3,13 @@ import { createWebAnalyticsId } from "../../analytics/session";
 import { apiClient } from "../../api/client";
 import { getFriendlyErrorMessage } from "../../api/error-message";
 import {
-  getNextQueuedImport,
+  claimNextQueuedImport,
+  IMPORT_CLAIM_RENEW_MS,
   markImportDone,
   markImportFailed,
   markImportProcessing,
   recoverStaleImports,
+  renewImportClaim,
   retryImport,
   type ImportQueueItem
 } from "../../data/import-queue-store";
@@ -50,6 +52,9 @@ import type { V2AnalyticsImportProperties } from "@linkdish/utils";
  * queue with a plain reason; running out of room or imports pauses the queue instead. The runner
  * never opens UI itself: a pause shows up quietly in the queue panel, and the upgrade sheet opens
  * only when the cook taps it there.
+ *
+ * Each item is claimed for this tab before any work starts (see claimNextQueuedImport), so a
+ * second tab working through the same queue never imports it again.
  */
 
 export type QueuePauseReason = "save_limit" | "import_limit" | "offline";
@@ -58,13 +63,17 @@ export interface QueueRunnerContext {
   isAuthenticated: boolean;
   tier: WebBillingTier;
   signal: AbortSignal;
+  /** Whose claims these are. Defaults to this tab's id. */
+  owner?: string | undefined;
 }
 
 export type QueueItemOutcome =
   | { status: "done"; recipeId: string; duplicate: boolean }
   | { status: "failed"; message: string }
   | { status: "paused"; reason: QueuePauseReason }
-  | { status: "stopped" };
+  | { status: "stopped" }
+  /** Another tab claimed the item (this tab's claim lapsed), or it was removed, meanwhile. */
+  | { status: "skipped" };
 
 type ImportProperties = V2AnalyticsImportProperties & { source: "in_app" | "share_sheet" };
 
@@ -88,6 +97,11 @@ const propertiesFor = (item: ImportQueueItem): ImportProperties => {
 
 const isPaid = (tier: WebBillingTier) => tier !== "free";
 
+let tabOwnerId: string | undefined;
+
+/** Identifies this tab's claims on queue items (a new id per page load). */
+const getTabOwnerId = (): string => (tabOwnerId ??= createWebAnalyticsId());
+
 const extract = (
   item: ImportQueueItem,
   attempt: "primary" | "fallback",
@@ -101,12 +115,12 @@ const extract = (
         { signal }
       );
 
-/** Processes one queued item. Never throws. */
+/** Processes one queued item, claimed for `context.owner`. Never throws. */
 export async function processImportQueueItem(
   item: ImportQueueItem,
   context: QueueRunnerContext
 ): Promise<QueueItemOutcome> {
-  const { isAuthenticated, signal, tier } = context;
+  const { isAuthenticated, owner, signal, tier } = context;
 
   // 1. Already saved? Nothing to import, nothing spent.
   if (item.url) {
@@ -114,7 +128,7 @@ export async function processImportQueueItem(
     const existing = findSavedDuplicate(item.url, getSavedRecipesSnapshot().data);
 
     if (existing) {
-      await markImportDone(item.id, { recipeId: existing.id });
+      await markImportDone(item.id, { recipeId: existing.id }, owner);
       return { duplicate: true, recipeId: existing.id, status: "done" };
     }
   }
@@ -124,6 +138,7 @@ export async function processImportQueueItem(
     await assertCanAddSavedRecipe({ isPremiumUser: isPaid(tier) });
   } catch (error) {
     if (error instanceof SavedRecipeLimitError) {
+      await retryImport(item.id, owner);
       return { reason: "save_limit", status: "paused" };
     }
   }
@@ -136,14 +151,19 @@ export async function processImportQueueItem(
     (!canStartWebImport(tier).allowed ||
       (needsStrong && !canStartWebStrongExtraction(tier).allowed))
   ) {
+    await retryImport(item.id, owner);
     return { reason: "import_limit", status: "paused" };
   }
 
   if (signal.aborted) {
+    await retryImport(item.id, owner);
     return { status: "stopped" };
   }
 
-  await markImportProcessing(item.id);
+  if (!(await markImportProcessing(item.id, owner))) {
+    return { status: "skipped" };
+  }
+
   const correlationId = createWebAnalyticsId();
   let properties = propertiesFor(item);
   let attempt: "primary" | "fallback" = item.url ? "primary" : "fallback";
@@ -156,7 +176,7 @@ export async function processImportQueueItem(
       properties: { ...properties, attempt, ...failureProperties },
       routeOrScreen: IMPORT_ANALYTICS_ROUTE
     });
-    await markImportFailed(item.id, message);
+    await markImportFailed(item.id, message, owner);
   };
 
   trackWebEvent({
@@ -236,7 +256,7 @@ export async function processImportQueueItem(
       const saved = await saveRecipe(input, isPaid(tier));
 
       if (saved.error === "limit_exceeded") {
-        await markImportFailed(item.id, "Your cookbook is full. Make room, then try again.");
+        await markImportFailed(item.id, "Your cookbook is full. Make room, then try again.", owner);
         return { reason: "save_limit", status: "paused" };
       }
 
@@ -255,7 +275,7 @@ export async function processImportQueueItem(
       // A duplicate_prompt means this exact recipe is already saved under the same id.
       const recipeId =
         saved.recipe?.id ?? (await generateDeterministicId(input.sourceUrl, input.recipe.title));
-      await markImportDone(item.id, { recipeId });
+      await markImportDone(item.id, { recipeId }, owner);
       return { duplicate: !saved.success, recipeId, status: "done" };
     }
 
@@ -278,7 +298,7 @@ export async function processImportQueueItem(
         routeOrScreen: IMPORT_ANALYTICS_ROUTE
       });
       // Not the link's fault: it waits in the queue for more imports.
-      await retryImport(item.id);
+      await retryImport(item.id, owner);
       return { reason: "import_limit", status: "paused" };
     }
 
@@ -295,7 +315,7 @@ export async function processImportQueueItem(
         });
       }
 
-      await retryImport(item.id);
+      await retryImport(item.id, owner);
       return { status: "stopped" };
     }
 
@@ -309,14 +329,14 @@ export async function processImportQueueItem(
         });
       }
 
-      await retryImport(item.id);
+      await retryImport(item.id, owner);
       return { reason: "offline", status: "paused" };
     }
 
     if (terminal) {
       // The import itself finished (and was recorded); keeping the recipe didn't work.
       const message = getFriendlyErrorMessage(error, "save");
-      await markImportFailed(item.id, message).catch(() => undefined);
+      await markImportFailed(item.id, message, owner).catch(() => undefined);
       return { message, status: "failed" };
     }
 
@@ -334,6 +354,8 @@ export interface QueueRunResult {
 
 /** Runs the queue until it's empty, paused or stopped. */
 export async function runImportQueue(context: QueueRunnerContext): Promise<QueueRunResult> {
+  const owner = context.owner ?? getTabOwnerId();
+  const itemContext = { ...context, owner };
   await recoverStaleImports().catch(() => 0);
   let processed = 0;
 
@@ -342,13 +364,32 @@ export async function runImportQueue(context: QueueRunnerContext): Promise<Queue
       return { paused: "offline", processed };
     }
 
-    const next = await getNextQueuedImport();
+    const next = await claimNextQueuedImport(owner);
 
     if (!next) {
       return { paused: null, processed };
     }
 
-    const outcome = await processImportQueueItem(next, context);
+    // Keep the claim fresh while the import runs, so a slow one is never mistaken for an
+    // abandoned tab's and imported again elsewhere.
+    const renewal = setInterval(() => {
+      void renewImportClaim(next.id, owner).catch(() => undefined);
+    }, IMPORT_CLAIM_RENEW_MS);
+    let outcome: QueueItemOutcome;
+
+    try {
+      outcome = await processImportQueueItem(next, itemContext);
+    } catch (error) {
+      // Storage trouble before the import started: let the item go for the next run.
+      await retryImport(next.id, owner).catch(() => undefined);
+      throw error;
+    } finally {
+      clearInterval(renewal);
+    }
+
+    if (outcome.status === "skipped") {
+      continue;
+    }
 
     if (outcome.status === "paused") {
       return { paused: outcome.reason, processed };

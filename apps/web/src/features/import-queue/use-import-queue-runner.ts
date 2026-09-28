@@ -18,7 +18,11 @@ export interface ImportQueueRunnerState {
   resume: () => void;
 }
 
-/** Runs the task holding the queue lock; false when another tab already has it. */
+/**
+ * Runs the task holding the queue lock; false when another tab already has it. Without Web Locks
+ * every open import page runs the task: each item is claimed atomically for one tab (see
+ * claimNextQueuedImport), so they share the queue without importing anything twice.
+ */
 const withQueueLock = async (task: () => Promise<void>): Promise<boolean> => {
   const locks = typeof navigator !== "undefined" ? navigator.locks : undefined;
 
@@ -39,7 +43,8 @@ const withQueueLock = async (task: () => Promise<void>): Promise<boolean> => {
 
 /**
  * Processes queued imports one at a time while this screen is open and the browser is online.
- * Stale "processing" items (a tab closed mid-import) go back in the queue on mount.
+ * Stale "processing" items (a tab closed mid-import, so its claim lapsed) go back in the queue on
+ * mount.
  */
 export function useImportQueueRunner(enabled = true): ImportQueueRunnerState {
   // Imports run only once requests carry the account (not while a cached Clerk user's session is

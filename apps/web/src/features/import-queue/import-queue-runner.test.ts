@@ -5,6 +5,7 @@ import { resetDataChangeFeedForTests, setDataChannelFactoryForTests } from "../.
 import {
   enqueueImport,
   getImportQueue,
+  recoverStaleImports,
   resetImportQueueStoreForTests,
   STALE_PROCESSING_MS
 } from "../../data/import-queue-store";
@@ -16,6 +17,7 @@ import {
   SAVED_RECIPES_STORE_NAME
 } from "../../storage/linkdish-db";
 import { fakeIdb } from "../../storage/testing/fake-idb";
+import { readWebBillingUsage } from "../billing/web-billing";
 
 import { runImportQueue } from "./import-queue-runner";
 
@@ -206,6 +208,135 @@ describe("import queue runner", () => {
       vi.mocked(trackWebEvent).mock.calls.filter(([event]) => event.eventName === "import_started")
     ).toHaveLength(2);
     expect(v2Events("import_succeeded")).toHaveLength(2);
+  });
+
+  it("imports each queued link exactly once when two tabs run the queue at the same time", async () => {
+    // No navigator.locks (older Safari, insecure origins): every open import page runs a worker.
+    await enqueueImport({ url: "https://a.com/soup" });
+    await enqueueImport({ url: "https://b.com/stew" });
+    await enqueueImport({ url: "https://c.com/pie" });
+    apiMocks.extractRecipe.mockImplementation(async (request) => {
+      const url = (request as { url: string }).url;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return success(`From ${new URL(url).host}`, url);
+    });
+
+    const [first, second] = await Promise.all([
+      runImportQueue(context({ owner: "tab-a" })),
+      runImportQueue(context({ owner: "tab-b" }))
+    ]);
+
+    const extracted = apiMocks.extractRecipe.mock.calls
+      .map(([request]) => (request as { url: string }).url)
+      .sort();
+    expect(extracted).toEqual(["https://a.com/soup", "https://b.com/stew", "https://c.com/pie"]);
+    expect(first.processed + second.processed).toBe(3);
+    expect(await statuses()).toEqual([
+      ["https://a.com/soup", "done"],
+      ["https://b.com/stew", "done"],
+      ["https://c.com/pie", "done"]
+    ]);
+    expect(v2Events("import_succeeded")).toHaveLength(3);
+  });
+
+  it("never takes over an import another tab is still working on, however long it takes", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+
+    try {
+      await enqueueImport({ url: "https://slow.com/stew" });
+      let started: () => void = () => undefined;
+      const extracting = new Promise<void>((resolve) => {
+        started = resolve;
+      });
+      let finish: (response: unknown) => void = () => undefined;
+      apiMocks.extractRecipe
+        .mockImplementationOnce(() => {
+          started();
+          return new Promise((resolve) => {
+            finish = resolve;
+          });
+        })
+        .mockResolvedValue(success("Stew again", "https://slow.com/stew"));
+
+      const slowTab = runImportQueue(context({ owner: "tab-a" }));
+      await extracting;
+      // Well past the lease: only tab-a's renewals show it is still at work.
+      await vi.advanceTimersByTimeAsync(2 * STALE_PROCESSING_MS);
+
+      await expect(runImportQueue(context({ owner: "tab-b" }))).resolves.toEqual({
+        paused: null,
+        processed: 0
+      });
+      expect((await getImportQueue())[0]).toMatchObject({
+        claimedBy: "tab-a",
+        status: "processing"
+      });
+
+      finish(success("Stew", "https://slow.com/stew"));
+      await expect(slowTab).resolves.toEqual({ paused: null, processed: 1 });
+      expect(apiMocks.extractRecipe).toHaveBeenCalledOnce();
+      expect((await getImportQueue())[0]?.status).toBe("done");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  describe("when the working tab's claim lapsed but no other tab took the item", () => {
+    // Tab A was suspended mid-import (a frozen or backgrounded tab) past its lease, and another
+    // page's mount put the item back in the queue without claiming it. A's result must still count.
+    const heldExtraction = () => {
+      let started: () => void = () => undefined;
+      const extracting = new Promise<void>((resolve) => {
+        started = resolve;
+      });
+      let finish: (response: unknown) => void = () => undefined;
+      const hold = () => {
+        started();
+        return new Promise((resolve) => {
+          finish = resolve;
+        });
+      };
+      return { extracting, finish: (response: unknown) => finish(response), hold };
+    };
+    const freeTabA = () => context({ isAuthenticated: false, owner: "tab-a", tier: "free" });
+
+    it("records a finished text import instead of importing it again", async () => {
+      await enqueueImport({ text: "Soup: 1 onion, 2 cups stock. Simmer 20 minutes." });
+      const extraction = heldExtraction();
+      apiMocks.extractRecipeFromText
+        .mockImplementationOnce(extraction.hold)
+        .mockResolvedValue(success("Onion soup again", "https://linkdish.app/text-imports/b"));
+
+      const tab = runImportQueue(freeTabA());
+      await extraction.extracting;
+      expect(await recoverStaleImports(Date.now() + STALE_PROCESSING_MS + 1000)).toBe(1);
+      extraction.finish(success("Onion soup", "https://linkdish.app/text-imports/a"));
+
+      await expect(tab).resolves.toEqual({ paused: null, processed: 1 });
+      expect(apiMocks.extractRecipeFromText).toHaveBeenCalledOnce();
+      expect(readWebBillingUsage()).toMatchObject({ imports: 1, strongExtractions: 1 });
+      expect((await getImportQueue())[0]).toMatchObject({ status: "done" });
+    });
+
+    it("records a failed link instead of trying it again", async () => {
+      await enqueueImport({ url: "https://blocked.com/r" });
+      const extraction = heldExtraction();
+      apiMocks.extractRecipe
+        .mockImplementationOnce(extraction.hold)
+        .mockResolvedValue(success("Blocked again", "https://blocked.com/r"));
+
+      const tab = runImportQueue(freeTabA());
+      await extraction.extracting;
+      expect(await recoverStaleImports(Date.now() + STALE_PROCESSING_MS + 1000)).toBe(1);
+      extraction.finish({ reason: "source_blocked", status: "failure", userMessage: "x" });
+
+      await expect(tab).resolves.toEqual({ paused: null, processed: 1 });
+      expect(apiMocks.extractRecipe).toHaveBeenCalledOnce();
+      expect((await getImportQueue())[0]).toMatchObject({
+        error: "That site kept its door shut",
+        status: "failed"
+      });
+    });
   });
 
   it("skips links that are already in the cookbook without spending an import", async () => {
