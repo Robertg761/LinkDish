@@ -128,9 +128,10 @@ When artwork changes, add a new 1200 x 630 PNG with a dated filename such as
 putting pricing or quota promises into the image unless production plan
 configuration was verified in the same change.
 
-The current card is `assets/social-card-20260928.png`; every page uses it.
-`assets/social-card-20260729.png` stays because the web app
-(`apps/web/index.html`) still points its own preview at it.
+The current card is `assets/social-card-20260928b.png`, built from the real app
+screenshots; every page and the web app (`apps/web/index.html`) use it. The
+older `social-card-20260928.png` and `social-card-20260729.png` stay so links
+already shared with them keep their preview.
 
 ## Deployment And Ownership
 
