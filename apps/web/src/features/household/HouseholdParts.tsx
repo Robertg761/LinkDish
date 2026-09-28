@@ -73,7 +73,7 @@ export const MemberRow: React.FC<MemberRowProps> = ({
         <span className="household-member-name">
           <span className="household-member-name-text">{name}</span>
           {member.role === "owner" ? (
-            <Badge icon="crown" tone="butter">
+            <Badge className="household-owner-badge" icon="crown" tone="butter">
               Owner
             </Badge>
           ) : null}

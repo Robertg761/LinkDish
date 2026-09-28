@@ -75,6 +75,12 @@
   background: var(--color-primary);
 }
 
+.household-seat.is-invited {
+  border-style: solid;
+  border-color: var(--color-primary);
+  background: var(--color-primary-soft);
+}
+
 .household-seat.is-cooling {
   border-style: solid;
   border-color: var(--color-butter);
@@ -134,7 +140,7 @@
 
 .household-tint-1 {
   background: var(--color-butter-soft);
-  color: var(--color-on-butter);
+  color: var(--color-ink);
 }
 
 .household-tint-2 {
@@ -157,6 +163,11 @@
   gap: 6px;
   color: var(--color-ink);
   font-weight: 650;
+}
+
+/* Soft butter badges use --color-on-butter, which is too dark on the dark theme. */
+.badge.household-owner-badge {
+  --badge-fg: var(--color-ink);
 }
 
 .household-member-name-text {

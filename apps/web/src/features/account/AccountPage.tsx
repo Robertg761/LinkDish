@@ -132,7 +132,7 @@ const SignInView: React.FC<{ destination: string | null }> = ({ destination }) =
   const intentNote = searchParams.get("invite")
     ? "Sign in with the email your invite was sent to, and we'll take you straight to your household."
     : isPaidPlan(upgradeIntent)
-      ? `Sign in to continue to ${planContent[upgradeIntent].name}. We'll take you right back to checkout.`
+      ? `Sign in to continue to ${planContent[upgradeIntent].name}. We'll bring you straight back to it.`
       : null;
 
   const requestCode = async (event: React.FormEvent) => {
@@ -516,7 +516,6 @@ const PlanCardSection: React.FC<{ tier: WebBillingTier }> = ({ tier }) => {
           <ProgressBar
             label="Saved recipes"
             max={limit}
-            size="sm"
             tone={savedCount >= limit ? "tomato" : "primary"}
             value={savedCount}
             valueText={`${savedCount} of ${limit} saved`}
@@ -715,8 +714,15 @@ export const AccountPage: React.FC = () => {
           <h1 className="account-profile-name">{name}</h1>
           <p className="account-profile-email">{user.email}</p>
         </div>
-        <Button icon="pencil" onClick={() => setProfileOpen(true)} size="sm" variant="secondary">
-          Edit profile
+        <Button
+          aria-label="Edit profile"
+          className="account-profile-edit"
+          icon="pencil"
+          onClick={() => setProfileOpen(true)}
+          size="sm"
+          variant="secondary"
+        >
+          Edit
         </Button>
       </header>
 

@@ -7,8 +7,12 @@
   gap: 10px 12px;
 }
 
-.billing-period-toggle .segmented {
-  min-width: 240px;
+.billing-period-toggle .segmented-option {
+  min-width: 108px;
+}
+
+.badge.billing-period-savings {
+  --badge-fg: var(--color-ink);
 }
 
 .billing-period-savings {

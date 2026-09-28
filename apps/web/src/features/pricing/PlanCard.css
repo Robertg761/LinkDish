@@ -81,6 +81,12 @@
   --btn-border-hover: var(--plan-card-muted);
 }
 
+/* Solid badges would vanish on the forest card; flip them to the card's CTA colors. */
+.plan-card-featured .plan-card-badges .badge-primary {
+  --badge-solid-bg: var(--plan-card-cta-bg);
+  --badge-solid-fg: var(--plan-card-cta-fg);
+}
+
 .plan-card.is-selected {
   border-color: var(--color-tomato);
   box-shadow:
@@ -99,6 +105,12 @@
   flex-wrap: wrap;
   gap: 6px;
   min-height: 22px;
+}
+
+@media (max-width: 899px) {
+  .plan-card-badges:empty {
+    display: none;
+  }
 }
 
 .plan-card-badges .badge {

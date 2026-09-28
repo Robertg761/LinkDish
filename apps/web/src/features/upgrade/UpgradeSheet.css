@@ -17,7 +17,7 @@
   padding: 4px 10px;
   border-radius: var(--radius-pill);
   background: var(--color-butter-soft);
-  color: var(--color-on-butter);
+  color: var(--color-ink);
   font-family: var(--font-family-sans);
   font-size: 0.6875rem;
   font-weight: 800;
@@ -67,8 +67,8 @@
   justify-content: flex-start;
 }
 
-.upgrade-sheet-chooser .billing-period-toggle .segmented {
-  min-width: 200px;
+.upgrade-sheet-chooser .billing-period-toggle .segmented-option {
+  min-width: 92px;
 }
 
 .upgrade-sheet-plans {
@@ -193,7 +193,7 @@
 }
 
 .upgrade-sheet-plan-note {
-  max-width: 17ch;
+  white-space: nowrap;
   color: var(--color-ink-muted);
   font-size: 0.75rem;
   line-height: 1.3;

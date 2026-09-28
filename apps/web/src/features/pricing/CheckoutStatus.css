@@ -117,8 +117,10 @@
 }
 
 @media (max-width: 480px) {
+  /* Stacked, the dismiss button shares the icon's row, so the copy can use the full width. */
   .checkout-status {
     flex-direction: column;
+    padding-right: 18px;
   }
 
   .checkout-status-actions .btn {

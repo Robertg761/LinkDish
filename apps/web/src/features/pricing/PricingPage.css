@@ -59,6 +59,10 @@
   font-size: var(--text-caption);
 }
 
+.pricing-usage .progress {
+  background: color-mix(in srgb, var(--color-ink) 12%, transparent);
+}
+
 .pricing-usage-row strong {
   color: var(--color-ink);
   font-size: var(--text-small);

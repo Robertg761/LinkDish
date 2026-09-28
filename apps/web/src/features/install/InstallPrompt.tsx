@@ -69,7 +69,9 @@ export const InstallPrompt: React.FC = () => {
           </p>
         ) : (
           <p className="install-prompt-desc">
-            Open it like an app and share recipes straight into LinkDish.
+            {platform === "android"
+              ? "Open it like an app and share recipes straight into LinkDish."
+              : "Open it in its own window, right from your dock or taskbar."}
           </p>
         )}
       </div>

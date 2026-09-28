@@ -7,6 +7,7 @@ import { Button, ButtonLink } from "../../components/Button";
 import { PageHeader } from "../../components/PageHeader";
 import { ProgressBar } from "../../components/ProgressBar";
 import { useDocumentTitle } from "../../lib/use-document-title";
+import { useMediaQuery } from "../../lib/use-media-query";
 import { useWebBillingAvailability } from "../billing/billing-availability";
 import { useWebCheckout } from "../billing/use-web-checkout";
 import {
@@ -44,7 +45,11 @@ import type { BillingPeriod, PaidBillingPlan } from "@linkdish/api-contracts";
 
 import "./PricingPage.css";
 
-const TIERS: ReadonlyArray<WebBillingTier> = ["free", "plus", "family"];
+/** Side by side, Free sits first like a price ladder. */
+const WIDE_TIERS: ReadonlyArray<WebBillingTier> = ["free", "plus", "family"];
+/** Stacked on phones, the paid plans come first so they're visible without scrolling past Free. */
+const STACKED_TIERS: ReadonlyArray<WebBillingTier> = ["plus", "family", "free"];
+const WIDE_GRID_QUERY = "(min-width: 900px)";
 
 /** Who pays for the plan the person is on, which decides whether "Manage billing" is theirs. */
 type BillingOwner = "self" | "household" | "unknown";
@@ -90,6 +95,7 @@ export const PricingPage: React.FC = () => {
     availability.managementPortalAvailable;
   const remainingImports = isAuthenticated ? null : getRemainingImports("free");
   const bestSavings = getBestYearlySavings(availability);
+  const tiers = useMediaQuery(WIDE_GRID_QUERY) ? WIDE_TIERS : STACKED_TIERS;
   const cardRefs = useRef<Partial<Record<WebBillingTier, HTMLElement | null>>>({});
 
   useEffect(() => {
@@ -275,7 +281,7 @@ export const PricingPage: React.FC = () => {
         className="pricing-header"
         eyebrow="Plans"
         size="lg"
-        subtitle="Save recipes from anywhere, cook from them calmly and shop with your household. Start free and upgrade when your cookbook outgrows it."
+        subtitle="Save recipes from anywhere and cook from them calmly. Start free, and upgrade when your cookbook outgrows it."
         title="Cook more,"
       />
 
@@ -288,7 +294,7 @@ export const PricingPage: React.FC = () => {
       </div>
 
       <div className="pricing-grid">
-        {TIERS.map((tier) => (
+        {tiers.map((tier) => (
           <PlanCard
             action={tier === "free" ? renderFreeAction() : renderPaidAction(tier)}
             availability={availability}
@@ -313,7 +319,6 @@ export const PricingPage: React.FC = () => {
                 <ProgressBar
                   label="Free imports left"
                   max={webBillingPlans.free.limits.monthlyImports}
-                  size="sm"
                   tone={remainingImports === 0 ? "tomato" : "primary"}
                   value={remainingImports}
                   valueText={`${remainingImports} of ${webBillingPlans.free.limits.monthlyImports} left`}

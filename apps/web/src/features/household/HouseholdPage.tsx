@@ -238,7 +238,7 @@ export const HouseholdPage: React.FC = () => {
       subtitle={
         household
           ? "One cookbook and one shopping list for everyone in it."
-          : "A household shares one cookbook and one shopping list, for up to 6 people."
+          : "One cookbook and one shopping list, shared by up to 6 people."
       }
       title={household ? "Your" : "Cook together,"}
     />
@@ -377,13 +377,28 @@ export const HouseholdPage: React.FC = () => {
 
   const owner = getHouseholdOwner(household);
   const ownerName = owner ? getMemberDisplayName(owner) : "the owner";
+  const pendingCount = household.invites.length;
   const openSpots = Math.max(
     household.memberLimit -
       household.activeMemberCount -
       household.cooldownSlotCount -
-      household.invites.length,
+      pendingCount,
     0
   );
+  // One dot per spot: members, then invites waiting, then spots in their cooldown, then open.
+  const seats: Array<"used" | "invited" | "cooling" | "open"> = [
+    ...Array<"used">(household.activeMemberCount).fill("used"),
+    ...Array<"invited">(pendingCount).fill("invited"),
+    ...Array<"cooling">(household.cooldownSlotCount).fill("cooling"),
+    ...Array<"open">(openSpots).fill("open")
+  ].slice(0, household.memberLimit);
+  const seatSummary = [
+    `${household.activeMemberCount} of ${household.memberLimit} spots used`,
+    pendingCount > 0 ? `${pendingCount} invited` : "",
+    household.cooldownSlotCount > 0 ? `${household.cooldownSlotCount} opening up soon` : ""
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   return (
     <div className="household-page container page-enter">
@@ -413,29 +428,11 @@ export const HouseholdPage: React.FC = () => {
         <div className="household-card-head">
           <div className="household-card-heading">
             <h2>People</h2>
-            <p className="num">
-              {household.activeMemberCount} of {household.memberLimit} spots used
-              {household.cooldownSlotCount > 0
-                ? ` · ${household.cooldownSlotCount} opening up soon`
-                : ""}
-            </p>
+            <p className="num">{seatSummary}</p>
           </div>
-          <div
-            aria-hidden="true"
-            className="household-seats"
-            title={`${household.activeMemberCount} of ${household.memberLimit} spots used`}
-          >
-            {Array.from({ length: household.memberLimit }, (_, index) => (
-              <span
-                className={`household-seat${
-                  index < household.activeMemberCount
-                    ? " is-used"
-                    : index < household.activeMemberCount + household.cooldownSlotCount
-                      ? " is-cooling"
-                      : ""
-                }`}
-                key={index}
-              />
+          <div aria-hidden="true" className="household-seats" title={seatSummary}>
+            {seats.map((seat, index) => (
+              <span className={`household-seat is-${seat}`} key={index} />
             ))}
           </div>
         </div>

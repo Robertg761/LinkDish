@@ -68,7 +68,7 @@
   padding: 10px 12px;
   border-radius: var(--radius-sm);
   background: var(--color-butter-soft);
-  color: var(--color-on-butter);
+  color: var(--color-ink);
   font-size: var(--text-small);
 }
 
@@ -198,10 +198,15 @@
 /* Profile ------------------------------------------------------------------- */
 .account-profile {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
   gap: 16px;
   padding: 8px 0 4px;
+}
+
+.account-profile-edit {
+  flex-shrink: 0;
+  align-self: flex-start;
+  margin-top: 8px;
 }
 
 .account-avatar {
@@ -226,9 +231,25 @@
   font-size: 2.25rem;
 }
 
+@media (max-width: 520px) {
+  .account-profile {
+    gap: 12px;
+  }
+
+  .account-avatar {
+    width: 60px;
+    height: 60px;
+    font-size: 1.375rem;
+  }
+
+  .account-avatar.has-emoji {
+    font-size: 1.875rem;
+  }
+}
+
 .account-profile-copy {
   display: flex;
-  flex: 1 1 180px;
+  flex: 1 1 0;
   flex-direction: column;
   gap: 2px;
   min-width: 0;
@@ -299,6 +320,10 @@
   background: var(--color-surface-sunken);
 }
 
+.account-plan-meter .progress {
+  background: color-mix(in srgb, var(--color-ink) 12%, transparent);
+}
+
 .account-plan-meter-row {
   display: flex;
   align-items: baseline;
@@ -336,6 +361,12 @@
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+@media (max-width: 520px) {
+  .account-plan-actions .btn {
+    flex: 1 1 100%;
+  }
 }
 
 /* Quick links ---------------------------------------------------------------- */
