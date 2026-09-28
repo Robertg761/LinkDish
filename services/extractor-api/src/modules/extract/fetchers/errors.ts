@@ -31,6 +31,18 @@ export class BrowserFetchError extends Error {
   }
 }
 
+/** TikTok (and future social caption) fetches: oEmbed lookups and short-link resolution. */
+export class SocialFetchError extends Error {
+  public constructor(
+    message: string,
+    public readonly reason: InternalFetchFailureKind,
+    public readonly statusCode?: number
+  ) {
+    super(message);
+    this.name = "SocialFetchError";
+  }
+}
+
 export class YouTubeFetchError extends Error {
   public constructor(
     message: string,

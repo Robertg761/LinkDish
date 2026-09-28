@@ -1,6 +1,8 @@
 import { load } from "cheerio";
 
 import { extractorApiEnv } from "../../../config/env.js";
+import { readJsonStringLiteral } from "../html/json-string-literal.js";
+import { toYouTubeWatchUrl } from "../source-detection/parse-youtube-video-id.js";
 import { isSourceUrlRejection, validatePublicSourceUrl } from "../source-url-safety.js";
 
 import { YouTubeFetchError } from "./errors.js";
@@ -154,6 +156,27 @@ const fetchTranscriptFromCaptionTrack = async (
   }
 };
 
+const maxDescriptionChars = 10_000;
+
+/**
+ * The full video description from the watch page's ytInitialPlayerResponse
+ * (videoDetails.shortDescription). og:description is cut to ~160 characters, which drops the
+ * ingredient list creators paste into their descriptions.
+ */
+export const extractYouTubeShortDescription = (pageHtml: string): string | null => {
+  const marker = '"shortDescription":"';
+  const videoDetailsIndex = pageHtml.indexOf('"videoDetails":{');
+  const markerIndex = pageHtml.indexOf(marker, Math.max(0, videoDetailsIndex));
+
+  if (markerIndex === -1) {
+    return null;
+  }
+
+  const description = readJsonStringLiteral(pageHtml, markerIndex + marker.length - 1)?.trim();
+
+  return description ? description.slice(0, maxDescriptionChars) : null;
+};
+
 const parseChapterLines = (text: string): string[] =>
   text
     .split(/\n+/)
@@ -180,7 +203,12 @@ export const fetchYouTubeDocument = async (
 ): Promise<YouTubeSourceDocument> => {
   const maxBytes = options?.maxBytes ?? extractorApiEnv.FETCH_MAX_RESPONSE_BYTES;
   const validateUrl = options?.validateUrl ?? validatePublicSourceUrl;
-  const oEmbedUrl = `https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`;
+  /*
+   * Shorts, embeds and youtu.be links are all read through the canonical watch page, which is
+   * the page that carries the player response (full description, caption tracks).
+   */
+  const watchUrl = toYouTubeWatchUrl(videoId);
+  const oEmbedUrl = `https://www.youtube.com/oembed?url=${encodeURIComponent(watchUrl)}&format=json`;
   const oEmbedTimeout = createTimeoutSignal(timeoutMs, options?.signal);
   const watchTimeout = createTimeoutSignal(timeoutMs, options?.signal);
 
@@ -191,7 +219,7 @@ export const fetchYouTubeDocument = async (
     },
     signal: oEmbedTimeout.signal
   });
-  const watchRequest = fetchImplementation(url, {
+  const watchRequest = fetchImplementation(watchUrl, {
     headers: browserLikeHeaders,
     signal: watchTimeout.signal
   });
@@ -240,6 +268,7 @@ export const fetchYouTubeDocument = async (
       $("title").text().trim() ??
       null;
     const description =
+      extractYouTubeShortDescription(pageHtml) ??
       $('meta[property="og:description"]').attr("content")?.trim() ??
       $('meta[name="description"]').attr("content")?.trim() ??
       (metadata.author_name ? `Creator: ${metadata.author_name}` : null);
@@ -263,7 +292,11 @@ export const fetchYouTubeDocument = async (
       description,
       transcript,
       chapters,
-      pageHtml
+      pageHtml,
+      authorName:
+        typeof metadata.author_name === "string" && metadata.author_name.trim().length > 0
+          ? metadata.author_name.trim()
+          : null
     };
   } catch (error) {
     /* Do not keep downloading a watch page nobody will read. */

@@ -1,14 +1,18 @@
+import { createHash } from "node:crypto";
+
 import {
   extractRecipeResponseSchema,
+  type ExtractRecipeAnyRequest,
   type ExtractRecipeImage,
-  type ExtractRecipeRequest,
   type ExtractRecipeResponse,
   type ExtractRecipeSuccess
 } from "../../../../../../packages/api-contracts/src/index.js";
 import {
   buildMissingFieldSummary,
   computeMissingRecipeFields,
-  hasRequiredRecipeFields
+  hasRequiredRecipeFields,
+  type Recipe,
+  type SourceType
 } from "../../../../../../packages/recipe-domain/src/index.js";
 import { extractorApiEnv } from "../../../config/env.js";
 import { toHandoffSourceDocument, type FallbackHandoff } from "../cache/fallback-handoff.js";
@@ -19,12 +23,24 @@ import {
   ExtractionCancelledError,
   type RequestDeadline
 } from "../deadline.js";
+import { looksLikeRecipeText } from "../extractors/recipe-text-signals.js";
 import { FallbackProviderError } from "../fallback/errors.js";
 import { loadFallbackInputBuilder } from "../fallback/load-fallback-input.js";
-import { BrowserFetchError, HtmlFetchError, YouTubeFetchError } from "../fetchers/errors.js";
+import {
+  BrowserFetchError,
+  HtmlFetchError,
+  SocialFetchError,
+  YouTubeFetchError
+} from "../fetchers/errors.js";
 import { looksLikeNotFoundTitle, looksLikeUnrelatedRedirect } from "../fetchers/shared.js";
 import { normalizeExtractionCandidate } from "../normalizers/index.js";
-import { detectSourceTypeFromUrl } from "../source-detection/detect-source-from-url.js";
+import {
+  detectHostedMediaSourceType,
+  detectSourceTypeFromUrl,
+  isPinterestPinUrl,
+  TIKTOK_ADAPTER_KEY
+} from "../source-detection/detect-source-from-url.js";
+import { toYouTubeWatchUrl } from "../source-detection/parse-youtube-video-id.js";
 import { isSourceUrlRejection } from "../source-url-safety.js";
 import { recipeNeedsTextCleanup } from "../text-cleanup/needs-text-cleanup.js";
 
@@ -43,7 +59,8 @@ import type {
   ExtractorRuntime,
   HtmlSourceDocument,
   NormalizedExtraction,
-  SourceDocument
+  SourceDocument,
+  TextSourceDocument
 } from "../types.js";
 
 type ExtractRecipeUrlRequest = {
@@ -55,6 +72,11 @@ type ExtractRecipeImageRequest = {
   attempt: "fallback";
   images: ExtractRecipeImage[];
   sourceUrl: string;
+};
+
+type TextImportRequest = {
+  text: string;
+  sourceUrl?: string | undefined;
 };
 
 type ExtractionResult = {
@@ -100,8 +122,9 @@ const defaultRetryRecovery = {
 } as const;
 
 const unsupportedSourceMessages = {
-  social: "Social media links are not supported yet. Paste a written recipe page instead.",
-  video: "Video links and shorts are not supported yet. Paste a written recipe page instead.",
+  social:
+    "Instagram and Facebook links are not supported yet. Paste a written recipe page instead.",
+  video: "That video site is not supported yet. Paste a written recipe page instead.",
   unknown: "That source is not supported yet."
 } as const;
 
@@ -110,10 +133,17 @@ const minimumTextCleanupBudgetMs = 2_000;
 const textCleanupMaxMs = 8_000;
 const textCleanupReserveMs = 1_000;
 
+/* Social, video and unknown sources are never cached (they skip the lookup). */
 const isUnsupportedInitialSource = (
   sourceType: DetectionResult["sourceType"]
 ): sourceType is keyof typeof unsupportedSourceMessages =>
   sourceType === "social" || sourceType === "video" || sourceType === "unknown";
+
+/* TikTok is the one social platform with a supported path: its caption, via oEmbed. */
+const isSupportedSocialSource = (detection: DetectionResult, runtime: ExtractorRuntime) =>
+  detection.sourceType === "social" &&
+  detection.adapterKey === TIKTOK_ADAPTER_KEY &&
+  typeof runtime.fetchSocialDocument === "function";
 
 const createExtractionContext = (
   runtime: ExtractorRuntime,
@@ -180,7 +210,7 @@ const buildFailureDecision = (
 });
 
 const buildRetryDecision = (
-  sourceType: "recipe-webpage" | "article" | "youtube",
+  sourceType: SourceType,
   candidate: ExtractionCandidate | null,
   confidenceScore: number,
   reason: ExtractionRetryReason,
@@ -270,7 +300,8 @@ const mapFetchErrorToResponse = (
   if (
     error instanceof BrowserFetchError ||
     error instanceof HtmlFetchError ||
-    error instanceof YouTubeFetchError
+    error instanceof YouTubeFetchError ||
+    error instanceof SocialFetchError
   ) {
     if (error.reason === "timeout") {
       return extractRecipeResponseSchema.parse({
@@ -292,7 +323,9 @@ const mapFetchErrorToResponse = (
         userMessage:
           sourceType === "youtube"
             ? "That YouTube source blocked extraction right now."
-            : "That site blocked recipe extraction right now.",
+            : sourceType === "social"
+              ? "TikTok did not let LinkDish read that video right now."
+              : "That site blocked recipe extraction right now.",
         recovery: {
           retryable: false,
           allowFallback: false,
@@ -331,7 +364,10 @@ const mapFetchErrorToResponse = (
       return extractRecipeResponseSchema.parse({
         status: "failure",
         reason: "parse_failed",
-        userMessage: "That page no longer exists or has moved.",
+        userMessage:
+          sourceType === "social"
+            ? "That video is private, removed or not available to read."
+            : "That page no longer exists or has moved.",
         recovery: {
           retryable: false,
           allowFallback: false,
@@ -357,7 +393,8 @@ const getFetchErrorMetadata = (error: unknown) => {
   if (
     error instanceof BrowserFetchError ||
     error instanceof HtmlFetchError ||
-    error instanceof YouTubeFetchError
+    error instanceof YouTubeFetchError ||
+    error instanceof SocialFetchError
   ) {
     return {
       statusCode:
@@ -442,15 +479,22 @@ const detectFetchedDocumentFailure = async (
   return null;
 };
 
+interface FetchedSource {
+  sourceDocument: SourceDocument;
+  fetchMode: FetchMode;
+  detection: DetectionResult;
+  /**
+   * The URL whose content was fetched and becomes the recipe's sourceUrl: the requested URL,
+   * or the recipe page a Pinterest pin links to.
+   */
+  sourceUrl: string;
+}
+
 const fetchSourceDocument = async (
   url: string,
   detection: DetectionResult,
   context: ExtractionContext
-): Promise<{
-  sourceDocument: SourceDocument;
-  fetchMode: FetchMode;
-  detection: DetectionResult;
-}> => {
+): Promise<FetchedSource> => {
   const { runtime, deadline } = context;
 
   if (detection.sourceType === "youtube") {
@@ -463,7 +507,8 @@ const fetchSourceDocument = async (
     return {
       sourceDocument: await runtime.fetchYouTubeDocument(url, videoId, { deadline }),
       fetchMode: "http",
-      detection
+      detection,
+      sourceUrl: url
     };
   }
 
@@ -473,7 +518,52 @@ const fetchSourceDocument = async (
   return {
     sourceDocument: fetchResult.document,
     fetchMode: fetchResult.mode,
-    detection: detectSourceType(url, fetchResult.document)
+    detection: detectSourceType(url, fetchResult.document),
+    sourceUrl: url
+  };
+};
+
+/**
+ * A Pinterest pin (or a pin.it link that landed on one) is only a pointer: the recipe is on
+ * the site the pin links to. That outbound link is validated like any user URL before it is
+ * fetched. Pins without a usable link are extracted as they are.
+ */
+const readPinterestOutboundUrl = async (
+  fetched: FetchedSource,
+  context: ExtractionContext
+): Promise<string | null> => {
+  const { sourceDocument } = fetched;
+
+  if (sourceDocument.kind !== "html" || !isPinterestPinUrl(sourceDocument.finalUrl)) {
+    return null;
+  }
+
+  const { findPinterestOutboundUrl } = await loadHtmlAnalysis();
+  const outboundUrl = findPinterestOutboundUrl(sourceDocument);
+
+  if (!outboundUrl) {
+    return null;
+  }
+
+  const safety = await context.runtime.validateSourceUrl(outboundUrl);
+
+  return isSourceUrlRejection(safety) ? null : outboundUrl;
+};
+
+const fetchPinterestOutbound = async (
+  outboundUrl: string,
+  context: ExtractionContext
+): Promise<FetchedSource> => {
+  const outbound = await context.runtime.fetchHtmlDocument(outboundUrl, {
+    deadline: context.deadline
+  });
+  const { detectSourceType } = await loadHtmlAnalysis();
+
+  return {
+    sourceDocument: outbound.document,
+    fetchMode: outbound.mode,
+    detection: detectSourceType(outboundUrl, outbound.document),
+    sourceUrl: outboundUrl
   };
 };
 
@@ -767,6 +857,7 @@ const scheduleCacheWrite = (
 const scheduleFallbackHandoff = (
   context: ExtractionContext,
   requestUrl: string,
+  sourceUrl: string,
   sourceDocument: SourceDocument,
   detection: DetectionResult,
   fetchMode: FetchMode,
@@ -775,7 +866,12 @@ const scheduleFallbackHandoff = (
   const store = context.runtime.fallbackHandoffStore;
   const correlationId = context.correlationId;
 
-  if (!store || !correlationId || sourceDocument.kind === "image") {
+  if (
+    !store ||
+    !correlationId ||
+    sourceDocument.kind === "image" ||
+    sourceDocument.kind === "text"
+  ) {
     return Promise.resolve();
   }
 
@@ -790,7 +886,8 @@ const scheduleFallbackHandoff = (
       fetchMode,
       candidate,
       sourceDocument: toHandoffSourceDocument(sourceDocument),
-      sourceSummary
+      sourceSummary,
+      ...(sourceUrl === requestUrl ? {} : { sourceUrl })
     };
 
     await store.write(correlationId, requestUrl, handoff);
@@ -910,6 +1007,63 @@ const fallbackFailureResponse = (
     }
   });
 
+const recipeMetadataKeys = [
+  "description",
+  "totalTimeMinutes",
+  "author",
+  "siteName",
+  "cuisine",
+  "category",
+  "keywords",
+  "videoUrl"
+] as const satisfies readonly (keyof Recipe)[];
+
+/*
+ * The LLM extractors return the core recipe only. Metadata the deterministic pass or the source
+ * already knew (description, author, site, video...) is carried over where the model left a gap.
+ */
+const withMissingMetadata = (
+  recipe: Partial<Recipe>,
+  ...sources: Array<Partial<Recipe> | null | undefined>
+): Partial<Recipe> => {
+  const merged: Partial<Recipe> = { ...recipe };
+
+  for (const key of recipeMetadataKeys) {
+    if (merged[key] != null) {
+      continue;
+    }
+
+    const value = sources.map((source) => source?.[key]).find((entry) => entry != null);
+
+    if (value != null) {
+      Object.assign(merged, { [key]: value });
+    }
+  }
+
+  return merged;
+};
+
+/* Metadata a fetched source carries by itself: the video and channel for YouTube and TikTok. */
+const sourceDocumentMetadata = (sourceDocument: SourceDocument): Partial<Recipe> => {
+  if (sourceDocument.kind === "youtube") {
+    return {
+      siteName: "YouTube",
+      videoUrl: toYouTubeWatchUrl(sourceDocument.videoId),
+      ...(sourceDocument.authorName ? { author: sourceDocument.authorName } : {})
+    };
+  }
+
+  if (sourceDocument.kind === "text" && sourceDocument.origin === "tiktok") {
+    return {
+      siteName: "TikTok",
+      videoUrl: sourceDocument.url,
+      ...(sourceDocument.authorName ? { author: sourceDocument.authorName } : {})
+    };
+  }
+
+  return {};
+};
+
 const runUrlFallbackExtraction = async ({
   request,
   context,
@@ -977,7 +1131,11 @@ const runUrlFallbackExtraction = async ({
       {
         ...fallbackCandidate,
         recipe: {
-          ...fallbackCandidate.recipe,
+          ...withMissingMetadata(
+            fallbackCandidate.recipe,
+            candidate?.recipe,
+            sourceDocumentMetadata(sourceDocument)
+          ),
           image: fallbackCandidate.recipe.image ?? candidate?.recipe.image ?? null
         },
         signals: {
@@ -1053,6 +1211,255 @@ const runUrlFallbackExtraction = async ({
   }
 };
 
+const fallbackUnavailableResponse = (userMessage: string): ExtractRecipeResponse =>
+  extractRecipeResponseSchema.parse({
+    status: "failure",
+    reason: "fallback_unavailable",
+    userMessage,
+    recovery: {
+      retryable: false,
+      allowFallback: false,
+      suggestedAction: "try_again_later"
+    }
+  });
+
+const noRecipeInTextResponse = (userMessage: string): ExtractRecipeResponse =>
+  extractRecipeResponseSchema.parse({
+    status: "failure",
+    reason: "parse_failed",
+    userMessage,
+    recovery: {
+      retryable: false,
+      allowFallback: false,
+      suggestedAction: "try_another_url"
+    }
+  });
+
+/*
+ * The LLM path for text that did not come from a fetched page: a TikTok caption (on the
+ * explicit fallback attempt) or pasted text. Billing treats both as strong extractions.
+ */
+const runTextFallbackExtraction = async ({
+  context,
+  document,
+  detection,
+  hostname,
+  attempt
+}: {
+  context: ExtractionContext;
+  document: TextSourceDocument;
+  detection: DetectionResult;
+  hostname: string;
+  attempt: "primary" | "fallback";
+}): Promise<ExtractionResult> => {
+  const { runtime } = context;
+  const logBase = {
+    hostname,
+    detection,
+    attempt,
+    fetchMode: "http" as const,
+    fallbackProvider: runtime.fallbackExtractor.providerName,
+    browserAttempted: false
+  };
+  const failure = (
+    reason: "fallback_failed" | "quota_exceeded",
+    userMessage: string,
+    strategy: ExtractionLogContext["strategy"]
+  ): ExtractionResult => {
+    const response = fallbackFailureResponse(reason, userMessage);
+    return { response, logContext: makeLogContext({ ...logBase, response, strategy }) };
+  };
+
+  await ensureAuthorized(context);
+
+  try {
+    const fallbackCandidate = await runtime.fallbackExtractor.extract({
+      url: document.url,
+      sourceType: detection.sourceType,
+      sourceDocument: document,
+      candidate: null,
+      detection,
+      fetchMode: "http",
+      deadline: context.deadline
+    });
+
+    if (!fallbackCandidate) {
+      return failure(
+        "fallback_failed",
+        "LinkDish could not build a reliable recipe from that text.",
+        "none"
+      );
+    }
+
+    const normalized = normalizeExtractionCandidate(
+      {
+        ...fallbackCandidate,
+        recipe: {
+          ...withMissingMetadata(fallbackCandidate.recipe, sourceDocumentMetadata(document)),
+          image:
+            fallbackCandidate.recipe.image ??
+            (document.thumbnailUrl ? { url: document.thumbnailUrl, source: "og" } : null)
+        },
+        signals: {
+          ...fallbackCandidate.signals,
+          detectionConfidence: detection.confidence,
+          usedBrowserFallback: false,
+          blockedSourceSignals: 0
+        }
+      },
+      detection.sourceType,
+      document.url,
+      "http"
+    );
+
+    if (!normalized) {
+      return failure(
+        "fallback_failed",
+        "LinkDish still missed required recipe details in that text.",
+        "llm-fallback"
+      );
+    }
+
+    const cleanup = await cleanNormalizedExtraction(normalized, context);
+    const cleanedNormalized = cleanup.normalized;
+    const response = extractRecipeResponseSchema.parse({
+      status: "success",
+      recipe: cleanedNormalized.recipe,
+      extraction: {
+        sourceType: detection.sourceType,
+        strategy: cleanedNormalized.strategy,
+        confidenceScore: cleanedNormalized.confidenceScore,
+        missingFields: cleanedNormalized.missingFields,
+        warnings: cleanedNormalized.warnings,
+        fetchMode: cleanedNormalized.fetchMode,
+        provenance: cleanedNormalized.provenance
+      }
+    });
+
+    return {
+      response,
+      logContext: makeLogContext({
+        ...logBase,
+        response,
+        strategy: cleanedNormalized.strategy,
+        textCleanup: cleanup.textCleanup
+      })
+    };
+  } catch (error) {
+    if (error instanceof ExtractionCancelledError) {
+      throw error;
+    }
+
+    const quotaExceeded =
+      error instanceof FallbackProviderError && error.reason === "quota_exceeded";
+
+    return failure(
+      quotaExceeded ? "quota_exceeded" : "fallback_failed",
+      quotaExceeded
+        ? "Extra recipe help is temporarily unavailable."
+        : "Extra recipe help failed unexpectedly.",
+      "none"
+    );
+  }
+};
+
+/*
+ * TikTok: the caption is read through oEmbed. A caption with recipe signals needs the LLM, which
+ * only runs on the client's explicit fallback attempt (billed as a strong extraction), so the
+ * primary attempt answers needs_retry; a caption without a recipe fails without any LLM call.
+ */
+const extractFromSocialCaption = async (
+  request: ExtractRecipeUrlRequest,
+  context: ExtractionContext,
+  hostname: string,
+  detection: DetectionResult
+): Promise<ExtractionResult> => {
+  const { runtime } = context;
+  const logBase = {
+    hostname,
+    detection,
+    attempt: request.attempt,
+    fallbackProvider: runtime.fallbackExtractor.providerName,
+    browserAttempted: false
+  };
+  const fetchSocialDocument = runtime.fetchSocialDocument;
+
+  if (request.attempt === "fallback" && !runtime.fallbackExtractor.available) {
+    const response = fallbackUnavailableResponse(
+      "Extra recipe help is unavailable until backend recovery credentials are configured."
+    );
+
+    return {
+      response,
+      logContext: makeLogContext({ ...logBase, response, strategy: "none", fetchMode: "none" })
+    };
+  }
+
+  let document: TextSourceDocument;
+
+  try {
+    if (!fetchSocialDocument) {
+      throw new SocialFetchError("Social captions are not available.", "unreachable");
+    }
+
+    document = await fetchSocialDocument(request.url, { deadline: context.deadline });
+  } catch (error) {
+    const response = mapFetchErrorToResponse(error, detection.sourceType);
+    const metadata = getFetchErrorMetadata(error);
+
+    return {
+      response,
+      logContext: makeLogContext({
+        ...logBase,
+        response,
+        strategy: "none",
+        fetchMode: "none",
+        statusCode: metadata.statusCode
+      })
+    };
+  }
+
+  await ensureAuthorized(context);
+
+  if (!looksLikeRecipeText(document.text)) {
+    const response = noRecipeInTextResponse(
+      "That video's caption doesn't include a recipe. Try the recipe's website instead."
+    );
+
+    return {
+      response,
+      logContext: makeLogContext({ ...logBase, response, strategy: "none", fetchMode: "http" })
+    };
+  }
+
+  if (request.attempt === "primary") {
+    const response = extractRecipeResponseSchema.parse(
+      asApiResponse(
+        buildRetryDecision(
+          detection.sourceType,
+          null,
+          0,
+          "unsupported_primary_extraction",
+          "This video's caption has a recipe. LinkDish can read it with extra recipe help."
+        )
+      )
+    );
+
+    return {
+      response,
+      logContext: makeLogContext({ ...logBase, response, strategy: "none", fetchMode: "http" })
+    };
+  }
+
+  return runTextFallbackExtraction({
+    context,
+    document,
+    detection,
+    hostname,
+    attempt: request.attempt
+  });
+};
+
 const extractFromUrl = async (
   request: ExtractRecipeUrlRequest,
   context: ExtractionContext
@@ -1112,6 +1519,10 @@ const extractFromUrl = async (
         browserAttempted: false
       })
     };
+  }
+
+  if (isSupportedSocialSource(initialDetection, runtime)) {
+    return extractFromSocialCaption(request, context, hostname, initialDetection);
   }
 
   if (isUnsupportedInitialSource(initialDetection.sourceType)) {
@@ -1177,7 +1588,7 @@ const extractFromUrl = async (
 
     if (handoff) {
       return runUrlFallbackExtraction({
-        request,
+        request: { ...request, url: handoff.sourceUrl ?? request.url },
         context,
         hostname,
         detection: handoff.detection,
@@ -1190,15 +1601,7 @@ const extractFromUrl = async (
     }
   }
 
-  let fetchedSource: {
-    sourceDocument: SourceDocument;
-    fetchMode: FetchMode;
-    detection: DetectionResult;
-  };
-
-  try {
-    fetchedSource = await fetchSourceDocument(request.url, initialDetection, context);
-  } catch (error) {
+  const fetchFailureResult = (error: unknown): ExtractionResult => {
     const response = mapFetchErrorToResponse(error, initialDetection.sourceType);
     const metadata = getFetchErrorMetadata(error);
 
@@ -1218,14 +1621,46 @@ const extractFromUrl = async (
         browserAttempted: metadata.browserAttempted
       })
     };
+  };
+
+  let fetchedSource: FetchedSource;
+
+  try {
+    fetchedSource = await fetchSourceDocument(request.url, initialDetection, context);
+  } catch (error) {
+    return fetchFailureResult(error);
   }
 
   /* The fetch may start while billing is still deciding; nothing after it does. */
   await ensureAuthorized(context);
 
+  const pinOutboundUrl = await readPinterestOutboundUrl(fetchedSource, context);
+
+  if (pinOutboundUrl) {
+    /* The pin's recipe page may already be cached from a direct import. */
+    const cached = isCacheLookupEnabled(context, initialDetection)
+      ? await readCachedExtraction(context, pinOutboundUrl)
+      : null;
+
+    if (cached) {
+      return buildCacheHitResult({ ...request, url: pinOutboundUrl }, cached, runtime, hostname);
+    }
+
+    try {
+      fetchedSource = await fetchPinterestOutbound(pinOutboundUrl, context);
+    } catch (error) {
+      return fetchFailureResult(error);
+    }
+  }
+
   const { sourceDocument, fetchMode, detection } = fetchedSource;
+  /* The page actually extracted: the requested URL, or the recipe a Pinterest pin links to. */
+  const sourceRequest: ExtractRecipeUrlRequest = { ...request, url: fetchedSource.sourceUrl };
   const documentLogFields = getDocumentLogFields(sourceDocument, fetchMode);
-  const fetchedDocumentFailure = await detectFetchedDocumentFailure(request.url, sourceDocument);
+  const fetchedDocumentFailure = await detectFetchedDocumentFailure(
+    sourceRequest.url,
+    sourceDocument
+  );
 
   if (fetchedDocumentFailure) {
     return {
@@ -1247,7 +1682,7 @@ const extractFromUrl = async (
 
   if (request.attempt === "fallback") {
     return runUrlFallbackExtraction({
-      request,
+      request: sourceRequest,
       context,
       hostname,
       detection,
@@ -1259,7 +1694,13 @@ const extractFromUrl = async (
     });
   }
 
-  const decision = decidePrimaryOutcome(request, detection, sourceDocument, fetchMode, candidate);
+  const decision = decidePrimaryOutcome(
+    sourceRequest,
+    detection,
+    sourceDocument,
+    fetchMode,
+    candidate
+  );
   const cleanup =
     decision.kind === "success" ? await cleanNormalizedExtraction(decision.result, context) : null;
   const cleanedDecision: DeterministicDecision =
@@ -1267,11 +1708,12 @@ const extractFromUrl = async (
   const response = extractRecipeResponseSchema.parse(asApiResponse(cleanedDecision));
 
   if (response.status === "success") {
-    await scheduleCacheWrite(context, request.url, response, sourceDocument, detection);
+    await scheduleCacheWrite(context, sourceRequest.url, response, sourceDocument, detection);
   } else if (decision.kind === "needs_retry") {
     await scheduleFallbackHandoff(
       context,
       request.url,
+      sourceRequest.url,
       sourceDocument,
       detection,
       fetchMode,
@@ -1518,8 +1960,101 @@ export const extractRecipeFromImages = async (
   }
 };
 
+const textImportSourceUrlPrefix = "https://linkdish.app/text-imports/";
+
+/**
+ * Pasted text without a source gets a stable synthetic URL derived from the text, so the same
+ * paste maps to the same saved-recipe id (the way image scans use linkdish.app/image-imports/).
+ */
+export const buildTextImportSourceUrl = (text: string): string =>
+  `${textImportSourceUrlPrefix}${createHash("sha256").update(text).digest("hex").slice(0, 32)}`;
+
+/* A pasted caption's link keeps its platform type; other links are web pages. */
+const getTextImportSourceType = (sourceUrl: string | undefined): SourceType =>
+  sourceUrl ? (detectHostedMediaSourceType(sourceUrl)?.sourceType ?? "article") : "unknown";
+
+const extractFromText = async (
+  request: TextImportRequest,
+  context: ExtractionContext
+): Promise<ExtractionResult> => {
+  const { runtime } = context;
+  const sourceUrl = request.sourceUrl ?? buildTextImportSourceUrl(request.text);
+  const detection: DetectionResult = {
+    sourceType: getTextImportSourceType(request.sourceUrl),
+    confidence: "high",
+    reasons: ["User pasted recipe text."],
+    adapterKey: null
+  };
+  const hostname = new URL(sourceUrl).hostname;
+
+  await refreshFallbackSettings(runtime);
+
+  const logBase = {
+    hostname,
+    detection,
+    attempt: "fallback" as const,
+    fetchMode: "http" as const,
+    fallbackProvider: runtime.fallbackExtractor.providerName,
+    browserAttempted: false
+  };
+
+  if (!runtime.fallbackExtractor.available) {
+    const response = fallbackUnavailableResponse(
+      "Importing from text is unavailable until backend recovery credentials are configured."
+    );
+
+    return { response, logContext: makeLogContext({ ...logBase, response, strategy: "none" }) };
+  }
+
+  if (!looksLikeRecipeText(request.text)) {
+    const response = noRecipeInTextResponse(
+      "That text doesn't look like a recipe yet. Include the ingredients and the steps."
+    );
+
+    return { response, logContext: makeLogContext({ ...logBase, response, strategy: "none" }) };
+  }
+
+  return runTextFallbackExtraction({
+    context,
+    document: {
+      kind: "text",
+      url: sourceUrl,
+      origin: "paste",
+      text: request.text,
+      title: null,
+      authorName: null,
+      thumbnailUrl: null
+    },
+    detection,
+    hostname,
+    attempt: "fallback"
+  });
+};
+
+/* Pasted text is per-user input: it never reads or writes the result cache. */
+export const extractRecipeFromText = async (
+  request: TextImportRequest,
+  runtime: ExtractorRuntime = getSharedExtractorRuntime(),
+  options: ExtractRecipeOptions = {}
+): Promise<ExtractionResult> => {
+  const { context, dispose } = createExtractionContext(runtime, {
+    ...options,
+    cacheMode: "bypass"
+  });
+
+  try {
+    const result = await extractFromText(request, context);
+    return {
+      ...result,
+      logContext: { ...result.logContext, cacheStatus: "bypass" }
+    };
+  } finally {
+    dispose();
+  }
+};
+
 export const extractRecipe = (
-  request: ExtractRecipeRequest,
+  request: ExtractRecipeAnyRequest,
   runtime: ExtractorRuntime = getSharedExtractorRuntime(),
   options: ExtractRecipeOptions = {}
 ) => {
@@ -1544,6 +2079,17 @@ export const extractRecipe = (
       {
         attempt: request.attempt ?? "primary",
         url: request.url
+      },
+      runtime,
+      options
+    );
+  }
+
+  if ("text" in request && typeof request.text === "string") {
+    return extractRecipeFromText(
+      {
+        text: request.text,
+        ...(request.sourceUrl ? { sourceUrl: request.sourceUrl } : {})
       },
       runtime,
       options

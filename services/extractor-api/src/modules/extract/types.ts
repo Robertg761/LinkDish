@@ -39,6 +39,23 @@ export interface YouTubeSourceDocument {
   transcript: string | null;
   chapters: string[];
   pageHtml: string | null;
+  /** The channel name from oEmbed, when known. */
+  authorName?: string | null | undefined;
+}
+
+/**
+ * Recipe text that did not come from a fetched page: a TikTok caption read through oEmbed, or
+ * text the user pasted. It only ever goes to the LLM extractor.
+ */
+export interface TextSourceDocument {
+  kind: "text";
+  /** The recipe's source URL (the video's canonical URL, or the pasted text's source/synthetic URL). */
+  url: string;
+  origin: "paste" | "tiktok";
+  text: string;
+  title: string | null;
+  authorName: string | null;
+  thumbnailUrl: string | null;
 }
 
 export interface ImageSourceDocument {
@@ -47,7 +64,11 @@ export interface ImageSourceDocument {
   images: ExtractRecipeImage[];
 }
 
-export type SourceDocument = HtmlSourceDocument | YouTubeSourceDocument | ImageSourceDocument;
+export type SourceDocument =
+  | HtmlSourceDocument
+  | YouTubeSourceDocument
+  | ImageSourceDocument
+  | TextSourceDocument;
 
 export interface FetchResult {
   document: HtmlSourceDocument;
@@ -166,6 +187,11 @@ export interface ExtractorRuntime {
     videoId: string,
     options?: SourceFetchOptions
   ): Promise<YouTubeSourceDocument>;
+  /**
+   * Reads a social post's caption (TikTok oEmbed today). Runtimes without it treat those
+   * links as unsupported.
+   */
+  fetchSocialDocument?: (url: string, options?: SourceFetchOptions) => Promise<TextSourceDocument>;
   fallbackExtractor: FallbackRecipeExtractor;
   recipeTextCleaner?: RecipeTextCleaner;
   /** URL-keyed store of validated success responses. Test runtimes omit it unless they opt in. */

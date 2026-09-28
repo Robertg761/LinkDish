@@ -14,6 +14,7 @@ import {
 import type * as BrowserEscalation from "./browser-escalation.js";
 import type { RequestDeadline } from "../deadline.js";
 import type * as HtmlFetcher from "../fetchers/fetch-html-document.js";
+import type * as TikTokFetcher from "../fetchers/fetch-tiktok-document.js";
 import type * as YouTubeFetcher from "../fetchers/fetch-youtube-document.js";
 import type {
   BrowserFetcher,
@@ -35,6 +36,7 @@ let sharedRuntime: ExtractorRuntime | null = null;
 let htmlFetcherModule: Promise<typeof HtmlFetcher> | null = null;
 let browserEscalationModule: Promise<typeof BrowserEscalation> | null = null;
 let youTubeFetcherModule: Promise<typeof YouTubeFetcher> | null = null;
+let tikTokFetcherModule: Promise<typeof TikTokFetcher> | null = null;
 
 const loadHtmlFetcher = () => {
   htmlFetcherModule ??= import("../fetchers/fetch-html-document.js");
@@ -44,6 +46,11 @@ const loadHtmlFetcher = () => {
 const loadBrowserEscalation = () => {
   browserEscalationModule ??= import("./browser-escalation.js");
   return browserEscalationModule;
+};
+
+const loadTikTokFetcher = () => {
+  tikTokFetcherModule ??= import("../fetchers/fetch-tiktok-document.js");
+  return tikTokFetcherModule;
 };
 
 const loadYouTubeFetcher = () => {
@@ -188,6 +195,18 @@ export const createDefaultExtractorRuntime = (): ExtractorRuntime => {
           : extractorApiEnv.FETCH_HTTP_TIMEOUT_MS,
         deadline ? { signal: deadline.signal } : undefined
       );
+    },
+    fetchSocialDocument: async (url: string, options?: SourceFetchOptions) => {
+      const deadline = options?.deadline;
+      const { fetchTikTokDocument } = await loadTikTokFetcher();
+
+      return fetchTikTokDocument(url, fetchImplementation, {
+        timeoutMs: deadline
+          ? deadline.budgetMs(extractorApiEnv.FETCH_HTTP_TIMEOUT_MS)
+          : extractorApiEnv.FETCH_HTTP_TIMEOUT_MS,
+        ...(deadline ? { signal: deadline.signal } : {}),
+        validateUrl: validatePublicSourceUrl
+      });
     },
     fallbackExtractor: getSharedManagedFallbackExtractor(fetchImplementation),
     recipeTextCleaner: createRecipeTextCleaner(),

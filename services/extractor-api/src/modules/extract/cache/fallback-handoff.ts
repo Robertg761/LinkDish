@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 
+import { isHttpUrl } from "../../../../../../packages/recipe-domain/src/index.js";
+
 import { createDefaultCacheStore, type CacheStore } from "./cache-store.js";
 import { canonicalizeSourceUrl } from "./canonical-url.js";
 import { EXTRACTOR_CACHE_VERSION } from "./extraction-cache.js";
@@ -41,6 +43,11 @@ export interface FallbackHandoff {
   sourceDocument: HandoffSourceDocument;
   /** Prompt-ready page summary for HTML documents. */
   sourceSummary: string | null;
+  /**
+   * The page the recipe was read from when it differs from the requested URL (a Pinterest pin
+   * resolves to the recipe it links to). Absent in entries written before it existed.
+   */
+  sourceUrl?: string | null;
 }
 
 export interface FallbackHandoffStore {
@@ -99,7 +106,9 @@ const parseHandoff = (rawValue: string, url: string): FallbackHandoff | null => 
     fetchMode: value.fetchMode,
     candidate: value.candidate as ExtractionCandidate | null,
     sourceDocument: value.sourceDocument,
-    sourceSummary: value.sourceSummary
+    sourceSummary: value.sourceSummary,
+    sourceUrl:
+      typeof value.sourceUrl === "string" && isHttpUrl(value.sourceUrl) ? value.sourceUrl : null
   };
 };
 

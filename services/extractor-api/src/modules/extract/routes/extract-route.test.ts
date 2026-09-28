@@ -335,7 +335,7 @@ describe("POST /extract", () => {
       method: "POST",
       url: "/extract",
       payload: {
-        url: "https://www.youtube.com/shorts/abc123"
+        url: "https://vimeo.com/123456789"
       }
     });
 
@@ -343,8 +343,7 @@ describe("POST /extract", () => {
     expect(response.json()).toMatchObject({
       status: "failure",
       reason: "unsupported_source",
-      userMessage:
-        "Video links and shorts are not supported yet. Paste a written recipe page instead.",
+      userMessage: "That video site is not supported yet. Paste a written recipe page instead.",
       recovery: {
         allowFallback: false,
         retryable: false,

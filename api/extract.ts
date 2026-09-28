@@ -1,7 +1,7 @@
 import { waitUntil } from "@vercel/functions";
 import { ZodError } from "zod";
 
-import { extractRecipeRequestSchema } from "../packages/api-contracts/src/index.js";
+import { extractRecipeAnyRequestSchema } from "../packages/api-contracts/src/index.js";
 import { corsJson, corsPreflight } from "../services/extractor-api/src/http/vercel-cors.js";
 import { runExtractRequestPipeline } from "../services/extractor-api/src/modules/extract/services/extract-request-pipeline.js";
 import {
@@ -52,7 +52,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const payload = extractRecipeRequestSchema.parse(await request.json());
+    const payload = extractRecipeAnyRequestSchema.parse(await request.json());
     /*
      * Durable analytics and the extraction cache/hand-off writes run after the
      * response through waitUntil, so the recipe is returned as soon as usage

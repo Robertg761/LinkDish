@@ -6,7 +6,7 @@ import { isLiveCanaryRequest } from "../../request-identity.js";
 import { extractRecipe } from "./extract-recipe.js";
 
 import type {
-  ExtractRecipeRequest,
+  ExtractRecipeAnyRequest,
   ExtractRecipeResponse
 } from "../../../../../../packages/api-contracts/src/index.js";
 import type { AdminExtractionEventInput } from "../../admin/metrics.js";
@@ -19,7 +19,7 @@ export interface ExtractPipelineLogger {
 }
 
 export interface ExtractRequestPipelineInput {
-  payload: ExtractRecipeRequest;
+  payload: ExtractRecipeAnyRequest;
   headers: RequestHeaders;
   identity: RequestIdentity;
   startedAt: number;
@@ -80,6 +80,13 @@ const recordAnalytics = (
   );
 };
 
+/*
+ * Pasted text always goes to the AI extractor, so it is metered like an explicit fallback
+ * attempt (imports and strong extractions) whatever the request's attempt says.
+ */
+const getBillingAttempt = (payload: ExtractRecipeAnyRequest): "primary" | "fallback" =>
+  "text" in payload ? "fallback" : payload.attempt;
+
 /**
  * POST /extract after rate limiting and request parsing, shared by the Vercel
  * adapter and the Fastify route.
@@ -96,7 +103,8 @@ export const runExtractRequestPipeline = async (
   const { payload, headers } = input;
   const correlationId = payload.correlationId;
   const cancellation = new AbortController();
-  const billingAuthorization = authorizeExtractionRequest(headers, payload.attempt, input.identity);
+  const billingAttempt = getBillingAttempt(payload);
+  const billingAuthorization = authorizeExtractionRequest(headers, billingAttempt, input.identity);
   const extraction = extractRecipe(payload, input.runtime, {
     signal: cancellation.signal,
     authorization: billingAuthorization.then(
@@ -140,7 +148,7 @@ export const runExtractRequestPipeline = async (
     input.logger.warn({
       ...billing.logContext,
       ...input.logContext,
-      attempt: payload.attempt,
+      attempt: billingAttempt,
       outcomeStatus: "failure",
       latencyMs
     });

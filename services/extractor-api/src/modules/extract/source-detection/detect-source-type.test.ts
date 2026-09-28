@@ -15,7 +15,14 @@ describe("detectSourceType", () => {
 
   it("detects supported YouTube videos and marks other video URLs as unsupported media", () => {
     expect(detectSourceType("https://www.youtube.com/watch?v=abc123").sourceType).toBe("youtube");
-    expect(detectSourceType("https://www.youtube.com/shorts/abc123").sourceType).toBe("video");
+    expect(detectSourceType("https://www.youtube.com/shorts/abc123").sourceType).toBe("youtube");
+    expect(
+      detectSourceType("https://m.youtube.com/shorts/dQw4w9WgXcQ?feature=share").sourceType
+    ).toBe("youtube");
+    expect(detectSourceType("https://www.youtube.com/embed/dQw4w9WgXcQ").sourceType).toBe(
+      "youtube"
+    );
+    expect(detectSourceType("https://www.youtube.com/shorts/").sourceType).toBe("video");
     expect(detectSourceType("https://youtu.be/abc123").sourceType).toBe("youtube");
     expect(detectSourceType("https://vimeo.com/123456").sourceType).toBe("video");
   });
@@ -32,6 +39,28 @@ describe("detectSourceType", () => {
 
   it("marks unsupported social URLs as social", () => {
     expect(detectSourceType("https://www.instagram.com/reel/abc123").sourceType).toBe("social");
+    expect(detectSourceType("https://www.instagram.com/reel/abc123").adapterKey).toBeNull();
+  });
+
+  it("maps TikTok onto the existing social type with its own adapter key", () => {
+    const detection = detectSourceType("https://www.tiktok.com/@cook/video/7234567890123456789");
+
+    expect(detection.sourceType).toBe("social");
+    expect(detection.adapterKey).toBe("tiktok");
+    expect(detectSourceType("https://vm.tiktok.com/ZMabc123/").adapterKey).toBe("tiktok");
+    expect(detectSourceType("https://tiktok.com.example.test/@cook/video/1").sourceType).toBe(
+      "article"
+    );
+  });
+
+  it("marks Pinterest pins so their outbound link is followed", () => {
+    expect(detectSourceType("https://www.pinterest.com/pin/123456789/").adapterKey).toBe(
+      "pinterest"
+    );
+    expect(detectSourceType("https://www.pinterest.co.uk/pin/123456789/").adapterKey).toBe(
+      "pinterest"
+    );
+    expect(detectSourceType("https://www.pinterest.com/cook/soups/").adapterKey).toBeNull();
   });
 
   it("upgrades recipe classification when fetched HTML contains recipe schema", () => {

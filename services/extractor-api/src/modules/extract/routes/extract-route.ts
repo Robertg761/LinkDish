@@ -1,6 +1,6 @@
 import { ZodError } from "zod";
 
-import { extractRecipeRequestSchema } from "../../../../../../packages/api-contracts/src/index.js";
+import { extractRecipeAnyRequestSchema } from "../../../../../../packages/api-contracts/src/index.js";
 import { runExtractRequestPipeline } from "../services/extract-request-pipeline.js";
 
 import type { ExtractorRuntime } from "../types.js";
@@ -11,7 +11,7 @@ export const registerExtractRoute = (app: FastifyInstance, runtime?: ExtractorRu
     const startedAt = Date.now();
 
     try {
-      const payload = extractRecipeRequestSchema.parse(request.body);
+      const payload = extractRecipeAnyRequestSchema.parse(request.body);
       /*
        * Same pipeline as the Vercel adapter. The long-lived server has no
        * waitUntil, so post-response work (analytics, cache writes) simply

@@ -257,6 +257,49 @@ describe("Vercel extract adapter request identity", () => {
     expect(mocks.waitUntil).toHaveBeenCalledWith(expect.any(Promise));
   });
 
+  it("accepts pasted text and meters it like an explicit fallback attempt", async () => {
+    const extractApi = await import("./extract.js");
+    const text = "Lentil soup: 1 cup red lentils, 4 cups stock. Simmer for 25 minutes.";
+
+    const response = await extractApi.POST(
+      new Request("https://api.linkdish.ca/extract", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-linkdish-client-id": "free-user"
+        },
+        body: JSON.stringify({ text })
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.extractRecipe).toHaveBeenCalledWith(
+      { text, attempt: "fallback" },
+      undefined,
+      expect.any(Object)
+    );
+    expect(mocks.authorizeExtractionRequest).toHaveBeenCalledWith(
+      expect.any(Headers),
+      "fallback",
+      expect.any(Object)
+    );
+  });
+
+  it("rejects pasted text outside the length bounds", async () => {
+    const extractApi = await import("./extract.js");
+
+    const response = await extractApi.POST(
+      new Request("https://api.linkdish.ca/extract", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ text: "too short" })
+      })
+    );
+
+    expect(response.status).toBe(400);
+    expect(mocks.extractRecipe).not.toHaveBeenCalled();
+  });
+
   it("reads around the result cache for live canary requests", async () => {
     const extractApi = await import("./extract.js");
 
