@@ -3,7 +3,8 @@
  * cookbook, which ids they get, how many fit under the free limit, and how a LinkDish backup's
  * collections and meal plan map onto this device. {@link buildImportPlan} is synchronous and pure
  * so the writer can re-run it inside its IndexedDB transaction against fresh data (no awaits on
- * non-IndexedDB work may happen inside a transaction).
+ * non-IndexedDB work may happen inside a transaction): everything it knows about the cookbook comes
+ * from its context, never from the analysis the preview ran.
  */
 import {
   canonicalizeRecipeUrl,
@@ -52,20 +53,24 @@ export interface AnalyzedCandidate {
   preferredId: string;
   /** A known starter recipe from a LinkDish backup (restored as a starter, outside the quota). */
   starterId: string | null;
-  /** The cookbook recipe this one duplicates, if any. */
+  /** The cookbook recipe this one duplicated when the analysis ran, if any (re-checked on commit). */
   duplicateOfLocalId: string | null;
   /** The earlier recipe in the same file this one duplicates, if any. */
   duplicateOfIndex: number | null;
+  /** A LinkDish backup entry: the same recipe only as one with its id, never by link and title. */
+  matchById: boolean;
 }
 
 export interface ImportAnalysis {
   parsed: ParsedImportFile;
   items: AnalyzedCandidate[];
-  /** Personal recipes on this device when the analysis ran (starters excluded). */
+  /** Ids of the recipes on this device when the analysis ran. */
+  analyzedRecipeIds: ReadonlySet<string>;
+  /** Personal recipes on this device when the analysis ran (starters excluded), for the preview. */
   quotaUsed: number;
-  /** Collections each cookbook recipe already belongs to (only recipes that have some). */
+  /** Collections each cookbook recipe belonged to when the analysis ran, for the preview. */
   existingCollectionIds: ReadonlyMap<string, readonly string[]>;
-  /** Starters on this device nobody had made their own when the analysis ran. */
+  /** Starters on this device nobody had made their own when the analysis ran, for the preview. */
   untouchedStarterIds: ReadonlySet<string>;
 }
 
@@ -133,6 +138,37 @@ const isStarterId = (id: string): boolean => id.startsWith(STARTER_ID_PREFIX);
 export const isUntouchedStarter = (recipe: WebSavedRecipe | undefined): recipe is WebSavedRecipe =>
   Boolean(recipe?.isStarter && isStarterId(recipe.id) && !isPersonalizedRecipe(recipe));
 
+/** The collections each recipe belongs to (only recipes that belong to some). */
+export const collectionIdsByRecipe = (
+  recipes: readonly WebSavedRecipe[]
+): Map<string, readonly string[]> =>
+  new Map(
+    recipes.flatMap((recipe) =>
+      recipe.collectionIds?.length ? [[recipe.id, recipe.collectionIds] as const] : []
+    )
+  );
+
+/**
+ * The stored recipes {@link buildImportPlan} looks at, of the ones in `storedIds`: each recipe a
+ * candidate matched or would take the id of (which collections it is in, whether a starter is
+ * still untouched), and each recipe saved since the analysis ran (another tab may have saved one
+ * of the file's recipes meanwhile). The writer reads these inside its transaction.
+ */
+export const recipeIdsToRecheck = (
+  analysis: ImportAnalysis,
+  storedIds: Iterable<string>
+): string[] => {
+  const matched = new Set(
+    analysis.items.flatMap((item) =>
+      item.duplicateOfLocalId ? [item.preferredId, item.duplicateOfLocalId] : [item.preferredId]
+    )
+  );
+
+  return Array.from(storedIds).filter(
+    (id) => matched.has(id) || !analysis.analyzedRecipeIds.has(id)
+  );
+};
+
 /**
  * Compares each candidate with the cookbook (and earlier candidates in the same file): same id,
  * same deterministic id, or the same recipe per `isLikelySameRecipe`.
@@ -195,7 +231,8 @@ export async function analyzeImport(
       preferredId,
       starterId,
       duplicateOfLocalId,
-      duplicateOfIndex: inFile
+      duplicateOfIndex: inFile,
+      matchById
     });
 
     if (matchById) {
@@ -214,12 +251,9 @@ export async function analyzeImport(
   return {
     parsed,
     items,
+    analyzedRecipeIds: new Set(existingById.keys()),
     quotaUsed: existing.filter((recipe) => !isStarterId(recipe.id)).length,
-    existingCollectionIds: new Map(
-      existing
-        .filter((recipe) => recipe.collectionIds?.length)
-        .map((recipe) => [recipe.id, recipe.collectionIds ?? []])
-    ),
+    existingCollectionIds: collectionIdsByRecipe(existing),
     untouchedStarterIds: new Set(existing.filter(isUntouchedStarter).map((recipe) => recipe.id))
   };
 }
@@ -237,6 +271,17 @@ export interface ImportPlanContext {
   quotaUsed: number;
   /** Starters stored right now that nobody has made their own (see {@link isUntouchedStarter}). */
   untouchedStarterIds: ReadonlySet<string>;
+  /**
+   * Collections the stored recipes the import may match belong to right now (see
+   * {@link recipeIdsToRecheck}): a skipped duplicate still joins the backup's collections it is
+   * missing from.
+   */
+  existingCollectionIds: ReadonlyMap<string, readonly string[]>;
+  /**
+   * Recipes stored now that were not when the analysis ran: a file recipe matching one of them by
+   * link and title is a duplicate too.
+   */
+  recipesSavedSinceAnalysis: readonly WebSavedRecipe[];
   existingCollections: readonly WebCollection[];
   existingMealPlan: readonly MealPlanEntry[];
   now: string;
@@ -471,6 +516,21 @@ export function buildImportPlan(analysis: ImportAnalysis, context: ImportPlanCon
   }
 
   /* Recipes -------------------------------------------------------------------------------- */
+  // A recipe saved since the analysis ran (by another tab) is matched by link and title like the
+  // rest of the cookbook was; a LinkDish backup's entries only match by id (checked below).
+  const savedSinceAnalysis = new RecipeIndex();
+  for (const recipe of context.recipesSavedSinceAnalysis) {
+    savedSinceAnalysis.add({
+      id: recipe.id,
+      sourceUrl: recipe.sourceUrl,
+      title: recipe.recipe.title
+    });
+  }
+  const savedSinceAnalysisMatch = ({ candidate, matchById }: AnalyzedCandidate): string | null =>
+    matchById || context.recipesSavedSinceAnalysis.length === 0
+      ? null
+      : savedSinceAnalysis.find(candidate.sourceUrl, candidate.recipe.title);
+
   const recipes: WebSavedRecipe[] = [];
   /** Original (backup) id or file position → the local id the recipe ends up with. */
   const localIdByOriginal = new Map<string, string>();
@@ -513,7 +573,7 @@ export function buildImportPlan(analysis: ImportAnalysis, context: ImportPlanCon
     const duplicateLocalId =
       item.duplicateOfLocalId && context.existingRecipeIds.has(item.duplicateOfLocalId)
         ? item.duplicateOfLocalId
-        : null;
+        : savedSinceAnalysisMatch(item);
     const duplicateInFileId =
       item.duplicateOfIndex === null ? null : (localIdByIndex.get(item.duplicateOfIndex) ?? null);
     const isDuplicate =
@@ -537,7 +597,7 @@ export function buildImportPlan(analysis: ImportAnalysis, context: ImportPlanCon
 
           // Restoring a backup onto a cookbook that already has the recipe still restores
           // which collections it belongs to.
-          const current = new Set(analysis.existingCollectionIds.get(localId) ?? []);
+          const current = new Set(context.existingCollectionIds.get(localId) ?? []);
           const missing = collectionIds.filter((collectionId) => !current.has(collectionId));
 
           if (missing.length && context.existingRecipeIds.has(localId)) {
