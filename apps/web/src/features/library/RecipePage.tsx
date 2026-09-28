@@ -612,10 +612,8 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
 
   const deleteLocalWithUndo = async () => {
     const title = recipe.title;
-    // Keep a full copy (with photos) so Undo restores everything.
-    const snapshot = (await getSavedRecipeById(record.id).catch(() => undefined)) ?? record;
-
-    await removeSavedRecipe(record.id);
+    // The full copy (with photos) the delete removed, so Undo restores exactly that.
+    const snapshot = (await removeSavedRecipe(record.id)) ?? record;
     // Undo lives in memory: a waiting app update must not reload the page on this navigation.
     holdAutoApplyUpdate(UNDO_UPDATE_HOLD_MS);
     void navigate("/");

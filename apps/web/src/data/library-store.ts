@@ -363,13 +363,16 @@ export const updateNotes = (id: string, notes: string | null) =>
     () => updateRecipeNotes(id, notes)
   );
 
-/** Deletes the local recipe (the household copy, if any, is the caller's job). */
-export async function removeSavedRecipe(id: string): Promise<void> {
+/**
+ * Deletes the local recipe (the household copy, if any, is the caller's job). Resolves with the
+ * recipe as it was deleted, scans included, for Undo (`undefined` when it was already gone).
+ */
+export async function removeSavedRecipe(id: string): Promise<WebSavedRecipe | undefined> {
   const previous = libraryResource.getSnapshot().data;
   libraryResource.update((current) => current.filter((recipe) => recipe.id !== id));
 
   try {
-    await deleteSavedRecipe(id);
+    return await deleteSavedRecipe(id);
   } catch (error) {
     libraryResource.update(() => previous);
     throw error;

@@ -89,7 +89,6 @@ import {
 } from "./components/use-library-search";
 import { isSharedRecipeNotFoundError, useSharedRecipes } from "./components/use-shared-recipes";
 import {
-  getSavedRecipeById,
   hasSeededStarterRecipes,
   LOCAL_LIMIT_FREE,
   restoreSavedRecipe,
@@ -388,25 +387,20 @@ export const LibraryPage: React.FC = () => {
   const offerSaveLimitUpgrade = useCallback(() => offerUpgrade("save_limit"), [offerUpgrade]);
 
   /* --------------------------- Recipe actions --------------------------- */
-  /** Local recipes delete instantly; Undo writes the full record (and any scans) back. */
+  /**
+   * Local recipes delete instantly; Undo writes the full record (and any scans) back, exactly as
+   * the delete removed them (read in the deleting transaction).
+   */
   const deleteWithUndo = async (recipe: WebSavedRecipe) => {
-    let snapshot: WebSavedRecipe | undefined;
+    let restorable: WebSavedRecipe | undefined;
 
     try {
-      snapshot = await getSavedRecipeById(recipe.id);
-    } catch {
-      snapshot = undefined;
-    }
-
-    try {
-      await removeSavedRecipe(recipe.id);
+      restorable = await removeSavedRecipe(recipe.id);
     } catch (error) {
       console.error("Delete failed:", error);
       showToast({ message: "This recipe could not be deleted. Please try again.", tone: "danger" });
       return;
     }
-
-    const restorable = snapshot;
 
     if (restorable) {
       // Undo lives in memory: a waiting app update must not reload the page on the next tap.

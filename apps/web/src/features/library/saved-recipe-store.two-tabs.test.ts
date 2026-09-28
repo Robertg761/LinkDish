@@ -89,6 +89,11 @@ const personalRecipe = (id: string): WebSavedRecipe => ({
   updatedAt: "2026-09-01T00:00:00.000Z"
 });
 
+const scan = (name: string) => ({
+  dataUrl: `data:image/png;base64,${name}`,
+  mimeType: "image/png" as const
+});
+
 /** Fills a free cookbook up to one below the limit. */
 const fillToOneBelowLimit = () =>
   fakeIdb.seed(
@@ -250,10 +255,6 @@ describe("saved-recipe writes from two tabs", () => {
   });
 
   it("keeps the copy another tab saved again before this tab's Undo", async () => {
-    const scan = (name: string) => ({
-      dataUrl: `data:image/png;base64,${name}`,
-      mimeType: "image/png" as const
-    });
     await putSavedRecipe({
       ...personalRecipe("soup"),
       notes: "Old note",
@@ -297,6 +298,60 @@ describe("saved-recipe writes from two tabs", () => {
 
     expect(outcome).toMatchObject({ restored: true });
     expect(stored("soup")).toMatchObject({ notes: "New note" });
+  });
+
+  it("reads a recipe with the scans it has at that moment", async () => {
+    await putSavedRecipe({ ...personalRecipe("soup"), notes: "First", sourceImages: [scan("A")] });
+    const other = await openOtherTab();
+
+    // Right after this tab read the recipe, the other tab saves a new version with new scans.
+    const replaced = writeInOtherTabAfterNextRead(
+      await getLinkDishWebDb(),
+      SAVED_RECIPES_STORE_NAME,
+      "soup",
+      other.connection,
+      () =>
+        other.store.putSavedRecipe({
+          ...personalRecipe("soup"),
+          notes: "Second",
+          sourceImages: [scan("B")]
+        })
+    );
+    const [read] = await Promise.all([getSavedRecipeById("soup"), replaced]);
+
+    expect({ notes: read?.notes, scans: read?.sourceImages }).toEqual({
+      notes: "First",
+      scans: [scan("A")]
+    });
+    expect(await getSavedRecipeSourceImages("soup")).toEqual([scan("B")]);
+  });
+
+  it("copies a recipe with the scans it has at that moment", async () => {
+    await putSavedRecipe({ ...personalRecipe("soup"), notes: "First", sourceImages: [scan("A")] });
+    const other = await openOtherTab();
+
+    // Right after this tab read the recipe to copy it, the other tab saves a new version.
+    const replaced = writeInOtherTabAfterNextRead(
+      await getLinkDishWebDb(),
+      SAVED_RECIPES_STORE_NAME,
+      "soup",
+      other.connection,
+      () =>
+        other.store.putSavedRecipe({
+          ...personalRecipe("soup"),
+          notes: "Second",
+          sourceImages: [scan("B")]
+        })
+    );
+    const [copy] = await Promise.all([
+      duplicateSavedRecipe("soup", { isPremiumUser: true }),
+      replaced
+    ]);
+
+    expect({
+      notes: stored(copy!.id)?.notes,
+      scans: await getSavedRecipeSourceImages(copy!.id)
+    }).toEqual({ notes: "First", scans: [scan("A")] });
   });
 
   it("never lets two tabs duplicate past the free limit", async () => {

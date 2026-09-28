@@ -1,15 +1,16 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { putSavedRecipe } from "../features/library/saved-recipe-store";
+import { duplicateSavedRecipe, putSavedRecipe } from "../features/library/saved-recipe-store";
 import {
   COLLECTIONS_STORE_NAME,
+  getLinkDishWebDb,
   resetLinkDishWebDbForTests,
   SAVED_RECIPES_STORE_NAME
 } from "../storage/linkdish-db";
 import { fakeIdb } from "../storage/testing/fake-idb";
 import { isolateFakeIdbTransactions } from "../storage/testing/fake-idb-isolation";
-import { createChannelPair } from "../storage/testing/two-tabs";
+import { createChannelPair, writeInOtherTabAfterNextRead } from "../storage/testing/two-tabs";
 
 import { resetDataChangeFeedForTests, setDataChannelFactoryForTests } from "./change-feed";
 import {
@@ -42,11 +43,13 @@ const openOtherTab = async () => {
   const feed = await import("./change-feed");
   const collections = await import("./collections-store");
   const library = await import("./library-store");
-  await (await import("../storage/linkdish-db")).getLinkDishWebDb();
-  return { collections, feed, library };
+  const connection = await (await import("../storage/linkdish-db")).getLinkDishWebDb();
+  return { collections, connection, feed, library };
 };
 
 const storedCollection = (id: string) => fakeIdb.record<WebCollection>(COLLECTIONS_STORE_NAME, id);
+
+const storedRecipe = (id: string) => fakeIdb.record<WebSavedRecipe>(SAVED_RECIPES_STORE_NAME, id);
 
 const recipe = (id: string): WebSavedRecipe =>
   ({
@@ -169,5 +172,42 @@ describe("collection writes from two tabs", () => {
         ...(fakeIdb.record<WebSavedRecipe>(SAVED_RECIPES_STORE_NAME, "pho")?.collectionIds ?? [])
       ].sort()
     ).toEqual([soups.id, salads.id].sort());
+  });
+
+  it("takes a recipe out of the collection whichever tab's write comes first", async () => {
+    await putSavedRecipe(recipe("pho"));
+    await putSavedRecipe({ ...recipe("ramen"), collectionIds: [soups.id] });
+    await loadSavedRecipes();
+    const other = await openOtherTab();
+    await other.library.loadSavedRecipes();
+
+    // The other tab files a recipe in the collection while this one deletes it.
+    await Promise.all([deleteCollection(soups.id), other.library.addToCollection("pho", soups.id)]);
+
+    expect(storedCollection(soups.id)).toBeUndefined();
+    expect(storedRecipe("pho")?.collectionIds).toBeUndefined();
+    expect(storedRecipe("ramen")?.collectionIds).toBeUndefined();
+  });
+
+  it("never leaves a copy made while the other tab deletes its collection filed in it", async () => {
+    await putSavedRecipe({ ...recipe("pho"), collectionIds: [soups.id, salads.id] });
+    const other = await openOtherTab();
+
+    // The other tab deletes the collection right after this tab read the recipe to copy it.
+    const deleted = writeInOtherTabAfterNextRead(
+      await getLinkDishWebDb(),
+      SAVED_RECIPES_STORE_NAME,
+      "pho",
+      other.connection,
+      () => other.collections.deleteCollection(soups.id)
+    );
+    const [copy] = await Promise.all([
+      duplicateSavedRecipe("pho", { isPremiumUser: true }),
+      deleted
+    ]);
+
+    expect(storedCollection(soups.id)).toBeUndefined();
+    expect(storedRecipe("pho")?.collectionIds).toEqual([salads.id]);
+    expect(storedRecipe(copy!.id)?.collectionIds).toEqual([salads.id]);
   });
 });

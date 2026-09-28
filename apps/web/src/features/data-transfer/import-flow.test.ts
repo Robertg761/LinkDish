@@ -7,7 +7,7 @@ import {
   subscribeDataChanges
 } from "../../data/change-feed";
 import { createCollection, getCollections } from "../../data/collections-store";
-import { getMealPlanEntries } from "../../data/meal-plan-store";
+import { addMealPlanEntry, getMealPlanEntries } from "../../data/meal-plan-store";
 import {
   COLLECTIONS_STORE_NAME,
   getLinkDishWebDb,
@@ -146,16 +146,19 @@ describe("importing into the cookbook", () => {
       skippedDuplicates: 1,
       overLimit: 0
     });
-    expect(transaction).toHaveBeenCalledTimes(1);
-    expect(transaction).toHaveBeenCalledWith(
+    // The preview reads the cookbook in one readonly transaction; the import writes in one more.
+    expect(transaction.mock.calls).toEqual([
+      [[SAVED_RECIPES_STORE_NAME, COLLECTIONS_STORE_NAME, MEAL_PLAN_STORE_NAME], "readonly"],
       [
-        SAVED_RECIPES_STORE_NAME,
-        RECIPE_SOURCE_IMAGES_STORE_NAME,
-        COLLECTIONS_STORE_NAME,
-        MEAL_PLAN_STORE_NAME
-      ],
-      "readwrite"
-    );
+        [
+          SAVED_RECIPES_STORE_NAME,
+          RECIPE_SOURCE_IMAGES_STORE_NAME,
+          COLLECTIONS_STORE_NAME,
+          MEAL_PLAN_STORE_NAME
+        ],
+        "readwrite"
+      ]
+    ]);
     expect(changes).toEqual(["2 upserted"]);
     expect((await getSavedRecipes()).map((recipe) => recipe.recipe.title).sort()).toEqual([
       "Soup number 1",
@@ -608,6 +611,37 @@ describe("importing into the cookbook", () => {
     await expect(failure).rejects.toBeInstanceOf(DataTransferError);
     await expect(failure).rejects.toMatchObject({ code: "storage_full" });
     expect(analytics.trackWebEvent).not.toHaveBeenCalled();
+  });
+
+  it("restores nothing when the device fills up part-way through a restore", async () => {
+    const weeknights = await createCollection({ name: "Weeknights" });
+    await putSavedRecipe(record("mine", { collectionIds: [weeknights.id] }));
+    await addMealPlanEntry({ date: "2026-09-29", recipeId: "mine", slot: "dinner", title: "Mine" });
+    const { backup } = buildBackup(await loadExportSnapshot(), {
+      exportedAt: "2026-09-28T00:00:00.000Z",
+      includeImages: false
+    });
+    fakeIdb.reset();
+    resetLinkDishWebDbForTests();
+    const prepared = await prepareImport(fileFromBytes(jsonBytes(backup), "linkdish-backup.json"));
+    const changes: unknown[] = [];
+    for (const topic of ["savedRecipes", "collections", "mealPlan"] as const) {
+      subscribeDataChanges(topic, (change) => changes.push(change));
+    }
+    // The meal plan is written last, after the collections and recipes.
+    fakeIdb.failNextPut(
+      MEAL_PLAN_STORE_NAME,
+      new DOMException("The quota has been exceeded.", "QuotaExceededError")
+    );
+
+    await expect(
+      runImport(prepared, { duplicateMode: "skip", isPremium: true })
+    ).rejects.toMatchObject({ code: "storage_full" });
+
+    expect(fakeIdb.records(SAVED_RECIPES_STORE_NAME)).toEqual([]);
+    expect(fakeIdb.records(COLLECTIONS_STORE_NAME)).toEqual([]);
+    expect(fakeIdb.records(MEAL_PLAN_STORE_NAME)).toEqual([]);
+    expect(changes).toEqual([]);
   });
 
   it("never writes when the file can't be read", async () => {

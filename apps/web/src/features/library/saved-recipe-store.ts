@@ -6,6 +6,7 @@ import { apiClient } from "../../api/client";
 import { isCachedUserPremium } from "../../auth/auth-cache";
 import { emitDataChange } from "../../data/change-feed";
 import { safeGetItem, safeSetItem } from "../../platform/safe-storage";
+import { runLinkDishTransaction } from "../../storage/idb-transaction";
 import {
   COLLECTIONS_STORE_NAME,
   COOK_SESSIONS_STORE_NAME,
@@ -167,11 +168,14 @@ const imagesRecordFor = (
  * Reads
  * ---------------------------------------------------------------------------------------------- */
 
+/** Stored records as the cookbook lists them: list records (no scans), newest update first. */
+export const toSavedRecipeList = (records: readonly WebSavedRecipe[]): WebSavedRecipe[] =>
+  sortByUpdatedAtDesc(records.map(toSavedRecipeListRecord));
+
 /** All saved recipes, newest update first. List records never include `sourceImages`. */
 export async function getSavedRecipes(): Promise<WebSavedRecipe[]> {
   const db = await getDb();
-  const recipes = (await db.getAll(STORE_NAME)) as WebSavedRecipe[];
-  return sortByUpdatedAtDesc(recipes.map(toSavedRecipeListRecord));
+  return toSavedRecipeList((await db.getAll(STORE_NAME)) as WebSavedRecipe[]);
 }
 
 /** Hostname for a recipe source, or "unknown" when the URL cannot be parsed. */
@@ -183,37 +187,59 @@ export const getSourceHost = (sourceUrl: string): string => {
   }
 };
 
-/** The original scans for an image-imported recipe (empty when there are none). */
-export async function getSavedRecipeSourceImages(id: string): Promise<ExtractRecipeImage[]> {
-  const db = await getDb();
-  const stored = (await db.get(IMAGES_STORE_NAME, id)) as WebRecipeSourceImagesRecord | undefined;
-
-  if (stored?.images?.length) {
-    return stored.images;
-  }
-
-  // Records written before the v4 migration ran still embed their images.
-  const legacy = (await db.get(STORE_NAME, id)) as WebSavedRecipe | undefined;
-  return legacy?.sourceImages ?? [];
+/** The parts of a `savedRecipes` or `recipeSourceImages` store (in a transaction) reads use. */
+interface ReadableStore {
+  get(key: string): Promise<unknown>;
 }
 
-/** One saved recipe with its `sourceImages` hydrated (backward compatible detail read). */
-export async function getSavedRecipeById(id: string): Promise<WebSavedRecipe | undefined> {
-  const db = await getDb();
-  const stored = (await db.get(STORE_NAME, id)) as WebSavedRecipe | undefined;
+/**
+ * A recipe's stored record and its scans, read in one transaction so they are from the same
+ * moment: a new version saved meanwhile (in this tab or another) is either both or neither.
+ */
+const readRecipeWithScans = (
+  recipes: ReadableStore,
+  imagesStore: ReadableStore,
+  id: string
+): Promise<[WebSavedRecipe | undefined, WebRecipeSourceImagesRecord | undefined]> =>
+  Promise.all([
+    recipes.get(id) as Promise<WebSavedRecipe | undefined>,
+    imagesStore.get(id) as Promise<WebRecipeSourceImagesRecord | undefined>
+  ]);
 
+/** The record with its scans, as {@link getSavedRecipeById} returns it (`undefined` if none). */
+const hydrateStoredRecipe = (
+  stored: WebSavedRecipe | undefined,
+  images: WebRecipeSourceImagesRecord | undefined
+): WebSavedRecipe | undefined => {
   if (!stored) {
     return undefined;
   }
 
   const record = withStarterFlagById(stored);
+  // Records written before the v4 migration ran still embed their images.
+  return record.sourceImages?.length ? record : withImages(record, images?.images);
+};
 
-  if (record.sourceImages?.length) {
-    return record;
-  }
+/** The original scans for an image-imported recipe (empty when there are none). */
+export async function getSavedRecipeSourceImages(id: string): Promise<ExtractRecipeImage[]> {
+  const [stored, images] = await runLinkDishTransaction(
+    [STORE_NAME, IMAGES_STORE_NAME],
+    "readonly",
+    (tx) => readRecipeWithScans(tx.objectStore(STORE_NAME), tx.objectStore(IMAGES_STORE_NAME), id)
+  );
 
-  const images = (await db.get(IMAGES_STORE_NAME, id)) as WebRecipeSourceImagesRecord | undefined;
-  return withImages(record, images?.images);
+  return images?.images?.length ? images.images : (stored?.sourceImages ?? []);
+}
+
+/** One saved recipe with its `sourceImages` hydrated (backward compatible detail read). */
+export async function getSavedRecipeById(id: string): Promise<WebSavedRecipe | undefined> {
+  const [stored, images] = await runLinkDishTransaction(
+    [STORE_NAME, IMAGES_STORE_NAME],
+    "readonly",
+    (tx) => readRecipeWithScans(tx.objectStore(STORE_NAME), tx.objectStore(IMAGES_STORE_NAME), id)
+  );
+
+  return hydrateStoredRecipe(stored, images);
 }
 
 /** Alias of {@link getSavedRecipeById}. */
@@ -275,18 +301,16 @@ const putSplitRecord = (
 
 /** Writes the record and its images atomically; returns the stored (image-free) record. */
 async function writeSavedRecipe(recipe: WebSavedRecipe): Promise<WebSavedRecipe> {
-  const db = await getDb();
   const split = splitSourceImages(recipe);
 
   if (split.images === undefined) {
-    await db.put(STORE_NAME, split.record);
+    await (await getDb()).put(STORE_NAME, split.record);
   } else {
-    const tx = db.transaction([STORE_NAME, IMAGES_STORE_NAME], "readwrite");
-
-    await Promise.all([
-      ...putSplitRecord(tx.objectStore(STORE_NAME), tx.objectStore(IMAGES_STORE_NAME), split),
-      tx.done
-    ]);
+    await runLinkDishTransaction([STORE_NAME, IMAGES_STORE_NAME], "readwrite", (tx) =>
+      Promise.all(
+        putSplitRecord(tx.objectStore(STORE_NAME), tx.objectStore(IMAGES_STORE_NAME), split)
+      )
+    );
   }
 
   emitDataChange({ topic: "savedRecipes", upserted: [split.record] });
@@ -309,41 +333,89 @@ type NewRecipeOutcome =
   | { record?: undefined; refused: "duplicate"; stored: WebSavedRecipe }
   | { record?: undefined; refused: "limit_exceeded" };
 
+const countPersonalRecipes = (keys: readonly IDBValidKey[]): number =>
+  keys.filter((key) => !isStarterRecipeId(key)).length;
+
+/**
+ * Those of `collectionIds` whose collection still exists, read through the `collections` store of
+ * the caller's transaction. A recipe written back (Undo) or copied after its collection was
+ * deleted must not be filed in it again: the delete could not take it out.
+ */
+const keepExistingCollections = async (
+  collections: ReadableStore,
+  collectionIds: readonly string[]
+): Promise<string[] | undefined> => {
+  const found = await Promise.all(collectionIds.map((id) => collections.get(id)));
+  const kept = collectionIds.filter((_, index) => found[index] !== undefined);
+  return kept.length ? kept : undefined;
+};
+
+/** `record` filed only in `collectionIds` (none when `undefined`). */
+const withCollectionIds = (
+  record: WebSavedRecipe,
+  collectionIds: string[] | undefined
+): WebSavedRecipe => {
+  const next: WebSavedRecipe = { ...record };
+
+  if (collectionIds) {
+    next.collectionIds = collectionIds;
+  } else {
+    delete next.collectionIds;
+  }
+
+  return next;
+};
+
 /**
  * Writes a recipe once `checks` pass. The checks read what is stored inside the readwrite
  * transaction that writes, so two tabs saving at once can't both pass them: the second finds the
- * recipe already there, or the free cookbook full.
+ * recipe already there, or the free cookbook full. A recipe filed in collections (an Undo) is
+ * only filed in those that still exist, read in the same transaction.
  */
 async function writeNewSavedRecipe(
   recipe: WebSavedRecipe,
   checks: NewRecipeChecks
 ): Promise<NewRecipeOutcome> {
-  const db = await getDb();
   const split = splitSourceImages(recipe);
-  const tx = db.transaction([STORE_NAME, IMAGES_STORE_NAME], "readwrite");
-  const done = tx.done;
-  // A failed request rejects below; keep `done` from also surfacing as an unhandled rejection.
-  done.catch(() => undefined);
-  const recipes = tx.objectStore(STORE_NAME);
-  const stored = (await recipes.get(split.record.id)) as WebSavedRecipe | undefined;
+  const filedIn = split.record.collectionIds?.length ? split.record.collectionIds : undefined;
+  const outcome = await runLinkDishTransaction(
+    filedIn
+      ? [STORE_NAME, IMAGES_STORE_NAME, COLLECTIONS_STORE_NAME]
+      : [STORE_NAME, IMAGES_STORE_NAME],
+    "readwrite",
+    async (tx): Promise<NewRecipeOutcome> => {
+      const recipes = tx.objectStore(STORE_NAME);
+      const stored = (await recipes.get(split.record.id)) as WebSavedRecipe | undefined;
 
-  if (checks.ifAbsent && stored) {
-    await done;
-    return { refused: "duplicate", stored: toSavedRecipeListRecord(stored) };
-  }
+      if (checks.ifAbsent && stored) {
+        return { refused: "duplicate", stored: toSavedRecipeListRecord(stored) };
+      }
 
-  if (checks.withinFreeLimit && !stored && !isStarterRecipeId(split.record.id)) {
-    const keys = await recipes.getAllKeys();
+      if (checks.withinFreeLimit && !stored && !isStarterRecipeId(split.record.id)) {
+        if (countPersonalRecipes(await recipes.getAllKeys()) >= LOCAL_LIMIT_FREE) {
+          return { refused: "limit_exceeded" };
+        }
+      }
 
-    if (keys.filter((key) => !isStarterRecipeId(key)).length >= LOCAL_LIMIT_FREE) {
-      await done;
-      return { refused: "limit_exceeded" };
+      const record = filedIn
+        ? withCollectionIds(
+            split.record,
+            await keepExistingCollections(tx.objectStore(COLLECTIONS_STORE_NAME), filedIn)
+          )
+        : split.record;
+
+      await Promise.all(
+        putSplitRecord(recipes, tx.objectStore(IMAGES_STORE_NAME), { ...split, record })
+      );
+      return { record };
     }
+  );
+
+  if (!outcome.refused) {
+    emitDataChange({ topic: "savedRecipes", upserted: [outcome.record] });
   }
 
-  await Promise.all([...putSplitRecord(recipes, tx.objectStore(IMAGES_STORE_NAME), split), done]);
-  emitDataChange({ topic: "savedRecipes", upserted: [split.record] });
-  return { record: split.record };
+  return outcome;
 }
 
 /**
@@ -384,48 +456,43 @@ async function updateStoredRecipe(
   updater: (existing: WebSavedRecipe | undefined) => WebSavedRecipe | undefined,
   { whileCollectionExists }: StoredRecipeUpdateOptions = {}
 ): Promise<WebSavedRecipe | undefined> {
-  const db = await getDb();
-  const tx = db.transaction(
+  const { record, report } = await runLinkDishTransaction(
     whileCollectionExists
       ? [STORE_NAME, IMAGES_STORE_NAME, COLLECTIONS_STORE_NAME]
       : [STORE_NAME, IMAGES_STORE_NAME],
-    "readwrite"
-  );
-  const done = tx.done;
-  // A failed request rejects below; keep `done` from also surfacing as an unhandled rejection.
-  done.catch(() => undefined);
-  const recipes = tx.objectStore(STORE_NAME);
-  const [existing, collection] = await Promise.all([
-    recipes.get(id) as Promise<WebSavedRecipe | undefined>,
-    whileCollectionExists
-      ? (tx.objectStore(COLLECTIONS_STORE_NAME).get(whileCollectionExists) as Promise<unknown>)
-      : undefined
-  ]);
+    "readwrite",
+    async (tx) => {
+      const recipes = tx.objectStore(STORE_NAME);
+      const [existing, collection] = await Promise.all([
+        recipes.get(id) as Promise<WebSavedRecipe | undefined>,
+        whileCollectionExists
+          ? (tx.objectStore(COLLECTIONS_STORE_NAME).get(whileCollectionExists) as Promise<unknown>)
+          : undefined
+      ]);
+      const unchanged = () => existing && toSavedRecipeListRecord(existing);
 
-  if (whileCollectionExists && collection === undefined) {
-    await done;
+      if (whileCollectionExists && collection === undefined) {
+        // Nothing changed, but this tab may already show the change (optimistically): correct it.
+        return { record: unchanged(), report: true };
+      }
 
-    if (!existing) {
-      return undefined;
+      const next = updater(existing);
+
+      if (!next) {
+        return { record: unchanged(), report: false };
+      }
+
+      const split = splitSourceImages(next);
+      await Promise.all(putSplitRecord(recipes, tx.objectStore(IMAGES_STORE_NAME), split));
+      return { record: split.record, report: true };
     }
+  );
 
-    // Nothing changed, but this tab may already show the change (optimistically): correct it.
-    const unchanged = toSavedRecipeListRecord(existing);
-    emitDataChange({ topic: "savedRecipes", upserted: [unchanged] });
-    return unchanged;
+  if (report && record) {
+    emitDataChange({ topic: "savedRecipes", upserted: [record] });
   }
 
-  const next = updater(existing);
-
-  if (!next) {
-    await done;
-    return existing && toSavedRecipeListRecord(existing);
-  }
-
-  const split = splitSourceImages(next);
-  await Promise.all([...putSplitRecord(recipes, tx.objectStore(IMAGES_STORE_NAME), split), done]);
-  emitDataChange({ topic: "savedRecipes", upserted: [split.record] });
-  return split.record;
+  return record;
 }
 
 /** {@link updateStoredRecipe} for a recipe that must already be stored (nothing is created). */
@@ -741,14 +808,19 @@ export async function updateRecipeNotes(
 
 const COPY_SUFFIX_PATTERN = /\s+\(copy(?:\s+\d+)?\)$/iu;
 
-/** "Soup" → "Soup (copy)", then "Soup (copy 2)", … skipping titles already in the cookbook. */
-export async function getUniqueCopyTitle(title: string): Promise<string> {
-  const db = await getDb();
+/**
+ * "Soup" → "Soup (copy)", then "Soup (copy 2)", … skipping titles `countTitled` finds in the
+ * cookbook.
+ */
+async function findUniqueCopyTitle(
+  title: string,
+  countTitled: (candidate: string) => Promise<number>
+): Promise<string> {
   const base = title.replace(COPY_SUFFIX_PATTERN, "").trim() || title.trim();
   let candidate = `${base} (copy)`;
 
   for (let index = 2; index < 1000; index += 1) {
-    if ((await db.countFromIndex(STORE_NAME, "title", candidate)) === 0) {
+    if ((await countTitled(candidate)) === 0) {
       return candidate;
     }
 
@@ -758,51 +830,96 @@ export async function getUniqueCopyTitle(title: string): Promise<string> {
   return candidate;
 }
 
+/** "Soup" → "Soup (copy)", then "Soup (copy 2)", … skipping titles already in the cookbook. */
+export async function getUniqueCopyTitle(title: string): Promise<string> {
+  const db = await getDb();
+  return findUniqueCopyTitle(title, (candidate) =>
+    db.countFromIndex(STORE_NAME, "title", candidate)
+  );
+}
+
 /**
  * Copies a personal recipe. The copy is a regular personal recipe: it counts toward the free
  * limit (throws {@link SavedRecipeLimitError} when full), is never a starter, and is local-only.
+ *
+ * The recipe and its scans are read, and the copy (with its scans) written, in one readwrite
+ * transaction: the copy is of one moment's recipe even when another tab saves a new version
+ * meanwhile, a full device leaves neither the copy nor its scans, and the copy is only filed in
+ * collections that still exist (another tab's delete of one waits for it, then takes it out).
  */
 export async function duplicateSavedRecipe(
   id: string,
   options?: SavedRecipeQuotaOptions
 ): Promise<WebSavedRecipe | undefined> {
-  const existing = await getSavedRecipeById(id);
+  const withinFreeLimit = !isPremium(options);
+  const copied = await runLinkDishTransaction(
+    [STORE_NAME, IMAGES_STORE_NAME, COLLECTIONS_STORE_NAME],
+    "readwrite",
+    async (tx) => {
+      const recipes = tx.objectStore(STORE_NAME);
+      const imagesStore = tx.objectStore(IMAGES_STORE_NAME);
+      const existing = hydrateStoredRecipe(
+        ...(await readRecipeWithScans(recipes, imagesStore, id))
+      );
 
-  if (!existing) {
+      if (!existing) {
+        return undefined;
+      }
+
+      if (withinFreeLimit && countPersonalRecipes(await recipes.getAllKeys()) >= LOCAL_LIMIT_FREE) {
+        throw new SavedRecipeLimitError();
+      }
+
+      const titleIndex = recipes.index("title");
+      const title = await findUniqueCopyTitle(existing.recipe.title, (candidate) =>
+        titleIndex.count(candidate)
+      );
+      const collectionIds = existing.collectionIds?.length
+        ? await keepExistingCollections(
+            tx.objectStore(COLLECTIONS_STORE_NAME),
+            existing.collectionIds
+          )
+        : undefined;
+
+      // A copy is a fresh personal recipe: it keeps content, notes, tags and collections, but not
+      // starter status, sync state or this copy's own cooking history.
+      const copyable: WebSavedRecipe = withCollectionIds(existing, collectionIds);
+      delete copyable.cookLog;
+      delete copyable.favorite;
+      delete copyable.isStarter;
+      delete copyable.lastCookedAt;
+      delete copyable.lastOpenedAt;
+      delete copyable.rating;
+      const now = new Date().toISOString();
+      const duplicate: WebSavedRecipe = {
+        ...copyable,
+        id: crypto.randomUUID(),
+        recipe: {
+          ...existing.recipe,
+          ingredients: existing.recipe.ingredients.map((ingredient) => ({ ...ingredient })),
+          steps: existing.recipe.steps.map((step) => ({ ...step })),
+          title
+        },
+        createdAt: now,
+        updatedAt: now,
+        timesCooked: 0,
+        sync: {
+          status: "local_only"
+        }
+      };
+      const split = splitSourceImages(duplicate);
+
+      await Promise.all(putSplitRecord(recipes, imagesStore, split));
+      return { duplicate, record: split.record };
+    }
+  );
+
+  if (!copied) {
     return undefined;
   }
 
-  await assertCanAddSavedRecipe(options);
-
-  // A copy is a fresh personal recipe: it keeps content, notes, tags and collections, but not
-  // starter status, sync state or this copy's own cooking history.
-  const copyable: WebSavedRecipe = { ...existing };
-  delete copyable.cookLog;
-  delete copyable.favorite;
-  delete copyable.isStarter;
-  delete copyable.lastCookedAt;
-  delete copyable.lastOpenedAt;
-  delete copyable.rating;
-  const now = new Date().toISOString();
-  const duplicate: WebSavedRecipe = {
-    ...copyable,
-    id: crypto.randomUUID(),
-    recipe: {
-      ...existing.recipe,
-      ingredients: existing.recipe.ingredients.map((ingredient) => ({ ...ingredient })),
-      steps: existing.recipe.steps.map((step) => ({ ...step })),
-      title: await getUniqueCopyTitle(existing.recipe.title)
-    },
-    createdAt: now,
-    updatedAt: now,
-    timesCooked: 0,
-    sync: {
-      status: "local_only"
-    }
-  };
-
-  await writeWithinFreeLimit(duplicate, options);
-  return duplicate;
+  emitDataChange({ topic: "savedRecipes", upserted: [copied.record] });
+  return copied.duplicate;
 }
 
 export function sharedRecipeToWebSavedRecipe(sharedRecipe: SharedRecipe): WebSavedRecipe {
@@ -968,20 +1085,32 @@ export async function syncRecipeToHousehold(recipe: WebSavedRecipe): Promise<Web
   }
 }
 
-/** Deletes a recipe together with its stored source images and any in-progress cook session. */
-export async function deleteSavedRecipe(id: string): Promise<void> {
-  const db = await getDb();
-  const tx = db.transaction([STORE_NAME, IMAGES_STORE_NAME, COOK_SESSIONS_STORE_NAME], "readwrite");
-
-  await Promise.all([
-    tx.objectStore(STORE_NAME).delete(id),
-    tx.objectStore(IMAGES_STORE_NAME).delete(id),
-    tx.objectStore(COOK_SESSIONS_STORE_NAME).delete(id),
-    tx.done
-  ]);
+/**
+ * Deletes a recipe together with its stored source images and any in-progress cook session, in
+ * one transaction. Resolves with the recipe as it was when deleted (scans included, read in that
+ * same transaction), for Undo to put back exactly that, or `undefined` when there was none.
+ */
+export async function deleteSavedRecipe(id: string): Promise<WebSavedRecipe | undefined> {
+  const removed = await runLinkDishTransaction(
+    [STORE_NAME, IMAGES_STORE_NAME, COOK_SESSIONS_STORE_NAME],
+    "readwrite",
+    async (tx) => {
+      const recipes = tx.objectStore(STORE_NAME);
+      const imagesStore = tx.objectStore(IMAGES_STORE_NAME);
+      // Requests in a transaction run in order: the reads see the recipe the deletes remove.
+      const [[stored, images]] = await Promise.all([
+        readRecipeWithScans(recipes, imagesStore, id),
+        recipes.delete(id),
+        imagesStore.delete(id),
+        tx.objectStore(COOK_SESSIONS_STORE_NAME).delete(id)
+      ]);
+      return hydrateStoredRecipe(stored, images);
+    }
+  );
 
   emitDataChange({ topic: "savedRecipes", deletedIds: [id] });
   emitDataChange({ topic: "cookSessions", deletedIds: [id] });
+  return removed;
 }
 
 export async function incrementSavedRecipeTimesCooked(
@@ -1171,30 +1300,31 @@ export function markRecipeOpened(
   return patchStoredRecipe(id, (existing) => ({ ...existing, lastOpenedAt: openedAt }));
 }
 
-/** Removes a deleted collection from every recipe that referenced it. */
-export async function removeCollectionFromAllRecipes(collectionId: string): Promise<number> {
-  const db = await getDb();
-  const tx = db.transaction(STORE_NAME, "readwrite");
-  const store = tx.objectStore(STORE_NAME);
-  const recipes = (await store.getAll()) as WebSavedRecipe[];
-  const updated: WebSavedRecipe[] = [];
+/** The parts of a `savedRecipes` store (in the caller's readwrite transaction) a sweep uses. */
+interface RecipeSweepStore {
+  getAll(): Promise<unknown[]>;
+  put(value: unknown): Promise<unknown>;
+}
 
-  for (const recipe of recipes) {
+/**
+ * Takes a collection out of every recipe filed in it, through the `savedRecipes` store of the
+ * caller's readwrite transaction: the one that deletes the collection (see `deleteCollection`),
+ * so the collection and its memberships go together or not at all. Returns the updated list
+ * records, for the caller to report once that transaction has committed.
+ */
+export async function removeCollectionFromRecipes(
+  recipes: RecipeSweepStore,
+  collectionId: string
+): Promise<WebSavedRecipe[]> {
+  const updated = ((await recipes.getAll()) as WebSavedRecipe[]).flatMap((recipe) => {
     if (!recipe.collectionIds?.includes(collectionId)) {
-      continue;
+      return [];
     }
 
     const remaining = recipe.collectionIds.filter((entry) => entry !== collectionId);
-    const next = withOptional(recipe, "collectionIds", remaining.length ? remaining : undefined);
-    await store.put(next);
-    updated.push(toSavedRecipeListRecord(next));
-  }
+    return [withOptional(recipe, "collectionIds", remaining.length ? remaining : undefined)];
+  });
 
-  await tx.done;
-
-  if (updated.length) {
-    emitDataChange({ topic: "savedRecipes", upserted: updated });
-  }
-
-  return updated.length;
+  await Promise.all(updated.map((recipe) => recipes.put(recipe)));
+  return updated.map(toSavedRecipeListRecord);
 }
