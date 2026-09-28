@@ -370,7 +370,8 @@ describe("SettingsPage", { timeout: 20_000 }, () => {
 
     const sheet = await screen.findByRole("dialog", { name: "Restore a backup" });
     expect(await within(sheet).findByText(/^Backup from /u)).toBeInTheDocument();
-    fireEvent.click(within(sheet).getByRole("button", { name: "Restore 1 recipe" }));
+    // The plan (and so the button's label) follows the header by a render.
+    fireEvent.click(await within(sheet).findByRole("button", { name: "Restore 1 recipe" }));
     await within(sheet).findByText("1 recipe restored");
     expect((await getSavedRecipes())[0]).toMatchObject({
       id: "mine",
