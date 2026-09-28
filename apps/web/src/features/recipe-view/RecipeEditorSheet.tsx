@@ -19,11 +19,25 @@ import type { Recipe } from "@linkdish/recipe-domain";
 
 import "./RecipeEditorSheet.css";
 
+/** What the cook changed since the editor opened. */
+export interface RecipeEditorChanges {
+  /** The recipe fields the cook changed (with `sourceUrl` when the link changed). */
+  recipe: Partial<Recipe>;
+  /** The new notes (`null` when cleared); present only when the cook changed them. */
+  notes?: string | null | undefined;
+}
+
 export interface RecipeEditorValues {
+  /** The recipe as it is now, with the cook's changes (a family recipe is saved whole). */
   recipe: Recipe;
   notes: string | null;
   /** Present only when the source link was editable and changed. */
   sourceUrl?: string | undefined;
+  /**
+   * Only what the cook changed. A saved recipe writes just these, so a note or edit saved in
+   * another tab while the editor was open is kept.
+   */
+  changes: RecipeEditorChanges;
 }
 
 interface RecipeEditorSheetProps {
@@ -62,6 +76,44 @@ const toDraft = (recipe: Recipe, notes: string | null | undefined, sourceUrl: st
   steps: formatEditableSteps(recipe.steps),
   title: recipe.title
 });
+
+/* What each field saves, read from its text: two texts that save the same value are no change. */
+const titleOf = (draft: Draft) => draft.title.trim();
+const descriptionOf = (draft: Draft) => draft.description.trim() || null;
+const servingsOf = (draft: Draft) => draft.servings.trim() || null;
+const prepOf = (draft: Draft) => parseMinutesField(draft.prep);
+const cookOf = (draft: Draft) => parseMinutesField(draft.cook);
+const ingredientsOf = (draft: Draft) => splitEditableIngredients(draft.ingredients);
+const stepsOf = (draft: Draft) =>
+  splitEditableLines(draft.steps).map((text, index) => ({ index: index + 1, text }));
+const sourceUrlOf = (draft: Draft) => draft.sourceUrl.trim();
+const notesOf = (draft: Draft) => draft.notes.trim() || null;
+
+/**
+ * The recipe fields whose saved value differs between the draft the editor opened with and the
+ * cook's draft. Call it with a valid draft (see {@link validate}).
+ */
+const changedRecipeFields = (
+  opened: Draft,
+  draft: Draft,
+  sourceEditable: boolean
+): Partial<Recipe> => {
+  const changed = (valueOf: (value: Draft) => unknown) =>
+    JSON.stringify(valueOf(draft)) !== JSON.stringify(valueOf(opened));
+  const prep = prepOf(draft);
+  const cook = cookOf(draft);
+
+  return {
+    ...(changed(titleOf) ? { title: titleOf(draft) } : {}),
+    ...(changed(descriptionOf) ? { description: descriptionOf(draft) } : {}),
+    ...(changed(servingsOf) ? { servings: servingsOf(draft) } : {}),
+    ...(prep !== "invalid" && changed(prepOf) ? { prepTimeMinutes: prep } : {}),
+    ...(cook !== "invalid" && changed(cookOf) ? { cookTimeMinutes: cook } : {}),
+    ...(changed(ingredientsOf) ? { ingredients: ingredientsOf(draft) } : {}),
+    ...(changed(stepsOf) ? { steps: stepsOf(draft) } : {}),
+    ...(sourceEditable && changed(sourceUrlOf) ? { sourceUrl: sourceUrlOf(draft) } : {})
+  };
+};
 
 const validate = (draft: Draft, sourceEditable: boolean): DraftErrors => {
   const errors: DraftErrors = {};
@@ -111,6 +163,8 @@ export const RecipeEditorSheet: React.FC<RecipeEditorSheetProps> = ({
     () => toDraft(recipe, notes, sourceUrl ?? ""),
     [notes, recipe, sourceUrl]
   );
+  // What the editor opened with: the recipe on screen may change meanwhile (another tab saves).
+  const [opened, setOpened] = useState<Draft>(initial);
   const [draft, setDraft] = useState<Draft>(initial);
   const [errors, setErrors] = useState<DraftErrors>({});
   const [formError, setFormError] = useState("");
@@ -121,6 +175,7 @@ export const RecipeEditorSheet: React.FC<RecipeEditorSheetProps> = ({
   // A fresh draft every time the sheet opens.
   useEffect(() => {
     if (open && !wasOpenRef.current) {
+      setOpened(initial);
       setDraft(initial);
       setErrors({});
       setFormError("");
@@ -130,8 +185,8 @@ export const RecipeEditorSheet: React.FC<RecipeEditorSheetProps> = ({
     wasOpenRef.current = open;
   }, [initial, open]);
 
-  const dirty = (Object.keys(initial) as Array<keyof Draft>).some(
-    (key) => draft[key] !== initial[key]
+  const dirty = (Object.keys(opened) as Array<keyof Draft>).some(
+    (key) => draft[key] !== opened[key]
   );
 
   const update =
@@ -171,30 +226,21 @@ export const RecipeEditorSheet: React.FC<RecipeEditorSheetProps> = ({
       return;
     }
 
-    const prep = parseMinutesField(draft.prep);
-    const cook = parseMinutesField(draft.cook);
-    const nextSourceUrl = draft.sourceUrl.trim();
-    const sourceChanged = sourceEditable && nextSourceUrl !== (sourceUrl ?? "");
-    const description = draft.description.trim();
-    const editedRecipe: Recipe = {
-      ...recipe,
-      cookTimeMinutes: cook === "invalid" ? recipe.cookTimeMinutes : cook,
-      ...(description || recipe.description != null ? { description: description || null } : {}),
-      ingredients: splitEditableIngredients(draft.ingredients),
-      prepTimeMinutes: prep === "invalid" ? recipe.prepTimeMinutes : prep,
-      servings: draft.servings.trim() || null,
-      steps: splitEditableLines(draft.steps).map((text, index) => ({ index: index + 1, text })),
-      title: draft.title.trim(),
-      ...(sourceChanged ? { sourceUrl: nextSourceUrl } : {})
-    };
+    // Only what the cook changed: the rest may have been changed elsewhere since the editor opened.
+    const recipeChanges = changedRecipeFields(opened, draft, sourceEditable);
+    const notesChanged = notesOf(draft) !== notesOf(opened);
 
     setSaving(true);
 
     try {
       await onSave({
-        notes: draft.notes.trim() || null,
-        recipe: editedRecipe,
-        ...(sourceChanged ? { sourceUrl: nextSourceUrl } : {})
+        changes: {
+          recipe: recipeChanges,
+          ...(notesChanged ? { notes: notesOf(draft) } : {})
+        },
+        notes: notesChanged ? notesOf(draft) : notes?.trim() || null,
+        recipe: { ...recipe, ...recipeChanges },
+        ...(recipeChanges.sourceUrl ? { sourceUrl: recipeChanges.sourceUrl } : {})
       });
       onClose();
     } catch (error) {

@@ -182,6 +182,22 @@ describe("saved-recipe writes from two tabs", () => {
     });
   });
 
+  it("keeps a note and a title the other tab saves while this tab's editor is open", async () => {
+    await putSavedRecipe({ ...personalRecipe("soup"), notes: "Old note" });
+    const other = await openOtherTab();
+    // This tab's editor opened first; the other tab then saves a note and a new title.
+    await other.store.updateRecipeNotes("soup", "New note");
+    await other.store.updateSavedRecipe("soup", { recipe: { title: "Green soup" } });
+
+    // The editor only changed the servings, so only the servings are written.
+    await updateSavedRecipe("soup", { recipe: { servings: "6" } });
+
+    expect(stored("soup")).toMatchObject({
+      notes: "New note",
+      recipe: { ingredients: [{ text: "1 cup rice" }], servings: "6", title: "Green soup" }
+    });
+  });
+
   it("lets only one tab save the same new recipe", async () => {
     const other = await openOtherTab();
     const input = saveInput("Fried rice");

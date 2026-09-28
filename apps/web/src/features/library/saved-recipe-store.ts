@@ -670,30 +670,55 @@ export async function restoreSavedRecipe(
   return { recipe: outcome.record, restored: true };
 }
 
+/** An edit from the recipe editor: only what the cook changed. */
+export interface SavedRecipeEdit {
+  /** New notes (`null` or blank clears them). Left out, the stored notes stay. */
+  notes?: string | null | undefined;
+  /** The recipe fields the cook changed; the others stay as stored. */
+  recipe?: Partial<Recipe> | undefined;
+  /** A new source link. */
+  sourceUrl?: string | undefined;
+}
+
 /**
- * Saves an edit of the recipe (and, with `sourceUrl`, its link) in one read-modify-write, so
- * personal metadata another tab saves meanwhile (a cook, a favorite) is kept.
+ * Saves an edit of the recipe (and, with `sourceUrl`, its link) in one read-modify-write that
+ * changes only what `edit` holds, so a note or recipe edit another tab saved meanwhile (or a
+ * cook, a favorite) is kept. An edit that holds nothing writes nothing.
  */
 export async function updateSavedRecipe(
   id: string,
-  update: {
-    notes?: string | undefined;
-    recipe: Recipe;
-    sourceUrl?: string | undefined;
-  }
+  edit: SavedRecipeEdit
 ): Promise<WebSavedRecipe | undefined> {
-  const { sourceUrl } = update;
-  const updated = await patchStoredRecipe(id, (existing) => ({
-    ...existing,
-    notes: update.notes?.trim() || undefined,
-    recipe: update.recipe,
-    ...(sourceUrl ? { sourceHost: getSourceHost(sourceUrl), sourceUrl } : {}),
-    updatedAt: new Date().toISOString(),
-    sync: {
-      ...(existing.sync || { status: "local_only" }),
-      status: existing.sync?.sharedRecipeId ? "dirty" : (existing.sync?.status ?? "local_only")
+  const { notes, recipe, sourceUrl } = edit;
+  const recipeChanges = recipe && Object.keys(recipe).length > 0 ? recipe : undefined;
+  const updated = await updateStoredRecipe(id, (existing) => {
+    if (!existing || (notes === undefined && !recipeChanges && !sourceUrl)) {
+      return undefined;
     }
-  }));
+
+    const next: WebSavedRecipe = {
+      ...existing,
+      ...(recipeChanges ? { recipe: { ...existing.recipe, ...recipeChanges } } : {}),
+      ...(sourceUrl ? { sourceHost: getSourceHost(sourceUrl), sourceUrl } : {}),
+      updatedAt: new Date().toISOString(),
+      sync: {
+        ...(existing.sync || { status: "local_only" }),
+        status: existing.sync?.sharedRecipeId ? "dirty" : (existing.sync?.status ?? "local_only")
+      }
+    };
+
+    if (notes !== undefined) {
+      const trimmed = notes?.trim();
+
+      if (trimmed) {
+        next.notes = trimmed;
+      } else {
+        delete next.notes;
+      }
+    }
+
+    return next;
+  });
 
   return hydrateImages(updated);
 }

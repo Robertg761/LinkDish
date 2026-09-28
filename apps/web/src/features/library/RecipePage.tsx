@@ -725,10 +725,10 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
       return;
     }
 
-    // One write for the edit and the link, so a cook or favorite saved meanwhile is kept.
+    // One write of only what was changed in the editor (and the link), so a note, edit, cook or
+    // favorite saved meanwhile, here or in another tab, is kept.
     const updated = await updateSavedRecipe(record.id, {
-      notes: values.notes ?? undefined,
-      recipe: values.recipe,
+      ...values.changes,
       ...(values.sourceUrl ? { sourceUrl: values.sourceUrl } : {})
     });
 

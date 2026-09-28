@@ -657,6 +657,28 @@ describe("RecipePage saved route", () => {
     expect(screen.getByText("Saved here. Sync to update your household’s copy.")).toBeVisible();
   });
 
+  it("keeps a note another tab saves while the editor is open", async () => {
+    await seed([savedRecipe({ notes: "Old note" })]);
+    renderAt("/recipes/recipe_local");
+    await screen.findByRole("heading", { level: 1, name: "Weeknight Chili" });
+
+    fireEvent.click(within(openMenu()).getByRole("menuitem", { name: "Edit recipe" }));
+    const editor = screen.getByRole("dialog", { name: "Edit recipe" });
+    // Another tab saves a note and a new title; this tab hasn't heard about them yet.
+    fakeIdb.seed(SAVED_RECIPES_STORE_NAME, [
+      savedRecipe({ notes: "New note", recipe: { ...baseRecipe, title: "Green Chili" } })
+    ]);
+    fireEvent.change(within(editor).getByLabelText("Servings"), { target: { value: "6" } });
+    fireEvent.click(within(editor).getByRole("button", { name: "Save changes" }));
+
+    expect(await screen.findByText("Recipe updated.")).toBeVisible();
+    // Only what was changed in the editor was written.
+    expect(stored("recipe_local")).toMatchObject({
+      notes: "New note",
+      recipe: { servings: "6", title: "Green Chili" }
+    });
+  });
+
   describe("'Sync now' after an edit", () => {
     const editTitleAndSave = async (title: string) => {
       fireEvent.click(within(openMenu()).getByRole("menuitem", { name: "Edit recipe" }));
