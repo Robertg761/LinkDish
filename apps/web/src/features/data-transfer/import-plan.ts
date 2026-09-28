@@ -7,7 +7,7 @@
  */
 import {
   canonicalizeRecipeUrl,
-  isLikelySameRecipe,
+  recipeSiteTitleKey,
   recipeUrlIdentity,
   SAMPLE_RECIPES
 } from "@linkdish/recipe-domain";
@@ -75,31 +75,29 @@ interface ExistingIndexEntry {
   title: string;
 }
 
-/** Fast duplicate lookups: exact URL identity, then same-site + same-title. */
+/**
+ * Duplicate lookups in constant time: exact URL identity, then same site + same title (the two
+ * rules of `isLikelySameRecipe`), each a map key, so a big export from one site is not compared
+ * pair by pair.
+ */
 class RecipeIndex {
   private readonly byIdentity = new Map<string, string>();
   private readonly byCanonical = new Map<string, string>();
-  private readonly byHost = new Map<string, ExistingIndexEntry[]>();
+  private readonly bySiteTitle = new Map<string, string>();
 
   public add(entry: ExistingIndexEntry): void {
     if (isLinkDishInternalSourceUrl(entry.sourceUrl)) {
       // Made-up URLs are only equal when they are the same URL (every scan shares the host).
-      const canonical = canonicalizeRecipeUrl(entry.sourceUrl);
-      if (!this.byCanonical.has(canonical)) {
-        this.byCanonical.set(canonical, entry.id);
-      }
+      setIfAbsent(this.byCanonical, canonicalizeRecipeUrl(entry.sourceUrl), entry.id);
       return;
     }
 
-    const identity = recipeUrlIdentity(entry.sourceUrl);
-    if (!this.byIdentity.has(identity)) {
-      this.byIdentity.set(identity, entry.id);
-    }
+    setIfAbsent(this.byIdentity, recipeUrlIdentity(entry.sourceUrl), entry.id);
+    const siteTitle = recipeSiteTitleKey(entry);
 
-    const host = getSourceHost(entry.sourceUrl);
-    const list = this.byHost.get(host) ?? [];
-    list.push(entry);
-    this.byHost.set(host, list);
+    if (siteTitle !== null) {
+      setIfAbsent(this.bySiteTitle, siteTitle, entry.id);
+    }
   }
 
   public find(sourceUrl: string, title: string): string | null {
@@ -113,14 +111,17 @@ class RecipeIndex {
       return exact;
     }
 
-    const sameHost = this.byHost.get(getSourceHost(sourceUrl)) ?? [];
-    return (
-      sameHost.find((entry) =>
-        isLikelySameRecipe({ sourceUrl, title }, { sourceUrl: entry.sourceUrl, title: entry.title })
-      )?.id ?? null
-    );
+    const siteTitle = recipeSiteTitleKey({ sourceUrl, title });
+    return siteTitle === null ? null : (this.bySiteTitle.get(siteTitle) ?? null);
   }
 }
+
+/** The first entry for a key wins (the earliest recipe in the file, or the cookbook's). */
+const setIfAbsent = (map: Map<string, string>, key: string, value: string): void => {
+  if (!map.has(key)) {
+    map.set(key, value);
+  }
+};
 
 const isStarterId = (id: string): boolean => id.startsWith(STARTER_ID_PREFIX);
 
