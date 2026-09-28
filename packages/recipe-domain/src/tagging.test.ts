@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { inferRecipeTags, SAMPLE_RECIPES } from "./index.js";
+import { inferRecipeCourse, inferRecipeTags, SAMPLE_RECIPES } from "./index.js";
 
 type Fixture = Parameters<typeof inferRecipeTags>[0];
 
@@ -216,5 +216,25 @@ describe("inferRecipeTags fixtures", () => {
     expect(quick({ prepTimeMinutes: 10, cookTimeMinutes: 25 })).toBeNull();
     expect(quick({ prepTimeMinutes: 5, cookTimeMinutes: 5, totalTimeMinutes: 120 })).toBeNull();
     expect(quick({})).toBeNull();
+  });
+});
+
+describe("inferRecipeCourse", () => {
+  it("suggests exactly the course inferRecipeTags does", () => {
+    const recipes: Fixture[] = [
+      ...SAMPLE_RECIPES.map((sample) => sample.recipe),
+      fixture("Brown Butter Berry Oat Bars", ["1/2 cup honey", "2 cups oats"], ["Bake."]),
+      fixture("Granola Bars", ["2 cups oats"], ["Press."]),
+      fixture("Garlicky Green Beans", ["1 lb green beans"], ["Saute."], { category: "Side Dish" }),
+      fixture("Iced Coffee", ["1 cup coffee"], ["Pour."], { keywords: ["drink"] }),
+      fixture("Weeknight Something", ["1 onion"], ["Cook."]),
+      fixture("classic chocolate chip cookies", [], [])
+    ];
+
+    for (const recipe of recipes) {
+      expect(inferRecipeCourse(recipe)).toEqual(inferRecipeTags(recipe).course);
+    }
+
+    expect(inferRecipeCourse(fixture("pancakes", [], []))?.value).toBe("breakfast");
   });
 });
