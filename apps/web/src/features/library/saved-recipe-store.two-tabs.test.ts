@@ -17,9 +17,12 @@ import { isolateFakeIdbTransactions } from "../../storage/testing/fake-idb-isola
 import { writeInOtherTabAfterNextRead } from "../../storage/testing/two-tabs";
 
 import {
+  deleteSavedRecipe,
   duplicateSavedRecipe,
   forceSaveRecipe,
   generateDeterministicId,
+  getSavedRecipeById,
+  getSavedRecipeSourceImages,
   LOCAL_LIMIT_FREE,
   putSavedRecipe,
   restoreSavedRecipe,
@@ -228,6 +231,56 @@ describe("saved-recipe writes from two tabs", () => {
         : [expect.any(SavedRecipeLimitError), "saved"]
     );
     expect(personalCount()).toBe(LOCAL_LIMIT_FREE);
+  });
+
+  it("keeps the copy another tab saved again before this tab's Undo", async () => {
+    const scan = (name: string) => ({
+      dataUrl: `data:image/png;base64,${name}`,
+      mimeType: "image/png" as const
+    });
+    await putSavedRecipe({
+      ...personalRecipe("soup"),
+      notes: "Old note",
+      sourceImages: [scan("A")]
+    });
+    const snapshot = await getSavedRecipeById("soup");
+    await deleteSavedRecipe("soup");
+    const other = await openOtherTab();
+    // The other tab re-imports the recipe and makes it its own before this tab's Undo.
+    await other.store.putSavedRecipe({
+      ...personalRecipe("soup"),
+      favorite: true,
+      notes: "New note",
+      sourceImages: [scan("B")]
+    });
+
+    const outcome = await restoreSavedRecipe(snapshot!, { isPremiumUser: false });
+
+    expect(outcome).toMatchObject({
+      recipe: { favorite: true, notes: "New note" },
+      restored: false
+    });
+    expect(stored("soup")).toMatchObject({ favorite: true, notes: "New note" });
+    expect(await getSavedRecipeSourceImages("soup")).toEqual([scan("B")]);
+  });
+
+  it("puts a deleted recipe back before a save that starts while Undo checks for it", async () => {
+    const snapshot = { ...personalRecipe("soup"), notes: "Old note" };
+    const other = await openOtherTab();
+
+    // The other tab's save starts right after Undo looked for the recipe: it waits for Undo's
+    // write instead of landing in between (and being overwritten by the snapshot).
+    const saved = writeInOtherTabAfterNextRead(
+      await getLinkDishWebDb(),
+      SAVED_RECIPES_STORE_NAME,
+      "soup",
+      other.connection,
+      () => other.store.updateRecipeNotes("soup", "New note")
+    );
+    const [outcome] = await Promise.all([restoreSavedRecipe(snapshot), saved]);
+
+    expect(outcome).toMatchObject({ restored: true });
+    expect(stored("soup")).toMatchObject({ notes: "New note" });
   });
 
   it("never lets two tabs duplicate past the free limit", async () => {

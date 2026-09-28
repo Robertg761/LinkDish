@@ -506,6 +506,24 @@ describe("RecipePage saved route", () => {
     expect(upgradeMocks.requestUpgradeSheet).toHaveBeenCalledWith("save_limit");
   });
 
+  it("keeps the copy saved again elsewhere when Undo comes after it", async () => {
+    await seed([savedRecipe({ notes: "Old note" })]);
+    renderAt("/recipes/recipe_local");
+    await screen.findByRole("heading", { level: 1, name: "Weeknight Chili" });
+
+    fireEvent.click(within(openMenu()).getByRole("menuitem", { name: "Delete recipe" }));
+    expect(await screen.findByText("Cookbook route")).toBeInTheDocument();
+    // Another tab saves the recipe again, with a new note, before Undo.
+    fakeIdb.seed(SAVED_RECIPES_STORE_NAME, [savedRecipe({ notes: "New note" })]);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Undo" }));
+
+    expect(
+      await screen.findByText("“Weeknight Chili” is already back in your cookbook.")
+    ).toBeInTheDocument();
+    expect(stored("recipe_local")?.notes).toBe("New note");
+  });
+
   it("keeps the Undo when an ignored app update is waiting to apply on navigation", async () => {
     resetAppUpdateForTests();
     pwa.updateSW.mockReset().mockResolvedValue(undefined);

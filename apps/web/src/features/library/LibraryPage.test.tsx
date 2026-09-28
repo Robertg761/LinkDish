@@ -439,6 +439,25 @@ describe("LibraryPage", () => {
     await waitFor(() => expect(storedRecipe("soup")?.recipe.title).toBe("Tomato Soup"));
   });
 
+  it("keeps the copy saved again elsewhere when Undo comes after it", async () => {
+    seedRecipes([makeRecipe("soup", { title: "Tomato Soup" })]);
+
+    renderPage();
+    await screen.findByText("Tomato Soup");
+    fireEvent.click(within(openCardMenu("Tomato Soup")).getByRole("menuitem", { name: "Delete" }));
+    await waitFor(() => expect(storedRecipe("soup")).toBeUndefined());
+
+    // Another tab saves the recipe again (and renames it) before Undo: that copy stays.
+    seedRecipes([makeRecipe("soup", { title: "Roasted Tomato Soup" })]);
+    fireEvent.click(await screen.findByRole("button", { name: "Undo" }));
+
+    expect(
+      await screen.findByText("“Roasted Tomato Soup” is already back in your cookbook.")
+    ).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: "Roasted Tomato Soup" })).toBeInTheDocument();
+    expect(storedRecipe("soup")?.recipe.title).toBe("Roasted Tomato Soup");
+  });
+
   it("keeps a recipe deleted when Undo would take a free cookbook past its limit", async () => {
     seedRecipes(
       Array.from({ length: 15 }, (_, index) =>

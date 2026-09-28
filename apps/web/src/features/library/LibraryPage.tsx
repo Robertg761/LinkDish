@@ -418,28 +418,39 @@ export const LibraryPage: React.FC = () => {
         ? {
             label: "Undo",
             onClick: () => {
-              restoreSavedRecipe(restorable, { isPremiumUser }).catch((error: unknown) => {
-                if (error instanceof SavedRecipeLimitError) {
-                  // The cookbook filled up again since the delete: it stays deleted.
-                  showToast({
-                    action: {
-                      label: "Upgrade",
-                      onClick: () => {
-                        if (!requestUpgradeSheet("save_limit")) {
-                          void navigate("/pricing?upgrade=plus");
+              restoreSavedRecipe(restorable, { isPremiumUser }).then(
+                ({ recipe: current, restored }) => {
+                  if (!restored) {
+                    // Saved again (say, in another tab) since the delete: that newer copy stays.
+                    showToast({
+                      id: `library-delete-${recipe.id}`,
+                      message: `“${current.recipe.title}” is already back in your cookbook.`
+                    });
+                  }
+                },
+                (error: unknown) => {
+                  if (error instanceof SavedRecipeLimitError) {
+                    // The cookbook filled up again since the delete: it stays deleted.
+                    showToast({
+                      action: {
+                        label: "Upgrade",
+                        onClick: () => {
+                          if (!requestUpgradeSheet("save_limit")) {
+                            void navigate("/pricing?upgrade=plus");
+                          }
                         }
-                      }
-                    },
-                    icon: "lock",
-                    id: `library-delete-${recipe.id}`,
-                    message: `Your cookbook is full, so “${recipe.recipe.title}” stays deleted. Free cookbooks hold ${LOCAL_LIMIT_FREE} recipes.`
-                  });
-                  return;
-                }
+                      },
+                      icon: "lock",
+                      id: `library-delete-${recipe.id}`,
+                      message: `Your cookbook is full, so “${recipe.recipe.title}” stays deleted. Free cookbooks hold ${LOCAL_LIMIT_FREE} recipes.`
+                    });
+                    return;
+                  }
 
-                console.error("Restore failed:", error);
-                showToast({ message: getFriendlyErrorMessage(error, "save"), tone: "danger" });
-              });
+                  console.error("Restore failed:", error);
+                  showToast({ message: getFriendlyErrorMessage(error, "save"), tone: "danger" });
+                }
+              );
             }
           }
         : undefined,

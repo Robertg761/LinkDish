@@ -305,7 +305,9 @@ interface NewRecipeChecks {
 
 type NewRecipeOutcome =
   | { record: WebSavedRecipe; refused?: undefined }
-  | { record?: undefined; refused: "duplicate" | "limit_exceeded" };
+  /** `stored` is the record already there (image-free), left as it was. */
+  | { record?: undefined; refused: "duplicate"; stored: WebSavedRecipe }
+  | { record?: undefined; refused: "limit_exceeded" };
 
 /**
  * Writes a recipe once `checks` pass. The checks read what is stored inside the readwrite
@@ -323,22 +325,20 @@ async function writeNewSavedRecipe(
   // A failed request rejects below; keep `done` from also surfacing as an unhandled rejection.
   done.catch(() => undefined);
   const recipes = tx.objectStore(STORE_NAME);
-  const exists = (await recipes.get(split.record.id)) !== undefined;
-  let refused: NewRecipeOutcome["refused"];
+  const stored = (await recipes.get(split.record.id)) as WebSavedRecipe | undefined;
 
-  if (checks.ifAbsent && exists) {
-    refused = "duplicate";
-  } else if (checks.withinFreeLimit && !exists && !isStarterRecipeId(split.record.id)) {
+  if (checks.ifAbsent && stored) {
+    await done;
+    return { refused: "duplicate", stored: toSavedRecipeListRecord(stored) };
+  }
+
+  if (checks.withinFreeLimit && !stored && !isStarterRecipeId(split.record.id)) {
     const keys = await recipes.getAllKeys();
 
     if (keys.filter((key) => !isStarterRecipeId(key)).length >= LOCAL_LIMIT_FREE) {
-      refused = "limit_exceeded";
+      await done;
+      return { refused: "limit_exceeded" };
     }
-  }
-
-  if (refused) {
-    await done;
-    return { refused };
   }
 
   await Promise.all([...putSplitRecord(recipes, tx.objectStore(IMAGES_STORE_NAME), split), done]);
@@ -630,19 +630,44 @@ export async function putSavedRecipe(recipe: WebSavedRecipe): Promise<WebSavedRe
   return recipe;
 }
 
+export interface RestoredSavedRecipe {
+  /** The recipe as stored now (without its scans). */
+  recipe: WebSavedRecipe;
+  /**
+   * False when the recipe was already back (saved again since the delete, say in another tab):
+   * that record, with its own edits and scans, stays as it is.
+   */
+  restored: boolean;
+}
+
 /**
- * Puts a deleted recipe back (Undo), like {@link putSavedRecipe}. When a free cookbook filled up
- * again after the delete there is no room for it, so this throws {@link SavedRecipeLimitError}
- * instead of going past the limit (checked in the transaction that writes, so another tab saving
- * at the same moment can't slip past it too). Starters, and a record that is still stored, go
- * straight back.
+ * Puts a deleted recipe (and its scans) back for Undo, unless a recipe with its id is stored
+ * again by now: that newer record is kept, never replaced by the older snapshot. When a free
+ * cookbook filled up again after the delete there is no room for it, so this throws
+ * {@link SavedRecipeLimitError} instead of going past the limit. Starters always fit. Both checks
+ * read what is stored in the transaction that writes, so a save in another tab can't slip in
+ * between them and the write.
  */
 export async function restoreSavedRecipe(
   recipe: WebSavedRecipe,
   options?: SavedRecipeQuotaOptions
-): Promise<WebSavedRecipe> {
-  await writeWithinFreeLimit(recipe, options);
-  return recipe;
+): Promise<RestoredSavedRecipe> {
+  const outcome = await writeNewSavedRecipe(recipe, {
+    ifAbsent: true,
+    withinFreeLimit: !isPremium(options)
+  });
+
+  if (outcome.refused === "limit_exceeded") {
+    throw new SavedRecipeLimitError();
+  }
+
+  if (outcome.refused === "duplicate") {
+    // This tab may still show the recipe as deleted: show the stored one.
+    emitDataChange({ topic: "savedRecipes", upserted: [outcome.stored] });
+    return { recipe: outcome.stored, restored: false };
+  }
+
+  return { recipe: outcome.record, restored: true };
 }
 
 /**

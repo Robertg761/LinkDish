@@ -624,7 +624,13 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
         label: "Undo",
         onClick: () => {
           void restoreSavedRecipe(snapshot, { isPremiumUser }).then(
-            () => showToast({ message: `“${title}” is back in your cookbook.` }),
+            ({ recipe: current, restored }) =>
+              showToast({
+                // Saved again (say, in another tab) since the delete: that newer copy stays.
+                message: restored
+                  ? `“${title}” is back in your cookbook.`
+                  : `“${current.recipe.title}” is already back in your cookbook.`
+              }),
             (error: unknown) =>
               showToast(
                 error instanceof SavedRecipeLimitError

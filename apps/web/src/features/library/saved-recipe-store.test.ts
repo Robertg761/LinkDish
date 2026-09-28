@@ -337,8 +337,10 @@ describe("saved-recipe-store", () => {
     expect(await getSavedRecipeById(deleted.id)).toBeUndefined();
     expect(await countQuotaSavedRecipes()).toBe(LOCAL_LIMIT_FREE);
 
-    // Plus has no limit, a starter never counts, and a record still stored just goes back.
-    await restoreSavedRecipe(deleted, { isPremiumUser: true });
+    // Plus has no limit, and a starter never counts.
+    await expect(restoreSavedRecipe(deleted, { isPremiumUser: true })).resolves.toMatchObject({
+      restored: true
+    });
     expect((await getSavedRecipeById(deleted.id))?.recipe.title).toBe(deleted.recipe.title);
 
     const [starter] = (await getSavedRecipes()).filter((recipe) =>
@@ -348,8 +350,12 @@ describe("saved-recipe-store", () => {
     await restoreSavedRecipe(starter as WebSavedRecipe);
     expect(await getSavedRecipeById(starter?.id ?? "")).toBeDefined();
 
-    await restoreSavedRecipe({ ...deleted, notes: "Still here" });
-    expect((await getSavedRecipeById(deleted.id))?.notes).toBe("Still here");
+    // A recipe that is back already (saved again, say in another tab) stays as it is stored.
+    await expect(restoreSavedRecipe({ ...deleted, notes: "Older copy" })).resolves.toMatchObject({
+      recipe: { id: deleted.id },
+      restored: false
+    });
+    expect((await getSavedRecipeById(deleted.id))?.notes).toBeUndefined();
   });
 
   it("excludes starter recipes from the free save limit", async () => {
