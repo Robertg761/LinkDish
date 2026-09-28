@@ -65,6 +65,24 @@ describe("replaceBracketedGroups", () => {
     for (const input of ["(".repeat(HOSTILE), "[".repeat(HOSTILE), " ".repeat(HOSTILE) + "x"]) {
       expect(replaceBracketedGroups(input, notes, " ")).toBe(input);
       expect(fastestMilliseconds(() => replaceBracketedGroups(input, notes, " "))).toBeLessThan(50);
+      expect(
+        fastestMilliseconds(() => replaceBracketedGroups(input, notes, " ", { keepSpaces: true }))
+      ).toBeLessThan(50);
+    }
+  });
+
+  it("with keepSpaces, returns exactly what the space-keeping global regex returned", () => {
+    const inputs = seededStrings([" ", "\t", " ", "(", ")", "[", "]", "a", ","], 4_000, 14);
+
+    expect(replaceBracketedGroups("green (spring) onions", notes, " ", { keepSpaces: true })).toBe(
+      "green   onions"
+    );
+
+    for (const input of inputs) {
+      expect(
+        replaceBracketedGroups(input, notes, " ", { keepSpaces: true }),
+        JSON.stringify(input)
+      ).toBe(input.replace(/\([^)]*\)|\[[^\]]*\]/gu, " "));
     }
   });
 });

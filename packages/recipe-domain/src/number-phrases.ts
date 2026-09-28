@@ -79,8 +79,19 @@ export const NUMBER_PHRASE_PATTERN = String.raw`(?:\d+-(?:${asciiFraction}|${vul
 
 const FRACTION_SLASH_PATTERN = /[⁄∕]/u;
 const WHITESPACE_PATTERN = /\s+/u;
-const HYPHENATED_MIXED_PATTERN = /^(\d+)-(.+)$/u;
+/**
+ * "1-1/2" or "2-½", the only hyphenated form NUMBER_PHRASE_PATTERN matches. Any text after the
+ * hyphen used to be parsed recursively, so "1-1-1-…" recursed once per hyphen.
+ */
+const HYPHENATED_MIXED_PATTERN = new RegExp(
+  `^(\\d+)-(${asciiFraction}|${vulgarFractionClass})$`,
+  "u"
+);
 const GLUED_VULGAR_PATTERN = new RegExp(`^(\\d+(?:\\.\\d+)?)\\s*(${vulgarFractionClass})$`, "u");
+
+/** A table entry for a word, never an Object.prototype member ("constructor", "toString"). */
+const ownValue = (table: Readonly<Record<string, number>>, key: string): number | undefined =>
+  Object.prototype.hasOwnProperty.call(table, key) ? table[key] : undefined;
 
 /**
  * Rewrites the Unicode fraction slash (U+2044, and the division slash U+2215) as an ASCII "/",
@@ -125,12 +136,12 @@ export const parseNumberPhrase = (value: string): number | null => {
     return 1;
   }
 
-  const word = WORD_NUMBER_VALUES[normalized];
+  const word = ownValue(WORD_NUMBER_VALUES, normalized);
   if (word != null) {
     return word;
   }
 
-  const directVulgar = VULGAR_FRACTION_VALUES[normalized];
+  const directVulgar = ownValue(VULGAR_FRACTION_VALUES, normalized);
 
   if (directVulgar != null) {
     return directVulgar;

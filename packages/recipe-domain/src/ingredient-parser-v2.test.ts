@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  convertIngredientLine,
+  formatIngredientQuantity,
   formatParsedIngredient,
+  getDisplayIngredient,
+  getDisplayIngredientText,
   inflectIngredientPhrase,
+  inflectNoun,
   isPluralNoun,
   parseIngredientQuantity,
   parseNumberPhrase,
@@ -333,5 +338,70 @@ describe("compound amounts (bug 16)", () => {
     expect(parseIngredientQuantity("1 cup plus 2 eggs").addition).toBeUndefined();
     expect(parseIngredientQuantity("1 cup plus 100 g flour").addition).toBeUndefined();
     expect(parseIngredientQuantity("2 eggs plus 1 yolk").addition).toBeUndefined();
+  });
+});
+
+describe("nouns named like Object.prototype members (fuzz)", () => {
+  it("inflects 'constructor' like any other noun instead of reading the inherited member", () => {
+    expect(isPluralNoun("constructor")).toBe(false);
+    expect(isPluralNoun("constructors")).toBe(true);
+    expect(singularizeNoun("constructor")).toBe("constructor");
+    expect(singularizeNoun("Constructor")).toBe("Constructor");
+    expect(singularizeNoun("CONSTRUCTOR")).toBe("CONSTRUCTOR");
+    expect(singularizeNoun("constructors")).toBe("constructor");
+    expect(pluralizeNoun("constructor")).toBe("constructors");
+    expect(inflectNoun("Constructor", 2)).toBe("Constructors");
+    expect(inflectIngredientPhrase("constructors, sliced", 2, 1)).toBe("constructor, sliced");
+  });
+
+  it("scales and formats a line whose noun is 'constructor'", () => {
+    expect(getDisplayIngredient("2 Constructor", { scale: 0.5 }).text).toBe("1 Constructor");
+    expect(scaled("2 CONSTRUCTOR", 0.5)).toBe("1 CONSTRUCTOR");
+    expect(scaled("2 constructor", 0.5)).toBe("1 constructor");
+    expect(scaled("1 constructor", 2)).toBe("2 constructors");
+    expect(formatIngredientQuantity(1, "Constructor")).toBe("1 Constructor");
+    expect(formatIngredientQuantity(2, "constructor")).toBe("2 constructors");
+  });
+});
+
+describe("hostile ingredient notes and number phrases (fuzz)", () => {
+  it("steps over thousands of leading notes without recursing once per note", () => {
+    const notes = "()".repeat(10_000);
+
+    expect(getDisplayIngredient(`1 ${notes}egg`).text).toBe(`1 ${notes}egg`);
+    expect(scaled(`2 ${"()".repeat(7_500)}eggs`, 2)).toBe(`4 ${"()".repeat(7_500)}eggs`);
+    expect(scaled(`2 ${"(a)".repeat(7_500)}eggs`, 0.5)).toBe(`1 ${"(a)".repeat(7_500)}egg`);
+    expect(getDisplayIngredientText(`2 ${"()".repeat(5_000)}`)).toBe(`2 ${"()".repeat(5_000)}`);
+    expect(getDisplayIngredientText(`2 ${"[]".repeat(5_000)}x`, { scale: 2 })).toBe(
+      `4 ${"[]".repeat(5_000)}x`
+    );
+    expect(convertIngredientLine(`2 ${"()".repeat(5_000)}eggs`, "us").text).toBe(
+      `2 ${"()".repeat(5_000)}eggs`
+    );
+    expect(getDisplayIngredient(`2 (${"()".repeat(50_000)}) cans`, { scale: 2 }).text).toBe(
+      `4 (${"()".repeat(50_000)}) cans`
+    );
+  });
+
+  it("keeps inflecting the noun after a leading note, as before", () => {
+    expect(scaled("1 (8 inch) pie crust", 2)).toBe("2 (8 inch) pie crusts");
+    expect(inflectIngredientPhrase("(about) [large] eggs, beaten", 2, 1)).toBe(
+      "(about) [large] egg, beaten"
+    );
+  });
+
+  it("reads a hyphenated mixed number only when a proper fraction follows the hyphen", () => {
+    expect(parseNumberPhrase(`${"1-".repeat(3_000)}1`)).toBeNull();
+    expect(parseNumberPhrase(`1 ${"1-".repeat(3_000)}½`)).toBeNull();
+    expect(parseNumberPhrase("1-0-1/2")).toBeNull();
+    expect(parseNumberPhrase("2-½")).toBe(2.5);
+    expect(parseNumberPhrase("2-3/4")).toBe(2.75);
+    expect(parseNumberPhrase("1-3/2")).toBeNull();
+  });
+
+  it("reads no number from a word named like an Object.prototype member", () => {
+    expect(parseNumberPhrase("constructor")).toBeNull();
+    expect(parseNumberPhrase("toString")).toBeNull();
+    expect(parseNumberPhrase("1 __proto__")).toBeNull();
   });
 });

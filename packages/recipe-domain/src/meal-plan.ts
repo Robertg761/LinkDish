@@ -127,8 +127,14 @@ type RecipeLookup =
 const isRecipeMap = (lookup: RecipeLookup): lookup is ReadonlyMap<string, PlannedRecipe> =>
   lookup instanceof Map;
 
-const lookupRecipe = (recipesById: RecipeLookup, id: string): PlannedRecipe | undefined =>
-  isRecipeMap(recipesById) ? recipesById.get(id) : recipesById[id];
+/** Own properties only: an id such as "toString" must not find an Object.prototype member. */
+const lookupRecipe = (recipesById: RecipeLookup, id: string): PlannedRecipe | undefined => {
+  if (isRecipeMap(recipesById)) {
+    return recipesById.get(id);
+  }
+
+  return Object.prototype.hasOwnProperty.call(recipesById, id) ? recipesById[id] : undefined;
+};
 
 /**
  * Shopping inputs for planned meals: each entry's recipe ingredients, scaled from the recipe's

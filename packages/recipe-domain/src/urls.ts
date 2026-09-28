@@ -46,7 +46,8 @@ const YOUTUBE_PATH_ID_PATTERN = /^\/(?:shorts|embed|live|v)\/([A-Za-z0-9_-]{6,20
 /** Text that looks like a link: an http(s) URL, or "www." followed by a host. */
 const URL_IN_TEXT_PATTERN =
   /\bhttps?:\/\/[^\s<>"'`]+|\bwww\.[a-z0-9-]+(?:\.[a-z0-9-]+)+[^\s<>"'`]*/iu;
-const TRAILING_URL_PUNCTUATION_PATTERN = /[),.!?;:\]'"]$/u;
+/** Sentence punctuation that may follow a link; tested one character at a time from the end. */
+const TRAILING_URL_PUNCTUATION_CHARACTER = /[),.!?;:\]'"]/u;
 const SCHEME_PATTERN = /^https?:\/\//iu;
 
 const countOf = (text: string, character: string): number => text.split(character).length - 1;
@@ -224,17 +225,27 @@ export const extractFirstUrl = (text: string): string | null => {
     return null;
   }
 
-  let candidate = match[0];
+  const link = match[0];
+  // Counted once and kept current while trimming: recounting the whole link for every
+  // character trimmed took seconds on a long run of ")".
+  const opened = countOf(link, "(");
+  let closed = countOf(link, ")");
+  let end = link.length;
 
-  while (TRAILING_URL_PUNCTUATION_PATTERN.test(candidate)) {
-    // A URL that opened a parenthesis keeps its closing one ("…/Pavlova_(cake)").
-    if (candidate.endsWith(")") && countOf(candidate, "(") >= countOf(candidate, ")")) {
-      break;
+  while (end > 0 && TRAILING_URL_PUNCTUATION_CHARACTER.test(link[end - 1] ?? "")) {
+    if (link[end - 1] === ")") {
+      // A URL that opened a parenthesis keeps its closing one ("…/Pavlova_(cake)").
+      if (opened >= closed) {
+        break;
+      }
+
+      closed -= 1;
     }
 
-    candidate = candidate.slice(0, -1);
+    end -= 1;
   }
 
+  const candidate = link.slice(0, end);
   const withScheme = SCHEME_PATTERN.test(candidate) ? candidate : `https://${candidate}`;
   return parseUrl(withScheme) ? withScheme : null;
 };
@@ -245,11 +256,12 @@ export const extractFirstUrl = (text: string): string | null => {
  */
 const IMPORTED_APP_URL_PATTERN = /linkdish\.app\/imports\/([a-z0-9-]+)\//iu;
 
-const IMPORTED_APP_LABELS: Readonly<Record<string, string>> = {
-  linkdish: "Imported from a LinkDish backup",
-  mela: "Imported from Mela",
-  paprika: "Imported from Paprika"
-};
+/** A Map, so ".../imports/constructor/..." cannot reach Object.prototype.constructor. */
+const IMPORTED_APP_LABELS: ReadonlyMap<string, string> = new Map([
+  ["linkdish", "Imported from a LinkDish backup"],
+  ["mela", "Imported from Mela"],
+  ["paprika", "Imported from Paprika"]
+]);
 
 export const recipeSourceLabel = (sourceUrl: string): string => {
   if (sourceUrl.includes("linkdish.app/image-imports/")) {
@@ -264,7 +276,7 @@ export const recipeSourceLabel = (sourceUrl: string): string => {
   const importedApp = IMPORTED_APP_URL_PATTERN.exec(sourceUrl)?.[1];
 
   if (importedApp !== undefined) {
-    return IMPORTED_APP_LABELS[importedApp.toLowerCase()] ?? "Imported recipe";
+    return IMPORTED_APP_LABELS.get(importedApp.toLowerCase()) ?? "Imported recipe";
   }
 
   const parsed = parseUrl(sourceUrl);

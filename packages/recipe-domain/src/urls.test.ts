@@ -132,6 +132,15 @@ describe("extractFirstUrl", () => {
       expect(extractFirstUrl(text), text).toBe(expected);
     }
   });
+
+  it("keeps only the closing parentheses the URL opened, however many follow it (fuzz)", () => {
+    expect(extractFirstUrl("(see https://en.wikipedia.org/wiki/Pavlova_(cake))).")).toBe(
+      "https://en.wikipedia.org/wiki/Pavlova_(cake)"
+    );
+    expect(extractFirstUrl("https://a.co/((x)).)!")).toBe("https://a.co/((x))");
+    expect(extractFirstUrl(`https://a.co/${")".repeat(40_000)}`)).toBe("https://a.co/");
+    expect(extractFirstUrl(`https://a.co/x${".)".repeat(20_000)}`)).toBe("https://a.co/x");
+  });
 });
 
 describe("recipeSourceLabel", () => {
@@ -149,5 +158,10 @@ describe("recipeSourceLabel", () => {
     expect(recipeSourceLabel("https://linkdish.app/imports/schema-org/stew-77")).toBe(
       "Imported recipe"
     );
+  });
+
+  it("labels an app named like an Object.prototype member as an ordinary import (fuzz)", () => {
+    expect(recipeSourceLabel("https://linkdish.app/imports/constructor/x")).toBe("Imported recipe");
+    expect(recipeSourceLabel("https://linkdish.app/imports/Constructor/x")).toBe("Imported recipe");
   });
 });

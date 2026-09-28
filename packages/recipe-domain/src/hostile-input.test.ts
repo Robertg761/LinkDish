@@ -2,10 +2,17 @@ import { describe, expect, it } from "vitest";
 
 import {
   canonicalIngredientKey,
+  categorizeIngredient,
   cleanShoppingItemName,
+  extractFirstUrl,
+  getDisplayIngredient,
+  getDisplayIngredientText,
+  melaRecipeToRecipe,
+  mergeShoppingInputs,
   normalizeFractionSlashes,
   paprikaRecipeToRecipe,
   parseIngredientQuantity,
+  parseNumberPhrase,
   parseServings,
   parseStepDurations,
   schemaOrgRecipeToRecipe
@@ -105,6 +112,14 @@ describe("number phrases on hostile input", () => {
     );
   });
 
+  it("reads a long chain of hyphenated numbers in linear time, without recursing", () => {
+    const chain = `${"1-".repeat(HOSTILE / 2)}1`;
+
+    expect(parseNumberPhrase(chain)).toBeNull();
+    expect(parseNumberPhrase(`1 ${chain}`)).toBeNull();
+    expect(fastestMilliseconds(() => parseNumberPhrase(chain))).toBeLessThan(MAX_MILLISECONDS);
+  });
+
   it("drops only the whitespace around each fraction slash, as before", () => {
     expect(normalizeFractionSlashes("1 ⁄ 2 cup")).toBe("1/2 cup");
     expect(normalizeFractionSlashes("1∕ 4 tsp")).toBe("1/4 tsp");
@@ -167,6 +182,116 @@ describe("recipe import on hostile input", () => {
       paprikaRecipeToRecipe(paprika, { syntheticSourceBase: "https://linkdish.ca/imported///" })
         .meta.sourceUrl
     ).toMatch(/^https:\/\/linkdish\.ca\/imported\/soup-[0-9a-z]+$/u);
+  });
+
+  it("collects categories in linear time, stopping at the tag limit", () => {
+    const categories = Array.from({ length: 20_000 }, (_, index) => `c${index}`);
+    const repeated = Array.from({ length: 20_000 }, (_, index) =>
+      index % 2 ? "Dinner" : "dinner"
+    );
+
+    expect(paprikaRecipeToRecipe({ ...paprika, categories }).meta.tags).toEqual(
+      categories.slice(0, 50)
+    );
+    expect(paprikaRecipeToRecipe({ ...paprika, categories: repeated }).meta.tags).toEqual([
+      "dinner"
+    ]);
+    expect(
+      fastestMilliseconds(() => paprikaRecipeToRecipe({ ...paprika, categories }))
+    ).toBeLessThan(MAX_MILLISECONDS);
+    expect(
+      fastestMilliseconds(() =>
+        melaRecipeToRecipe({
+          title: "Soup",
+          ingredients: "1 cup water",
+          instructions: "Boil.",
+          categories: categories.join(",")
+        })
+      )
+    ).toBeLessThan(MAX_MILLISECONDS);
+  });
+});
+
+describe("ingredient display on hostile input", () => {
+  const letters = "a".repeat(HOSTILE);
+
+  it("finds the noun to inflect in linear time after a long run of letters", () => {
+    const inputs = [
+      `2 ${letters} eggs`,
+      `2 ${letters}1`,
+      `2 eggs ${"-".repeat(HOSTILE)}!`,
+      `2 ${"é".repeat(HOSTILE)}1`
+    ];
+
+    expect(getDisplayIngredient(`2 ${letters} eggs`, { scale: 0.5 }).text).toBe(`1 ${letters} egg`);
+
+    for (const input of inputs) {
+      expect(
+        fastestMilliseconds(() => getDisplayIngredient(input, { scale: 2 })),
+        input.slice(0, 12)
+      ).toBeLessThan(MAX_MILLISECONDS);
+      expect(
+        fastestMilliseconds(() => getDisplayIngredientText(input, { units: "us" })),
+        input.slice(0, 12)
+      ).toBeLessThan(MAX_MILLISECONDS);
+    }
+  });
+
+  it("steps over leading notes in linear time", () => {
+    const text = `1 ${"()".repeat(HOSTILE / 2)}egg`;
+
+    expect(getDisplayIngredient(text, { scale: 2 }).text).toBe(`2 ${"()".repeat(HOSTILE / 2)}eggs`);
+    expect(fastestMilliseconds(() => getDisplayIngredient(text, { scale: 2 }))).toBeLessThan(
+      MAX_MILLISECONDS
+    );
+  });
+});
+
+/*
+ * The aisle rules are a dozen case-insensitive word patterns, each run over the whole line, so
+ * any 100,000-character line takes 5–25 ms here: too close to a bare 50 ms on a loaded machine.
+ * Like the markup checks, these are held against an ordinary line of the same length instead;
+ * the quadratic note pattern this replaced was over 500 times slower (12 s at this length).
+ */
+const MAX_AISLE_SLOWDOWN = 100;
+
+describe("shopping aisles on hostile input", () => {
+  const inputs = [
+    `${"(".repeat(HOSTILE)}x`,
+    `${"[".repeat(HOSTILE)}x`,
+    `2 cups ${"(".repeat(HOSTILE)}`
+  ];
+  const ordinary = `2 cups ${"flour ".repeat(HOSTILE / 6)}`;
+
+  it("files items in linear time, even with a long run of unclosed '(' or '['", () => {
+    for (const input of inputs) {
+      expect(
+        slowdown(
+          () => categorizeIngredient(input),
+          () => categorizeIngredient(ordinary)
+        ),
+        input.slice(0, 8)
+      ).toBeLessThan(MAX_AISLE_SLOWDOWN);
+      expect(
+        slowdown(
+          () => mergeShoppingInputs([{ text: input }]),
+          () => mergeShoppingInputs([{ text: ordinary }])
+        ),
+        input.slice(0, 8)
+      ).toBeLessThan(MAX_AISLE_SLOWDOWN);
+    }
+  });
+});
+
+describe("links in shared text on hostile input", () => {
+  it("drops trailing punctuation in linear time", () => {
+    const closers = `https://a.co/${")".repeat(HOSTILE)}`;
+    const mixed = `https://a.co/x${".)".repeat(HOSTILE / 2)}`;
+
+    expect(extractFirstUrl(closers)).toBe("https://a.co/");
+    expect(extractFirstUrl(mixed)).toBe("https://a.co/x");
+    expect(fastestMilliseconds(() => extractFirstUrl(closers))).toBeLessThan(MAX_MILLISECONDS);
+    expect(fastestMilliseconds(() => extractFirstUrl(mixed))).toBeLessThan(MAX_MILLISECONDS);
   });
 });
 

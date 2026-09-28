@@ -5,33 +5,37 @@
  * are listed explicitly, and nouns without a plural ("rice", "shrimp", "asparagus") never change.
  */
 
-const IRREGULAR_PLURALS: Readonly<Record<string, string>> = {
-  leaf: "leaves",
-  loaf: "loaves",
-  half: "halves",
-  knife: "knives",
-  calf: "calves",
-  shelf: "shelves",
-  tomato: "tomatoes",
-  potato: "potatoes",
-  mango: "mangoes",
-  chili: "chilies",
-  chilli: "chillies",
-  hero: "heroes",
-  echo: "echoes",
-  tooth: "teeth",
-  foot: "feet",
-  goose: "geese",
-  mouse: "mice",
-  person: "people",
-  child: "children",
-  cactus: "cacti",
-  fungus: "fungi",
-  radius: "radii"
-};
+/**
+ * Maps rather than object literals: a lookup of any word must not reach Object.prototype, where
+ * "constructor" would come back as the Object function.
+ */
+const IRREGULAR_PLURALS: ReadonlyMap<string, string> = new Map([
+  ["leaf", "leaves"],
+  ["loaf", "loaves"],
+  ["half", "halves"],
+  ["knife", "knives"],
+  ["calf", "calves"],
+  ["shelf", "shelves"],
+  ["tomato", "tomatoes"],
+  ["potato", "potatoes"],
+  ["mango", "mangoes"],
+  ["chili", "chilies"],
+  ["chilli", "chillies"],
+  ["hero", "heroes"],
+  ["echo", "echoes"],
+  ["tooth", "teeth"],
+  ["foot", "feet"],
+  ["goose", "geese"],
+  ["mouse", "mice"],
+  ["person", "people"],
+  ["child", "children"],
+  ["cactus", "cacti"],
+  ["fungus", "fungi"],
+  ["radius", "radii"]
+]);
 
-const IRREGULAR_SINGULARS: Readonly<Record<string, string>> = Object.fromEntries(
-  Object.entries(IRREGULAR_PLURALS).map(([singular, plural]) => [plural, singular])
+const IRREGULAR_SINGULARS: ReadonlyMap<string, string> = new Map(
+  [...IRREGULAR_PLURALS].map(([singular, plural]) => [plural, singular])
 );
 
 /** Nouns that read the same in both numbers, or that are never counted. */
@@ -142,11 +146,11 @@ export const isPluralNoun = (word: string): boolean => {
     return false;
   }
 
-  if (IRREGULAR_SINGULARS[lower] != null) {
+  if (IRREGULAR_SINGULARS.has(lower)) {
     return true;
   }
 
-  if (IRREGULAR_PLURALS[lower] != null) {
+  if (IRREGULAR_PLURALS.has(lower)) {
     return false;
   }
 
@@ -164,7 +168,7 @@ export const singularizeNoun = (word: string): string => {
     return word;
   }
 
-  const irregular = IRREGULAR_SINGULARS[lower];
+  const irregular = IRREGULAR_SINGULARS.get(lower);
   if (irregular != null) {
     return matchCase(word, irregular);
   }
@@ -193,7 +197,7 @@ export const pluralizeNoun = (word: string): string => {
     return word;
   }
 
-  const irregular = IRREGULAR_PLURALS[lower];
+  const irregular = IRREGULAR_PLURALS.get(lower);
   if (irregular != null) {
     return matchCase(word, irregular);
   }
@@ -219,9 +223,43 @@ export const inflectNoun = (word: string, count: number): string =>
  */
 const HEAD_PHRASE_END_PATTERN =
   /[,;([*]|\s[-–—]\s|\s(?:or|for|to|about|such|plus|and|with|at|in|from|if|as|divided|optional)\s/iu;
-const TRAILING_WORD_PATTERN = /([A-Za-zÀ-ÿ'-]+)(\s*)$/u;
-/** A size note that opens the phrase, as in "1 (8 inch) pie crust". */
-const LEADING_NOTE_PATTERN = /^\s*[([][^)\]]*[)\]]\s*/u;
+/**
+ * One character of the head noun. The noun is found with backward scans (see runStart): the
+ * end-anchored `([A-Za-zÀ-ÿ'-]+)(\s*)$` it replaces was retried at every position of a long run
+ * of letters, which took seconds on a line of a few ten thousand characters.
+ */
+const WORD_CHARACTER = /[A-Za-zÀ-ÿ'-]/u;
+const SPACE_CHARACTER = /\s/u;
+
+/** Where the run of characters matching `character` that ends at `end` starts. */
+const runStart = (text: string, end: number, character: RegExp): number => {
+  let start = end;
+
+  while (start > 0 && character.test(text[start - 1] ?? "")) {
+    start -= 1;
+  }
+
+  return start;
+};
+
+/**
+ * A size note that opens the phrase, as in "1 (8 inch) pie crust". Sticky, so a loop steps over
+ * any number of notes in one pass; see leadingNotesEnd.
+ */
+const LEADING_NOTE_PATTERN = /\s*[([][^)\]]*[)\]]\s*/uy;
+
+/** Where the notes that open a phrase end: 0 without any, 16 for "(8 inch) [thin] crust". */
+const leadingNotesEnd = (phrase: string): number => {
+  let end = 0;
+  LEADING_NOTE_PATTERN.lastIndex = 0;
+
+  // A failed sticky match resets lastIndex to 0 and ends the loop; a match is never empty.
+  while (LEADING_NOTE_PATTERN.exec(phrase)) {
+    end = LEADING_NOTE_PATTERN.lastIndex;
+  }
+
+  return end;
+};
 
 /**
  * Re-inflects the head noun of an ingredient phrase for a new count, leaving everything after
@@ -235,22 +273,14 @@ export const inflectIngredientPhrase = (
   originalCount: number,
   nextCount: number
 ): string => {
-  const leadingNote = LEADING_NOTE_PATTERN.exec(phrase)?.[0] ?? "";
-
-  if (leadingNote.length > 0) {
-    return `${leadingNote}${inflectIngredientPhrase(phrase.slice(leadingNote.length), originalCount, nextCount)}`;
-  }
-
-  const endMatch = HEAD_PHRASE_END_PATTERN.exec(phrase);
-  const headEnd = endMatch ? endMatch.index : phrase.length;
-  const head = phrase.slice(0, headEnd);
-  const wordMatch = TRAILING_WORD_PATTERN.exec(head);
-
-  if (!wordMatch || wordMatch.index == null) {
-    return phrase;
-  }
-
-  const word = wordMatch[1] ?? "";
+  const notesEnd = leadingNotesEnd(phrase);
+  const rest = phrase.slice(notesEnd);
+  const endMatch = HEAD_PHRASE_END_PATTERN.exec(rest);
+  const headEnd = endMatch ? endMatch.index : rest.length;
+  const head = rest.slice(0, headEnd);
+  const wordEnd = runStart(head, head.length, SPACE_CHARACTER);
+  const wordStart = runStart(head, wordEnd, WORD_CHARACTER);
+  const word = head.slice(wordStart, wordEnd);
 
   if (word.length < 2 || isInvariantNoun(word) || word.includes("-")) {
     return phrase;
@@ -269,5 +299,5 @@ export const inflectIngredientPhrase = (
     return phrase;
   }
 
-  return `${head.slice(0, wordMatch.index)}${inflected}${wordMatch[2] ?? ""}${phrase.slice(headEnd)}`;
+  return `${phrase.slice(0, notesEnd + wordStart)}${inflected}${phrase.slice(notesEnd + wordEnd)}`;
 };

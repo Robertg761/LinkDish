@@ -246,6 +246,13 @@ describe("categorizeIngredient", () => {
     expect(categorizeIngredient("1 cup butter beans")).toBe("canned");
     expect(categorizeIngredient("1 tbsp cornmeal")).toBe("baking");
   });
+
+  it("drops bracketed notes, and leaves unclosed openers, as before (fuzz)", () => {
+    expect(categorizeIngredient("2 [large] onions (diced)")).toBe("produce");
+    expect(categorizeIngredient("1 (packed) cup brown sugar")).toBe("baking");
+    expect(categorizeIngredient(`${"(".repeat(100_000)}x`)).toBe("other");
+    expect(categorizeIngredient(`2 cups ${"[".repeat(100_000)}milk`)).toBe("dairy-eggs");
+  });
 });
 
 describe("shopping aisles", () => {

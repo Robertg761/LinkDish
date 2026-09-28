@@ -135,6 +135,47 @@ describe("parseShoppingLine", () => {
     }
   });
 
+  it("keeps the added part of a compound amount (fuzz)", () => {
+    expect(parseShoppingLine("1 cup plus 2 tablespoons all-purpose flour")).toEqual({
+      qty: 1.125,
+      unit: "cup",
+      text: "all-purpose flour"
+    });
+    expect(
+      formatShoppingItemText(parseShoppingLine("1 tablespoon plus 1 teaspoon kosher salt"))
+    ).toBe("1 ⅓ Tbsp kosher salt");
+    expect(formatShoppingItemText(parseShoppingLine("3/4 cup + 2 tbsp sugar"))).toBe("⅞ cup sugar");
+    expect(formatShoppingItemText(parseShoppingLine("1 cup and 2 tablespoons milk"))).toBe(
+      "1 ⅛ cups milk"
+    );
+    expect(
+      mergeShoppingInputs([
+        { text: "1 cup plus 2 tablespoons all-purpose flour" },
+        { text: "1 cup all-purpose flour" }
+      ]).map(formatShoppingItemText)
+    ).toEqual(["2 ⅛ cups all-purpose flour"]);
+    expect(
+      mergeShoppingInputs(
+        recipeIngredientsToShoppingInputs(
+          { title: "Cake", ingredients: [{ text: "1 cup plus 2 Tbsp flour" }] },
+          { scale: 2 }
+        )
+      ).map(formatShoppingItemText)
+    ).toEqual(["2 ¼ cups flour"]);
+  });
+
+  it("reads 'constructor' as an item name, not an inherited member (fuzz)", () => {
+    expect(parseShoppingLine("2 constructor")).toEqual({ qty: 2, text: "constructor" });
+    expect(parseShoppingLine("2 Constructors")).toEqual({ qty: 2, text: "Constructors" });
+    expect(canonicalIngredientKey("constructor sugar")).toBe("constructor sugar");
+    expect(canonicalIngredientKey("2 constructors")).toBe("constructor");
+    expect(
+      mergeShoppingInputs([{ text: "1 constructor" }, { text: "2 constructors" }]).map(
+        formatShoppingItemText
+      )
+    ).toEqual(["3 constructors"]);
+  });
+
   it("cleans names", () => {
     expect(cleanShoppingItemName("chickpeas, drained and rinsed")).toBe("chickpeas");
     expect(cleanShoppingItemName("walnuts (optional)")).toBe("walnuts");
@@ -364,6 +405,18 @@ describe("mergeShoppingItemLists", () => {
     expect(eggs).toMatchObject({ qty: { min: 2, max: 3 }, text: "eggs" });
   });
 
+  it("re-inflects a name that opens with thousands of notes without overflowing (fuzz)", () => {
+    const notes = "()".repeat(5_000);
+    const [eggs] = mergeShoppingItemLists<Item>(
+      [{ id: "a", text: `${notes} egg`, qty: 1 }],
+      [{ id: "b", text: "egg", qty: 2 }],
+      combine
+    );
+
+    // Inflected to "…() eggs", then clipped to the item text limit.
+    expect(eggs).toEqual({ id: "a", text: "()".repeat(100), qty: 3, mergedFrom: ["a", "b"] });
+  });
+
   it("finds the matching item index", () => {
     const items = [
       { text: "green onions", qty: 2 },
@@ -417,5 +470,16 @@ describe("recipeIngredientsToShoppingInputs", () => {
         units: "metric"
       })[0]?.text
     ).toBe("240 ml cherry tomatoes, quartered");
+  });
+
+  it("scales a line that opens with thousands of notes without overflowing (fuzz)", () => {
+    const notes = "()".repeat(6_000);
+
+    expect(
+      recipeIngredientsToShoppingInputs(
+        { title: "T", ingredients: [{ text: `2 ${notes} eggs` }] },
+        { scale: 2 }
+      )[0]?.text
+    ).toBe(`4 ${notes} eggs`);
   });
 });

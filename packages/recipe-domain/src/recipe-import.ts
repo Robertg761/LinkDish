@@ -23,6 +23,7 @@ import {
   MAX_RECIPE_STEP_COUNT,
   MAX_RECIPE_STEP_TEXT_LENGTH,
   MAX_RECIPE_TITLE_LENGTH,
+  MAX_RECIPE_URL_LENGTH,
   recipeSchema
 } from "./recipe-schema.js";
 import { removeHtmlTags, trimEndMatching } from "./text-scan.js";
@@ -102,6 +103,13 @@ const clip = (text: string, maxLength: number): string =>
   text.length <= maxLength
     ? text
     : text.slice(0, maxLength).replace(HIGH_SURROGATE_END_PATTERN, "").trimEnd();
+
+/**
+ * A URL the recipe schema accepts. A longer one is dropped like an invalid one, so an over-long
+ * image or video link costs that field instead of the whole recipe.
+ */
+const isImportableUrl = (url: string): boolean =>
+  url.length <= MAX_RECIPE_URL_LENGTH && isHttpUrl(url);
 
 /** Text from an unknown JSON value: strings as-is, numbers stringified, anything else "". */
 const asText = (value: unknown): string =>
@@ -313,7 +321,7 @@ const resolveSourceUrl = (
   for (const candidate of candidates) {
     const url = asText(candidate).trim();
 
-    if (url && isHttpUrl(url) && url.length <= 2_048) {
+    if (url && isImportableUrl(url)) {
       return { sourceUrl: url, synthetic: false };
     }
   }
@@ -325,19 +333,27 @@ const resolveSourceUrl = (
   return { sourceUrl: `${base}/${slugify(title)}-${hashText(identity)}`, synthetic: true };
 };
 
+/** The first MAX_TAGS distinct tags, ignoring case; stops reading once it has them. */
 const toTags = (value: unknown): string[] | undefined => {
   const entries = Array.isArray(value) ? value : typeof value === "string" ? value.split(",") : [];
   const tags: string[] = [];
+  const seen = new Set<string>();
 
   for (const entry of entries) {
-    const tag = clip(oneLine(entry), MAX_TAG_LENGTH);
+    if (tags.length === MAX_TAGS) {
+      break;
+    }
 
-    if (tag && !tags.some((existing) => existing.toLowerCase() === tag.toLowerCase())) {
+    const tag = clip(oneLine(entry), MAX_TAG_LENGTH);
+    const key = tag.toLowerCase();
+
+    if (tag && !seen.has(key)) {
+      seen.add(key);
       tags.push(tag);
     }
   }
 
-  return tags.length > 0 ? tags.slice(0, MAX_TAGS) : undefined;
+  return tags.length > 0 ? tags : undefined;
 };
 
 const toRating = (value: unknown): number | null => {
@@ -477,7 +493,7 @@ export const paprikaRecipeToRecipe = (
   );
   const imageUrl = asText(source.image_url).trim();
   const image: RecipeImage | null =
-    imageUrl && isHttpUrl(imageUrl) ? { url: imageUrl, source: "content" } : null;
+    imageUrl && isImportableUrl(imageUrl) ? { url: imageUrl, source: "content" } : null;
   const draft: RecipeDraft = {
     title,
     sourceUrl,
@@ -662,7 +678,7 @@ const imageFrom = (value: unknown, depth = 0): RecipeImage | null => {
 
   if (typeof value === "string") {
     const url = value.trim();
-    return isHttpUrl(url) ? { url, source: "jsonld" } : null;
+    return isImportableUrl(url) ? { url, source: "jsonld" } : null;
   }
 
   if (Array.isArray(value)) {
@@ -680,7 +696,7 @@ const imageFrom = (value: unknown, depth = 0): RecipeImage | null => {
   const node = recordOf(value);
   const url = asText(node.url ?? node.contentUrl).trim();
 
-  if (!url || !isHttpUrl(url)) {
+  if (!url || !isImportableUrl(url)) {
     return null;
   }
 
@@ -702,7 +718,7 @@ const videoUrlFrom = (value: unknown): string | null => {
     for (const candidate of [node.contentUrl, node.embedUrl, node.url, entry]) {
       const url = asText(candidate).trim();
 
-      if (url && isHttpUrl(url)) {
+      if (url && isImportableUrl(url)) {
         return url;
       }
     }

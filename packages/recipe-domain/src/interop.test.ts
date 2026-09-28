@@ -350,6 +350,44 @@ describe("schemaOrgRecipeToRecipe", () => {
     });
   });
 
+  it("drops an image or video URL longer than the schema allows and keeps the recipe (fuzz)", () => {
+    const longUrl = `https://cdn.example.com/img.jpg?${"a".repeat(2100)}`;
+    const recipe = {
+      "@type": "Recipe",
+      name: "S",
+      recipeIngredient: ["1 cup water"],
+      recipeInstructions: "Boil."
+    };
+
+    const withImage = schemaOrgRecipeToRecipe({ ...recipe, image: longUrl });
+    expect(withImage.warnings).toEqual([]);
+    expect(withImage.recipe).toMatchObject({ title: "S", image: null });
+
+    const withVideo = schemaOrgRecipeToRecipe({ ...recipe, video: { contentUrl: longUrl } });
+    expect(withVideo.warnings).toEqual([]);
+    expect(withVideo.recipe).toMatchObject({ title: "S", videoUrl: null });
+
+    expect(
+      schemaOrgRecipeToRecipe({
+        ...recipe,
+        image: [{ url: longUrl }, "https://example.com/next.jpg"],
+        video: [{ contentUrl: longUrl, embedUrl: "https://example.com/embed" }]
+      }).recipe
+    ).toMatchObject({
+      image: { url: "https://example.com/next.jpg" },
+      videoUrl: "https://example.com/embed"
+    });
+
+    const paprika = paprikaRecipeToRecipe({
+      name: "S",
+      ingredients: "1 cup water",
+      directions: "Boil.",
+      image_url: longUrl
+    });
+    expect(paprika.warnings).toEqual([]);
+    expect(paprika.recipe).toMatchObject({ title: "S", image: null });
+  });
+
   it("round-trips a LinkDish recipe through recipeToJsonLd", () => {
     const { recipe } = schemaOrgRecipeToRecipe(recipeToJsonLd(skillet));
 
