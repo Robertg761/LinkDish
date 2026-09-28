@@ -1,3 +1,4 @@
+import { notificationAsync } from "expo-haptics";
 import React from "react";
 import { act, create } from "react-test-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -1860,5 +1861,65 @@ describe("RecipeResultCard", () => {
 
     expect(timerText()).toBe("9:57");
     expect(uiRenderCounts.appText).toBe(appTextRendersBeforeTicks);
+  });
+
+  it("keeps timers ticking and alerts when one finishes on the finale screen", async () => {
+    vi.useFakeTimers();
+    let renderer: ReturnType<typeof create>;
+
+    act(() => {
+      renderer = create(
+        <RecipeResultCard
+          recipe={buildRecipe({ steps: [{ index: 1, text: "Roast for 10 minutes." }] })}
+        />
+      );
+    });
+
+    act(() => {
+      getProps<PressableProps>(
+        renderer!.root.findByProps({ accessibilityLabel: "Open step-by-step cooking mode" })
+      ).onPress?.();
+    });
+
+    act(() => {
+      getProps<PressableProps>(
+        renderer!.root.findAllByProps({ accessibilityLabel: "Start 10 minutes timer" })[0]!
+      ).onPress?.();
+    });
+
+    act(() => {
+      getProps<PressableProps>(
+        renderer!.root.findByProps({ accessibilityLabel: "Finish cooking" })
+      ).onPress?.();
+    });
+
+    expect(JSON.stringify(renderer!.toJSON())).toContain(COOK_MODE_FINALE_TITLE);
+    vi.mocked(notificationAsync).mockClear();
+
+    const timerText = () =>
+      renderer!.root
+        .findAllByType("text" as React.ElementType)
+        .map((node) => getPrimitiveText(node))
+        .find((text) => /^\d+:\d\d$/u.test(text));
+
+    await act(async () => {
+      vi.advanceTimersByTime(3_000);
+      await flushAsyncWork();
+    });
+
+    // The running timer stays visible (and counting) under the finale.
+    expect(timerText()).toBe("9:57");
+
+    await act(async () => {
+      vi.advanceTimersByTime(10 * 60 * 1000);
+      await flushAsyncWork();
+    });
+
+    expect(vi.mocked(notificationAsync)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(notificationAsync)).toHaveBeenCalledWith("success");
+    expect(
+      renderer!.root.findAllByProps({ accessibilityLabel: "Dismiss 10 minutes timer" })
+    ).not.toHaveLength(0);
+    expect(vi.getTimerCount()).toBe(0);
   });
 });

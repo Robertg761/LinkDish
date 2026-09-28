@@ -2,6 +2,7 @@ import {
   formatShoppingItemText,
   getDisplayIngredientText,
   groupByShoppingCategory,
+  MAX_SHOPPING_ITEM_TEXT_LENGTH,
   mergeShoppingItemLists,
   parseShoppingLine as parseDomainShoppingLine,
   recipeIngredientsToShoppingInputs as buildDomainShoppingInputs
@@ -65,6 +66,22 @@ export const SHOPPING_MERGE_OPTIONS: MergeShoppingOptions = { convertUnits: true
 const isRemoteNewer = (remoteUpdatedAt: string, localUpdatedAt: string): boolean =>
   new Date(remoteUpdatedAt).getTime() > new Date(localUpdatedAt).getTime();
 
+const HIGH_SURROGATE_END_PATTERN = /[\uD800-\uDBFF]$/u;
+
+/**
+ * Keeps an item name within the household list's limit (the domain's shoppingItemSchema).
+ * Parsing clips names already, but re-inflecting a clipped name for a merged total can add a
+ * character, and older app versions stored names unclipped. One over-long name makes the
+ * household list reject the whole sync batch, so every later edit would fail with it.
+ */
+const clipShoppingItemText = (text: string): string =>
+  text.length <= MAX_SHOPPING_ITEM_TEXT_LENGTH
+    ? text
+    : text
+        .slice(0, MAX_SHOPPING_ITEM_TEXT_LENGTH)
+        .replace(HIGH_SURROGATE_END_PATTERN, "")
+        .trimEnd();
+
 const createShoppingItemId = (timestamp: string, index: number): string =>
   `shopping_${timestamp.replace(/\D/gu, "")}_${index}_${Math.random().toString(36).slice(2, 10)}`;
 
@@ -122,7 +139,7 @@ export const recipeIngredientsToShoppingInputs = (
 
 export const toApiShoppingItem = (item: MobileShoppingItem): ShoppingItem => ({
   id: item.id,
-  text: item.text,
+  text: clipShoppingItemText(item.text),
   ...(item.qty == null ? {} : { qty: item.qty }),
   ...(item.unit == null ? {} : { unit: item.unit }),
   ...(item.recipeId == null ? {} : { recipeId: item.recipeId }),
@@ -153,7 +170,7 @@ export const mergeShoppingItems = (
         existing.sync.status === "local_only" && incoming.sync.status === "local_only"
           ? { status: "local_only" }
           : { status: "dirty" },
-      text: merged.text,
+      text: clipShoppingItemText(merged.text),
       unit: merged.unit ?? null,
       updatedAt:
         new Date(incoming.updatedAt).getTime() > new Date(existing.updatedAt).getTime()
@@ -302,15 +319,17 @@ export const applyRemoteShoppingItems = (
   for (const remoteItem of remoteItems) {
     const localItem = localById.get(remoteItem.id);
 
-    // The server stores the client's updatedAt, so a remote copy with the same timestamp as a
-    // dirty local item is that exact edit coming back: it is synced now, not still "Syncing".
-    // A local tombstone waits for its delete to go through unless the remote edit is newer.
+    // A local edit or tombstone that has not been pushed yet wins unless the remote edit is
+    // strictly newer. A same-timestamp remote copy is not proof that this edit reached the
+    // server: a merge into an item stamped ahead of this device's clock keeps that timestamp, and
+    // a response computed before the merge carries the old copy. The echo of what this pass
+    // pushed is already marked synced by markShoppingItemsSynced before this runs.
     if (
       localItem &&
-      (localItem.isDeleted
-        ? !isRemoteNewer(remoteItem.updatedAt, localItem.updatedAt)
-        : (localItem.sync.status === "dirty" || localItem.sync.status === "sync_failed") &&
-          isRemoteNewer(localItem.updatedAt, remoteItem.updatedAt))
+      (localItem.isDeleted ||
+        localItem.sync.status === "dirty" ||
+        localItem.sync.status === "sync_failed") &&
+      !isRemoteNewer(remoteItem.updatedAt, localItem.updatedAt)
     ) {
       continue;
     }

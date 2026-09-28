@@ -1637,84 +1637,90 @@ const CookingModeModal = ({
           </ScrollView>
         </View>
 
-        {!isFinaleVisible ? (
+        {/* Running timers stay in the footer on the finale too: the strip owns the countdown and
+            the "timer done" haptic, so unmounting it there would silence a timer still running. */}
+        {!isFinaleVisible || activeTimers.length > 0 ? (
           <View style={styles.cookModeFooter}>
-            {areHintsVisible ? <CookModeHintCard onDismiss={dismissHints} /> : null}
+            {!isFinaleVisible && areHintsVisible ? (
+              <CookModeHintCard onDismiss={dismissHints} />
+            ) : null}
             <CookModeActiveTimers
               onComplete={markTimersCompleted}
               onDismiss={dismissTimer}
               timers={activeTimers}
               visible={visible}
             />
-            <View style={styles.cookModeFooterRow}>
-              {!isFirstStep ? (
+            {!isFinaleVisible ? (
+              <View style={styles.cookModeFooterRow}>
+                {!isFirstStep ? (
+                  <Pressable
+                    accessibilityLabel="Previous step"
+                    accessibilityRole="button"
+                    accessibilityState={{ disabled: isStepTransitionAnimating }}
+                    disabled={isStepTransitionAnimating}
+                    onPress={goToPreviousStep}
+                    style={({ pressed }) => [
+                      styles.arrowButton,
+                      styles.arrowButtonSecondary,
+                      pressed && styles.pressed
+                    ]}
+                  >
+                    <MaterialCommunityIcons color={appColors.accent} name="arrow-left" size={24} />
+                  </Pressable>
+                ) : (
+                  <View style={styles.arrowButtonSpacer} />
+                )}
+
+                <View style={styles.keepAwakeMiddleContainer}>
+                  <Reanimated.View style={keepAwakeIconStyle}>
+                    <MaterialCommunityIcons
+                      color={keepAwake ? appColors.accent : appColors.muted}
+                      name="brightness-5"
+                      size={18}
+                    />
+                  </Reanimated.View>
+                  <Text
+                    maxFontSizeMultiplier={COOK_MODE_CONTROL_MAX_FONT_SCALE}
+                    style={styles.keepAwakeMiddleText}
+                  >
+                    Keep awake
+                  </Text>
+                  <Switch
+                    accessibilityLabel="Keep screen awake"
+                    accessibilityHint="Stops the screen from sleeping while you cook."
+                    onValueChange={setKeepAwake}
+                    thumbColor={keepAwake ? appColors.accent : appColors.surface}
+                    trackColor={{ false: appColors.border, true: appColors.accentSoft }}
+                    value={keepAwake}
+                    style={styles.keepAwakeMiddleSwitch}
+                  />
+                </View>
+
                 <Pressable
-                  accessibilityLabel="Previous step"
+                  accessibilityLabel={isLastStep ? "Finish cooking" : "Next step"}
                   accessibilityRole="button"
                   accessibilityState={{ disabled: isStepTransitionAnimating }}
                   disabled={isStepTransitionAnimating}
-                  onPress={goToPreviousStep}
+                  onPress={() => goToNextStep()}
                   style={({ pressed }) => [
                     styles.arrowButton,
-                    styles.arrowButtonSecondary,
+                    styles.arrowButtonPrimary,
                     pressed && styles.pressed
                   ]}
                 >
-                  <MaterialCommunityIcons color={appColors.accent} name="arrow-left" size={24} />
+                  {isLastStep ? (
+                    <Text
+                      maxFontSizeMultiplier={COOK_MODE_CONTROL_MAX_FONT_SCALE}
+                      style={styles.finishButtonText}
+                    >
+                      Finish
+                    </Text>
+                  ) : (
+                    <MaterialCommunityIcons color={appColors.canvas} name="arrow-right" size={24} />
+                  )}
                 </Pressable>
-              ) : (
-                <View style={styles.arrowButtonSpacer} />
-              )}
-
-              <View style={styles.keepAwakeMiddleContainer}>
-                <Reanimated.View style={keepAwakeIconStyle}>
-                  <MaterialCommunityIcons
-                    color={keepAwake ? appColors.accent : appColors.muted}
-                    name="brightness-5"
-                    size={18}
-                  />
-                </Reanimated.View>
-                <Text
-                  maxFontSizeMultiplier={COOK_MODE_CONTROL_MAX_FONT_SCALE}
-                  style={styles.keepAwakeMiddleText}
-                >
-                  Keep awake
-                </Text>
-                <Switch
-                  accessibilityLabel="Keep screen awake"
-                  accessibilityHint="Stops the screen from sleeping while you cook."
-                  onValueChange={setKeepAwake}
-                  thumbColor={keepAwake ? appColors.accent : appColors.surface}
-                  trackColor={{ false: appColors.border, true: appColors.accentSoft }}
-                  value={keepAwake}
-                  style={styles.keepAwakeMiddleSwitch}
-                />
               </View>
-
-              <Pressable
-                accessibilityLabel={isLastStep ? "Finish cooking" : "Next step"}
-                accessibilityRole="button"
-                accessibilityState={{ disabled: isStepTransitionAnimating }}
-                disabled={isStepTransitionAnimating}
-                onPress={() => goToNextStep()}
-                style={({ pressed }) => [
-                  styles.arrowButton,
-                  styles.arrowButtonPrimary,
-                  pressed && styles.pressed
-                ]}
-              >
-                {isLastStep ? (
-                  <Text
-                    maxFontSizeMultiplier={COOK_MODE_CONTROL_MAX_FONT_SCALE}
-                    style={styles.finishButtonText}
-                  >
-                    Finish
-                  </Text>
-                ) : (
-                  <MaterialCommunityIcons color={appColors.canvas} name="arrow-right" size={24} />
-                )}
-              </Pressable>
-            </View>
+            ) : null}
           </View>
         ) : null}
       </SafeAreaView>
