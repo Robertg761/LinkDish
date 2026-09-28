@@ -38,10 +38,18 @@ const LibraryFilterBarComponent: React.FC<LibraryFilterBarProps> = ({
   ];
   const trackRef = useRef<HTMLDivElement | null>(null);
   const selectionKey = selected.join("|");
+  const shownSelectionKey = useRef(selectionKey);
 
   // A chip picked at the far end moves to the front: bring the front (Clear and the active
-  // chips) into view with it, instead of leaving the row scrolled past them.
+  // chips) into view with it, instead of leaving the row scrolled past them. Not on mount: a new
+  // row starts at the front, and reading its scroll position would lay out the whole Cookbook
+  // mid-render (a long pause on a slow phone, before its first photos are even requested).
   useLayoutEffect(() => {
+    if (shownSelectionKey.current === selectionKey) {
+      return;
+    }
+
+    shownSelectionKey.current = selectionKey;
     const track = trackRef.current;
 
     if (track && track.scrollLeft > 0) {

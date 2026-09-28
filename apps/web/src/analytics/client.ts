@@ -1,4 +1,5 @@
 import { apiBaseUrl } from "../api/base-url";
+import { whenBootSettled } from "../platform/boot-settle";
 import { getStableClientId } from "../platform/stable-client-id";
 
 import { createWebAnalyticsId, getWebAnalyticsClientId, getWebAnalyticsSessionId } from "./session";
@@ -427,9 +428,23 @@ const installLifecycle = (): void => {
   });
 };
 
+let validatorPreloadScheduled = false;
+
+/** Fetches the contract ahead of the first flush, once the first screen has settled. */
+const preloadValidator = (): void => {
+  if (validatorPreloadScheduled || eventSchema) {
+    return;
+  }
+
+  validatorPreloadScheduled = true;
+  whenBootSettled(() => {
+    void loadAnalyticsValidator();
+  });
+};
+
 const enqueue = (event: AnalyticsEventInput): void => {
   installLifecycle();
-  void loadAnalyticsValidator();
+  preloadValidator();
   queue.push(event);
 
   if (queue.length > MAX_QUEUE_SIZE) {

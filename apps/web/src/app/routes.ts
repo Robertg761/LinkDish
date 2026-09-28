@@ -64,12 +64,14 @@ export const SupportPage = lazyWithRetry(() =>
 const normalizePath = (pathname: string): string =>
   pathname.length > 1 ? pathname.replace(/\/+$/u, "") : pathname;
 
+const isCookbookPath = (path: string): boolean => path === "/" || path === "/library";
+
 /** The page a URL lands on, for the routes people most often start from. */
 const BOOT_ROUTES: ReadonlyArray<{
   match: (path: string) => boolean;
   page: { preload: () => Promise<void> };
 }> = [
-  { match: (path) => path === "/" || path === "/library", page: LibraryPage },
+  { match: isCookbookPath, page: LibraryPage },
   { match: (path) => path.startsWith("/recipes/"), page: RecipePage },
   { match: (path) => path.startsWith("/featured/"), page: FeaturedRecipePage },
   { match: (path) => path === "/import", page: ExtractPage },
@@ -90,3 +92,17 @@ export const preloadRouteForPath = (pathname: string): Promise<void> | null => {
 
   return route ? route.page.preload().catch(() => undefined) : null;
 };
+
+/**
+ * Starts reading the data the landing page shows first, alongside its chunk: IndexedDB answers
+ * while the shell renders, instead of only once the page has mounted. Only the Cookbook reads
+ * storage before its first meaningful paint. Resolves when the read has settled (never rejects);
+ * null for other routes.
+ */
+export const warmRouteDataForPath = (pathname: string): Promise<void> | null =>
+  isCookbookPath(normalizePath(pathname))
+    ? import("../features/library/LibraryPage").then(
+        (module) => module.warmCookbook(),
+        () => undefined
+      )
+    : null;

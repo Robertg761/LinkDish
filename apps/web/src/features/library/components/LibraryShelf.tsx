@@ -18,6 +18,14 @@ interface LibraryShelfProps {
   className?: string | undefined;
 }
 
+/**
+ * A shelf card's photo width (`RecipeCard`'s `imageSizes`), from the track's columns in
+ * LibraryShelf.css: 156px on phones, 208px from 640px, then four (from 1024px, beside the side
+ * rail) or five (from 1280px) to the column.
+ */
+export const LIBRARY_SHELF_CARD_SIZES =
+  "(min-width: 1280px) 190px, (min-width: 1024px) calc(25vw - 94px), (min-width: 640px) 208px, 156px";
+
 const prefersReducedMotion = (): boolean => {
   try {
     return window.matchMedia("(prefers-reduced-motion: reduce)").matches;

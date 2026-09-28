@@ -1,9 +1,9 @@
-import React, { useSyncExternalStore } from "react";
+import React, { useEffect, useSyncExternalStore } from "react";
 
 import { Icon } from "./Icon";
 
 import type { IconName } from "./Icon";
-import type { RecipeCourse, inferRecipeTags } from "@linkdish/recipe-domain/src/tagging";
+import type { RecipeCourse, inferRecipeCourse } from "@linkdish/recipe-domain/src/tagging";
 
 import "./RecipeCover.css";
 
@@ -34,24 +34,42 @@ const toneForTitle = (title: string): CoverTone => {
   return TONES[hash % TONES.length] ?? "sage";
 };
 
-let inferTags: typeof inferRecipeTags | null = null;
+let inferCourse: typeof inferRecipeCourse | null = null;
+let courseRulesRequested = false;
 const courseRulesListeners = new Set<() => void>();
+let settleCourseRules: () => void = () => undefined;
+
+/** Settles once the course rules have loaded (or failed to): covers then show their course. */
+export const coverCourseRulesReady = new Promise<void>((resolve) => {
+  settleCourseRules = resolve;
+});
 
 /**
- * The course rules (long word lists) load beside the Cookbook rather than in its first download:
- * the art is decoration. The request starts as soon as this module runs, well before saved
- * recipes come back from storage, so covers normally draw with their course straight away; until
- * then (or if it can't load) a cover shows the neutral fork-and-knife plate. The tagging module
- * directly, not the package index, which would bring the whole domain engine (schemas, zod).
+ * The course rules (long word lists) are decoration, so they stay out of the first download and
+ * load when the first cover that needs them has been drawn, not before: a cover first draws the
+ * neutral fork-and-knife plate (same box, same size) and picks up its course art a moment later.
+ * The tagging module directly, not the package index, which would bring the whole domain engine
+ * (schemas, zod).
  */
-export const coverCourseRulesReady: Promise<void> =
+const requestCourseRules = () => {
+  if (courseRulesRequested) {
+    return;
+  }
+
+  courseRulesRequested = true;
   import("@linkdish/recipe-domain/src/tagging").then(
     (module) => {
-      inferTags = module.inferRecipeTags;
+      inferCourse = module.inferRecipeCourse;
       courseRulesListeners.forEach((listener) => listener());
+      settleCourseRules();
     },
-    () => undefined
+    () => {
+      // Offline or a stale deploy: plain plates for now, another try on the next cover.
+      courseRulesRequested = false;
+      settleCourseRules();
+    }
   );
+};
 
 const subscribeToCourseRules = (listener: () => void) => {
   courseRulesListeners.add(listener);
@@ -60,7 +78,7 @@ const subscribeToCourseRules = (listener: () => void) => {
   };
 };
 
-const courseRulesLoaded = () => inferTags !== null;
+const courseRulesLoaded = () => inferCourse !== null;
 
 const courseCache = new Map<string, RecipeCourse | null>();
 
@@ -69,7 +87,7 @@ const courseCache = new Map<string, RecipeCourse | null>();
  * until the course rules have loaded.
  */
 export const inferCourseFromTitle = (title: string): RecipeCourse | null => {
-  if (!inferTags) {
+  if (!inferCourse) {
     return null;
   }
 
@@ -80,7 +98,7 @@ export const inferCourseFromTitle = (title: string): RecipeCourse | null => {
     return cached;
   }
 
-  const course = inferTags({ ingredients: [], steps: [], title: key }).course?.value ?? null;
+  const course = inferCourse({ ingredients: [], steps: [], title: key })?.value ?? null;
 
   if (courseCache.size > 500) {
     courseCache.clear();
@@ -110,6 +128,13 @@ export const RecipeCover: React.FC<RecipeCoverProps> = ({ title, course, classNa
     courseRulesLoaded,
     courseRulesLoaded
   );
+
+  useEffect(() => {
+    if (course === undefined && !courseRulesLoaded()) {
+      requestCourseRules();
+    }
+  }, [course]);
+
   const resolved =
     course === undefined ? (rulesLoaded ? inferCourseFromTitle(title) : null) : course;
   const art = resolved

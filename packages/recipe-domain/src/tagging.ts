@@ -910,6 +910,13 @@ const inferDiet = (ingredientLines: readonly string[]): Array<TagSuggestion<Reci
 const QUICK_MAX_MINUTES = 30;
 
 /**
+ * Just the course {@link inferRecipeTags} would suggest, without the cuisine, method and diet
+ * passes: for callers that only need the course (the no-photo cover art), in long lists.
+ */
+export const inferRecipeCourse = (recipe: TaggableRecipe): TagSuggestion<RecipeCourse> | null =>
+  inferCourse(recipe, recipe.ingredients.map((ingredient) => ingredient.text).join("\n"));
+
+/**
  * Suggests tags for a recipe. Conservative by design: the course comes from the recipe's own
  * category or a clear title word; a cuisine needs several signature words and a clear lead;
  * "vegetarian" needs ingredients and none of them meat or fish; "vegan" additionally no dairy,

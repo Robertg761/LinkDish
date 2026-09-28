@@ -16,6 +16,7 @@ import { requestCommandPalette } from "../lib/command-palette-events";
 import { SAVE_FEEDBACK_EVENT } from "../lib/delight-events";
 import { paletteShortcutLabel, RAIL_SHORTCUTS } from "../lib/shortcuts";
 import { RAIL_MEDIA_QUERY, useMediaQuery } from "../lib/use-media-query";
+import { useBootSettled } from "../platform/boot-settle";
 import { lazyWithRetry } from "../platform/lazy";
 import { useOnlineStatus } from "../platform/online-status";
 import { OptionalChunkBoundary } from "../platform/OptionalChunkBoundary";
@@ -27,6 +28,7 @@ import { usePageHidesTabBar } from "./tab-bar-visibility";
 
 import type { AppSection } from "./app-route-meta";
 import type { IconName } from "./Icon";
+import type * as StoredActivity from "../data/stored-activity";
 
 import "./AppShell.css";
 
@@ -127,24 +129,93 @@ const OfflineBanner: React.FC = () => {
   );
 };
 
-// Kitchen timers float above the tab bar on every page; the dock loads after first paint.
+// Kitchen timers float above the tab bar on every page. The dock (and the saved timers it
+// restores) loads once the first screen has settled (platform/boot-settle.ts).
 const TimerDock = lazyWithRetry(() =>
   import("../features/cook-mode/TimerDock").then((module) => ({ default: module.TimerDock }))
 );
 
-// The import queue count on Add reads IndexedDB, so it loads beside the Cookbook, not in the entry.
+// The import queue count on Add reads IndexedDB, so it loads after the first screen, not in the
+// entry.
 const ImportQueueCount = lazyWithRetry(() =>
   import("./ImportQueueCount").then((module) => ({ default: module.ImportQueueCount }))
 );
 
+type StoredActivityWatch = keyof typeof StoredActivity;
+
+let storedActivityLoad: Promise<typeof StoredActivity> | null = null;
+
+/** The watchers' module, imported once for every hook (a failed import is tried again). */
+const loadStoredActivity = (): Promise<typeof StoredActivity> => {
+  storedActivityLoad ??= import("../data/stored-activity").catch((error: unknown) => {
+    storedActivityLoad = null;
+    throw error;
+  });
+
+  return storedActivityLoad;
+};
+
+/**
+ * True once the first screen has settled and the store behind some shell UI holds data (or is
+ * written to, in this tab or another): until then that UI and its chunks stay unloaded.
+ */
+const useStoredActivity = (watch: StoredActivityWatch): boolean => {
+  const settled = useBootSettled();
+  const [active, setActive] = useState(false);
+
+  useEffect(() => {
+    if (!settled || active) {
+      return;
+    }
+
+    let cancelled = false;
+    let stop: () => void = () => undefined;
+
+    loadStoredActivity().then(
+      (module) => {
+        if (!cancelled) {
+          stop = module[watch](() => setActive(true));
+        }
+      },
+      () => {
+        // The watcher couldn't load: show the UI, as before it existed.
+        if (!cancelled) {
+          setActive(true);
+        }
+      }
+    );
+
+    return () => {
+      cancelled = true;
+      stop();
+    };
+  }, [active, settled, watch]);
+
+  return active;
+};
+
 /** The Add tab / rail button's queue count; renders nothing while the queue is empty. */
-const AddQueueBadge: React.FC<{ onDescribe: (description: string) => void }> = ({ onDescribe }) => (
-  <OptionalChunkBoundary name="Import queue count">
-    <Suspense fallback={null}>
-      <ImportQueueCount onDescribe={onDescribe} />
-    </Suspense>
-  </OptionalChunkBoundary>
-);
+const AddQueueBadge: React.FC<{ onDescribe: (description: string) => void; show: boolean }> = ({
+  onDescribe,
+  show
+}) =>
+  show ? (
+    <OptionalChunkBoundary name="Import queue count">
+      <Suspense fallback={null}>
+        <ImportQueueCount onDescribe={onDescribe} />
+      </Suspense>
+    </OptionalChunkBoundary>
+  ) : null;
+
+/** Mounted once a cook session (where timers are kept) exists: most visits never load it. */
+const DeferredTimerDock: React.FC = () =>
+  useStoredActivity("whenKitchenTimersMayExist") ? (
+    <OptionalChunkBoundary name="Timer dock">
+      <Suspense fallback={null}>
+        <TimerDock />
+      </Suspense>
+    </OptionalChunkBoundary>
+  ) : null;
 
 const TopBarActionsContext = createContext<HTMLElement | null>(null);
 
@@ -180,6 +251,8 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
   const pageHidesTabBar = usePageHidesTabBar();
   const hideTabBar = !isRail && (routeMeta.hideTabBar === true || pageHidesTabBar);
   const [importQueueLabel, setImportQueueLabel] = useState("");
+  // The count (and its IndexedDB reads) loads only once a link waits in the queue.
+  const importQueueActive = useStoredActivity("whenImportQueueMayHaveItems");
   const addLabel = importQueueLabel ? `Add recipe (${importQueueLabel})` : "Add recipe";
 
   // Sheets, toasts and the timer dock are portaled outside the shell, so the inset they read
@@ -282,7 +355,9 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
         >
           <span className="app-nav-icon" aria-hidden="true">
             <Icon name={item.icon} size={isAdd ? 26 : 22} strokeWidth={isAdd ? 2.4 : 2} />
-            {isAdd ? <AddQueueBadge onDescribe={setImportQueueLabel} /> : null}
+            {isAdd ? (
+              <AddQueueBadge onDescribe={setImportQueueLabel} show={importQueueActive} />
+            ) : null}
           </span>
           <span className="app-nav-label">{item.label}</span>
           {isRail && RAIL_SHORTCUTS[item.to] ? (
@@ -330,7 +405,7 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
                 >
                   <Icon name="plus" size={20} strokeWidth={2.4} />
                   Add recipe
-                  <AddQueueBadge onDescribe={setImportQueueLabel} />
+                  <AddQueueBadge onDescribe={setImportQueueLabel} show={importQueueActive} />
                 </Link>
               ) : null}
 
@@ -420,11 +495,7 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
         </TopBarActionsContext.Provider>
       </div>
 
-      <OptionalChunkBoundary name="Timer dock">
-        <Suspense fallback={null}>
-          <TimerDock />
-        </Suspense>
-      </OptionalChunkBoundary>
+      <DeferredTimerDock />
 
       <FirstRunOnboardingSheet />
     </div>

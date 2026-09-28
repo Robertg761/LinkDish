@@ -30,7 +30,8 @@ import type { SharedRecipesState } from "./use-shared-recipes";
 import type { SharedRecipe } from "@linkdish/api-contracts";
 import type { RecipeSearchFields } from "@linkdish/recipe-domain";
 
-const PRIORITY_CARD_COUNT = 6;
+/** Photos fetched first: the grid's opening rows (two on a phone), which fill the first screen. */
+const PRIORITY_CARD_COUNT = 4;
 
 const getId = (recipe: SharedRecipe) => recipe.id;
 const getSignature = (recipe: SharedRecipe): readonly unknown[] => [

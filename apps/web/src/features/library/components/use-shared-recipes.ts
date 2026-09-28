@@ -103,7 +103,9 @@ export function useSharedRecipes(
     const request = ++requestRef.current;
 
     if (!isAuthenticated) {
-      setRecipes([]);
+      // Keep the same (empty) list when there is nothing to clear: a new array would render the
+      // whole Cookbook again right after its first paint.
+      setRecipes((current) => (current.length === 0 ? current : []));
       setStatus("idle");
       setError(null);
       setAccessBlocked(false);

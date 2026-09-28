@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { whenBootSettled } from "../../../platform/boot-settle";
+
 import type * as SearchEngineModule from "./library-search-engine";
 import type { Recipe, RecipeSearchFields, RecipeSearchIndex } from "@linkdish/recipe-domain";
 
@@ -67,9 +69,14 @@ export function useSearchEngine(needed: boolean): SearchEngine | null {
       };
     }
 
-    const timer = window.setTimeout(load, IDLE_PRELOAD_DELAY_MS);
+    // Not needed for the first screen: a while after it has settled (platform/boot-settle.ts).
+    let timer: number | undefined;
+    const cancelSettled = whenBootSettled(() => {
+      timer = window.setTimeout(load, IDLE_PRELOAD_DELAY_MS);
+    });
     return () => {
       active = false;
+      cancelSettled();
       window.clearTimeout(timer);
     };
   }, [loaded, needed]);

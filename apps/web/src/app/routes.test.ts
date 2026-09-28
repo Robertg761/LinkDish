@@ -1,12 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { preloadRouteForPath } from "./routes";
+import { preloadRouteForPath, warmRouteDataForPath } from "./routes";
 
 const loaded = vi.hoisted(() => [] as string[]);
+const warmCookbook = vi.hoisted(() => vi.fn(() => Promise.resolve()));
 
 vi.mock("../features/library/LibraryPage", () => {
   loaded.push("library");
-  return { LibraryPage: () => null };
+  return { LibraryPage: () => null, warmCookbook };
 });
 vi.mock("../features/library/RecipePage", () => {
   loaded.push("recipe");
@@ -29,5 +30,19 @@ describe("preloadRouteForPath", () => {
   it("returns null for routes without a boot preload", () => {
     expect(preloadRouteForPath("/privacy")).toBeNull();
     expect(preloadRouteForPath("/sso-callback")).toBeNull();
+  });
+});
+
+describe("warmRouteDataForPath", () => {
+  it("starts reading the Cookbook's recipes when the visit lands on it", async () => {
+    await warmRouteDataForPath("/");
+    await warmRouteDataForPath("/library/");
+
+    expect(warmCookbook).toHaveBeenCalledTimes(2);
+  });
+
+  it("reads nothing ahead for other routes", () => {
+    expect(warmRouteDataForPath("/recipes/abc")).toBeNull();
+    expect(warmRouteDataForPath("/shopping")).toBeNull();
   });
 });

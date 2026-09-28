@@ -24,8 +24,10 @@ export interface FadeImageProps {
 }
 
 /**
- * An <img> that fades in once decoded. Lazy by default; `priority` switches to
- * eager + fetchpriority=high for the one hero image on a screen.
+ * An <img> that fades in once decoded. Lazy by default; `priority` switches to eager +
+ * fetchpriority=high for the few images a screen opens on, and shows them the moment they are
+ * decoded: no fade, and no wait for script to notice the load (it counts as painted, for Largest
+ * Contentful Paint, only once visible).
  */
 export const FadeImage: React.FC<FadeImageProps> = ({
   src,
@@ -53,7 +55,9 @@ export const FadeImage: React.FC<FadeImageProps> = ({
   return (
     <img
       alt={alt}
-      className={["fade-image", loaded ? "is-loaded" : "", className].filter(Boolean).join(" ")}
+      className={[priority ? "" : "fade-image", loaded ? "is-loaded" : "", className]
+        .filter(Boolean)
+        .join(" ")}
       crossOrigin={crossOrigin}
       decoding="async"
       fetchPriority={priority ? "high" : undefined}

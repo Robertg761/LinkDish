@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import React from "react";
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -13,6 +13,34 @@ const importQueue = vi.hoisted(() => ({ count: 0, failed: 0, pending: 0 }));
 
 vi.mock("../features/import-queue/use-import-queue-badge", () => ({
   useImportQueueBadge: () => ({ ...importQueue })
+}));
+
+/** Whether the import queue's store holds links (the shell loads the count only then). */
+const queueStore = vi.hoisted(() => ({ hasItems: true, watchers: 0 }));
+/** Whether cook sessions (where kitchen timers are kept) exist: the dock loads only then. */
+const cookSessions = vi.hoisted(() => ({ exist: false }));
+
+vi.mock("../data/stored-activity", () => ({
+  whenImportQueueMayHaveItems: (onActive: () => void) => {
+    queueStore.watchers += 1;
+
+    if (queueStore.hasItems) {
+      onActive();
+    }
+
+    return () => undefined;
+  },
+  whenKitchenTimersMayExist: (onActive: () => void) => {
+    if (cookSessions.exist) {
+      onActive();
+    }
+
+    return () => undefined;
+  }
+}));
+
+vi.mock("../features/cook-mode/TimerDock", () => ({
+  TimerDock: () => <div data-testid="timer-dock" />
 }));
 
 const LocationProbe = () => {
@@ -382,6 +410,44 @@ describe("AppShell search, shortcuts and status", () => {
       expect(badge).toHaveClass("is-attention");
     } finally {
       Object.assign(importQueue, { count: 0, failed: 0, pending: 0 });
+    }
+  });
+
+  it("doesn't load the count at all while the queue's store is empty", async () => {
+    queueStore.hasItems = false;
+    queueStore.watchers = 0;
+    Object.assign(importQueue, { count: 3, failed: 0, pending: 3 });
+
+    try {
+      renderShell("/");
+      await vi.waitFor(() => expect(queueStore.watchers).toBeGreaterThan(0));
+      await act(async () => {
+        await import("./ImportQueueCount");
+      });
+
+      expect(screen.getByRole("link", { name: "Add recipe" })).toBeInTheDocument();
+      expect(screen.queryByTestId("import-queue-badge")).not.toBeInTheDocument();
+    } finally {
+      queueStore.hasItems = true;
+      Object.assign(importQueue, { count: 0, failed: 0, pending: 0 });
+    }
+  });
+
+  it("loads the kitchen timer dock only when cook sessions (and so timers) may exist", async () => {
+    renderShell("/");
+    await act(async () => {
+      await import("../features/cook-mode/TimerDock");
+    });
+    expect(screen.queryByTestId("timer-dock")).not.toBeInTheDocument();
+
+    cleanup();
+    cookSessions.exist = true;
+
+    try {
+      renderShell("/");
+      expect(await screen.findByTestId("timer-dock")).toBeInTheDocument();
+    } finally {
+      cookSessions.exist = false;
     }
   });
 

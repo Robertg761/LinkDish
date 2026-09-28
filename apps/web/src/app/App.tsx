@@ -9,6 +9,7 @@ import { ToastProvider } from "../components/Toast";
 import { CommandCenter } from "../features/command-palette/CommandCenter";
 import { UpgradeSheetProvider } from "../features/upgrade/UpgradeSheet";
 import { formatDocumentTitle } from "../lib/use-document-title";
+import { BootRouteRendered } from "../platform/boot-settle";
 import { initPreferences } from "../preferences/preferences-store";
 
 import { AppUpdatePrompt } from "./AppUpdatePrompt";
@@ -74,6 +75,8 @@ const AppRoutes: React.FC = () => {
           {/* Catch-all 404 handler redirecting to home */}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
+        {/* Commits with the page (never with the fallback): deferred boot work may follow. */}
+        <BootRouteRendered />
       </Suspense>
     </ErrorBoundary>
   );

@@ -171,6 +171,32 @@
   }
 }
 
+/* Sample cards while the samples load: a sample card's boxes, with shimmering text lines. */
+.library-welcome-sample-placeholder {
+  pointer-events: none;
+}
+
+.library-welcome-sample-photo {
+  aspect-ratio: 4 / 3;
+  border-radius: 0;
+}
+
+/* Inline blocks of text in the card's own font, so every line keeps its height exactly. */
+.skeleton.library-welcome-sample-text {
+  display: inline-block;
+  width: 88%;
+  clip-path: inset(0.22em 0 0.22em 0 round 6px);
+}
+
+.skeleton.library-welcome-sample-text.is-short {
+  width: 56%;
+}
+
+.skeleton.library-welcome-sample-text.is-meta {
+  display: block;
+  width: 48%;
+}
+
 /* With starter recipes below, the hero is a friendly card rather than the whole page. */
 .library-welcome-starter .library-welcome-title {
   font-size: clamp(1.875rem, 1.5rem + 1.8vw, 2.75rem);

@@ -105,6 +105,48 @@ const preloadLandingRoute = (routeModule: string): Plugin => ({
   }
 });
 
+/** The API origin when VITE_LINKDISH_API_BASE_URL is unset; mirrors src/api/base-url.ts. */
+const DEFAULT_API_BASE_URL = "https://api.linkdish.ca";
+
+/**
+ * Recipe photos come through the API's image proxy, and a returning cook's first screen is
+ * photos: index.html opens the connection to the API while the scripts download, so the first
+ * photos (and the first API call) don't also wait for DNS, TCP and TLS. Two hints, because image
+ * requests (credentialed) and the API client's fetches (CORS, no credentials) use separate
+ * connections.
+ */
+const preconnectApi = (): Plugin => {
+  let origin: string | null = null;
+
+  return {
+    name: "linkdish:preconnect-api",
+    configResolved(config) {
+      const base =
+        (config.env.VITE_LINKDISH_API_BASE_URL as string | undefined) || DEFAULT_API_BASE_URL;
+
+      try {
+        origin = new URL(base).origin;
+      } catch {
+        origin = null;
+      }
+    },
+    transformIndexHtml() {
+      if (!origin) {
+        return [];
+      }
+
+      return [
+        { attrs: { href: origin, rel: "preconnect" }, injectTo: "head", tag: "link" },
+        {
+          attrs: { crossorigin: "", href: origin, rel: "preconnect" },
+          injectTo: "head",
+          tag: "link"
+        }
+      ];
+    }
+  };
+};
+
 /** Shared building blocks of the pages: components, stores, storage and helpers. */
 const APP_SHARED_PATTERN =
   /\/apps\/web\/src\/(?:components|data|storage|api|platform|preferences)\/|\/apps\/web\/src\/features\/library\/saved-recipe-(?:store|types)\.ts$|\/node_modules\/idb\//u;
@@ -121,10 +163,12 @@ const DOMAIN_FORMAT_PATTERN =
 /**
  * Without this, every shared component or store a page imports becomes its own tiny chunk (and
  * stylesheet): the Cookbook alone needed 20 scripts and 10 stylesheets. Shared page code is
- * grouped instead: what the landing page (the Cookbook) and the boot-time lazy UI use goes in
- * `app-core`, the rest of the shared building blocks in `app-shared`, and the small domain
- * formatters in `domain-core`. Modules the entry loads stay in the entry, and modules only ever
- * imported lazily (pages, sheets) keep their own chunks.
+ * grouped instead: what the landing page (the Cookbook) renders goes in `app-core`, the rest of
+ * the shared building blocks in `app-shared`, and the small domain formatters in `domain-core`.
+ * Modules the entry loads stay in the entry, and modules only ever imported lazily (pages, sheets)
+ * keep their own chunks. Lazy UI the shell adds after the first screen (the kitchen timer dock,
+ * the import queue count; see platform/boot-settle.ts) is not in `app-core`: the Cookbook's
+ * first download carries only what its first paint needs.
  */
 const createManualChunks = (bootModules: readonly string[]): Rollup.GetManualChunk => {
   let entryGraph: Set<string> | null = null;
@@ -198,14 +242,6 @@ const createManualChunks = (bootModules: readonly string[]): Rollup.GetManualChu
 
 /** The page most visits start on; see preloadLandingRoute and app/routes.ts. */
 const LANDING_ROUTE_MODULE = "/src/features/library/LibraryPage.tsx";
-/**
- * Lazy UI the shell loads on every visit (the kitchen timer dock, the import queue count on Add),
- * grouped with the landing page.
- */
-const BOOT_LAZY_MODULES = [
-  "/src/features/cook-mode/TimerDock.tsx",
-  "/src/components/ImportQueueCount.tsx"
-];
 
 export default defineConfig({
   test: {
@@ -216,7 +252,7 @@ export default defineConfig({
   build: {
     rollupOptions: {
       output: {
-        manualChunks: createManualChunks([LANDING_ROUTE_MODULE, ...BOOT_LAZY_MODULES])
+        manualChunks: createManualChunks([LANDING_ROUTE_MODULE])
       }
     }
   },
@@ -232,6 +268,7 @@ export default defineConfig({
   },
   plugins: [
     react(),
+    preconnectApi(),
     preloadLandingRoute(LANDING_ROUTE_MODULE),
     VitePWA({
       // A new version waits until the reader says "Reload" (or navigates after ignoring the

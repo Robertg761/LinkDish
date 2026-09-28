@@ -8,6 +8,7 @@ import {
   startAppUpdates,
   useAppUpdate
 } from "../platform/app-update";
+import { whenBootSettled } from "../platform/boot-settle";
 
 import type { FC } from "react";
 
@@ -15,39 +16,8 @@ import type { FC } from "react";
 const UPDATE_TOAST_DURATION_MS = 24 * 60 * 60_000;
 export const APP_UPDATE_TOAST_ID = "app-update-ready";
 
-const whenIdleAfterLoad = (callback: () => void): (() => void) => {
-  let idleHandle: number | null = null;
-  let timer: number | null = null;
-
-  const schedule = () => {
-    if (typeof window.requestIdleCallback === "function") {
-      idleHandle = window.requestIdleCallback(callback, { timeout: 5000 });
-    } else {
-      timer = window.setTimeout(callback, 1500);
-    }
-  };
-
-  if (document.readyState === "complete") {
-    schedule();
-  } else {
-    window.addEventListener("load", schedule, { once: true });
-  }
-
-  return () => {
-    window.removeEventListener("load", schedule);
-
-    if (idleHandle !== null && typeof window.cancelIdleCallback === "function") {
-      window.cancelIdleCallback(idleHandle);
-    }
-
-    if (timer !== null) {
-      window.clearTimeout(timer);
-    }
-  };
-};
-
 /**
- * Registers the service worker once the page is idle, offers "Reload" when a new version is
+ * Registers the service worker once the first screen has settled, offers "Reload" when a new version is
  * waiting, and applies an ignored update on the next navigation.
  */
 export const AppUpdatePrompt: FC = () => {
@@ -57,7 +27,7 @@ export const AppUpdatePrompt: FC = () => {
   const lastKeyRef = useRef(location.key);
 
   // The service worker (and workbox-window) never compete with the first paint.
-  useEffect(() => whenIdleAfterLoad(() => void startAppUpdates()), []);
+  useEffect(() => whenBootSettled(() => void startAppUpdates()), []);
 
   useEffect(() => {
     if (!needRefresh || applying) {
