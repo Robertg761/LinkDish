@@ -205,6 +205,20 @@
   }
 }
 
+/*
+ * After in-app navigation focus lands on the page's heading (app/route-focus.ts). Keyboard
+ * users see where they are without a hard box around a big display title.
+ */
+.app-shell-content h1[tabindex="-1"]:focus {
+  outline: none;
+}
+
+.app-shell-content h1[tabindex="-1"]:focus-visible {
+  border-radius: 6px;
+  outline: 2px solid color-mix(in srgb, var(--color-focus) 55%, transparent);
+  outline-offset: 6px;
+}
+
 /* The parked skip link's shadow otherwise peeks in at the top edge of full-screen layers. */
 .app-shell > .skip-link:not(:focus) {
   box-shadow: none;

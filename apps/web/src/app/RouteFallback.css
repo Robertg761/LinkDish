@@ -15,9 +15,26 @@
   font-size: var(--text-body);
 }
 
+.route-fallback-search.skeleton,
+.route-fallback-tabs.skeleton {
+  border-radius: var(--radius-pill);
+}
+
 .route-fallback-search {
   height: 56px;
-  border-radius: var(--radius-pill);
+}
+
+/* Where the Personal / Family switch will be. */
+.route-fallback-tabs {
+  width: 176px;
+  height: 42px;
+}
+
+@media (max-width: 559px) {
+  .route-fallback-header.page-header {
+    flex-wrap: nowrap;
+    gap: 12px;
+  }
 }
 
 .route-fallback-cookbook .loading-skeleton-grid {
