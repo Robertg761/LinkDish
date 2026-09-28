@@ -231,7 +231,7 @@ export const PendingInviteRow: React.FC<PendingInviteRowProps> = ({
   onCancel,
   cancelling
 }) => (
-  <li className="household-pending">
+  <li className={`household-pending${inviteCode ? " has-share" : ""}`}>
     <span className="household-pending-icon" aria-hidden="true">
       <Icon name="mail" size={16} />
     </span>

@@ -295,10 +295,9 @@ describe("AccountPage signed in", () => {
 
     renderAccount();
 
-    expect(await screen.findByRole("progressbar", { name: "Imports this month" })).toHaveAttribute(
-      "aria-valuenow",
-      "4"
-    );
+    expect(
+      await screen.findByRole("progressbar", { name: "Imports used this month" })
+    ).toHaveAttribute("aria-valuenow", "4");
     expect(screen.getByText("4 of 100")).toBeVisible();
     expect(screen.getByText(/^Resets /u)).toBeVisible();
     expect(screen.queryByRole("progressbar", { name: "Saved recipes" })).not.toBeInTheDocument();

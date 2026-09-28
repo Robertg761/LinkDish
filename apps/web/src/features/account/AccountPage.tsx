@@ -576,7 +576,7 @@ const PlanCardSection: React.FC<{ tier: WebBillingTier }> = ({ tier }) => {
 
       {importUsage && importUsage.limit > 0 ? (
         <UsageMeter
-          label={importUsage.monthly ? "Imports this month" : "Free imports"}
+          label={importUsage.monthly ? "Imports used this month" : "Free imports used"}
           limit={importUsage.limit}
           note={importUsage.monthly && resetsOn ? `Resets ${resetsOn}.` : null}
           tone={usageTone(importsUsed, importUsage.limit)}
