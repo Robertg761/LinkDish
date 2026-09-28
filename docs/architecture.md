@@ -36,6 +36,17 @@
   Clerk session hint exists or sign-in starts. `pnpm --filter @linkdish/web
 size` checks the budgets after a build (entry ≤ 115 KB gzip, landing JS ≤
   150 KB, landing CSS ≤ 24 KB).
+- **HTTP caching** (`apps/web/vercel.json`, written as `routes` because only
+  the `handle: hit` phase can tell a real file from a rewrite or a 404: headers
+  set before the filesystem check stick to whatever response follows). Hashed
+  `/assets/*-<hash>.js|css` and `/workbox-<hash>.js` get a one-year
+  `immutable` cache, but only in the `hit` phase, so only files that exist.
+  `/assets/`, `/fonts/`, `/icons/` and `/workbox-` are excluded from the SPA
+  fallback: a chunk from another deployment is a plain 404, never `index.html`
+  cached for a year under the chunk's URL. The self-hosted fonts keep stable
+  names and are cached for a week. Everything else (the app shell and every
+  deep link that falls back to it, `sw.js`, the manifest) is `no-cache`.
+  `api/vercel-config.test.ts` models Vercel's routing phases and checks this.
 - **Local data.** IndexedDB `linkdish-web` v4 (`storage/linkdish-db.ts`)
   holds `savedRecipes`, `recipeSourceImages` (scan images, kept out of list
   reads), `shoppingItems`, `collections`, `mealPlan`, `importQueue` and
@@ -121,9 +132,13 @@ platforms map onto them and are told apart internally by the detection `adapterK
   canonical watch page. The description is the full `videoDetails.shortDescription` from
   the player response (og:description is truncated). The channel becomes `author`.
 - **Pinterest** pins (and pin.it links that land on one): the pin's outbound link
-  (`og:see_also`, else `"link"` in the pin's app state) is validated with the same SSRF
-  checks and extracted instead. The recipe's `sourceUrl` is that page, and the result is
-  cached under its URL, so a later direct import of the same recipe hits the cache.
+  (`og:see_also`, else `"link"` in the pin's app state), when it is a valid recipe
+  `sourceUrl` (http(s), at most 2048 characters), is validated with the same SSRF
+  checks and extracted instead, through the same path a direct link to it takes: YouTube
+  through the transcript path, TikTok through its caption, and other social or video
+  sites are rejected as `unsupported_source` before anything is fetched. The recipe's
+  `sourceUrl` is that page, and the result is cached under its URL, so a later direct
+  import of the same recipe hits the cache.
 - **TikTok**: the caption is read through the public oEmbed endpoint
   (`fetchers/fetch-tiktok-document.ts`; short links are resolved hop by hop, TikTok hosts
   only, each hop SSRF-validated, with the request deadline and a byte cap). A caption with
@@ -177,12 +192,16 @@ parses `extractRecipeAnyRequestSchema`.
 
 `api/extract.ts` and the Fastify route share `services/extract-request-pipeline.ts`:
 
-1. IP rate limit (Upstash), then request parsing.
+1. IP rate limit (Upstash), then request parsing. Only a request that fails
+   `extractRecipeAnyRequestSchema` is a 400; any later error, a ZodError from the
+   extraction included, is a 500.
 2. Billing authorization and extraction start together. URL validation (DNS), the
    result-cache lookup and the page fetch overlap the auth, household and RevenueCat
    lookups. If billing denies, the in-flight fetch is aborted and the `plan_limit`
-   response is returned. Deterministic extraction, browser renders started after the
-   fetch, LLM calls and cache writes all wait for billing's answer.
+   response is returned. Only the plain HTTP fetch overlaps billing: a Playwright render
+   (the escalation for a blocked, shell or thin page, which launches Chromium and cannot
+   be aborted) awaits billing's answer through `SourceFetchOptions.awaitAuthorized`, as do
+   deterministic extraction, LLM calls and cache writes.
 3. Usage is committed before responding, exactly as before, including for cache hits
    (a cache hit is still an import).
 4. Durable Postgres analytics, cache writes and fallback hand-off writes run after the
@@ -194,13 +213,21 @@ Performance pieces in `services/extractor-api/src/modules/extract`:
 - **Result cache** (`cache/extraction-cache.ts`): a URL-keyed Upstash cache
   (`linkdish:extract-cache:v1:<EXTRACTOR_CACHE_VERSION>:<sha256(canonical URL)>`, where
   the canonical URL has tracking parameters, fragments, host case and trailing slashes
-  normalised, and YouTube URLs use their watch URL). It holds only validated successes
-  at or above the success confidence bar. It never stores needs_retry, failures, quota
-  data or image scans, and never a page that redirected to another site. A hit skips
-  fetch, parse and LLM calls and re-stamps the per-request `recipe.sourceUrl`. Bump
-  `EXTRACTOR_CACHE_VERSION` whenever extraction output changes. `EXTRACT_CACHE_ENABLED`
-  is the kill switch and `EXTRACT_CACHE_TTL_SECONDS` sets the lifetime (default 7 days).
-  Live canary requests (`x-linkdish-canary`) skip cache reads. Responses carry
+  normalised, and YouTube URLs use their watch URL). Route fragments (`#/…`, `#!…`) are
+  kept: a browser render keeps the fragment, so a hash-routed app renders a different
+  recipe for each. It holds only validated
+  deterministic successes at or above the success confidence bar. It never stores
+  needs_retry, failures, quota data, image scans or LLM fallback output (strategy
+  `llm-fallback` or `llm` provenance: the model reads page text anyone can post, such as
+  comments, so one caller could steer what later importers are served), and never a page
+  that redirected to another site. Reads treat an LLM-derived entry as a miss. A hit skips
+  fetch, parse and the text-cleanup LLM call and re-stamps the per-request
+  `recipe.sourceUrl`. Bump `EXTRACTOR_CACHE_VERSION` whenever extraction output or cache
+  semantics change. `EXTRACT_CACHE_ENABLED` is the kill switch and
+  `EXTRACT_CACHE_TTL_SECONDS` sets the lifetime (default 7 days). Only the live canary that
+  presents `LINKDISH_CANARY_TOKEN` as a bearer token (the same check billing uses) skips
+  cache reads and refreshes the entry; the bare `x-linkdish-canary` marker is
+  caller-controlled and only keeps a request out of durable analytics. Responses carry
   `x-linkdish-cache: hit|miss|bypass`, and logs and analytics carry `cacheStatus`.
 - **Fallback hand-off** (`cache/fallback-handoff.ts`): when a primary attempt with a
   `correlationId` returns needs_retry, it stores the LLM prompt summary, candidate,
@@ -227,7 +254,10 @@ Performance pieces in `services/extractor-api/src/modules/extract`:
   normal pages no longer force a browser render.
 - **Entitlements** (`billing/revenuecat-entitlements.ts`): paid plans are cached in
   Upstash for 5 minutes. "free" is never cached. The RevenueCat webhook invalidates every
-  user an event concerns. Household changes that require Family use fresh lookups.
+  user an event concerns and leaves a 5-minute marker; a lookup only caches a paid plan
+  when no marker exists (checked and written in one EVAL) and it started less than 5
+  minutes ago, so a lookup still waiting on RevenueCat when a refund or expiry arrives
+  cannot put the old plan back. Household changes that require Family use fresh lookups.
 
 ## Authentication
 

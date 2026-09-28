@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ZodError } from "zod";
 
 const mocks = vi.hoisted(() => {
   class MockRateLimitUnavailableError extends Error {}
@@ -300,6 +301,18 @@ describe("Vercel extract adapter request identity", () => {
     expect(mocks.extractRecipe).not.toHaveBeenCalled();
   });
 
+  it("answers 500, not 400, when a valid request fails validation inside the extraction", async () => {
+    mocks.extractRecipe.mockRejectedValueOnce(
+      new ZodError([{ code: "custom", path: ["recipe", "sourceUrl"], message: "Too long" }])
+    );
+    const extractApi = await import("./extract.js");
+
+    const response = await extractApi.POST(createRequest());
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({ message: "Unexpected extractor error." });
+  });
+
   it("returns the committed quota with a success", async () => {
     const quota = {
       limit: 3,
@@ -330,15 +343,36 @@ describe("Vercel extract adapter request identity", () => {
     await expect(response.json()).resolves.toMatchObject({ status: "success", quota });
   });
 
-  it("reads around the result cache for live canary requests", async () => {
+  it("reads around the result cache only for the token-verified live canary", async () => {
+    const { extractorApiEnv } = await import("../services/extractor-api/src/config/env.js");
+    const originalCanaryToken = extractorApiEnv.LINKDISH_CANARY_TOKEN;
+    extractorApiEnv.LINKDISH_CANARY_TOKEN = "canary-secret-token";
     const extractApi = await import("./extract.js");
 
-    await extractApi.POST(createRequest(undefined, { "x-linkdish-canary": "1" }));
+    try {
+      await extractApi.POST(
+        createRequest(undefined, {
+          authorization: "Bearer canary-secret-token",
+          "x-linkdish-canary": "1"
+        })
+      );
+      /* The bare marker is caller-controlled: it must not let anyone refresh shared entries. */
+      await extractApi.POST(createRequest(undefined, { "x-linkdish-canary": "1" }));
+    } finally {
+      extractorApiEnv.LINKDISH_CANARY_TOKEN = originalCanaryToken;
+    }
 
-    expect(mocks.extractRecipe).toHaveBeenCalledWith(
+    expect(mocks.extractRecipe).toHaveBeenNthCalledWith(
+      1,
       expect.any(Object),
       undefined,
       expect.objectContaining({ cacheMode: "refresh" })
+    );
+    expect(mocks.extractRecipe).toHaveBeenNthCalledWith(
+      2,
+      expect.any(Object),
+      undefined,
+      expect.objectContaining({ cacheMode: "default" })
     );
   });
 });

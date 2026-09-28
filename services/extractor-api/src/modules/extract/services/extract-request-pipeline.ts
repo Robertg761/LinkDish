@@ -1,7 +1,7 @@
 import { recordAdminExtractionEvent } from "../../admin/metrics.js";
 import { recordDurableExtractionAnalyticsEvent } from "../../analytics/extraction-analytics.js";
 import { authorizeExtractionRequest } from "../../billing/enforce-billing.js";
-import { isLiveCanaryRequest } from "../../request-identity.js";
+import { isAuthorizedCanaryRequest } from "../../request-identity.js";
 
 import { extractRecipe } from "./extract-recipe.js";
 
@@ -112,7 +112,11 @@ export const runExtractRequestPipeline = async (
       () => false
     ),
     ...(correlationId ? { correlationId } : {}),
-    cacheMode: isLiveCanaryRequest(headers) ? "refresh" : "default",
+    /*
+     * Only the token-verified canary may read around the shared cache and refresh it. The bare
+     * x-linkdish-canary marker is caller-controlled and changes nothing here.
+     */
+    cacheMode: isAuthorizedCanaryRequest(headers) ? "refresh" : "default",
     schedule: input.schedule
   });
 

@@ -637,14 +637,46 @@ const runMemorySlidingWindowRateLimit = (keys: string[], args: string[]): Upstas
   return { result: [1, sortedSet.size] };
 };
 
+const setUnlessBlockedScript = `
+-- linkdish_set_unless_blocked_v1
+if redis.call('EXISTS', KEYS[2]) == 1 then
+  return 0
+end
+
+redis.call('SET', KEYS[1], ARGV[1], 'EX', tonumber(ARGV[2]))
+return 1
+`;
+
+const runMemorySetUnlessBlocked = (keys: string[], args: string[]): UpstashResponse => {
+  const [key, blockerKey] = keys;
+  const [value, ttlSeconds] = args;
+
+  if (!key || !blockerKey || value === undefined || !ttlSeconds) {
+    return { error: "Invalid set-unless-blocked arguments." };
+  }
+
+  pruneExpiredMemoryKey(blockerKey);
+
+  if (keyExists(blockerKey)) {
+    return { result: 0 };
+  }
+
+  return { result: runMemoryCommand(["SET", key, value, "EX", ttlSeconds]).error ? 0 : 1 };
+};
+
 export const runStoreEval = async (
   script: string,
   keys: string[],
-  args: string[]
+  args: string[],
+  options: StoreRequestOptions = {}
 ): Promise<UpstashResponse> => {
   if (!isKeyValueStoreConfigured()) {
     if (script.includes("linkdish_sliding_window_rate_limit_v1") && keys.length === 1) {
       return runMemorySlidingWindowRateLimit(keys, args);
+    }
+
+    if (script.includes("linkdish_set_unless_blocked_v1") && keys.length === 2) {
+      return runMemorySetUnlessBlocked(keys, args);
     }
 
     if (script.includes("redis.call('get'") && keys.length === 1 && args.length === 1) {
@@ -661,13 +693,37 @@ export const runStoreEval = async (
     return { error: "Unsupported in-memory EVAL script." };
   }
 
-  const result = await runStoreCommand(["EVAL", script, String(keys.length), ...keys, ...args]);
+  const result = await runStoreCommand(
+    ["EVAL", script, String(keys.length), ...keys, ...args],
+    options
+  );
 
   if (result.error) {
     throw new KeyValueStoreUnavailableError(result.error);
   }
 
   return result;
+};
+
+/**
+ * SET key value EX ttl, atomically skipped while `blockerKey` exists. Returns whether the value
+ * was written. Lets a writer holding a possibly stale value lose to a concurrent invalidation
+ * that leaves `blockerKey` behind.
+ */
+export const setStoreStringUnlessBlocked = async (
+  key: string,
+  value: string,
+  blockerKey: string,
+  options: { ttlSeconds: number } & StoreRequestOptions
+): Promise<boolean> => {
+  const result = await runStoreEval(
+    setUnlessBlockedScript,
+    [key, blockerKey],
+    [value, String(options.ttlSeconds)],
+    options.timeoutMs ? { timeoutMs: options.timeoutMs } : {}
+  );
+
+  return parseNumeric(result.result) === 1;
 };
 
 export const checkStoreSlidingWindowRateLimit = async ({

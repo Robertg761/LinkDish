@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 
 import { extractorApiEnv } from "../config/env.js";
 
@@ -45,14 +45,43 @@ export const getRequestAddress = (headers: RequestHeaders, identity?: RequestIde
     : (getForwardedAddress(headers) ?? "unknown");
 
 /*
- * The post-deploy live canary marks its requests. They skip durable analytics
- * and read around the extraction result cache so they always exercise a real
- * extraction. The header is caller-controlled, which is fine: it only makes a
- * request slower, never cheaper.
+ * The post-deploy live canary marks its requests, and they skip durable
+ * analytics. The marker is caller-controlled, so it must never unlock anything
+ * that affects other callers (billing, the shared result cache): those use
+ * isAuthorizedCanaryRequest.
  */
 export const isLiveCanaryRequest = (headers: RequestHeaders): boolean =>
   getHeader(headers, "x-linkdish-canary") != null ||
   getHeader(headers, "x-linkdish-client-id") === "live-canary";
+
+/**
+ * True only for the live canary presenting the server's LINKDISH_CANARY_TOKEN as a bearer
+ * token. Billing exempts it, and it alone may read around the result cache and refresh it.
+ */
+export const isAuthorizedCanaryRequest = (headers: RequestHeaders): boolean => {
+  const canaryToken = extractorApiEnv.LINKDISH_CANARY_TOKEN?.trim();
+
+  if (!canaryToken) {
+    return false;
+  }
+
+  const authorization = getHeader(headers, "authorization");
+
+  if (!authorization?.startsWith("Bearer ")) {
+    return false;
+  }
+
+  const presentedToken = authorization.slice("Bearer ".length).trim();
+
+  if (!presentedToken) {
+    return false;
+  }
+
+  return timingSafeEqual(
+    createHash("sha256").update(canaryToken).digest(),
+    createHash("sha256").update(presentedToken).digest()
+  );
+};
 
 export const hashServerSideIdentity = (purpose: string, value: string): string =>
   createHash("sha256")

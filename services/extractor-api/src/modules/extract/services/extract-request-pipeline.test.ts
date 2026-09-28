@@ -15,13 +15,15 @@ vi.mock("../../analytics/extraction-analytics.js", () => ({
   recordDurableExtractionAnalyticsEvent: mocks.recordDurableExtractionAnalyticsEvent
 }));
 
+import { extractorApiEnv } from "../../../config/env";
 import { getAdminMetricsSnapshot } from "../../admin/metrics";
 import { createMemoryCacheStore } from "../cache/cache-store";
 import { createExtractionResultCache } from "../cache/extraction-cache";
 
 import { runExtractRequestPipeline } from "./extract-request-pipeline";
 
-import type { ExtractorRuntime } from "../types";
+import type { ExtractRecipeAnyRequest } from "../../../../../../packages/api-contracts/src/index.js";
+import type { ExtractionCandidate, ExtractorRuntime, FallbackRecipeExtractor } from "../types";
 
 const recipeJsonLd = readFileSync(
   new URL("../__fixtures__/recipe-jsonld.html", import.meta.url),
@@ -42,7 +44,53 @@ const billingLogContext = {
   quotaLimit: 3
 };
 
-const createRuntime = () => {
+/* What an LLM re-extraction of the page could produce, e.g. steered by text in its comments. */
+const llmCandidate: ExtractionCandidate = {
+  recipe: {
+    title: "LLM Output Title",
+    ingredients: [{ text: "12 oz spaghetti" }, { text: "2 cups cherry tomatoes" }],
+    steps: [
+      { index: 1, text: "Boil the pasta." },
+      { index: 2, text: "Toss with the tomatoes." }
+    ],
+    servings: "4 servings",
+    prepTimeMinutes: 10,
+    cookTimeMinutes: 20,
+    nutrition: null
+  },
+  strategy: "llm-fallback",
+  evidence: ["Fallback model assembled a complete recipe."],
+  warnings: [],
+  provenance: ["llm"],
+  fieldProvenance: {
+    title: "llm",
+    ingredients: "llm",
+    steps: "llm",
+    servings: "llm",
+    prepTimeMinutes: "llm",
+    cookTimeMinutes: "llm",
+    nutrition: null
+  },
+  signals: {
+    requiredFieldsInferred: false,
+    titleConfidence: "strong",
+    timesFromStructuredMetadata: false,
+    recipeLike: true,
+    detectionConfidence: "high",
+    sectionCohesion: "strong",
+    transcriptQuality: "weak",
+    usedBrowserFallback: false,
+    blockedSourceSignals: 0
+  }
+};
+
+const createRuntime = (
+  fallbackExtractor: FallbackRecipeExtractor = {
+    available: false,
+    providerName: "none",
+    extract: () => Promise.resolve(null)
+  }
+) => {
   const fetchHtmlDocument = vi.fn<ExtractorRuntime["fetchHtmlDocument"]>((url: string) =>
     Promise.resolve({
       document: {
@@ -64,11 +112,7 @@ const createRuntime = () => {
     fetchImplementation: fetch,
     fetchHtmlDocument,
     fetchYouTubeDocument: () => Promise.reject(new Error("unused")),
-    fallbackExtractor: {
-      available: false,
-      providerName: "none",
-      extract: () => Promise.resolve(null)
-    },
+    fallbackExtractor,
     extractionCache: createExtractionResultCache({
       ttlSeconds: 600,
       store: createMemoryCacheStore(10)
@@ -84,15 +128,16 @@ const logger = { info: vi.fn(), warn: vi.fn() };
 
 const runPipeline = (
   runtime: ExtractorRuntime,
-  schedule: (task: Promise<unknown>) => void = () => undefined
+  schedule: (task: Promise<unknown>) => void = () => undefined,
+  request: { payload?: ExtractRecipeAnyRequest; headers?: Record<string, string> } = {}
 ) =>
   runExtractRequestPipeline({
-    payload: {
+    payload: request.payload ?? {
       attempt: "primary",
       url: "https://fixtures.linkdish.test/recipe-jsonld",
       correlationId: "5d9a4b20-7e1f-4d5f-8fa2-838071ca35cb"
     },
-    headers: { "x-linkdish-client-id": "client-1" },
+    headers: request.headers ?? { "x-linkdish-client-id": "client-1" },
     identity: { remoteAddress: "198.51.100.7" },
     startedAt: Date.now(),
     runtime,
@@ -199,5 +244,139 @@ describe("runExtractRequestPipeline", () => {
     /* One cache write plus the (still pending) analytics write. */
     expect(scheduled.length).toBeGreaterThanOrEqual(2);
     expect(getAdminMetricsSnapshot().totalRequests).toBe(before + 1);
+  });
+
+  describe("live canary and the shared result cache", () => {
+    const url = "https://fixtures.linkdish.test/recipe-jsonld";
+    const originalCanaryToken = extractorApiEnv.LINKDISH_CANARY_TOKEN;
+
+    beforeEach(() => {
+      extractorApiEnv.LINKDISH_CANARY_TOKEN = "canary-secret-token";
+      mocks.authorizeExtractionRequest.mockResolvedValue({
+        allowed: true,
+        commitUsage: () => Promise.resolve(billingLogContext),
+        logContext: billingLogContext
+      });
+    });
+
+    afterEach(() => {
+      extractorApiEnv.LINKDISH_CANARY_TOKEN = originalCanaryToken;
+    });
+
+    const runAndSettle = async (
+      runtime: ExtractorRuntime,
+      payload: ExtractRecipeAnyRequest,
+      headers: Record<string, string>
+    ) => {
+      const scheduled: Promise<unknown>[] = [];
+      const result = await runPipeline(runtime, (task) => scheduled.push(task), {
+        payload,
+        headers
+      });
+      await Promise.all(scheduled);
+      return result;
+    };
+
+    it("does not let a canary header without the canary token overwrite a cached recipe", async () => {
+      const extract = vi.fn<FallbackRecipeExtractor["extract"]>(() =>
+        Promise.resolve(llmCandidate)
+      );
+      const { runtime } = createRuntime({ available: true, providerName: "gemini", extract });
+
+      const first = await runAndSettle(
+        runtime,
+        { attempt: "primary", url },
+        { "x-linkdish-client-id": "victim-1" }
+      );
+      await runAndSettle(
+        runtime,
+        { attempt: "fallback", url },
+        { "x-linkdish-client-id": "attacker", "x-linkdish-canary": "1" }
+      );
+      const next = await runAndSettle(
+        runtime,
+        { attempt: "primary", url },
+        { "x-linkdish-client-id": "victim-2" }
+      );
+
+      expect(first.response).toMatchObject({
+        status: "success",
+        recipe: { title: "One-Pan Tomato Pasta" }
+      });
+      expect(next.headers).toEqual({ "x-linkdish-cache": "hit" });
+      expect(next.response).toMatchObject({
+        status: "success",
+        recipe: { title: "One-Pan Tomato Pasta" },
+        extraction: { strategy: "recipe-schema" }
+      });
+    });
+
+    it("lets the verified canary read around the cache and refresh it", async () => {
+      const { runtime, fetchHtmlDocument } = createRuntime();
+
+      await runAndSettle(runtime, { attempt: "primary", url }, { "x-linkdish-client-id": "a" });
+      const canary = await runAndSettle(
+        runtime,
+        { attempt: "primary", url },
+        {
+          authorization: "Bearer canary-secret-token",
+          "x-linkdish-canary": "1",
+          "x-linkdish-client-id": "live-canary"
+        }
+      );
+      const forged = await runAndSettle(
+        runtime,
+        { attempt: "primary", url },
+        {
+          authorization: "Bearer wrong-token",
+          "x-linkdish-canary": "1",
+          "x-linkdish-client-id": "live-canary"
+        }
+      );
+
+      expect(canary.headers).toEqual({ "x-linkdish-cache": "bypass" });
+      expect(forged.headers).toEqual({ "x-linkdish-cache": "hit" });
+      expect(fetchHtmlDocument).toHaveBeenCalledTimes(2);
+    });
+
+    it("never stores LLM fallback output, even for the verified canary", async () => {
+      const extract = vi.fn<FallbackRecipeExtractor["extract"]>(() =>
+        Promise.resolve(llmCandidate)
+      );
+      const { runtime, fetchHtmlDocument } = createRuntime({
+        available: true,
+        providerName: "gemini",
+        extract
+      });
+
+      const seeded = await runAndSettle(
+        runtime,
+        { attempt: "fallback", url },
+        { "x-linkdish-client-id": "attacker" }
+      );
+      await runAndSettle(
+        runtime,
+        { attempt: "fallback", url },
+        { authorization: "Bearer canary-secret-token", "x-linkdish-canary": "1" }
+      );
+      const next = await runAndSettle(
+        runtime,
+        { attempt: "primary", url },
+        { "x-linkdish-client-id": "victim" }
+      );
+
+      expect(seeded.response).toMatchObject({
+        status: "success",
+        recipe: { title: "LLM Output Title" },
+        extraction: { strategy: "llm-fallback" }
+      });
+      expect(next.headers).toEqual({ "x-linkdish-cache": "miss" });
+      expect(next.response).toMatchObject({
+        status: "success",
+        recipe: { title: "One-Pan Tomato Pasta" },
+        extraction: { strategy: "recipe-schema" }
+      });
+      expect(fetchHtmlDocument).toHaveBeenCalledTimes(3);
+    });
   });
 });

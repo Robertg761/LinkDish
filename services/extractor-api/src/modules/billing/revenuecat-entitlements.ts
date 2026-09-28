@@ -1,6 +1,11 @@
 import { extractorApiEnv } from "../../config/env.js";
 import { hashServerSideIdentity } from "../request-identity.js";
-import { getStoreString, runStoreCommand, setStoreString } from "../storage/upstash-store.js";
+import {
+  getStoreString,
+  runStoreCommand,
+  runStoreTransaction,
+  setStoreStringUnlessBlocked
+} from "../storage/upstash-store.js";
 
 export type RevenueCatBillingPlanId = "free" | "plus" | "family";
 
@@ -182,12 +187,21 @@ export const getRevenueCatBillingPlanIdFromSubscriber = (
  * that would grant access is dropped by the RevenueCat webhook (every
  * verified event for the user) or overwritten by the next fresh lookup.
  * Cache failures only ever fall back to RevenueCat.
+ *
+ * A lookup that was already waiting on RevenueCat when the webhook arrived may
+ * hold the pre-change answer, so the invalidation also leaves a marker for one
+ * cache lifetime, and a paid plan is only written while no marker exists (one
+ * atomic EVAL) and when the lookup started less than a cache lifetime ago.
+ * For those 5 minutes the user's plan is read from RevenueCat on every request.
  */
 export const REVENUECAT_ENTITLEMENT_CACHE_TTL_SECONDS = 5 * 60;
 const entitlementCacheTimeoutMs = 1_000;
 
 export const getRevenueCatEntitlementCacheKey = (appUserId: string): string =>
   `linkdish:entitlement:v1:${hashServerSideIdentity("entitlement-cache", appUserId)}`;
+
+const getRevenueCatEntitlementInvalidationKey = (appUserId: string): string =>
+  `linkdish:entitlement-invalidated:v1:${hashServerSideIdentity("entitlement-cache", appUserId)}`;
 
 type PaidPlanId = Exclude<RevenueCatBillingPlanId, "free">;
 
@@ -207,14 +221,25 @@ const readCachedPaidPlanId = async (appUserId: string): Promise<PaidPlanId | nul
 
 const writeCachedPlanId = async (
   appUserId: string,
-  planId: RevenueCatBillingPlanId
+  planId: RevenueCatBillingPlanId,
+  lookupStartedAtMs: number
 ): Promise<void> => {
   try {
     if (isPaidPlanId(planId)) {
-      await setStoreString(getRevenueCatEntitlementCacheKey(appUserId), planId, {
-        timeoutMs: entitlementCacheTimeoutMs,
-        ttlSeconds: REVENUECAT_ENTITLEMENT_CACHE_TTL_SECONDS
-      });
+      /* An invalidation marker from before this lookup began may already have expired. */
+      if (Date.now() - lookupStartedAtMs >= REVENUECAT_ENTITLEMENT_CACHE_TTL_SECONDS * 1_000) {
+        return;
+      }
+
+      await setStoreStringUnlessBlocked(
+        getRevenueCatEntitlementCacheKey(appUserId),
+        planId,
+        getRevenueCatEntitlementInvalidationKey(appUserId),
+        {
+          timeoutMs: entitlementCacheTimeoutMs,
+          ttlSeconds: REVENUECAT_ENTITLEMENT_CACHE_TTL_SECONDS
+        }
+      );
       return;
     }
 
@@ -236,10 +261,11 @@ const lookupRevenueCatBillingPlanId = (appUserId: string): Promise<RevenueCatBil
     return inflightLookup;
   }
 
+  const startedAtMs = Date.now();
   const lookup = getRevenueCatSubscriber(appUserId)
     .then(async (subscriber) => {
       const planId = getRevenueCatBillingPlanIdFromSubscriber(subscriber);
-      await writeCachedPlanId(appUserId, planId);
+      await writeCachedPlanId(appUserId, planId, startedAtMs);
       return planId;
     })
     .finally(() => {
@@ -291,20 +317,34 @@ export const verifyActiveRevenueCatFamilyEntitlement = async (
 export const invalidateRevenueCatEntitlementCache = async (
   ...appUserIds: Array<string | null | undefined>
 ): Promise<void> => {
-  const keys = [
-    ...new Set(
-      appUserIds
-        .filter((appUserId): appUserId is string => Boolean(appUserId?.trim()))
-        .map(getRevenueCatEntitlementCacheKey)
-    )
+  const users = [
+    ...new Set(appUserIds.filter((appUserId): appUserId is string => Boolean(appUserId?.trim())))
   ];
 
-  if (keys.length === 0) {
+  if (users.length === 0) {
     return;
   }
 
   try {
-    await runStoreCommand(["DEL", ...keys], { timeoutMs: entitlementCacheTimeoutMs });
+    /* The marker stops lookups already in flight from writing their pre-change answer back. */
+    const results = await runStoreTransaction(
+      [
+        ["DEL", ...users.map(getRevenueCatEntitlementCacheKey)],
+        ...users.map((appUserId) => [
+          "SET",
+          getRevenueCatEntitlementInvalidationKey(appUserId),
+          "1",
+          "EX",
+          String(REVENUECAT_ENTITLEMENT_CACHE_TTL_SECONDS)
+        ])
+      ],
+      { timeoutMs: entitlementCacheTimeoutMs }
+    );
+    const failed = results.find((result) => result.error);
+
+    if (failed?.error) {
+      throw new Error(failed.error);
+    }
   } catch (error) {
     console.warn(
       JSON.stringify({

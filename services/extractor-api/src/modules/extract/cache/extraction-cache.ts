@@ -13,16 +13,21 @@ import { canonicalizeSourceUrl, isSameSiteFetch } from "./canonical-url.js";
 import type { DetectionResult } from "../types.js";
 
 /*
- * URL-keyed cache of validated extraction successes. Popular recipes are
- * imported by many people, and each import used to repeat DNS, the fetch, a
- * possible Playwright render, the parse and the LLM calls. A hit skips all of
- * that; rate limiting, billing authorization and usage commits still run in
- * the request pipeline exactly as for a fresh extraction.
+ * URL-keyed cache of validated deterministic extraction successes. Popular
+ * recipes are imported by many people, and each import used to repeat DNS, the
+ * fetch, a possible Playwright render, the parse and the text-cleanup LLM call.
+ * A hit skips all of that; rate limiting, billing authorization and usage
+ * commits still run in the request pipeline exactly as for a fresh extraction.
  *
  * Bump EXTRACTOR_CACHE_VERSION whenever extraction output changes (parsers,
  * normalisation, scoring, prompts) so stale results stop being served.
+ *
+ * 2026-09-28.1: LLM fallback output is no longer shared; entries written under
+ * the previous version may hold it.
+ * 2026-09-28.2: route fragments (#/..., #!...) are part of the key; an older
+ * entry under a hash-routed app's page may hold one route's recipe.
  */
-export const EXTRACTOR_CACHE_VERSION = "2026-09-27.2";
+export const EXTRACTOR_CACHE_VERSION = "2026-09-28.2";
 
 const cacheKeyPrefix = "linkdish:extract-cache:v1";
 
@@ -63,8 +68,19 @@ export type ExtractionCacheSkipReason =
   | "not_success"
   | "unsupported_source_type"
   | "below_confidence_threshold"
+  | "llm_derived"
   | "invalid_payload"
   | "cross_site_redirect";
+
+/*
+ * LLM fallback output is never shared. The model reads the page's visible text, which can
+ * include comments and other text anyone can post, so a caller could steer one extraction and
+ * have it served to every later importer of that URL. Only deterministic extractions of a page
+ * the server fetched itself are cached (a primary attempt's optional text cleanup only tidies
+ * that deterministic recipe and keeps its strategy and provenance).
+ */
+const isLlmDerived = (response: ExtractRecipeSuccess): boolean =>
+  response.extraction.strategy === "llm-fallback" || response.extraction.provenance.includes("llm");
 
 export interface ExtractionResultCache {
   read(url: string): Promise<CachedExtraction | null>;
@@ -78,9 +94,9 @@ export const getExtractionCacheKey = (url: string): string =>
     .digest("hex")}`;
 
 /**
- * Only validated successes at or above the success confidence bar are shared:
- * never needs_retry, failures, quota errors or image scans, and never a page
- * that redirected to a different site.
+ * Only validated deterministic successes at or above the success confidence bar
+ * are shared: never needs_retry, failures, quota errors, image scans or LLM
+ * output, and never a page that redirected to a different site.
  */
 export const evaluateExtractionCacheWrite = (
   entry: ExtractionCacheWrite
@@ -97,6 +113,10 @@ export const evaluateExtractionCacheWrite = (
 
   if (entry.response.extraction.confidenceScore < successConfidenceThresholds[sourceType]) {
     return { skipReason: "below_confidence_threshold" };
+  }
+
+  if (isLlmDerived(entry.response)) {
+    return { skipReason: "llm_derived" };
   }
 
   if (entry.finalUrl && !isSameSiteFetch(entry.requestUrl, entry.finalUrl)) {
@@ -129,6 +149,7 @@ const parseCachedEntry = (rawValue: string): CachedExtraction | null => {
 
   if (
     !response.success ||
+    isLlmDerived(response.data) ||
     (detectionConfidence !== "high" &&
       detectionConfidence !== "medium" &&
       detectionConfidence !== "low")

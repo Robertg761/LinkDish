@@ -176,6 +176,49 @@ describe("extraction result cache in the extract pipeline", () => {
     expect(second.logContext.cacheStatus).toBe("miss");
   });
 
+  it("keeps the routes of a hash-routed app apart in the cache", async () => {
+    const lemonChicken = recipeJsonLd
+      .replaceAll("One-Pan Tomato Pasta", "Lemon Chicken")
+      .replace("12 oz spaghetti", "2 chicken breasts");
+    /* Playwright's page.goto keeps the fragment, so the app renders that route's recipe. */
+    const fetchHtmlDocument = vi.fn<ExtractorRuntime["fetchHtmlDocument"]>((url: string) =>
+      Promise.resolve({
+        document: {
+          kind: "html" as const,
+          url,
+          finalUrl: url,
+          html: new URL(url).hash === "#/recipe/2" ? lemonChicken : recipeJsonLd,
+          contentType: "text/html",
+          title: null,
+          description: null,
+          blockedSignals: [],
+          statusCode: 200
+        },
+        mode: "browser" as const,
+        blockedSignals: []
+      })
+    );
+    const { runtime: baseRuntime } = createTestRuntime();
+    const runtime: ExtractorRuntime = { ...baseRuntime, fetchHtmlDocument };
+
+    const first = await extractRecipe(
+      { attempt: "primary", url: "https://spa.example/#/recipe/1" },
+      runtime
+    );
+    const second = await extractRecipe(
+      { attempt: "primary", url: "https://spa.example/#/recipe/2" },
+      runtime
+    );
+
+    expect(first.response).toMatchObject({ recipe: { title: "One-Pan Tomato Pasta" } });
+    expect(second.logContext.cacheStatus).toBe("miss");
+    expect(second.response).toMatchObject({
+      status: "success",
+      recipe: { title: "Lemon Chicken", sourceUrl: "https://spa.example/#/recipe/2" }
+    });
+    expect(fetchHtmlDocument).toHaveBeenCalledTimes(2);
+  });
+
   it("skips cache reads in refresh mode (live canary) but still stores the fresh result", async () => {
     const { runtime, fetchHtmlDocument } = createTestRuntime();
     const url = "https://fixtures.linkdish.test/recipe-jsonld";

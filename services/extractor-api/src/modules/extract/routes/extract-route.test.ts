@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 
 import { describe, expect, it, vi } from "vitest";
+import { ZodError } from "zod";
 
 import { buildApp } from "../../../app";
 import { HtmlFetchError } from "../fetchers";
@@ -659,5 +660,25 @@ describe("POST /extract", () => {
     });
 
     expect(response.statusCode).toBe(400);
+  });
+
+  it("answers 500, not 400, when a valid request fails validation inside the extraction", async () => {
+    const runtime: ExtractorRuntime = {
+      ...createRuntime(),
+      validateSourceUrl: () =>
+        Promise.reject(
+          new ZodError([{ code: "custom", path: ["recipe", "sourceUrl"], message: "Too long" }])
+        )
+    };
+    const app = buildApp({ runtime });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/extract",
+      payload: { url: "https://fixtures.linkdish.test/recipe-jsonld", attempt: "primary" }
+    });
+
+    expect(response.statusCode).toBe(500);
+    expect(response.json()).toEqual({ message: "Unexpected extractor error." });
   });
 });
