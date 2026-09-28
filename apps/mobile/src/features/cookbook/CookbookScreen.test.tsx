@@ -38,8 +38,16 @@ const savedRecipesState = vi.hoisted(() => ({
   sharedRecipeError: null as string | null,
   sharedRecipes: [] as unknown[],
   shareMode: "none",
+  setRecipeFavorite: vi.fn(),
   shareRecipe: vi.fn(),
   unshareRecipe: vi.fn()
+}));
+
+const accountState = vi.hoisted(() => ({
+  isSignedIn: false,
+  user: {
+    id: "user_1"
+  } as { id: string } | null
 }));
 
 vi.mock("@expo/vector-icons", () => ({
@@ -84,6 +92,33 @@ vi.mock("expo-router", () => ({
 }));
 
 vi.mock("react-native", () => ({
+  FlatList: ({
+    ListFooterComponent,
+    ListHeaderComponent,
+    data,
+    keyExtractor,
+    renderItem,
+    ...props
+  }: {
+    ListFooterComponent?: React.ReactNode;
+    ListHeaderComponent?: React.ReactNode;
+    data: unknown[];
+    keyExtractor: (item: unknown, index: number) => string;
+    renderItem: (info: { index: number; item: unknown }) => React.ReactNode;
+  }) =>
+    React.createElement(
+      "flat-list",
+      props,
+      ListHeaderComponent,
+      ...data.map((item, index) =>
+        React.createElement(
+          React.Fragment,
+          { key: keyExtractor(item, index) },
+          renderItem({ index, item })
+        )
+      ),
+      ListFooterComponent
+    ),
   Image: ({ children, ...props }: { children?: React.ReactNode }) =>
     React.createElement("Image", props, children),
   Pressable: ({ children, ...props }: { children?: React.ReactNode }) =>
@@ -110,8 +145,12 @@ vi.mock("../../components/AppDialog", () => ({
 
 vi.mock("react-native-reanimated", () => ({
   default: {
-    View: ({ children, ...props }: { children?: React.ReactNode }) =>
-      React.createElement("animated-view", props, children)
+    // Reanimated only plays `entering` when a view mounts, so record the mount-time value.
+    View: ({ children, ...props }: { children?: React.ReactNode; entering?: unknown }) => {
+      const mountEntering = React.useRef(props.entering).current;
+
+      return React.createElement("animated-view", { ...props, mountEntering }, children);
+    }
   },
   Easing: {
     cubic: vi.fn((value: number) => value),
@@ -119,9 +158,9 @@ vi.mock("react-native-reanimated", () => ({
   },
   FadeInDown: {
     duration: () => ({
-      delay: () => ({
+      delay: (delay: number) => ({
         easing: () => ({
-          reduceMotion: () => ({})
+          reduceMotion: (reduceMotion: string) => ({ delay, reduceMotion })
         })
       })
     })
@@ -136,11 +175,7 @@ vi.mock("react-native-safe-area-context", () => ({
 }));
 
 vi.mock("../account/AccountContext", () => ({
-  useAccount: () => ({
-    user: {
-      id: "user_1"
-    }
-  })
+  useAccount: () => accountState
 }));
 
 vi.mock("../billing/UpgradeMomentContext", () => ({
@@ -212,8 +247,11 @@ describe("CookbookScreen navigation and sharing", () => {
     savedRecipesState.sharedRecipeError = null;
     savedRecipesState.sharedRecipes = [];
     savedRecipesState.shareMode = "none";
+    savedRecipesState.setRecipeFavorite.mockReset();
     savedRecipesState.shareRecipe.mockReset();
     savedRecipesState.unshareRecipe.mockReset();
+    accountState.isSignedIn = false;
+    accountState.user = { id: "user_1" };
   });
 
   it("sends the empty-state CTA to the Import tab", () => {
@@ -518,7 +556,8 @@ describe("CookbookScreen navigation and sharing", () => {
     });
 
     const output = JSON.stringify(renderer!.toJSON());
-    expect(output).toContain("4 servings · Prep 10 min · Cook 20 min");
+    // Rows show the clean servings label and the total time (formatServings + getRecipeTimes).
+    expect(output).toContain("Serves 4 · 30 min");
     expect(output).not.toContain("Webpage · 4 servings");
   });
 
@@ -640,5 +679,230 @@ describe("CookbookScreen navigation and sharing", () => {
     const thumbnail = renderer!.root.findByType("Image" as never);
 
     expect((thumbnail.props as { accessible?: boolean }).accessible).toBe(false);
+  });
+
+  it("tells signed-in users without a household to join one instead of signing in", () => {
+    accountState.isSignedIn = true;
+
+    let renderer: ReturnType<typeof create>;
+
+    act(() => {
+      renderer = create(<CookbookScreen />);
+    });
+
+    const lockIcon = renderer!.root.findByProps({ name: "lock-outline" });
+    let familyButton = lockIcon.parent;
+    while (familyButton && (familyButton.type as unknown) !== "pressable") {
+      familyButton = familyButton.parent;
+    }
+
+    act(() => {
+      (familyButton?.props as { onPress?: () => void } | undefined)?.onPress?.();
+    });
+
+    const output = JSON.stringify(renderer!.toJSON());
+    expect(output).toContain(
+      "Join or create a household from the Household tab to share a Family cookbook."
+    );
+    expect(output).not.toContain("Sign in from the Household tab");
+  });
+
+  it("hearts a recipe from its row", () => {
+    savedRecipesState.savedRecipes = [savedRecipe, { ...savedRecipe, favorite: true, id: "fav" }];
+
+    let renderer: ReturnType<typeof create>;
+
+    act(() => {
+      renderer = create(<CookbookScreen />);
+    });
+
+    act(() => {
+      (
+        renderer!.root.findByProps({ accessibilityLabel: "Add to favorites" }).props as {
+          onPress: () => void;
+        }
+      ).onPress();
+    });
+    act(() => {
+      (
+        renderer!.root.findByProps({ accessibilityLabel: "Remove from favorites" }).props as {
+          onPress: () => void;
+        }
+      ).onPress();
+    });
+
+    expect(savedRecipesState.setRecipeFavorite.mock.calls).toEqual([
+      ["saved_1", true],
+      ["fav", false]
+    ]);
+  });
+
+  it("filters the Cookbook down to favorites", () => {
+    savedRecipesState.savedRecipes = [
+      savedRecipe,
+      {
+        ...savedRecipe,
+        favorite: true,
+        id: "fav",
+        recipe: { ...savedRecipe.recipe, sourceUrl: "https://example.com/fav", title: "Loved Pie" }
+      }
+    ];
+
+    let renderer: ReturnType<typeof create>;
+
+    act(() => {
+      renderer = create(<CookbookScreen />);
+    });
+
+    const favoritesFilter = () =>
+      renderer!.root.findByProps({ testID: "cookbook-favorites-filter" });
+
+    expect(JSON.stringify(renderer!.toJSON())).toContain("Favorites · 1");
+
+    act(() => {
+      (favoritesFilter().props as { onPress: () => void }).onPress();
+    });
+
+    let output = JSON.stringify(renderer!.toJSON());
+    expect(favoritesFilter().props.accessibilityState).toEqual({ selected: true });
+    expect(output).toContain("Loved Pie");
+    expect(output).not.toContain("Tomato Toast");
+
+    savedRecipesState.savedRecipes = [savedRecipe];
+
+    act(() => {
+      renderer!.update(<CookbookScreen />);
+    });
+
+    output = JSON.stringify(renderer!.toJSON());
+    expect(output).toContain("No favorites yet. Tap the heart on a recipe to keep it here.");
+  });
+
+  it("sorts by the quickest recipes and keeps untimed ones last", async () => {
+    savedRecipesState.savedRecipes = [
+      {
+        ...savedRecipe,
+        id: "slow",
+        recipe: {
+          ...savedRecipe.recipe,
+          cookTimeMinutes: 180,
+          sourceUrl: "https://example.com/slow",
+          title: "Slow Stew"
+        }
+      },
+      {
+        ...savedRecipe,
+        id: "untimed",
+        recipe: {
+          ...savedRecipe.recipe,
+          cookTimeMinutes: null,
+          prepTimeMinutes: null,
+          sourceUrl: "https://example.com/untimed",
+          title: "Mystery Dish"
+        }
+      },
+      {
+        ...savedRecipe,
+        id: "fast",
+        recipe: {
+          ...savedRecipe.recipe,
+          cookTimeMinutes: 5,
+          prepTimeMinutes: 5,
+          sourceUrl: "https://example.com/fast",
+          title: "Fast Toast"
+        }
+      }
+    ];
+
+    let renderer: ReturnType<typeof create>;
+
+    await act(async () => {
+      renderer = create(<CookbookScreen />);
+      await Promise.resolve();
+    });
+
+    act(() => {
+      (
+        renderer!.root.findByProps({ accessibilityHint: "Opens sorting options" }).props as {
+          onPress: () => void;
+        }
+      ).onPress();
+    });
+    act(() => {
+      (
+        renderer!.root.findByProps({ accessibilityLabel: "Sort by Quickest" }).props as {
+          onPress: () => void;
+        }
+      ).onPress();
+    });
+
+    const output = JSON.stringify(renderer!.toJSON());
+    expect(output.indexOf("Fast Toast")).toBeLessThan(output.indexOf("Slow Stew"));
+    expect(output.indexOf("Slow Stew")).toBeLessThan(output.indexOf("Mystery Dish"));
+    expect(output).toContain("Serves 4 · 3 hr");
+    expect(asyncStorageMocks.setItem).toHaveBeenCalledWith("linkdish.cookbook.sort.v1", "quickest");
+  });
+
+  it("renders rows in a virtualized list with a pinned controls row", () => {
+    savedRecipesState.savedRecipes = [savedRecipe];
+
+    let renderer: ReturnType<typeof create>;
+
+    act(() => {
+      renderer = create(<CookbookScreen />);
+    });
+
+    const list = renderer!.root.findByType("flat-list" as never);
+    const listProps = list.props as { initialNumToRender?: number; stickyHeaderIndices?: number[] };
+
+    expect(listProps.stickyHeaderIndices).toEqual([1]);
+    expect(listProps.initialNumToRender).toBeGreaterThan(0);
+  });
+
+  it("animates only the first rows of the first populated render", () => {
+    savedRecipesState.savedRecipes = Array.from({ length: 10 }, (_, index) => ({
+      ...savedRecipe,
+      id: `saved_${index}`,
+      recipe: {
+        ...savedRecipe.recipe,
+        sourceUrl: `https://example.com/${index}`,
+        title: `Recipe ${index}`
+      }
+    }));
+
+    let renderer: ReturnType<typeof create>;
+
+    act(() => {
+      renderer = create(<CookbookScreen />);
+    });
+
+    const animatedRows = () =>
+      renderer!.root
+        .findAllByType("animated-view" as never)
+        .map((node) => (node.props as { mountEntering?: unknown }).mountEntering);
+
+    const firstMount = animatedRows();
+    expect(firstMount.filter(Boolean)).toHaveLength(8);
+    expect(firstMount[0]).toEqual({ delay: 0, reduceMotion: "system" });
+    expect(firstMount.slice(8).filter(Boolean)).toHaveLength(0);
+
+    savedRecipesState.savedRecipes = [
+      {
+        ...savedRecipe,
+        id: "new",
+        recipe: { ...savedRecipe.recipe, sourceUrl: "https://example.com/new", title: "New" }
+      },
+      ...(savedRecipesState.savedRecipes as Array<typeof savedRecipe>)
+    ];
+
+    act(() => {
+      renderer!.update(<CookbookScreen />);
+    });
+
+    // The row added later mounts without motion; existing rows were not remounted.
+    const afterUpdate = animatedRows();
+    expect(afterUpdate).toHaveLength(11);
+    expect(afterUpdate[0]).toBeUndefined();
+    expect(afterUpdate.filter(Boolean)).toHaveLength(8);
   });
 });

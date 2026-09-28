@@ -366,7 +366,8 @@ describe("RecipeResultCard", () => {
     expect(output).not.toContain("Check the seasoning.");
     expect(output).toContain("390 kcal");
     expect(output).toContain("Grandma’s Soup");
-    expect(output).toContain("Webpage · 4 servings · Prep 10 min · Cook 20 min");
+    // formatServings + getRecipeTimes: "4&nbsp;servings" reads as "Serves 4", with a total.
+    expect(output).toContain("Webpage · Serves 4 · Prep 10 min · Cook 20 min · Total 30 min");
     expect(output).toContain("1 ½ onions");
     expect(output).toContain("Don’t boil.");
     expect(output).toContain("Ingredients");
