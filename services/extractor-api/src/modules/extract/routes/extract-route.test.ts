@@ -4,8 +4,11 @@ import { describe, expect, it, vi } from "vitest";
 import { ZodError } from "zod";
 
 import { buildApp } from "../../../app";
+import { createMemoryCacheStore } from "../cache/cache-store";
+import { createFallbackHandoffStore } from "../cache/fallback-handoff";
 import { HtmlFetchError } from "../fetchers";
 
+import type { FallbackHandoffStore } from "../cache/fallback-handoff";
 import type {
   ExtractorRuntime,
   ExtractionCandidate,
@@ -680,5 +683,118 @@ describe("POST /extract", () => {
 
     expect(response.statusCode).toBe(500);
     expect(response.json()).toEqual({ message: "Unexpected extractor error." });
+  });
+});
+
+describe("POST /extract primary-to-fallback hand-off", () => {
+  const correlationId = "5d9a4b20-7e1f-4d5f-8fa2-838071ca35cb";
+  const url = "https://fixtures.linkdish.test/article-weak";
+  const fallbackCandidate: ExtractionCandidate = {
+    recipe: {
+      title: "Fallback Skillet Chicken",
+      ingredients: [{ text: "1 lb chicken thighs" }],
+      steps: [{ index: 1, text: "Sear the chicken." }],
+      servings: "4 servings",
+      prepTimeMinutes: 10,
+      cookTimeMinutes: 18,
+      nutrition: null
+    },
+    strategy: "llm-fallback",
+    evidence: ["Fallback model assembled a complete recipe."],
+    warnings: [],
+    provenance: ["llm"],
+    fieldProvenance: {
+      title: "llm",
+      ingredients: "llm",
+      steps: "llm",
+      servings: "llm",
+      prepTimeMinutes: "llm",
+      cookTimeMinutes: "llm",
+      nutrition: null
+    },
+    signals: {
+      requiredFieldsInferred: false,
+      titleConfidence: "strong",
+      timesFromStructuredMetadata: false,
+      recipeLike: true,
+      detectionConfidence: "medium",
+      sectionCohesion: "medium",
+      transcriptQuality: "weak",
+      usedBrowserFallback: false,
+      blockedSourceSignals: 0
+    }
+  };
+
+  const createHandoffRuntime = (
+    write: (
+      store: FallbackHandoffStore,
+      ...args: Parameters<FallbackHandoffStore["write"]>
+    ) => Promise<boolean>
+  ) => {
+    const base = createRuntime({ fallbackAvailable: true, fallbackCandidate });
+    const store = createFallbackHandoffStore({ store: createMemoryCacheStore(10) });
+    const fetchHtmlDocument = vi.fn<ExtractorRuntime["fetchHtmlDocument"]>((...args) =>
+      base.fetchHtmlDocument(...args)
+    );
+    const extract = vi.fn<FallbackRecipeExtractor["extract"]>((...args) =>
+      base.fallbackExtractor.extract(...args)
+    );
+    const runtime: ExtractorRuntime = {
+      ...base,
+      fetchHtmlDocument,
+      fallbackExtractor: { ...base.fallbackExtractor, extract },
+      fallbackHandoffStore: {
+        read: (...args) => store.read(...args),
+        write: (...args) => write(store, ...args)
+      }
+    };
+
+    return { runtime, fetchHtmlDocument, extract };
+  };
+
+  it("stores the hand-off before answering, so an immediate fallback skips the second fetch", async () => {
+    const { runtime, fetchHtmlDocument, extract } = createHandoffRuntime(async (store, ...args) => {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      return store.write(...args);
+    });
+    const app = buildApp({ runtime });
+
+    const primary = await app.inject({
+      method: "POST",
+      url: "/extract",
+      payload: { url, attempt: "primary", correlationId }
+    });
+    /* The route fires post-response work and forgets it; the client retries straight away. */
+    const fallback = await app.inject({
+      method: "POST",
+      url: "/extract",
+      payload: { url, attempt: "fallback", correlationId }
+    });
+
+    expect(primary.statusCode).toBe(200);
+    expect(primary.json()).toMatchObject({ status: "needs_retry" });
+    expect(fallback.statusCode).toBe(200);
+    expect(fallback.json()).toMatchObject({
+      status: "success",
+      extraction: { strategy: "llm-fallback" }
+    });
+    expect(fetchHtmlDocument).toHaveBeenCalledTimes(1);
+    expect(extract.mock.calls[0]?.[0].sourceSummary).toContain("Page title:");
+  });
+
+  it("still answers needs_retry with a 200 when the hand-off store fails or stalls", async () => {
+    const failing = createHandoffRuntime(() => Promise.reject(new Error("store unavailable")));
+    const stalled = createHandoffRuntime(() => new Promise<boolean>(() => undefined));
+
+    for (const { runtime } of [failing, stalled]) {
+      const response = await buildApp({ runtime }).inject({
+        method: "POST",
+        url: "/extract",
+        payload: { url, attempt: "primary", correlationId }
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({ status: "needs_retry" });
+    }
   });
 });

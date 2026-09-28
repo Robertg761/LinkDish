@@ -25,9 +25,10 @@ export interface ExtractRequestPipelineInput {
   startedAt: number;
   runtime?: ExtractorRuntime;
   /**
-   * Keeps post-response work (durable analytics, cache and hand-off writes)
-   * alive after the response is sent: Vercel's waitUntil in api/extract.ts,
-   * fire-and-forget on the long-lived Fastify server.
+   * Keeps post-response work (durable analytics, cache writes, a fallback
+   * hand-off write that outlasts its short pre-response wait) alive after the
+   * response is sent: Vercel's waitUntil in api/extract.ts, fire-and-forget on
+   * the long-lived Fastify server.
    */
   schedule: (task: Promise<unknown>) => void;
   /** Extra structured-log fields, e.g. the rate-limit context. */

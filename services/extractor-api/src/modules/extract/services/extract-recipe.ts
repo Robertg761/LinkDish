@@ -102,7 +102,10 @@ export interface ExtractRecipeOptions {
    * stores fresh results (the live canary), "bypass" does neither.
    */
   cacheMode?: "default" | "refresh" | "bypass";
-  /** Runs post-response work (cache and hand-off writes); Vercel passes waitUntil. Defaults to awaiting inline. */
+  /**
+   * Keeps work alive past the response (cache writes, and a hand-off write that outlasts its
+   * pre-response wait); Vercel passes waitUntil. Without it that work is awaited inline.
+   */
   schedule?: (task: Promise<unknown>) => void;
 }
 
@@ -112,8 +115,53 @@ interface ExtractionContext {
   authorization: Promise<boolean>;
   correlationId: string | undefined;
   cacheMode: NonNullable<ExtractRecipeOptions["cacheMode"]>;
+  /** Starts `task` and lets it finish after the response. Never rejects. */
   afterResponse(task: () => Promise<void>): Promise<void>;
+  /**
+   * Starts `task` and waits at most `maxWaitMs` for it; a slower task finishes after the
+   * response, like `afterResponse` work. Never rejects: a failed task reads as "settled".
+   */
+  beforeResponse(
+    task: () => Promise<void>,
+    options: { maxWaitMs: number; failureEvent: string }
+  ): Promise<"settled" | "timed_out">;
 }
+
+/*
+ * How long a needs_retry answer waits for its fallback hand-off to be stored. Clients may send
+ * the fallback attempt the moment the primary answer arrives (the import queue does), so a
+ * hand-off still being written then is missed and the page is fetched (often rendered) again.
+ * Storing it takes a lazily loaded HTML summary pass and one store write: typically tens of
+ * milliseconds, a few hundred on a cold start with a large page. 400 ms covers that tail while
+ * staying well under the store's own 1.5 s request timeout, so a slow or failing store adds at
+ * most 400 ms to an answer whose next step is a multi-second LLM call. A write that takes longer
+ * keeps running after the response, as it did before, and usually still lands before the
+ * fallback attempt (a new request, rate-limited and billed first) reads it.
+ */
+export const FALLBACK_HANDOFF_MAX_WAIT_MS = 400;
+
+const logTaskFailure = (event: string) => (error: unknown) => {
+  console.warn(
+    JSON.stringify({
+      event,
+      message: error instanceof Error ? error.message : "Unknown error"
+    })
+  );
+};
+
+/* Resolves true when `task` settles within `maxWaitMs`, false when the wait ran out first. */
+const settlesWithin = async (task: Promise<void>, maxWaitMs: number): Promise<boolean> => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<false>((resolve) => {
+    timer = setTimeout(() => resolve(false), Math.max(0, maxWaitMs));
+  });
+
+  try {
+    return await Promise.race([task.then(() => true as const), timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+};
 
 const defaultRetryRecovery = {
   retryable: true,
@@ -153,6 +201,20 @@ const createExtractionContext = (
     options.deadline ??
     createRequestDeadline(extractorApiEnv.EXTRACT_REQUEST_DEADLINE_MS, options.signal);
   const schedule = options.schedule;
+  /* Hands a started task to the scheduler; post-response bookkeeping must never fail an import. */
+  const keepAlive = (task: Promise<void>): boolean => {
+    if (!schedule) {
+      return false;
+    }
+
+    try {
+      schedule(task);
+    } catch (error) {
+      logTaskFailure("extract_schedule_failed")(error);
+    }
+
+    return true;
+  };
 
   return {
     context: {
@@ -162,21 +224,22 @@ const createExtractionContext = (
       correlationId: options.correlationId,
       cacheMode: options.cacheMode ?? "default",
       afterResponse: async (task) => {
-        const guardedTask = task().catch((error: unknown) => {
-          console.warn(
-            JSON.stringify({
-              event: "extract_post_response_task_failed",
-              message: error instanceof Error ? error.message : "Unknown error"
-            })
-          );
-        });
+        const guardedTask = task().catch(logTaskFailure("extract_post_response_task_failed"));
 
-        if (schedule) {
-          schedule(guardedTask);
-          return;
+        if (!keepAlive(guardedTask)) {
+          await guardedTask;
+        }
+      },
+      beforeResponse: async (task, { maxWaitMs, failureEvent }) => {
+        const guardedTask = task().catch(logTaskFailure(failureEvent));
+
+        /* Scheduled first, so the task outlives the response if the wait below runs out. */
+        if (!keepAlive(guardedTask)) {
+          await guardedTask;
+          return "settled";
         }
 
-        await guardedTask;
+        return (await settlesWithin(guardedTask, maxWaitMs)) ? "settled" : "timed_out";
       }
     },
     dispose: () => {
@@ -841,7 +904,13 @@ const scheduleCacheWrite = (
   });
 };
 
-const scheduleFallbackHandoff = (
+/*
+ * Stores the hand-off before the needs_retry answer goes out (bounded by
+ * FALLBACK_HANDOFF_MAX_WAIT_MS and the request deadline), so a fallback attempt sent the moment
+ * that answer arrives finds it. With the fallback provider switched off the fallback attempt
+ * never reads one, so nothing is stored or waited for.
+ */
+const persistFallbackHandoff = async (
   context: ExtractionContext,
   requestUrl: string,
   sourceUrl: string,
@@ -856,29 +925,43 @@ const scheduleFallbackHandoff = (
   if (
     !store ||
     !correlationId ||
+    !context.runtime.fallbackExtractor.available ||
     sourceDocument.kind === "image" ||
     sourceDocument.kind === "text"
   ) {
-    return Promise.resolve();
+    return;
   }
 
-  return context.afterResponse(async () => {
-    const sourceSummary =
-      sourceDocument.kind === "html"
-        ? (await loadFallbackInputBuilder()).buildHtmlSourceSummary(sourceDocument.html)
-        : null;
-    const handoff: FallbackHandoff = {
-      url: requestUrl,
-      detection,
-      fetchMode,
-      candidate,
-      sourceDocument: toHandoffSourceDocument(sourceDocument),
-      sourceSummary,
-      ...(sourceUrl === requestUrl ? {} : { sourceUrl })
-    };
+  const maxWaitMs = context.deadline.budgetMs(FALLBACK_HANDOFF_MAX_WAIT_MS);
+  const outcome = await context.beforeResponse(
+    async () => {
+      const sourceSummary =
+        sourceDocument.kind === "html"
+          ? (await loadFallbackInputBuilder()).buildHtmlSourceSummary(sourceDocument.html)
+          : null;
+      const handoff: FallbackHandoff = {
+        url: requestUrl,
+        detection,
+        fetchMode,
+        candidate,
+        sourceDocument: toHandoffSourceDocument(sourceDocument),
+        sourceSummary,
+        ...(sourceUrl === requestUrl ? {} : { sourceUrl })
+      };
 
-    await store.write(correlationId, requestUrl, handoff);
-  });
+      await store.write(correlationId, requestUrl, handoff);
+    },
+    { maxWaitMs, failureEvent: "extract_handoff_write_failed" }
+  );
+
+  if (outcome === "timed_out") {
+    console.warn(
+      JSON.stringify({
+        event: "extract_handoff_write_slow",
+        waitedMs: maxWaitMs
+      })
+    );
+  }
 };
 
 const readFallbackHandoff = async (
@@ -1750,7 +1833,7 @@ const extractFromUrl = async (
   if (response.status === "success") {
     await scheduleCacheWrite(context, sourceRequest.url, response, sourceDocument, detection);
   } else if (decision.kind === "needs_retry") {
-    await scheduleFallbackHandoff(
+    await persistFallbackHandoff(
       context,
       request.url,
       sourceRequest.url,

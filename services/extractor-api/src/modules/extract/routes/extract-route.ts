@@ -26,8 +26,9 @@ export const registerExtractRoute = (app: FastifyInstance, runtime?: ExtractorRu
     try {
       /*
        * Same pipeline as the Vercel adapter. The long-lived server has no
-       * waitUntil, so post-response work (analytics, cache writes) simply
-       * continues in the background; each task handles its own errors.
+       * waitUntil, so post-response work (analytics, cache writes, a slow
+       * fallback hand-off write) simply continues in the background; each
+       * task handles its own errors.
        */
       const { response, headers } = await runExtractRequestPipeline({
         payload,
