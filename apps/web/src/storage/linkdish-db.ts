@@ -1,5 +1,7 @@
 import { openDB, type IDBPDatabase } from "idb";
 
+import { safeGetItem, safeRemoveItem, safeSetItem } from "../platform/safe-storage";
+
 export const LINKDISH_WEB_DB_NAME = "linkdish-web";
 export const LINKDISH_WEB_DB_VERSION = 4;
 export const SAVED_RECIPES_STORE_NAME = "savedRecipes";
@@ -45,10 +47,6 @@ export interface MigrationRecordStore {
   getAllKeys(): Promise<IDBValidKey[]>;
   get(key: IDBValidKey): Promise<unknown>;
   put(value: unknown): Promise<unknown>;
-}
-
-export interface UpgradeTransaction {
-  objectStore(name: string): MigrationRecordStore;
 }
 
 interface StoreDefinition {
@@ -145,12 +143,44 @@ const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
 /**
- * v4 perf migration: moves `sourceImages` (multi-MB base64 data URLs) out of each saved recipe
- * into the `recipeSourceImages` store so list reads stop cloning them.
- *
- * Per record the images are written first and the recipe is rewritten second. Everything runs in
- * the single versionchange transaction, so if any step throws the caller aborts the transaction
- * and the database stays exactly as it was. Running it again is a no-op.
+ * Moves one saved recipe's embedded `sourceImages` into the images store: the images are written
+ * first and the recipe is rewritten second. Returns what it did ("none" when there was nothing
+ * embedded). Running it again is a no-op.
+ */
+export async function migrateRecipeSourceImages(
+  key: IDBValidKey,
+  savedRecipes: MigrationRecordStore,
+  sourceImages: MigrationRecordStore,
+  now: () => string = () => new Date().toISOString()
+): Promise<"moved" | "stripped" | "none"> {
+  const record = await savedRecipes.get(key);
+
+  if (!isPlainRecord(record) || !("sourceImages" in record)) {
+    return "none";
+  }
+
+  const { sourceImages: embeddedImages, ...rest } = record;
+  const images = Array.isArray(embeddedImages) ? (embeddedImages as unknown[]) : [];
+
+  if (images.length > 0) {
+    const imageRecord: StoredRecipeSourceImages = {
+      images,
+      recipeId: typeof key === "string" ? key : String(key as number),
+      updatedAt: typeof record.updatedAt === "string" ? record.updatedAt : now()
+    };
+
+    await sourceImages.put(imageRecord);
+  }
+
+  await savedRecipes.put(images.length > 0 ? { ...rest, sourceImageCount: images.length } : rest);
+  return images.length > 0 ? "moved" : "stripped";
+}
+
+/**
+ * v4 perf migration: moves `sourceImages` (multi-MB base64 data URLs) out of every saved recipe
+ * into the `recipeSourceImages` store so list reads stop cloning them. Running it again is a
+ * no-op. The app runs it one recipe per transaction after the database opens (see
+ * {@link finishSourceImageMigration}); reads handle recipes that still embed their images.
  */
 export async function migrateSourceImagesToImageStore(
   savedRecipes: MigrationRecordStore,
@@ -158,45 +188,94 @@ export async function migrateSourceImagesToImageStore(
   now: () => string = () => new Date().toISOString()
 ): Promise<SourceImageMigrationResult> {
   const result: SourceImageMigrationResult = { moved: 0, stripped: 0 };
-  const keys = await savedRecipes.getAllKeys();
 
-  for (const key of keys) {
-    const record = await savedRecipes.get(key);
+  for (const key of await savedRecipes.getAllKeys()) {
+    const outcome = await migrateRecipeSourceImages(key, savedRecipes, sourceImages, now);
 
-    if (!isPlainRecord(record) || !("sourceImages" in record)) {
-      continue;
+    if (outcome !== "none") {
+      result.stripped += 1;
+      result.moved += outcome === "moved" ? 1 : 0;
     }
-
-    const { sourceImages: embeddedImages, ...rest } = record;
-    const images = Array.isArray(embeddedImages) ? (embeddedImages as unknown[]) : [];
-
-    if (images.length > 0) {
-      const imageRecord: StoredRecipeSourceImages = {
-        images,
-        recipeId: typeof key === "string" ? key : String(key as number),
-        updatedAt: typeof record.updatedAt === "string" ? record.updatedAt : now()
-      };
-
-      await sourceImages.put(imageRecord);
-      result.moved += 1;
-    }
-
-    await savedRecipes.put(images.length > 0 ? { ...rest, sourceImageCount: images.length } : rest);
-    result.stripped += 1;
   }
 
   return result;
 }
 
+/** Set while recipes from before v4 may still embed their scans (see the migration below). */
+export const SOURCE_IMAGE_MIGRATION_PENDING_KEY = "linkdish:web:source-image-migration:v1";
+let sourceImageMigrationPending = false;
+
+const markSourceImageMigrationPending = (): void => {
+  sourceImageMigrationPending = true;
+  safeSetItem(SOURCE_IMAGE_MIGRATION_PENDING_KEY, "pending");
+};
+
+const isSourceImageMigrationPending = (): boolean =>
+  sourceImageMigrationPending || safeGetItem(SOURCE_IMAGE_MIGRATION_PENDING_KEY) !== null;
+
+/** The part of an open database the post-upgrade migration uses. */
+export interface MigrationDatabase {
+  getAllKeys(storeName: string): Promise<IDBValidKey[]>;
+  transaction(
+    storeNames: string[],
+    mode: "readwrite"
+  ): {
+    done: Promise<unknown>;
+    objectStore(name: string): MigrationRecordStore;
+  };
+}
+
+/**
+ * Moves pre-v4 recipes' scans into the images store after the database has opened, one recipe per
+ * transaction. Doing it inside the versionchange transaction needed room for every scan twice at
+ * once, and a single failure (a full device) aborted the upgrade and locked people out of all
+ * their data on every load. Here a failure only leaves the rest for the next load: recipes that
+ * still embed their scans stay readable and exportable. Never rejects; true when it finished.
+ */
+export async function finishSourceImageMigration(db: MigrationDatabase): Promise<boolean> {
+  try {
+    for (const key of await db.getAllKeys(SAVED_RECIPES_STORE_NAME)) {
+      const tx = db.transaction(
+        [SAVED_RECIPES_STORE_NAME, RECIPE_SOURCE_IMAGES_STORE_NAME],
+        "readwrite"
+      );
+      const done = tx.done;
+      done.catch(() => undefined);
+
+      try {
+        await migrateRecipeSourceImages(
+          key,
+          tx.objectStore(SAVED_RECIPES_STORE_NAME),
+          tx.objectStore(RECIPE_SOURCE_IMAGES_STORE_NAME)
+        );
+        await done;
+      } catch (error) {
+        try {
+          (tx as { abort?: () => void }).abort?.();
+        } catch {
+          // Already aborted by the failed request.
+        }
+
+        throw error;
+      }
+    }
+  } catch (error) {
+    console.warn("Some scans could not be moved yet; they stay readable where they are.", error);
+    return false;
+  }
+
+  sourceImageMigrationPending = false;
+  safeRemoveItem(SOURCE_IMAGE_MIGRATION_PENDING_KEY);
+  return true;
+}
+
 /**
  * Runs every schema step needed to bring `oldVersion` up to {@link LINKDISH_WEB_DB_VERSION}.
- * Store creation is idempotent and additive; data migrations are oldVersion-gated.
+ * Store creation is idempotent and additive. Data migrations run after the database has opened
+ * (oldVersion-gated markers here), so the versionchange transaction stays small and cannot fail
+ * for lack of space.
  */
-export async function runLinkDishWebDbUpgrade(
-  db: UpgradeDatabase,
-  oldVersion: number,
-  transaction: UpgradeTransaction
-): Promise<void> {
+export function runLinkDishWebDbUpgrade(db: UpgradeDatabase, oldVersion: number): void {
   // v1: saved recipes. v2 only added recipe.image inside the existing payload.
   ensureObjectStore(db, SAVED_RECIPES_STORE_NAME);
 
@@ -212,10 +291,8 @@ export async function runLinkDishWebDbUpgrade(
     ensureObjectStore(db, RECIPE_SOURCE_IMAGES_STORE_NAME);
 
     if (oldVersion > 0) {
-      await migrateSourceImagesToImageStore(
-        transaction.objectStore(SAVED_RECIPES_STORE_NAME),
-        transaction.objectStore(RECIPE_SOURCE_IMAGES_STORE_NAME)
-      );
+      // Scans move out once the database is open (see finishSourceImageMigration).
+      markSourceImageMigrationPending();
     }
   }
 }
@@ -275,11 +352,9 @@ export function getLinkDishWebDb(): Promise<IDBPDatabase> {
 
   const promise: Promise<IDBPDatabase> = openDB(LINKDISH_WEB_DB_NAME, LINKDISH_WEB_DB_VERSION, {
     upgrade(db, oldVersion, _newVersion, transaction) {
-      runLinkDishWebDbUpgrade(
-        db as unknown as UpgradeDatabase,
-        oldVersion,
-        transaction as unknown as UpgradeTransaction
-      ).catch((error: unknown) => {
+      try {
+        runLinkDishWebDbUpgrade(db as unknown as UpgradeDatabase, oldVersion);
+      } catch (error) {
         console.error("LinkDish storage upgrade failed; keeping the previous data.", error);
 
         try {
@@ -288,7 +363,7 @@ export function getLinkDishWebDb(): Promise<IDBPDatabase> {
         } catch {
           // The transaction may already be finished or aborted.
         }
-      });
+      }
     },
     blocked() {
       setStatus({ state: "blocked" });
@@ -308,7 +383,11 @@ export function getLinkDishWebDb(): Promise<IDBPDatabase> {
       setStatus({ state: "terminated" });
     }
   }).then(
-    (db) => {
+    async (db) => {
+      if (isSourceImageMigrationPending()) {
+        await finishSourceImageMigration(db as unknown as MigrationDatabase);
+      }
+
       if (dbPromise === promise) {
         openDbConnection = db;
         setStatus({ state: "ready" });
@@ -351,9 +430,11 @@ export function subscribeLinkDishDbStatus(listener: () => void): () => void {
   };
 }
 
+/** Forgets this page's connection, like a reload (a pending migration stays pending). */
 export function resetLinkDishWebDbForTests(): void {
   closeConnection(openDbConnection);
   openDbConnection = null;
   dbPromise = null;
+  sourceImageMigrationPending = false;
   status = { state: "idle" };
 }

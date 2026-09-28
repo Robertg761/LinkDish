@@ -435,6 +435,28 @@ describe("saved-recipe-store v4 behaviour", () => {
     expect((await getSavedRecipes()).every((recipe) => !("sourceImages" in recipe))).toBe(true);
   });
 
+  it("keeps a v3 cookbook readable when the device has no room to move its scans", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const legacy = { ...(await saveScanned()), id: "legacy-scan", sourceImages: [scan(7)] };
+    fakeIdb.reset(3);
+    fakeIdb.defineStore(SAVED_RECIPES_STORE_NAME, "id", {
+      createdAt: "createdAt",
+      sourceHost: "sourceHost",
+      title: "recipe.title",
+      updatedAt: "updatedAt"
+    });
+    fakeIdb.seed(SAVED_RECIPES_STORE_NAME, [legacy]);
+    resetLinkDishWebDbForTests();
+    fakeIdb.failNextPut(
+      RECIPE_SOURCE_IMAGES_STORE_NAME,
+      new DOMException("The quota has been exceeded.", "QuotaExceededError")
+    );
+
+    expect((await getSavedRecipes()).map((recipe) => recipe.id)).toEqual(["legacy-scan"]);
+    expect(await getSavedRecipeSourceImages("legacy-scan")).toEqual([scan(7)]);
+    expect((await getSavedRecipeById("legacy-scan"))?.sourceImages).toEqual([scan(7)]);
+  });
+
   it("keeps images hydrated through edits, cooks and replacements", async () => {
     const saved = await saveScanned();
 

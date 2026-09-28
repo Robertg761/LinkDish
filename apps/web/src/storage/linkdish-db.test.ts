@@ -4,6 +4,7 @@ import {
   COLLECTIONS_STORE_NAME,
   COOK_SESSIONS_STORE_NAME,
   ensureObjectStore,
+  finishSourceImageMigration,
   getLinkDishDbStatus,
   getLinkDishWebDb,
   IMPORT_QUEUE_STORE_NAME,
@@ -16,7 +17,9 @@ import {
   retryLinkDishWebDb,
   SAVED_RECIPES_STORE_NAME,
   SHOPPING_ITEMS_STORE_NAME,
+  SOURCE_IMAGE_MIGRATION_PENDING_KEY,
   subscribeLinkDishDbStatus,
+  type MigrationDatabase,
   type MigrationRecordStore
 } from "./linkdish-db";
 import { fakeIdb } from "./testing/fake-idb";
@@ -200,27 +203,60 @@ describe("linkdish-db v4 schema", () => {
     ]);
   });
 
-  it("rolls the whole upgrade back when the migration fails", async () => {
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+  it("still opens when moving the scans fails (a full device), and finishes the move later", async () => {
+    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     seedExistingSchema(3);
     const scanned = legacyRecipe("scanned", { sourceImages: [scan(5)] });
-    fakeIdb.seed(SAVED_RECIPES_STORE_NAME, [scanned]);
-    fakeIdb.failNextPut(RECIPE_SOURCE_IMAGES_STORE_NAME, new Error("quota exceeded"));
+    const other = legacyRecipe("other", { sourceImages: [scan(6)] });
+    fakeIdb.seed(SAVED_RECIPES_STORE_NAME, [scanned, other]);
+    fakeIdb.failNextPut(
+      RECIPE_SOURCE_IMAGES_STORE_NAME,
+      new DOMException("The quota has been exceeded.", "QuotaExceededError")
+    );
 
-    await expect(getLinkDishWebDb()).rejects.toMatchObject({ name: "AbortError" });
+    await getLinkDishWebDb();
 
-    expect(consoleError).toHaveBeenCalled();
-    expect(fakeIdb.version).toBe(3);
-    expect(fakeIdb.hasStore(RECIPE_SOURCE_IMAGES_STORE_NAME)).toBe(false);
-    expect(fakeIdb.record(SAVED_RECIPES_STORE_NAME, "scanned")).toEqual(scanned);
-    expect(getLinkDishDbStatus().state).toBe("error");
-
-    // The failed open is not cached: the next attempt runs the upgrade again and succeeds.
-    await retryLinkDishWebDb();
+    // Not locked out: the schema is upgraded and every recipe (with its scans) is still there.
+    expect(consoleWarn).toHaveBeenCalled();
     expect(getLinkDishDbStatus().state).toBe("ready");
+    expect(fakeIdb.version).toBe(4);
+    expectV4Stores();
+    expect(fakeIdb.record(SAVED_RECIPES_STORE_NAME, "scanned")).toEqual(scanned);
+    expect(fakeIdb.record(SAVED_RECIPES_STORE_NAME, "other")).toEqual(other);
+
+    // The next load (with room again) moves them.
+    resetLinkDishWebDbForTests();
+    await getLinkDishWebDb();
+
     expect(fakeIdb.record(RECIPE_SOURCE_IMAGES_STORE_NAME, "scanned")).toMatchObject({
       images: [scan(5)]
     });
+    expect(fakeIdb.record(SAVED_RECIPES_STORE_NAME, "scanned")).not.toHaveProperty("sourceImages");
+    expect(fakeIdb.record(SAVED_RECIPES_STORE_NAME, "other")).toMatchObject({
+      sourceImageCount: 1
+    });
+    expect(localStorage.getItem(SOURCE_IMAGE_MIGRATION_PENDING_KEY)).toBeNull();
+  });
+
+  it("moves each recipe's scans in its own transaction", async () => {
+    const db = await getLinkDishWebDb();
+    fakeIdb.seed(SAVED_RECIPES_STORE_NAME, [
+      legacyRecipe("a", { sourceImages: [scan(1)] }),
+      legacyRecipe("b", { sourceImages: [scan(2)] })
+    ]);
+    const transactions: string[][] = [];
+    const transaction = db.transaction.bind(db);
+    vi.spyOn(db, "transaction").mockImplementation(((names: string[], mode: "readwrite") => {
+      transactions.push(names);
+      return transaction(names, mode);
+    }) as typeof db.transaction);
+
+    await expect(finishSourceImageMigration(db as unknown as MigrationDatabase)).resolves.toBe(
+      true
+    );
+
+    expect(transactions).toHaveLength(2);
+    expect(fakeIdb.records(RECIPE_SOURCE_IMAGES_STORE_NAME)).toHaveLength(2);
   });
 });
 
