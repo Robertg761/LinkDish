@@ -43,6 +43,7 @@ const runner = (overrides: Partial<ImportQueueRunnerState> = {}): ImportQueueRun
   paused: null,
   resume: vi.fn(),
   running: false,
+  stalled: false,
   ...overrides
 });
 
@@ -85,6 +86,24 @@ describe("ImportQueuePanel", () => {
 
     fireEvent.click(within(note).getByRole("button", { name: "Get Plus" }));
     expect(upgradeMocks.requestUpgradeSheet).toHaveBeenCalledWith("save_limit");
+  });
+
+  it("says when storage trouble stopped the queue, and tries again when tapped", async () => {
+    fakeIdb.seed(IMPORT_QUEUE_STORE_NAME, [
+      item("a", { url: "https://www.bonappetit.com/recipe/rice" })
+    ]);
+    const state = runner({ stalled: true });
+
+    renderPanel(state);
+
+    const note = (await screen.findByText(/Stopped for now · 1 link waiting\./u)).closest(
+      ".import-queue-note"
+    ) as HTMLElement;
+    expect(note).toHaveAttribute("role", "status");
+    expect(note).toHaveTextContent("We’ll try again shortly.");
+
+    fireEvent.click(within(note).getByRole("button", { name: "Try again" }));
+    expect(state.resume).toHaveBeenCalledOnce();
   });
 
   it("gives every row one anatomy: title, trailing actions, a full-width status", async () => {

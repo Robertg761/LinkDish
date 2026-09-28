@@ -15,6 +15,13 @@ import type { ImportQueueItem } from "../../data/import-queue-store";
 /** Only one tab works through the queue at a time. */
 export const IMPORT_QUEUE_LOCK_NAME = "linkdish:import-queue";
 
+/**
+ * After storage trouble stops a run, the queue waits this long before trying again by itself,
+ * twice as long after each run in a row that fails, up to {@link MAX_STORAGE_RETRY_MS}.
+ */
+export const STORAGE_RETRY_MS = 30 * 1000;
+export const MAX_STORAGE_RETRY_MS = 5 * 60 * 1000;
+
 /** The waiting items, as they are now: changes whenever one is added, retried or let go of. */
 const queuedKeyOf = (items: readonly ImportQueueItem[]): string =>
   items
@@ -22,11 +29,30 @@ const queuedKeyOf = (items: readonly ImportQueueItem[]): string =>
     .map((item) => `${item.id}:${item.updatedAt}`)
     .join("|");
 
+/**
+ * Which items are waiting or importing, not how: a tab claiming an item and letting it go again
+ * (as every tab does when storage can't be read) leaves this as it was.
+ */
+const pendingIdsOf = (items: readonly ImportQueueItem[]): string =>
+  items
+    .filter((item) => item.status === "queued" || item.status === "processing")
+    .map((item) => item.id)
+    .join("|");
+
+/** Storage trouble stopped the last `failures` runs in a row; `waitingOn` is set until a retry. */
+interface StorageStall {
+  failures: number;
+  /** The pending items (see pendingIdsOf) when the last run stopped; null once it may try again. */
+  waitingOn: string | null;
+}
+
 export interface ImportQueueRunnerState {
   running: boolean;
   paused: QueuePauseReason | null;
   online: boolean;
-  /** Clears a pause (e.g. after upgrading) and tries again. */
+  /** Storage trouble stopped the queue. It tries again by itself after a while, or on `resume`. */
+  stalled: boolean;
+  /** Clears a pause (e.g. after upgrading) or a stall, and tries again. */
   resume: () => void;
 }
 
@@ -66,9 +92,11 @@ export function useImportQueueRunner(enabled = true): ImportQueueRunnerState {
   const [online, setOnline] = useState(isOnline);
   const [running, setRunning] = useState(false);
   const [paused, setPaused] = useState<QueuePauseReason | null>(null);
+  const [stall, setStall] = useState<StorageStall | null>(null);
   const controllerRef = useRef<AbortController | null>(null);
   const tier = getWebBillingTier(user);
   const queuedKey = useMemo(() => queuedKeyOf(queue.items), [queue.items]);
+  const pendingIds = useMemo(() => pendingIdsOf(queue.items), [queue.items]);
   const hasQueued = queuedKey.length > 0;
   /** The queue as it was when a run found nothing to do; don't spin on it again. */
   const idleKeyRef = useRef<string | null>(null);
@@ -102,7 +130,8 @@ export function useImportQueueRunner(enabled = true): ImportQueueRunnerState {
       running ||
       paused ||
       !hasQueued ||
-      idleKeyRef.current === queuedKey
+      idleKeyRef.current === queuedKey ||
+      stall?.waitingOn === pendingIds
     ) {
       return;
     }
@@ -123,6 +152,7 @@ export function useImportQueueRunner(enabled = true): ImportQueueRunnerState {
 
       if (!controller.signal.aborted) {
         setPaused(result.paused);
+        setStall(null);
       }
     })
       .then((ran) => {
@@ -132,10 +162,15 @@ export function useImportQueueRunner(enabled = true): ImportQueueRunnerState {
         }
       })
       .catch((error: unknown) => {
-        // Storage trouble: don't spin; try again when the queue changes. The queue as the run
-        // left it, so the item it let go of (a fresh `updatedAt`) doesn't count as a change.
-        idleKeyRef.current = queuedKeyOf(getImportQueueSnapshot().data);
+        // Storage trouble: don't spin. Try again after a while, or sooner when something new is
+        // waiting; not when a tab (this one or another) only lets the same item go again.
+        idleKeyRef.current = null;
         console.warn("The import queue stopped.", error);
+
+        if (!controller.signal.aborted) {
+          const waitingOn = pendingIdsOf(getImportQueueSnapshot().data);
+          setStall((current) => ({ failures: (current?.failures ?? 0) + 1, waitingOn }));
+        }
       })
       .finally(() => {
         if (controllerRef.current === controller) {
@@ -153,10 +188,25 @@ export function useImportQueueRunner(enabled = true): ImportQueueRunnerState {
     isAuthenticated,
     online,
     paused,
+    pendingIds,
     queuedKey,
     running,
+    stall,
     tier
   ]);
+
+  // After storage trouble, try again by itself (the trouble may have passed), backing off.
+  useEffect(() => {
+    if (!stall || stall.waitingOn === null) {
+      return;
+    }
+
+    const delay = Math.min(STORAGE_RETRY_MS * 2 ** (stall.failures - 1), MAX_STORAGE_RETRY_MS);
+    const timer = setTimeout(() => {
+      setStall((current) => (current ? { ...current, waitingOn: null } : current));
+    }, delay);
+    return () => clearTimeout(timer);
+  }, [stall]);
 
   useEffect(
     () => () => {
@@ -165,7 +215,11 @@ export function useImportQueueRunner(enabled = true): ImportQueueRunnerState {
     []
   );
 
-  const resume = useCallback(() => setPaused(null), []);
+  const resume = useCallback(() => {
+    idleKeyRef.current = null;
+    setPaused(null);
+    setStall((current) => (current ? { ...current, waitingOn: null } : current));
+  }, []);
 
-  return { online, paused, resume, running };
+  return { online, paused, resume, running, stalled: stall !== null };
 }

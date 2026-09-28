@@ -138,6 +138,16 @@ export const ImportQueuePanel: React.FC<ImportQueuePanelProps> = ({ onOpenItem, 
           <Icon name="wifi-off" size={18} />
           <p>You’re offline. We’ll carry on as soon as you’re back.</p>
         </div>
+      ) : runner.stalled && waiting.length > 0 ? (
+        <div className="import-queue-note" role="status">
+          <Icon name="alert-circle" size={18} />
+          <p>
+            <strong>Stopped for now · {waitingNote}.</strong> We’ll try again shortly.
+          </p>
+          <Button onClick={runner.resume} size="sm" variant="secondary">
+            Try again
+          </Button>
+        </div>
       ) : null}
 
       <ul className="import-queue-list">
