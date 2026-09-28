@@ -1,12 +1,11 @@
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { AppButton, AppText, AppTextField } from "@linkdish/ui";
-import { toTrimmedOrNull } from "@linkdish/utils";
 import { useEffect, useRef, useState } from "react";
 import { Animated, Easing, Pressable, StyleSheet, View } from "react-native";
 
 import { pressedOpacity } from "../../../theme/interactions";
 import { appColors } from "../../../theme/tokens";
-import { INVALID_RECIPE_URL_MESSAGE, isAllowedRecipeUrl } from "../urlValidation";
+import { INVALID_RECIPE_URL_MESSAGE, resolveRecipeUrlInput } from "../urlValidation";
 
 import type { TextInput } from "react-native";
 
@@ -74,11 +73,12 @@ export const UrlForm = ({
       return;
     }
 
-    const trimmedUrl = toTrimmedOrNull(url);
+    // A pasted caption ("so good 😍 https://…") submits the link inside it.
+    const recipeUrl = resolveRecipeUrlInput(url);
 
-    if (trimmedUrl && isAllowedRecipeUrl(trimmedUrl)) {
+    if (recipeUrl) {
       setError(null);
-      onSubmit(trimmedUrl);
+      onSubmit(recipeUrl);
       return;
     }
 

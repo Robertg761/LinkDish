@@ -20,4 +20,14 @@ describe("extractUrlFromSharedText", () => {
       "https://site.com/recipe"
     );
   });
+
+  it("finds bare www links and keeps a closing parenthesis that belongs to the URL", () => {
+    expect(extractUrlFromSharedText("Dinner idea: www.site.com/pasta! 🍝")).toBe(
+      "https://www.site.com/pasta"
+    );
+    expect(extractUrlFromSharedText("(see https://en.wikipedia.org/wiki/Pavlova_(cake))")).toBe(
+      "https://en.wikipedia.org/wiki/Pavlova_(cake)"
+    );
+    expect(extractUrlFromSharedText(undefined)).toBeUndefined();
+  });
 });

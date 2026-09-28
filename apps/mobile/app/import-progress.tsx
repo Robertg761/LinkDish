@@ -8,8 +8,10 @@ import { trackMobileEvent } from "../src/analytics/client";
 import { useOptionalUpgradeMoment } from "../src/features/billing/UpgradeMomentContext";
 import { createPendingImageImport } from "../src/features/recipe-intake/pendingImageImports";
 import { prepareSharedImageImport } from "../src/features/recipe-intake/sharedImageImport";
+import { getSharedImportTarget } from "../src/features/recipe-intake/sharedImportTarget";
 import { extractUrlFromSharedText } from "../src/features/recipe-intake/sharedText";
 import { useRecipeExtraction } from "../src/features/recipe-results/hooks/useRecipeExtraction";
+import { useSavedRecipes } from "../src/features/saved-recipes/SavedRecipesContext";
 import { EXTRACTION_ERROR_LINES, selectFlavorCopyLine } from "../src/theme/flavorCopy";
 import { appColors, appSpacing } from "../src/theme/tokens";
 
@@ -100,10 +102,27 @@ export default function ImportProgressScreen() {
     const textParam = readFirstParam(params.text);
     return urlParam ?? extractUrlFromSharedText(textParam);
   }, [params.text, params.url]);
-  const extraction = useRecipeExtraction(sharedUrl, undefined, {
-    importSource: "share_sheet",
-    routeOrScreen: "import-progress"
+  const { getSavedRecipeBySourceUrl, hasLoadedSavedRecipes } = useSavedRecipes();
+  const importTarget = getSharedImportTarget({
+    findSavedRecipeId: (candidateUrl) => getSavedRecipeBySourceUrl(candidateUrl)?.id,
+    hasLoadedSavedRecipes,
+    sharedUrl
   });
+  const savedRecipeIdForShare = importTarget.kind === "saved" ? importTarget.savedId : undefined;
+  const extraction = useRecipeExtraction(
+    importTarget.kind === "extract" ? importTarget.url : undefined,
+    undefined,
+    {
+      importSource: "share_sheet",
+      routeOrScreen: "import-progress"
+    }
+  );
+
+  useEffect(() => {
+    if (savedRecipeIdForShare) {
+      router.replace({ pathname: "/recipe", params: { savedId: savedRecipeIdForShare } });
+    }
+  }, [savedRecipeIdForShare]);
 
   useEffect(() => {
     if (!sharedImageUri || preparedImageUriRef.current === sharedImageUri) {
