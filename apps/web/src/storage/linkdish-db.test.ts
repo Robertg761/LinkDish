@@ -24,7 +24,63 @@ import {
 } from "./linkdish-db";
 import { fakeIdb } from "./testing/fake-idb";
 
-vi.mock("idb", async () => (await import("./testing/fake-idb")).fakeIdbModule);
+/**
+ * Every connection the fake opens, wrapped so it behaves like a real IndexedDB connection once
+ * closed: `close()` is recorded and later transactions throw `InvalidStateError`.
+ */
+const connections = vi.hoisted(() => ({
+  /** Runs once, when the next `getAllKeys` has read its keys and before it answers. */
+  afterNextGetAllKeys: null as (() => Promise<void> | void) | null,
+  /** Connections this page closed with `close()`. */
+  closed: new Set<object>(),
+  /** Connections the browser closed on its own (they fire `terminated`, not `close()`). */
+  lost: new Set<object>(),
+  opened: [] as object[],
+  reset(): void {
+    connections.afterNextGetAllKeys = null;
+    connections.closed = new Set();
+    connections.lost = new Set();
+    connections.opened = [];
+  }
+}));
+
+vi.mock("idb", async () => {
+  const { fakeIdbModule } = await import("./testing/fake-idb");
+
+  return {
+    ...fakeIdbModule,
+    openDB: async (...args: Parameters<typeof fakeIdbModule.openDB>) => {
+      const db = await fakeIdbModule.openDB(...args);
+      const assertOpen = () => {
+        if (connections.closed.has(connection) || connections.lost.has(connection)) {
+          throw new DOMException("The database connection is closing.", "InvalidStateError");
+        }
+      };
+      const connection = {
+        ...db,
+        close: () => {
+          connections.closed.add(connection);
+          db.close();
+        },
+        getAllKeys: async (storeName: string) => {
+          assertOpen();
+          const keys = await db.getAllKeys(storeName);
+          const afterGetAllKeys = connections.afterNextGetAllKeys;
+          connections.afterNextGetAllKeys = null;
+          await afterGetAllKeys?.();
+          return keys;
+        },
+        transaction: (...transactionArgs: Parameters<typeof db.transaction>) => {
+          assertOpen();
+          return db.transaction(...transactionArgs);
+        }
+      };
+
+      connections.opened.push(connection);
+      return connection;
+    }
+  };
+});
 
 const SAVED_RECIPE_V1_INDEXES = {
   createdAt: "createdAt",
@@ -96,6 +152,7 @@ describe("linkdish-db v4 schema", () => {
   beforeEach(() => {
     fakeIdb.reset();
     resetLinkDishWebDbForTests();
+    connections.reset();
   });
 
   afterEach(() => {
@@ -338,7 +395,30 @@ describe("linkdish-db connection lifecycle", () => {
   beforeEach(() => {
     fakeIdb.reset();
     resetLinkDishWebDbForTests();
+    connections.reset();
+    localStorage.removeItem(SOURCE_IMAGE_MIGRATION_PENDING_KEY);
   });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const seedScannedLibrary = () => {
+    seedExistingSchema(3);
+    fakeIdb.seed(SAVED_RECIPES_STORE_NAME, [
+      legacyRecipe("a", { sourceImages: [scan(1)] }),
+      legacyRecipe("b", { sourceImages: [scan(2)] })
+    ]);
+  };
+
+  const recordStates = () => {
+    const states: string[] = [];
+    const unsubscribe = subscribeLinkDishDbStatus(() => {
+      states.push(getLinkDishDbStatus().state);
+    });
+
+    return { states, unsubscribe };
+  };
 
   it("returns the same connection promise on success", async () => {
     const first = getLinkDishWebDb();
@@ -382,9 +462,90 @@ describe("linkdish-db connection lifecycle", () => {
     fakeIdb.fireBlocking(5);
 
     expect(getLinkDishDbStatus().state).toBe("outdated");
+    expect(connections.closed.has(first)).toBe(true);
     const reopened = await retryLinkDishWebDb();
     expect(reopened).not.toBe(first);
+    expect(connections.closed.has(reopened)).toBe(false);
     expect(fakeIdb.openCalls).toHaveLength(2);
+  });
+
+  it("closes its connection for a newer tab even while it is still moving scans", async () => {
+    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    seedScannedLibrary();
+    const { states, unsubscribe } = recordStates();
+    // A newer deployment asks to upgrade while the post-open migration is awaiting storage.
+    connections.afterNextGetAllKeys = () => {
+      fakeIdb.fireBlocking(5);
+    };
+
+    const outcome = await getLinkDishWebDb().then(
+      (db) => db,
+      (error: unknown) => error
+    );
+    unsubscribe();
+
+    // The real connection is closed (not left open to block the newer tab), and never "ready".
+    const [connection] = connections.opened;
+    expect(connection).toBeDefined();
+    expect(connections.closed.has(connection as object)).toBe(true);
+    expect(states).toEqual(["opening", "outdated"]);
+    expect(outcome).toMatchObject({ name: "InvalidStateError" });
+    // The move stopped where it was; recipes keep their scans and the next load finishes it.
+    expect(consoleWarn).toHaveBeenCalled();
+    expect(fakeIdb.record(SAVED_RECIPES_STORE_NAME, "a")).toHaveProperty("sourceImages");
+    expect(localStorage.getItem(SOURCE_IMAGE_MIGRATION_PENDING_KEY)).not.toBeNull();
+  });
+
+  it("leaves a reopened connection alone when the replaced one finishes its migration", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    seedScannedLibrary();
+    let resumeFirstMigration: () => void = () => undefined;
+    connections.afterNextGetAllKeys = () => {
+      fakeIdb.fireBlocking(5);
+      return new Promise<void>((resolve) => {
+        resumeFirstMigration = resolve;
+      });
+    };
+
+    const first = getLinkDishWebDb();
+    first.catch(() => undefined);
+    await vi.waitFor(() => {
+      expect(getLinkDishDbStatus().state).toBe("outdated");
+    });
+
+    // The newer tab gave up; this tab reconnects while the replaced connection is still migrating.
+    const second = await retryLinkDishWebDb();
+    expect(getLinkDishDbStatus().state).toBe("ready");
+
+    resumeFirstMigration();
+    await expect(first).rejects.toMatchObject({ name: "InvalidStateError" });
+
+    const [firstConnection] = connections.opened;
+    expect(connections.opened).toHaveLength(2);
+    expect(connections.closed.has(firstConnection as object)).toBe(true);
+    expect(connections.closed.has(second)).toBe(false);
+    expect(getLinkDishDbStatus().state).toBe("ready");
+    await expect(getLinkDishWebDb()).resolves.toBe(second);
+    expect(fakeIdb.record(SAVED_RECIPES_STORE_NAME, "a")).not.toHaveProperty("sourceImages");
+  });
+
+  it("hands out no connection the browser closed while it was still moving scans", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    seedScannedLibrary();
+    connections.afterNextGetAllKeys = () => {
+      connections.lost.add(connections.opened[0] as object);
+      fakeIdb.fireTerminated();
+    };
+
+    await expect(getLinkDishWebDb()).rejects.toMatchObject({ name: "InvalidStateError" });
+    expect(getLinkDishDbStatus().state).toBe("terminated");
+    expect(localStorage.getItem(SOURCE_IMAGE_MIGRATION_PENDING_KEY)).not.toBeNull();
+
+    const reopened = await getLinkDishWebDb();
+    expect(connections.opened).toEqual([expect.anything(), reopened]);
+    expect(connections.closed.has(reopened)).toBe(false);
+    expect(getLinkDishDbStatus().state).toBe("ready");
+    expect(localStorage.getItem(SOURCE_IMAGE_MIGRATION_PENDING_KEY)).toBeNull();
   });
 
   it("treats a newer on-disk schema as outdated code", async () => {

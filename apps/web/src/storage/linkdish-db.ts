@@ -346,9 +346,21 @@ const isVersionError = (error: unknown): boolean =>
   "name" in error &&
   (error as { name?: unknown }).name === "VersionError";
 
+/** Why an open settles without a connection: it was closed before the post-open work finished. */
+const connectionClosedBeforeReady = (): DOMException =>
+  new DOMException(
+    "The LinkDish database connection closed before it was ready.",
+    "InvalidStateError"
+  );
+
 /**
  * Returns the shared `linkdish-web` connection. Successful opens are cached as a singleton;
  * a failed open is never cached, so the next call (or {@link retryLinkDishWebDb}) tries again.
+ *
+ * Each open owns its connection: its callbacks close that connection (never another open's), and
+ * they only change the page's state while this open is still the current one. An open whose
+ * connection was closed before it became ready (a newer tab upgrading, the browser closing it)
+ * rejects instead of handing out a dead connection, and never leaves one open.
  */
 export function getLinkDishWebDb(): Promise<IDBPDatabase> {
   if (dbPromise) {
@@ -356,6 +368,21 @@ export function getLinkDishWebDb(): Promise<IDBPDatabase> {
   }
 
   setStatus({ state: "opening" });
+
+  // Set as soon as the open succeeds, before any await, so `blocking()` can always close it.
+  let connection: IDBPDatabase | null = null;
+  const isCurrent = (): boolean => dbPromise === promise;
+
+  /** Forgets this open, if it is still the page's, so the next call opens again. */
+  const release = (next: LinkDishDbStatus): void => {
+    if (!isCurrent()) {
+      return;
+    }
+
+    openDbConnection = null;
+    dbPromise = null;
+    setStatus(next);
+  };
 
   const promise: Promise<IDBPDatabase> = openDB(LINKDISH_WEB_DB_NAME, LINKDISH_WEB_DB_VERSION, {
     upgrade(db, oldVersion, _newVersion, transaction) {
@@ -373,37 +400,44 @@ export function getLinkDishWebDb(): Promise<IDBPDatabase> {
       }
     },
     blocked() {
-      setStatus({ state: "blocked" });
+      if (isCurrent()) {
+        setStatus({ state: "blocked" });
+      }
     },
     blocking() {
-      // A newer LinkDish tab wants to upgrade the schema. Step aside so it can, then ask this
+      // A newer LinkDish tab wants to upgrade the schema. Step aside so it can (even mid-migration,
+      // and even if this open was already replaced: any open connection blocks it), then ask this
       // (older) tab to reload instead of hanging the other one.
-      const connection = openDbConnection;
-      openDbConnection = null;
-      dbPromise = null;
       closeConnection(connection);
-      setStatus({ state: "outdated" });
+      release({ state: "outdated" });
     },
     terminated() {
-      openDbConnection = null;
-      dbPromise = null;
-      setStatus({ state: "terminated" });
+      release({ state: "terminated" });
     }
   }).then(
     async (db) => {
-      if (isSourceImageMigrationPending()) {
-        await finishSourceImageMigration(db as unknown as MigrationDatabase);
-      }
+      connection = db;
 
-      if (dbPromise === promise) {
+      if (isCurrent()) {
         openDbConnection = db;
-        setStatus({ state: "ready" });
+
+        if (isSourceImageMigrationPending()) {
+          await finishSourceImageMigration(db as unknown as MigrationDatabase);
+        }
       }
 
+      if (!isCurrent()) {
+        // Closed or replaced while it was opening or migrating: never leave it open behind the
+        // page's back, where it would block a newer tab's upgrade until this page closes.
+        closeConnection(db);
+        throw connectionClosedBeforeReady();
+      }
+
+      setStatus({ state: "ready" });
       return db;
     },
     (error: unknown) => {
-      if (dbPromise === promise) {
+      if (isCurrent()) {
         dbPromise = null;
         setStatus(isVersionError(error) ? { state: "outdated" } : { state: "error", error });
       }
