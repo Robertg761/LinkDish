@@ -9,6 +9,7 @@ import { fakeIdb } from "../../storage/testing/fake-idb";
 import { formatItem } from "./shopping-format";
 import {
   addShoppingItems,
+  claimShoppingChanges,
   clearAllShoppingItems,
   clearCheckedShoppingItems,
   deleteShoppingItems,
@@ -16,6 +17,7 @@ import {
   getShoppingListSnapshot,
   handleUpsertShoppingSyncResult,
   loadShoppingList,
+  mergeIncomingShoppingItems,
   mergeShoppingItems,
   parseManualShoppingLine,
   putShoppingItems,
@@ -25,6 +27,7 @@ import {
   setShoppingChannelFactoryForTests,
   roundUpCountForShopping,
   setShoppingItemChecked,
+  setShoppingListHousehold,
   splitShoppingLines,
   syncShoppingItems,
   toApiShoppingItem,
@@ -427,6 +430,146 @@ describe("shopping-list-store", () => {
     await syncShoppingItems({ canSync: true, householdId: "h2" });
     expect(apiMocks.upsertShoppingItems).not.toHaveBeenCalled();
     expect(apiMocks.deleteShoppingItems).not.toHaveBeenCalled();
+  });
+
+  it("sets a refused change aside once when two tabs sync at once", async () => {
+    // Written before items recorded their household; the API says it is another household's.
+    await putShoppingItems([makeItem({ id: "foreign", text: "cream" })]);
+    apiMocks.upsertShoppingItems.mockRejectedValue(
+      new ExtractorApiError(
+        "Extractor API request failed.",
+        403,
+        { message: "This shopping item belongs to another household." },
+        { serverMessage: "This shopping item belongs to another household." }
+      )
+    );
+    apiMocks.getShoppingList.mockResolvedValue({ items: [] });
+
+    await Promise.all([
+      syncShoppingItems({ canSync: true, householdId: "h2" }),
+      syncShoppingItems({ canSync: true, householdId: "h2" })
+    ]);
+
+    const all = await getShoppingItems({ includeDeleted: true });
+    expect(all.map((item) => [item.text, item.sync.status])).toEqual([["cream", "local_only"]]);
+    expect(all[0]?.id).not.toBe("foreign");
+  });
+
+  it("keeps another household's unsent changes on this device and out of the sync", async () => {
+    const deletedAt = new Date().toISOString();
+    await putShoppingItems([
+      makeItem({ id: "h1-edit", sync: { householdId: "h1", status: "dirty" }, text: "cream" }),
+      makeItem({
+        deletedAt,
+        id: "h1-gone",
+        isDeleted: true,
+        sync: { householdId: "h1", status: "dirty" },
+        text: "salt"
+      }),
+      makeItem({ id: "mine", sync: { householdId: "h2", status: "dirty" }, text: "jam" })
+    ]);
+    const server = new Map<string, UpsertShoppingItemsRequest["items"][number]>();
+    apiMocks.upsertShoppingItems.mockImplementation((input: UpsertShoppingItemsRequest) => {
+      input.items.forEach((item) => server.set(item.id, item));
+      return Promise.resolve({ ignored: [], items: input.items });
+    });
+    apiMocks.getShoppingList.mockImplementation(() =>
+      Promise.resolve({ items: [...server.values()] })
+    );
+
+    // Two tabs sync with h2 at once.
+    await Promise.all([
+      syncShoppingItems({ canSync: true, householdId: "h2" }),
+      syncShoppingItems({ canSync: true, householdId: "h2" })
+    ]);
+
+    expect([...server.keys()]).toEqual(["mine"]);
+    expect(apiMocks.deleteShoppingItems).not.toHaveBeenCalled();
+    const all = await getShoppingItems({ includeDeleted: true, includeOtherHouseholds: true });
+    expect(all.map((item) => [item.id, item.sync.status, item.sync.householdId])).toEqual([
+      ["h1-edit", "dirty", "h1"],
+      ["h1-gone", "dirty", "h1"],
+      ["mine", "synced", "h2"]
+    ]);
+  });
+
+  it("records a confirmed household on unsent changes that don't name one", async () => {
+    await putShoppingItems([
+      makeItem({ id: "unknown", sync: { status: "dirty" }, text: "jam" }),
+      makeItem({ id: "synced", sync: { status: "synced" }, text: "bread" }),
+      makeItem({ id: "local", sync: { status: "local_only" }, text: "basil" }),
+      makeItem({ id: "old-home", sync: { householdId: "h1", status: "dirty" }, text: "eggs" }),
+      makeItem({ id: "other", sync: { householdId: "h3", status: "sync_failed" }, text: "salt" })
+    ]);
+    const households = async () =>
+      Object.fromEntries(
+        (await getShoppingItems({ includeOtherHouseholds: true })).map((item) => [
+          item.id,
+          item.sync.householdId
+        ])
+      );
+
+    await claimShoppingChanges("h2");
+    expect(await households()).toEqual({
+      local: undefined,
+      "old-home": "h1",
+      other: "h3",
+      synced: undefined,
+      unknown: "h2"
+    });
+
+    // This account moved from h1 to h2: its changes for h1 can only go to h2 now.
+    await claimShoppingChanges("h2", { from: "h1" });
+    expect(await households()).toMatchObject({ "old-home": "h2", other: "h3" });
+  });
+
+  it("leaves records kept for another household out of the list, merges and edits", async () => {
+    await putShoppingItems([
+      makeItem({
+        id: "milk-h1",
+        qty: 1,
+        sync: { householdId: "h1", status: "synced" },
+        text: "milk",
+        unit: "cup"
+      }),
+      makeItem({ id: "eggs-h1", sync: { householdId: "h1", status: "dirty" }, text: "eggs" })
+    ]);
+    await loadShoppingList();
+    expect(getShoppingListSnapshot().items).toHaveLength(2);
+
+    setShoppingListHousehold("h2");
+    await waitFor(() => expect(getShoppingListSnapshot().items).toEqual([]));
+    expect(await getShoppingItems()).toEqual([]);
+
+    const h2 = { canSync: true, householdId: "h2", userId: "u2" };
+    await addShoppingItems([{ recipeId: "r1", text: "2 cups milk" }], h2);
+    expect(await setShoppingItemChecked("eggs-h1", true, h2)).toBeUndefined();
+    expect(await updateShoppingItemFromLine("eggs-h1", "12 eggs", h2)).toBeUndefined();
+    expect(await deleteShoppingItems(["eggs-h1"], h2)).toEqual([]);
+
+    expect((await getShoppingItems()).map((item) => [item.text, item.qty, item.sync])).toEqual([
+      ["milk", 2, { householdId: "h2", status: "dirty" }]
+    ]);
+    expect(getShoppingListSnapshot().items.map((item) => item.text)).toEqual(["milk"]);
+    const all = await getShoppingItems({ includeDeleted: true, includeOtherHouseholds: true });
+    expect(all.find((item) => item.id === "milk-h1")).toMatchObject({ qty: 1 });
+    expect(all.find((item) => item.id === "eggs-h1")).toMatchObject({
+      checked: false,
+      sync: { householdId: "h1", status: "dirty" },
+      text: "eggs"
+    });
+
+    // Merging on its own also leaves them alone.
+    const merged = mergeIncomingShoppingItems(
+      all.filter((item) => item.sync.householdId === "h1"),
+      [makeItem({ id: "more-milk", qty: 1, sync: { status: "dirty" }, text: "milk", unit: "cup" })],
+      h2
+    );
+    expect([...merged.changedIds]).toEqual(["more-milk"]);
+
+    // Signed out, the whole list on this device shows again.
+    setShoppingListHousehold(null);
+    await waitFor(() => expect(getShoppingListSnapshot().items).toHaveLength(3));
   });
 
   it("keeps failing the sync, and every change, when the whole household is refused", async () => {

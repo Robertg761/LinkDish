@@ -2,10 +2,17 @@ import { useEffect, useSyncExternalStore } from "react";
 
 import { apiClient } from "../../api/client";
 import { isNetworkError, isOffline, isTimeoutError } from "../../api/error-message";
+import { getApiErrorKind } from "../../api/errors";
 import { useAuth } from "../../auth/AuthProvider";
 import { safeGetItem, safeSetItem } from "../../platform/safe-storage";
 
-import { loadShoppingList, syncShoppingItems } from "./shopping-list-store";
+import {
+  claimShoppingChanges,
+  loadShoppingList,
+  setShoppingListHousehold,
+  ShoppingSyncCancelledError,
+  syncShoppingItems
+} from "./shopping-list-store";
 
 import type { ShoppingWriteOptions } from "./shopping-list-store";
 
@@ -93,9 +100,18 @@ let credentialsPending = false;
 let syncWhenReady = false;
 /** Why the last household check failed (cleared when one succeeds). */
 let householdCheckError: unknown = null;
+/** Household ids being recorded on unsent changes (claimShoppingChanges), one after another. */
+let claims: Promise<void> = Promise.resolve();
 
 const setState = (patch: Partial<ShoppingSyncState>) => {
+  const previousHouseholdId = state.householdId;
   state = { ...state, ...patch };
+
+  if (state.householdId !== previousHouseholdId) {
+    // The list shows this household's items; other households' changes wait out of sight.
+    setShoppingListHousehold(state.householdId);
+  }
+
   listeners.forEach((listener) => {
     listener();
   });
@@ -194,6 +210,17 @@ export function refreshShoppingHousehold(options: { force?: boolean } = {}): Pro
         const householdId = response.household?.id ?? null;
         const household = householdId !== null;
         householdCheckError = null;
+
+        if (householdId) {
+          // Unsent changes that don't know their household yet are this account's; and if the
+          // account moved household, its changes for the old one can only go to this one now.
+          const from =
+            state.householdId && state.householdId !== householdId ? state.householdId : undefined;
+          claims = claims
+            .then(() => claimShoppingChanges(householdId, { from }))
+            .catch(() => undefined);
+        }
+
         writeHouseholdCache({
           checkedAt: Date.now(),
           household,
@@ -315,8 +342,17 @@ export function setShoppingAccount(account: ShoppingAccount): void {
   }
 }
 
-const classifyError = (error: unknown): ShoppingSyncPhase =>
-  isOffline() || isNetworkError(error) || isTimeoutError(error) ? "offline" : "error";
+const classifyError = (error: unknown): ShoppingSyncPhase => {
+  // The API client reports unreachable servers and timeouts as errors of those kinds.
+  const kind = getApiErrorKind(error);
+  return isOffline() ||
+    kind === "network" ||
+    kind === "timeout" ||
+    isNetworkError(error) ||
+    isTimeoutError(error)
+    ? "offline"
+    : "error";
+};
 
 /**
  * One sync with the household this device is in. Which household that is gets checked first
@@ -328,18 +364,27 @@ const syncWithHousehold = async (): Promise<boolean> => {
     await refreshShoppingHousehold({ force: true });
   }
 
+  await claims;
+
   if (state.mode !== "household") {
     return false;
   }
 
-  if (!state.householdId) {
+  const { householdId, userId } = state;
+
+  if (!householdId) {
     // Reported like the check's own failure (offline, timeout...) so the status reads right.
     throw householdCheckError instanceof Error
       ? householdCheckError
       : new Error("We couldn't check your household.");
   }
 
-  await syncShoppingItems({ canSync: true, householdId: state.householdId });
+  // Someone else signing in, or the household changing, stops it before the next request.
+  await syncShoppingItems({
+    canSync: true,
+    householdId,
+    isCurrent: () => state.userId === userId && state.householdId === householdId
+  });
   return true;
 };
 
@@ -376,6 +421,13 @@ export function syncShoppingNow(): Promise<void> {
         );
       },
       (error: unknown) => {
+        if (error instanceof ShoppingSyncCancelledError) {
+          // It was for an account or household this device no longer syncs: sync the current one.
+          syncAgain = true;
+          setState({ error: null, phase: "idle" });
+          return;
+        }
+
         setState({ error, phase: classifyError(error) });
       }
     )
@@ -529,6 +581,7 @@ export function resetShoppingSyncForTests(): void {
   credentialsPending = false;
   syncWhenReady = false;
   householdCheckError = null;
+  claims = Promise.resolve();
   accountConfigured = false;
   state = initialState;
   listeners.forEach((listener) => {

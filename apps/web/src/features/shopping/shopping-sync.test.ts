@@ -7,13 +7,17 @@ import { fakeIdb } from "../../storage/testing/fake-idb";
 
 import {
   addShoppingItems,
+  deleteShoppingItems,
   getShoppingItems,
+  getShoppingListSnapshot,
+  loadShoppingList,
   resetShoppingListStoreForTests,
   updateShoppingItemFromLine
 } from "./shopping-list-store";
 import {
   getShoppingSyncState,
   getShoppingWriteOptions,
+  refreshShoppingHousehold,
   requestShoppingSync,
   resetShoppingSyncForTests,
   setShoppingAccount,
@@ -69,8 +73,18 @@ const otherHouseholdItemError = () =>
     { kind: "http", serverMessage: "This shopping item belongs to another household." }
   );
 
-const householdItem = (id: string, text: string, updatedAt = "2026-07-04T10:00:00.000Z") =>
-  ({ addedBy: "someone", checked: false, id, text, updatedAt }) satisfies ShoppingItem;
+const householdItem = (
+  id: string,
+  text: string,
+  extra: Partial<ShoppingItem> = {}
+): ShoppingItem => ({
+  addedBy: "someone",
+  checked: false,
+  id,
+  text,
+  updatedAt: "2026-07-04T10:00:00.000Z",
+  ...extra
+});
 
 /**
  * The household shopping API as the server implements it: item ids are global, each record
@@ -314,7 +328,7 @@ describe("shopping-sync", () => {
     expect(apiMocks.getShoppingList).toHaveBeenCalledTimes(2);
   });
 
-  it("never sends another household's item after a different account signs in", async () => {
+  it("keeps another household's unsent edit for it while a different account syncs", async () => {
     const server = createHouseholdServer();
     server.seed("h1", householdItem("oat-milk", "oat milk"));
     server.seed("h2", householdItem("bread", "bread"));
@@ -328,6 +342,7 @@ describe("shopping-sync", () => {
     // u2 signs into household h2 on the same device.
     server.use("h2");
     await signIn("u2");
+    await loadShoppingList();
     await syncShoppingNow();
 
     expect(server.pushedIds).not.toContain("oat-milk");
@@ -336,25 +351,94 @@ describe("shopping-sync", () => {
       item: { text: "oat milk" }
     });
     expect(getShoppingSyncState()).toMatchObject({ error: null, phase: "synced" });
+    // u2 sees h2's list; u1's edit waits on this device, out of it.
+    expect((await getShoppingItems()).map((item) => [item.text, item.sync.status])).toEqual([
+      ["bread", "synced"]
+    ]);
+    await waitFor(() =>
+      expect(getShoppingListSnapshot().items.map((item) => item.text)).toEqual(["bread"])
+    );
 
-    // The edit is still on this device (as a local-only item) next to h2's list.
-    const items = await getShoppingItems();
-    const kept = items.find((item) => item.text === "oat milk");
-    expect(items.map((item) => item.text).sort()).toEqual(["bread", "oat milk"]);
-    expect(items.find((item) => item.text === "bread")?.sync.status).toBe("synced");
-    expect(kept).toMatchObject({ qty: 2, sync: { status: "local_only" }, unit: "cup" });
-    expect(kept?.id).not.toBe("oat-milk");
+    // u1 comes back: the edit reaches h1, once.
+    signOut();
+    server.use("h1");
+    await signIn("u1");
+    await syncShoppingNow();
 
-    // Editing the kept copy in h2 adds it to h2 as a new item; h1's record is never touched.
-    await updateShoppingItemFromLine(kept?.id ?? "", "3 cups oat milk", getShoppingWriteOptions());
+    expect(server.records.get("oat-milk")).toMatchObject({
+      householdId: "h1",
+      item: { qty: 2, text: "oat milk", unit: "cup" }
+    });
+    expect((await getShoppingItems()).map((item) => [item.id, item.qty, item.sync])).toEqual([
+      ["oat-milk", 2, expect.objectContaining({ householdId: "h1", status: "synced" })]
+    ]);
+  });
+
+  it("keeps another household's unsent deletion for it while a different account syncs", async () => {
+    const server = createHouseholdServer();
+    server.seed("h1", householdItem("eggs", "eggs"));
+    server.seed("h1", householdItem("jam", "jam"));
+
+    // u1 removes eggs in the store, offline: the deletion can't be sent yet.
+    await signIn("u1");
+    await syncShoppingNow();
+    apiMocks.deleteShoppingItems.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    await deleteShoppingItems(["eggs"], getShoppingWriteOptions());
+    await syncShoppingNow();
+    expect(getShoppingSyncState().phase).toBe("offline");
+    signOut();
+
+    server.use("h2");
+    await signIn("u2");
+    await syncShoppingNow();
+    expect(getShoppingSyncState().phase).toBe("synced");
+    expect(await getShoppingItems()).toEqual([]);
+    signOut();
+
+    server.use("h1");
+    await signIn("u1");
+    await syncShoppingNow();
+
+    expect(server.records.has("eggs")).toBe(false);
+    expect((await getShoppingItems()).map((item) => item.text)).toEqual(["jam"]);
+  });
+
+  it("adds the next account's recipe to its own household, not to the last one's items", async () => {
+    const server = createHouseholdServer();
+    server.seed("h1", householdItem("milk-h1", "milk", { qty: 1, unit: "cup" }));
+    server.seed("h1", householdItem("eggs-h1", "eggs", { checked: true, qty: 6 }));
+
+    await signIn("u1");
+    await syncShoppingNow();
+    signOut();
+
+    // u2 adds a recipe away from the shopping page, so h1's items are still on this device.
+    server.use("h2");
+    await signIn("u2");
+    await addShoppingItems(
+      [
+        { recipeId: "r1", recipeTitle: "Pancakes", text: "2 cups milk" },
+        { recipeId: "r1", recipeTitle: "Pancakes", text: "2 eggs" }
+      ],
+      getShoppingWriteOptions()
+    );
     await syncShoppingNow();
 
     expect(getShoppingSyncState().phase).toBe("synced");
-    expect(server.records.get("oat-milk")?.householdId).toBe("h1");
-    expect(server.records.get(kept?.id ?? "")).toMatchObject({
-      householdId: "h2",
-      item: { qty: 3, text: "oat milk" }
-    });
+    expect(
+      [...server.records.values()]
+        .filter((record) => record.householdId === "h2")
+        .map((record) => [record.item.text, record.item.qty, record.item.checked])
+    ).toEqual([
+      ["milk", 2, false],
+      ["eggs", 2, false]
+    ]);
+    expect(server.records.get("milk-h1")?.item).toMatchObject({ qty: 1 });
+    expect(server.records.get("eggs-h1")?.item).toMatchObject({ checked: true, qty: 6 });
+    expect((await getShoppingItems()).map((item) => [item.text, item.sync])).toEqual([
+      ["milk", expect.objectContaining({ householdId: "h2", status: "synced" })],
+      ["eggs", expect.objectContaining({ householdId: "h2", status: "synced" })]
+    ]);
   });
 
   it("does not recreate a deleted item in the next account's household", async () => {
@@ -374,9 +458,8 @@ describe("shopping-sync", () => {
 
     expect(server.pushedIds).not.toContain("eggs");
     expect([...server.records.values()]).toEqual([]);
-    expect(await getShoppingItems()).toEqual([
-      expect.objectContaining({ qty: 12, sync: { status: "local_only" }, text: "eggs" })
-    ]);
+    expect(getShoppingSyncState().phase).toBe("synced");
+    expect(await getShoppingItems()).toEqual([]);
   });
 
   it("keeps items added in one household out of the next one even before they were sent", async () => {
@@ -395,8 +478,91 @@ describe("shopping-sync", () => {
 
     expect(getShoppingSyncState().phase).toBe("synced");
     expect(server.records.size).toBe(0);
-    expect(await getShoppingItems()).toEqual([
-      expect.objectContaining({ sync: { status: "local_only" }, text: "limes" })
+    expect(await getShoppingItems()).toEqual([]);
+
+    // Back in h1, they go there.
+    signOut();
+    server.use("h1");
+    await signIn("u1");
+    await syncShoppingNow();
+
+    expect(
+      [...server.records.values()].map((record) => [record.householdId, record.item.text])
+    ).toEqual([["h1", "limes"]]);
+  });
+
+  it("stops a sync when another account signs in while it runs", async () => {
+    const server = createHouseholdServer();
+    server.seed("h2", householdItem("bread", "bread"));
+
+    await signIn("u1");
+    await addShoppingItems([{ text: "limes" }], getShoppingWriteOptions());
+    // The push goes out as u1; u2 signs in before it answers.
+    const answered = deferred<undefined>();
+    const upsert = apiMocks.upsertShoppingItems.getMockImplementation();
+    apiMocks.upsertShoppingItems.mockImplementationOnce(
+      async (input: UpsertShoppingItemsRequest) => {
+        const result: unknown = await upsert?.(input);
+        await answered.promise;
+        return result;
+      }
+    );
+    const syncing = syncShoppingNow();
+    await waitFor(() => expect(apiMocks.upsertShoppingItems).toHaveBeenCalledTimes(1));
+
+    signOut();
+    server.use("h2");
+    await signIn("u2");
+    answered.resolve(undefined);
+    await syncing;
+
+    // u1's sync stopped there; u2's list is h2's, pulled as h2's.
+    await waitFor(() => expect(getShoppingSyncState().phase).toBe("synced"));
+    expect(apiMocks.upsertShoppingItems).toHaveBeenCalledTimes(1);
+    expect(
+      [...server.records.values()].map((record) => [record.householdId, record.item.text])
+    ).toEqual([
+      ["h2", "bread"],
+      ["h1", "limes"]
+    ]);
+    const [bread] = await getShoppingItems();
+    expect(bread).toMatchObject({ sync: { householdId: "h2", status: "synced" }, text: "bread" });
+
+    // So u2's edits to h2's items go to h2.
+    await updateShoppingItemFromLine(bread?.id ?? "", "2 loaves bread", getShoppingWriteOptions());
+    await syncShoppingNow();
+    expect(server.records.get("bread")).toMatchObject({ householdId: "h2", item: { qty: 2 } });
+  });
+
+  it("sends changes made under an out-of-date household to the account's current one", async () => {
+    const server = createHouseholdServer();
+    server.seed("h2", householdItem("milk-h2", "milk", { qty: 1, unit: "cup" }));
+    // This device checked u1's household (h1) a moment ago; u1 has since moved to h2.
+    cacheHousehold(true);
+    server.use("h2");
+    setShoppingAccount({ isAuthenticated: true, loading: false, userId: "u1" });
+    expect(getShoppingSyncState()).toMatchObject({ householdId: "h1", mode: "household" });
+
+    await syncShoppingNow();
+    await updateShoppingItemFromLine("milk-h2", "3 cups milk", getShoppingWriteOptions());
+    await addShoppingItems([{ text: "limes" }], getShoppingWriteOptions());
+    await refreshShoppingHousehold({ force: true });
+    expect(getShoppingSyncState().householdId).toBe("h2");
+
+    await syncShoppingNow();
+
+    // The account's changes followed it to h2.
+    expect(getShoppingSyncState().phase).toBe("synced");
+    expect(server.records.get("milk-h2")).toMatchObject({ householdId: "h2", item: { qty: 3 } });
+    expect(
+      [...server.records.values()].map((record) => [record.householdId, record.item.text])
+    ).toEqual([
+      ["h2", "milk"],
+      ["h2", "limes"]
+    ]);
+    expect((await getShoppingItems()).map((item) => [item.text, item.qty, item.sync])).toEqual([
+      ["milk", 3, expect.objectContaining({ householdId: "h2", status: "synced" })],
+      ["limes", undefined, expect.objectContaining({ householdId: "h2", status: "synced" })]
     ]);
   });
 
@@ -470,6 +636,13 @@ describe("shopping-sync", () => {
     await addShoppingItems([{ text: "bread" }], getShoppingWriteOptions());
 
     apiMocks.upsertShoppingItems.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    await syncShoppingNow();
+    expect(getShoppingSyncState().phase).toBe("offline");
+
+    // How the API client reports a server it can't reach.
+    apiMocks.upsertShoppingItems.mockRejectedValueOnce(
+      new ExtractorApiError("Failed to fetch", 0, undefined, { kind: "network" })
+    );
     await syncShoppingNow();
     expect(getShoppingSyncState().phase).toBe("offline");
 

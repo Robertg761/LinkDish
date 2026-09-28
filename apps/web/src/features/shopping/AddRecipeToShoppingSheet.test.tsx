@@ -14,17 +14,26 @@ import {
   getShoppingItems,
   resetShoppingListStoreForTests
 } from "./shopping-list-store";
-import { resetShoppingSyncForTests } from "./shopping-sync";
+import {
+  getShoppingSyncState,
+  resetShoppingSyncForTests,
+  setShoppingAccount,
+  syncShoppingNow
+} from "./shopping-sync";
 
+import type { UpsertShoppingItemsRequest } from "@linkdish/api-contracts";
 import type { Recipe } from "@linkdish/recipe-domain";
 
 const analyticsMocks = vi.hoisted(() => ({ trackWebEvent: vi.fn() }));
+const apiMocks = vi.hoisted(() => ({
+  deleteShoppingItems: vi.fn(),
+  getHousehold: vi.fn(),
+  getShoppingList: vi.fn(),
+  upsertShoppingItems: vi.fn()
+}));
 
 vi.mock("../../analytics/client", () => ({ trackWebEvent: analyticsMocks.trackWebEvent }));
-vi.mock("../../api/client", () => ({
-  apiBaseUrl: "/api",
-  apiClient: { getHousehold: vi.fn(), getShoppingList: vi.fn(), upsertShoppingItems: vi.fn() }
-}));
+vi.mock("../../api/client", () => ({ apiBaseUrl: "/api", apiClient: apiMocks }));
 vi.mock("idb", async () => (await import("../../storage/testing/fake-idb")).fakeIdbModule);
 
 const recipe = {
@@ -72,6 +81,7 @@ describe("AddRecipeToShoppingSheet", () => {
     resetShoppingSyncForTests();
     resetPreferencesForTests();
     analyticsMocks.trackWebEvent.mockReset();
+    Object.values(apiMocks).forEach((mock) => mock.mockReset());
     let uuid = 0;
     vi.spyOn(crypto, "randomUUID").mockImplementation(() => {
       uuid += 1;
@@ -137,6 +147,55 @@ describe("AddRecipeToShoppingSheet", () => {
         properties: { count: 4, method: "recipe_sheet", source: "recipe" }
       })
     );
+  });
+
+  it("records the household on items added before its check answers", async () => {
+    let answerHousehold: (value: { household: { id: string } }) => void = () => undefined;
+    apiMocks.getHousehold.mockReturnValueOnce(
+      new Promise((resolve) => {
+        answerHousehold = resolve;
+      })
+    );
+    const pushes: Array<{ household: string; ids: string[] }> = [];
+    let serverHousehold = "h1";
+    apiMocks.upsertShoppingItems.mockImplementation((input: UpsertShoppingItemsRequest) => {
+      pushes.push({ household: serverHousehold, ids: input.items.map((item) => item.id) });
+      return Promise.resolve({ ignored: [], items: input.items });
+    });
+    apiMocks.getShoppingList.mockResolvedValue({ items: [] });
+    // The page knows this account shares a list; the sync layer's own check is still out.
+    setShoppingAccount({ isAuthenticated: true, loading: false, userId: "u1" });
+    const { onClose } = renderSheet({ canSync: true, userId: "u1" });
+
+    // Added at once, for the household list.
+    fireEvent.click(screen.getByRole("button", { name: "Add 4 items" }));
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect((await getShoppingItems()).map((item) => item.sync.status)).toEqual([
+      "dirty",
+      "dirty",
+      "dirty"
+    ]);
+
+    // Once the check answers, they are h1's.
+    answerHousehold({ household: { id: "h1" } });
+    await waitFor(async () =>
+      expect((await getShoppingItems()).map((item) => item.sync.householdId)).toEqual([
+        "h1",
+        "h1",
+        "h1"
+      ])
+    );
+
+    // u1 signs out before they were sent; u2 (household h2) signs in and syncs.
+    setShoppingAccount({ isAuthenticated: false, loading: false });
+    serverHousehold = "h2";
+    apiMocks.getHousehold.mockResolvedValue({ household: { id: "h2" } });
+    setShoppingAccount({ isAuthenticated: true, loading: false, userId: "u2" });
+    await waitFor(() => expect(getShoppingSyncState().householdId).toBe("h2"));
+    await syncShoppingNow();
+
+    expect(getShoppingSyncState().phase).toBe("synced");
+    expect(pushes.filter((push) => push.household === "h2")).toEqual([]);
   });
 
   it("marks what is already on the list", async () => {

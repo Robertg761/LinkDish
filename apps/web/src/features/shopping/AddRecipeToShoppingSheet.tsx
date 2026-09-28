@@ -26,7 +26,11 @@ import {
   useShoppingList,
   type ShoppingScaling
 } from "./shopping-list-store";
-import { getShoppingWriteOptions, requestShoppingSync } from "./shopping-sync";
+import {
+  getShoppingWriteOptions,
+  refreshShoppingHousehold,
+  requestShoppingSync
+} from "./shopping-sync";
 import { ShoppingChecklist } from "./ShoppingChecklist";
 
 import type { ShoppingChecklistGroup } from "./ShoppingChecklist";
@@ -207,6 +211,12 @@ export const AddRecipeToShoppingSheet: React.FC<AddRecipeToShoppingSheetProps> =
         ...((userId ?? defaults.userId) ? { userId: userId ?? defaults.userId } : {})
       };
       await addShoppingItems(selectedInputs, writeOptions);
+
+      if (writeOptions.canSync && !writeOptions.householdId) {
+        // The sync layer hasn't confirmed this account's household yet: ask it now, so these
+        // items record their household (and can only ever go there) as soon as it answers.
+        void refreshShoppingHousehold({ force: true });
+      }
 
       if (writeOptions.canSync) {
         requestShoppingSync({ delayMs: 0 });
