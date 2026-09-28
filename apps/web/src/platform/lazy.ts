@@ -1,4 +1,4 @@
-import { createElement, lazy, useSyncExternalStore } from "react";
+import { createElement, lazy, useState, useSyncExternalStore } from "react";
 
 import { safeGetItem, safeSetItem } from "./safe-storage";
 
@@ -164,10 +164,18 @@ export function lazyWithRetry<Component extends AnyComponentType>(
 ): LazyWithRetryComponent<Component> {
   type Props = ComponentProps<Component>;
   let failedAtEpoch: number | null = null;
+  // Set once the module has loaded (by a render or by preload()).
+  let loadedComponent: Component | null = null;
+
+  const load = () =>
+    importWithRetry(factory, options).then((module) => {
+      loadedComponent = module.default;
+      return module;
+    });
 
   const createLazy = () =>
     lazy(() =>
-      importWithRetry(factory, options).catch((error: unknown) => {
+      load().catch((error: unknown) => {
         failedAtEpoch = retryEpoch;
         throw error;
       })
@@ -177,6 +185,14 @@ export function lazyWithRetry<Component extends AnyComponentType>(
 
   const LazyWithRetry = (props: Props) => {
     const epoch = useSyncExternalStore(subscribeRetryEpoch, getRetryEpoch, getRetryEpoch);
+    // Preloaded before this mount (e.g. the landing page, fetched alongside the entry): render it
+    // straight away instead of suspending for a promise that has already settled. Decided once
+    // per mount, so the component type never changes under a mounted page.
+    const [preloaded] = useState(() => loadedComponent);
+
+    if (preloaded) {
+      return createElement(preloaded as ComponentType<Props>, props);
+    }
 
     if (failedAtEpoch !== null && epoch > failedAtEpoch) {
       failedAtEpoch = null;
@@ -187,6 +203,6 @@ export function lazyWithRetry<Component extends AnyComponentType>(
   };
 
   return Object.assign(LazyWithRetry, {
-    preload: () => importWithRetry(factory, options).then(() => undefined)
+    preload: () => load().then(() => undefined)
   });
 }

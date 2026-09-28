@@ -1,18 +1,16 @@
-import { ClerkProvider } from "@clerk/clerk-react";
 import React from "react";
 
 import { AuthProvider } from "../auth/AuthProvider";
+import { ClerkBridgeHost } from "../auth/ClerkBridgeHost";
 
-const clerkPublishableKey = (import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string | undefined) || "";
-
-export const AppProviders: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  if (clerkPublishableKey) {
-    return (
-      <ClerkProvider publishableKey={clerkPublishableKey}>
-        <AuthProvider>{children}</AuthProvider>
-      </ClerkProvider>
-    );
-  }
-  
-  return <AuthProvider>{children}</AuthProvider>;
-};
+/**
+ * App-wide providers. Clerk is not one of them: the lazily loaded Clerk bridge renders *next to*
+ * the app (never around it) only when a Clerk session may exist or sign-in starts, so loading it
+ * never remounts the app. Must render inside the router.
+ */
+export const AppProviders: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <AuthProvider>
+    {children}
+    <ClerkBridgeHost />
+  </AuthProvider>
+);

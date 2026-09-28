@@ -1,4 +1,3 @@
-import { useAuth as useClerkAuth, useSignIn } from "@clerk/clerk-react";
 import React, {
   createContext,
   useCallback,
@@ -26,6 +25,14 @@ import {
   setLegacySessionToken,
   removeLegacySessionToken
 } from "./auth-storage";
+import {
+  getClerkBridgeSnapshot,
+  getClerkControls,
+  isClerkConfigured,
+  loadClerk,
+  requestClerk,
+  useClerkBridge
+} from "./clerk-bridge";
 import { hasClerkSessionHint } from "./clerk-session-hint";
 
 import type { AccountUser, AuthConfigResponse, AuthMode } from "@linkdish/api-contracts";
@@ -50,6 +57,8 @@ interface AuthContextType {
   verifyLoginCode: (email: string, code: string) => Promise<void>;
   // Clerk actions
   loginWithGoogle: (redirectUrlComplete?: string) => Promise<void>;
+  /** Starts loading Clerk ahead of a likely Google sign-in (e.g. the sign-in screen is shown). */
+  prepareGoogleSignIn: () => void;
   // Global actions
   logout: () => Promise<void>;
   deleteAccount: (email: string) => Promise<void>;
@@ -102,10 +111,10 @@ async function getAuthConfigWithRetry(retry: boolean): Promise<AuthConfigRespons
 
 type AuthTransport = "clerk" | "legacy" | "unknown";
 
-/** Which credential the API should see, given the server config and whether Clerk is mounted. */
+/** Which credential the API should see, given the server config and whether Clerk is available. */
 const getAuthTransport = (
   config: AuthConfigResponse | null,
-  hasClerkProvider: boolean
+  clerkAvailable: boolean
 ): AuthTransport => {
   if (!config) {
     return "unknown";
@@ -113,7 +122,7 @@ const getAuthTransport = (
 
   return (config.authMode === "clerk_beta" || config.authMode === "clerk_primary") &&
     config.clerkEnabled &&
-    hasClerkProvider
+    clerkAvailable
     ? "clerk"
     : "legacy";
 };
@@ -139,16 +148,6 @@ async function fetchSession(): Promise<SessionResult> {
 
 const isBrowserOffline = () => typeof navigator !== "undefined" && navigator.onLine === false;
 
-function useSafeClerk() {
-  try {
-    const auth = useClerkAuth();
-    const signIn = useSignIn();
-    return { auth, signIn };
-  } catch {
-    return { auth: null, signIn: null };
-  }
-}
-
 interface InitialAuthState {
   config: AuthConfigResponse | null;
   loading: boolean;
@@ -156,13 +155,14 @@ interface InitialAuthState {
   userSource: CachedAuthUserSource | null;
 }
 
-const readInitialAuthState = (hasClerkProvider: boolean): InitialAuthState => {
+const readInitialAuthState = (clerkAvailable: boolean): InitialAuthState => {
   const config = readCachedAuthConfig()?.config ?? null;
   const cachedUser = readCachedAuthUser();
   const hasLegacyToken = Boolean(getLegacySessionToken());
-  // A cached legacy user without its token is stale; a Clerk user is confirmed once Clerk loads.
+  // A cached legacy user without its token is stale; a Clerk user is confirmed once Clerk loads
+  // (the Clerk bridge mounts at boot for a cached Clerk user, see clerk-bridge.ts).
   const usable =
-    cachedUser && (cachedUser.source === "clerk" ? hasClerkProvider : hasLegacyToken)
+    cachedUser && (cachedUser.source === "clerk" ? clerkAvailable : hasLegacyToken)
       ? cachedUser
       : null;
 
@@ -171,7 +171,7 @@ const readInitialAuthState = (hasClerkProvider: boolean): InitialAuthState => {
   }
 
   const knownAnonymous =
-    !usable && config !== null && getAuthTransport(config, hasClerkProvider) === "legacy"
+    !usable && config !== null && getAuthTransport(config, clerkAvailable) === "legacy"
       ? !hasLegacyToken
       : false;
 
@@ -184,31 +184,31 @@ const readInitialAuthState = (hasClerkProvider: boolean): InitialAuthState => {
 };
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { auth: clerkAuth, signIn: clerkSignIn } = useSafeClerk();
-  const hasClerkProvider = clerkAuth !== null;
-  const hasClerkPublishableKey = Boolean(import.meta.env.VITE_CLERK_PUBLISHABLE_KEY);
+  const clerk = useClerkBridge();
+  // Clerk is available whenever the build has a key; the bridge itself mounts on demand.
+  const hasClerkPublishableKey = isClerkConfigured();
+  const clerkAvailable = hasClerkPublishableKey;
+  const clerkMounted = clerkAvailable && clerk.requested;
 
-  const [initial] = useState(() => readInitialAuthState(hasClerkProvider));
+  const [initial] = useState(() => readInitialAuthState(clerkAvailable));
   const [config, setConfig] = useState<AuthConfigResponse | null>(initial.config);
   const [configSettled, setConfigSettled] = useState(initial.config !== null);
   const [user, setUserState] = useState<AccountUser | null>(initial.user);
   const [loading, setLoading] = useState(initial.loading);
   const [clerkWaitExpired, setClerkWaitExpired] = useState(false);
 
-  const clerkReady = Boolean(clerkAuth?.isLoaded && clerkSignIn?.isLoaded && clerkSignIn.signIn);
-  const clerkLoaded = Boolean(clerkAuth?.isLoaded);
-  const clerkSignedIn = Boolean(clerkAuth?.isSignedIn);
-  const transport = getAuthTransport(config, hasClerkProvider);
+  const clerkLoaded = clerkMounted && clerk.isLoaded;
+  const clerkSignedIn = clerkLoaded && clerk.isSignedIn;
+  const clerkFailed = clerk.status === "failed" || (clerkWaitExpired && !clerkLoaded);
+  // "Google sign-in can start": Clerk has loaded, or can be loaded on demand and has not failed.
+  const clerkReady = clerkAvailable && !clerkFailed && (clerkLoaded ? clerk.signInReady : true);
+  const transport = getAuthTransport(config, clerkAvailable);
 
   // Latest values for stable callbacks and the token bridge.
-  const clerkAuthRef = useRef(clerkAuth);
-  const clerkSignInRef = useRef(clerkSignIn);
   const transportRef = useRef(transport);
   const configRef = useRef(config);
   const userRef = useRef(user);
   const resolveRunRef = useRef(0);
-  clerkAuthRef.current = clerkAuth;
-  clerkSignInRef.current = clerkSignIn;
   transportRef.current = transport;
   configRef.current = config;
   userRef.current = user;
@@ -226,14 +226,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   /** Token bridge for every API request (registered once, reads the latest auth state). */
   const getSessionToken = useCallback(async (): Promise<string | null> => {
-    const clerk = clerkAuthRef.current;
+    const controls = getClerkControls();
 
-    if (transportRef.current !== "legacy" && clerk?.isSignedIn) {
+    if (transportRef.current !== "legacy" && controls && getClerkBridgeSnapshot().isSignedIn) {
       // Clerk beta keeps legacy email-code sessions valid only until Clerk signs in.
       removeLegacySessionToken();
 
       try {
-        return await clerk.getToken();
+        return await controls.getToken();
       } catch {
         return null;
       }
@@ -300,7 +300,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Give up waiting for Clerk after a while (blocked script, flaky network) so pages that wait
   // on `loading` are not stuck; a cached user is never demoted by this.
   useEffect(() => {
-    if (!hasClerkProvider || clerkLoaded || clerkWaitExpired) {
+    if (!clerkMounted || clerkLoaded || clerkWaitExpired) {
       return;
     }
 
@@ -308,13 +308,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       () => {
         setClerkWaitExpired(true);
       },
-      isBrowserOffline() ? 0 : CLERK_LOAD_TIMEOUT_MS
+      isBrowserOffline() || clerk.status === "failed" ? 0 : CLERK_LOAD_TIMEOUT_MS
     );
 
     return () => {
       clearTimeout(timer);
     };
-  }, [clerkLoaded, clerkWaitExpired, hasClerkProvider]);
+  }, [clerk.status, clerkLoaded, clerkMounted, clerkWaitExpired]);
+
+  // Clerk loaded after all (e.g. a later sign-in attempt): stop treating it as unavailable.
+  useEffect(() => {
+    if (clerkLoaded) {
+      setClerkWaitExpired(false);
+    }
+  }, [clerkLoaded]);
 
   // Resolve who is signed in whenever the config or Clerk's state changes.
   useEffect(() => {
@@ -340,7 +347,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       finish();
     };
 
-    if (transport === "clerk" || (transport === "unknown" && hasClerkProvider)) {
+    if (transport === "clerk" || (transport === "unknown" && clerkAvailable)) {
       if (!clerkLoaded) {
         if (userRef.current) {
           // Optimistic cached user; revalidate once Clerk is ready.
@@ -348,7 +355,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           return;
         }
 
-        if (!clerkWaitExpired && hasClerkSessionHint()) {
+        if (clerkMounted && !clerkWaitExpired && hasClerkSessionHint()) {
           // Someone may be signed in and Clerk is still loading: stay in `loading` rather than
           // flashing signed-out UI. (Without Clerk's session cookie there is nobody to wait for.)
           setLoading(true);
@@ -394,18 +401,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     finish();
   }, [
     applySession,
+    clerkAvailable,
     clerkLoaded,
+    clerkMounted,
     clerkSignedIn,
     clerkWaitExpired,
     configSettled,
-    hasClerkProvider,
     setUser,
     transport
   ]);
 
   const refreshUser = useCallback(async () => {
     const source: CachedAuthUserSource =
-      transportRef.current !== "legacy" && clerkAuthRef.current?.isSignedIn ? "clerk" : "legacy";
+      transportRef.current !== "legacy" && getClerkBridgeSnapshot().isSignedIn ? "clerk" : "legacy";
     applySession(await fetchSession(), source);
   }, [applySession]);
 
@@ -448,12 +456,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         throw new Error("Google sign-in is not configured for this web app build.");
       }
 
-      const clerk = clerkAuthRef.current;
+      // Sign-in starting is one of the moments the lazy Clerk bridge mounts.
+      const controls = await loadClerk(CLERK_LOAD_TIMEOUT_MS);
 
       // If Clerk already has an active session (e.g. from a previous sign-in
       // attempt where the backend was unreachable), try refreshing the backend
       // session first.
-      if (clerk?.isSignedIn) {
+      if (getClerkBridgeSnapshot().isSignedIn) {
         removeLegacySessionToken();
         const result = await fetchSession();
 
@@ -464,12 +473,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         // Clerk session exists but backend can't authenticate it (expired JWT,
         // mismatched keys, etc.). Sign out of Clerk and start fresh.
-        await clerk.signOut();
+        await controls.signOut();
       }
 
-      const signIn = clerkSignInRef.current;
-
-      if (!signIn || !signIn.isLoaded || !signIn.signIn) {
+      if (!getClerkBridgeSnapshot().signInReady) {
         throw new Error("Clerk authentication is not initialized or configured.");
       }
       trackWebEvent({
@@ -479,7 +486,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           auth_mode: "clerk_google"
         }
       });
-      await signIn.signIn.authenticateWithRedirect({
+      await controls.authenticateWithRedirect({
         strategy: "oauth_google",
         redirectUrl: window.location.origin + "/sso-callback",
         redirectUrlComplete
@@ -487,6 +494,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     },
     [hasClerkPublishableKey, setUser]
   );
+
+  const prepareGoogleSignIn = useCallback(() => {
+    if (configRef.current?.clerkEnabled) {
+      requestClerk("sign_in_view");
+    }
+  }, []);
 
   const logout = useCallback(async () => {
     try {
@@ -498,10 +511,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // Clear legacy token
     removeLegacySessionToken();
 
-    // Clear Clerk if signed in
-    const clerk = clerkAuthRef.current;
-    if (clerk && clerk.signOut) {
-      await clerk.signOut();
+    // Clear Clerk if it is loaded (it is mounted whenever a Clerk session may exist)
+    const controls = getClerkControls();
+    if (controls && getClerkBridgeSnapshot().isLoaded) {
+      await controls.signOut();
     }
 
     setUser(null);
@@ -533,6 +546,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       requestLoginCode,
       verifyLoginCode,
       loginWithGoogle,
+      prepareGoogleSignIn,
       logout,
       deleteAccount,
       refreshUser
@@ -545,6 +559,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       loading,
       loginWithGoogle,
       logout,
+      prepareGoogleSignIn,
       refreshUser,
       requestLoginCode,
       user,

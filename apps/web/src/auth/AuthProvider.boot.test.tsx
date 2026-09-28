@@ -6,6 +6,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AUTH_CONFIG_CACHE_KEY, AUTH_USER_CACHE_KEY, readCachedAuthUser } from "./auth-cache";
 import { setLegacySessionToken } from "./auth-storage";
 import { AuthProvider, useAuth } from "./AuthProvider";
+import {
+  getClerkBridgeSnapshot,
+  publishClerkState,
+  registerClerkControls,
+  requestClerk,
+  resetClerkBridgeForTests
+} from "./clerk-bridge";
 
 const apiClientMocks = vi.hoisted(() => ({
   getAuthConfig: vi.fn(),
@@ -27,29 +34,38 @@ vi.mock("../analytics/client", () => ({
   trackWebEvent: vi.fn()
 }));
 
-const clerkMocks = vi.hoisted(() => ({
+/**
+ * Clerk as the lazy bridge would report it. `present` = the bridge is mounted (requested);
+ * AuthProvider never imports @clerk/clerk-react itself.
+ */
+const clerkMocks = {
   auth: {
-    getToken: vi.fn(),
+    getToken: vi.fn<() => Promise<string | null>>(),
     isLoaded: true,
     isSignedIn: false,
-    signOut: vi.fn()
+    signOut: vi.fn<() => Promise<void>>()
   },
-  present: true,
-  signIn: {
-    isLoaded: true,
-    signIn: { authenticateWithRedirect: vi.fn() }
-  }
-}));
+  present: true
+};
 
-vi.mock("@clerk/clerk-react", () => ({
-  useAuth: () => {
-    if (!clerkMocks.present) {
-      throw new Error("useAuth can only be used within <ClerkProvider />");
-    }
-    return { ...clerkMocks.auth };
-  },
-  useSignIn: () => clerkMocks.signIn
-}));
+/** Mirrors clerkMocks into the bridge store, as a mounted bridge would. */
+const syncClerk = () => {
+  if (!clerkMocks.present) {
+    return;
+  }
+
+  requestClerk("session_hint");
+  registerClerkControls({
+    authenticateWithRedirect: vi.fn(),
+    getToken: clerkMocks.auth.getToken,
+    signOut: clerkMocks.auth.signOut
+  });
+  publishClerkState({
+    isLoaded: clerkMocks.auth.isLoaded,
+    isSignedIn: clerkMocks.auth.isSignedIn,
+    signInReady: clerkMocks.auth.isLoaded
+  });
+};
 
 const user = { billingPlan: "plus" as const, email: "cook@example.com", id: "user_1" };
 
@@ -83,12 +99,15 @@ const Probe: React.FC = () => {
   );
 };
 
-const renderAuth = () =>
-  render(
+const renderAuth = () => {
+  syncClerk();
+
+  return render(
     <AuthProvider>
       <Probe />
     </AuthProvider>
   );
+};
 
 const authText = () => screen.getByTestId("auth").textContent;
 
@@ -104,6 +123,7 @@ describe("AuthProvider boot", () => {
     localStorage.clear();
     sessionStorage.clear();
     setClerkSessionCookie(null);
+    resetClerkBridgeForTests();
     seen.length = 0;
     vi.stubEnv("VITE_CLERK_PUBLISHABLE_KEY", "pk_test");
     apiClientMocks.getAuthConfig.mockReset();
@@ -187,6 +207,9 @@ describe("AuthProvider boot", () => {
 
     clerkMocks.auth.isLoaded = true;
     clerkMocks.auth.isSignedIn = true;
+    act(() => {
+      syncClerk();
+    });
     rerender(
       <AuthProvider>
         <Probe />
@@ -216,23 +239,23 @@ describe("AuthProvider boot", () => {
     expect(authText()).toBe("anonymous");
   });
 
-  it("does not wait for Clerk when no Clerk session can exist", async () => {
+  it("does not wait for (or even load) Clerk when no Clerk session can exist", async () => {
     setClerkSessionCookie("0");
-    clerkMocks.auth.isLoaded = false;
+    clerkMocks.present = false;
     apiClientMocks.getAuthConfig.mockResolvedValue(clerkConfig);
 
-    const { rerender } = renderAuth();
+    renderAuth();
     await waitFor(() => expect(authText()).toBe("anonymous"));
+    expect(getClerkBridgeSnapshot().requested).toBe(false);
 
-    // Clerk's own answer still wins once it loads.
+    // Clerk's own answer still wins once it loads (e.g. mounted for a sign-in).
+    clerkMocks.present = true;
     clerkMocks.auth.isLoaded = true;
     clerkMocks.auth.isSignedIn = true;
     apiClientMocks.getSession.mockResolvedValue({ authenticated: true, user });
-    rerender(
-      <AuthProvider>
-        <Probe />
-      </AuthProvider>
-    );
+    act(() => {
+      syncClerk();
+    });
     await waitFor(() => expect(authText()).toBe("user:cook@example.com"));
   });
 

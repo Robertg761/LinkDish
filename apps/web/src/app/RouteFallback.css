@@ -1,0 +1,40 @@
+/* Mirrors the Cookbook's frame (LibraryPage.css) so the page swaps in without a jump. */
+.route-fallback-cookbook.container-wide {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  max-width: var(--max-width-wide);
+}
+
+.route-fallback-header.page-header {
+  align-items: center;
+  margin-bottom: 0;
+}
+
+.route-fallback-header .page-header-subtitle {
+  font-size: var(--text-body);
+}
+
+.route-fallback-search {
+  height: 56px;
+  border-radius: var(--radius-pill);
+}
+
+.route-fallback-cookbook .loading-skeleton-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 12px;
+}
+
+@media (min-width: 600px) {
+  .route-fallback-cookbook .loading-skeleton-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 20px 16px;
+  }
+}
+
+@media (min-width: 1280px) {
+  .route-fallback-cookbook .loading-skeleton-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 24px 20px;
+  }
+}
