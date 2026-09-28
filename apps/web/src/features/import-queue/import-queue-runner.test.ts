@@ -7,6 +7,7 @@ import {
   getImportQueue,
   recoverStaleImports,
   resetImportQueueStoreForTests,
+  retryImport,
   STALE_PROCESSING_MS
 } from "../../data/import-queue-store";
 import { resetLibraryStoreForTests } from "../../data/library-store";
@@ -18,6 +19,7 @@ import {
 } from "../../storage/linkdish-db";
 import { fakeIdb } from "../../storage/testing/fake-idb";
 import { readWebBillingUsage } from "../billing/web-billing";
+import { deleteSavedRecipe } from "../library/saved-recipe-store";
 
 import { runImportQueue } from "./import-queue-runner";
 
@@ -458,6 +460,279 @@ describe("import queue runner", () => {
     const [item] = await getImportQueue();
     // Paused, not failed: making room and resuming picks it up again.
     expect(item?.status).toBe("queued");
+    expect(item).not.toHaveProperty("claimedBy");
+  });
+
+  describe("when another tab takes the last free slot while the final import runs", () => {
+    // The room check passed and the import was paid for (the API counted it, or the signed-out
+    // allowance was spent), then another tab saved the 15th recipe before this one was kept.
+    const cookbookOf = (count: number) =>
+      Array.from({ length: count }, (_, index) => saved(`r${index}`, `https://x.com/${index}`));
+    const takeLastSlotFirst = (response: unknown) => () => {
+      fakeIdb.seed(SAVED_RECIPES_STORE_NAME, [saved("r14", "https://x.com/14")]);
+      return Promise.resolve(response);
+    };
+    const usedFreeImports = (imports: number) =>
+      localStorage.setItem(
+        "linkdish:web:billing-usage:v2",
+        JSON.stringify({ imports, monthKey: "2026-09", strongExtractions: 0 })
+      );
+    const planLimit = {
+      quota: {
+        limit: 3,
+        meteringMode: "free_lifetime",
+        monthlyLimit: null,
+        remaining: 0,
+        remainingThisMonth: null,
+        resetsAt: null
+      },
+      reason: "plan_limit",
+      status: "failure",
+      userMessage: "Used up."
+    };
+    const signedOut = () => context({ isAuthenticated: false, owner: "tab-a", tier: "free" });
+    const signedIn = () => context({ owner: "tab-a", tier: "free" });
+    const savedTitles = () =>
+      fakeIdb
+        .records<WebSavedRecipe>(SAVED_RECIPES_STORE_NAME)
+        .map((recipe) => recipe.recipe.title)
+        .filter((title) => !title.startsWith("Recipe r"));
+
+    beforeEach(() => {
+      fakeIdb.seed(SAVED_RECIPES_STORE_NAME, cookbookOf(14));
+    });
+
+    it("keeps the imported recipe with the link while it waits for room", async () => {
+      await enqueueImport({ url: "https://a.com/soup" });
+      apiMocks.extractRecipe.mockImplementation(
+        takeLastSlotFirst(success("Soup", "https://a.com/soup"))
+      );
+
+      await expect(runImportQueue(signedIn())).resolves.toEqual({
+        paused: "save_limit",
+        processed: 0
+      });
+
+      const [item] = await getImportQueue();
+      expect(item).toMatchObject({
+        pendingSave: {
+          correlationId: apiMocks.extractRecipe.mock.calls[0]?.[0].correlationId,
+          extraction: { fetchMode: "http", strategy: "recipe-schema" },
+          recipe: { title: "Soup" },
+          sourceUrl: "https://a.com/soup"
+        },
+        status: "queued"
+      });
+      expect(item).not.toHaveProperty("claimedBy");
+      expect(v2Events("recipe_saved")).toHaveLength(0);
+    });
+
+    it("saves it once there's room without spending the last free import again (signed out)", async () => {
+      usedFreeImports(2);
+      await enqueueImport({ url: "https://a.com/soup" });
+      apiMocks.extractRecipe
+        .mockImplementationOnce(takeLastSlotFirst(success("Soup", "https://a.com/soup")))
+        .mockResolvedValue(success("Soup again", "https://a.com/soup"));
+
+      await expect(runImportQueue(signedOut())).resolves.toEqual({
+        paused: "save_limit",
+        processed: 0
+      });
+      expect(readWebBillingUsage()).toMatchObject({ imports: 3 });
+
+      // The cook makes room, and the queue carries on.
+      await deleteSavedRecipe("r0");
+      await expect(runImportQueue(signedOut())).resolves.toEqual({ paused: null, processed: 1 });
+
+      expect(apiMocks.extractRecipe).toHaveBeenCalledOnce();
+      expect(readWebBillingUsage()).toMatchObject({ imports: 3 });
+      const [item] = await getImportQueue();
+      expect(item).toMatchObject({ status: "done" });
+      expect(item).not.toHaveProperty("pendingSave");
+      expect(
+        fakeIdb.record<WebSavedRecipe>(SAVED_RECIPES_STORE_NAME, item?.recipeId ?? "")?.recipe.title
+      ).toBe("Soup");
+      expect(v2Events("import_succeeded")).toHaveLength(1);
+      expect(v2Events("recipe_saved")).toHaveLength(1);
+    });
+
+    it("saves it once there's room without importing it again (signed in)", async () => {
+      await enqueueImport({ url: "https://a.com/soup" });
+      // The API counted the import: asking again would be refused (or charged twice).
+      apiMocks.extractRecipe
+        .mockImplementationOnce(takeLastSlotFirst(success("Soup", "https://a.com/soup")))
+        .mockResolvedValue(planLimit);
+
+      await expect(runImportQueue(signedIn())).resolves.toEqual({
+        paused: "save_limit",
+        processed: 0
+      });
+      await deleteSavedRecipe("r0");
+      await expect(runImportQueue(signedIn())).resolves.toEqual({ paused: null, processed: 1 });
+
+      expect(apiMocks.extractRecipe).toHaveBeenCalledOnce();
+      expect(savedTitles()).toEqual(["Soup"]);
+      expect((await getImportQueue())[0]).toMatchObject({ status: "done" });
+      expect(v2Events("import_succeeded")).toHaveLength(1);
+      // Reported under the import it came from.
+      expect(v2Events("recipe_saved").map(([event]) => event.correlationId)).toEqual([
+        v2Events("import_succeeded")[0]?.[0].correlationId
+      ]);
+    });
+
+    it("pauses again, spending nothing, while the cookbook is still full", async () => {
+      usedFreeImports(2);
+      await enqueueImport({ url: "https://a.com/soup" });
+      apiMocks.extractRecipe
+        .mockImplementationOnce(takeLastSlotFirst(success("Soup", "https://a.com/soup")))
+        .mockResolvedValue(success("Soup again", "https://a.com/soup"));
+      await runImportQueue(signedOut());
+
+      // Out of imports too, but this one is paid for: only room is missing.
+      await expect(runImportQueue(signedOut())).resolves.toEqual({
+        paused: "save_limit",
+        processed: 0
+      });
+
+      expect(apiMocks.extractRecipe).toHaveBeenCalledOnce();
+      expect(readWebBillingUsage()).toMatchObject({ imports: 3 });
+      expect((await getImportQueue())[0]).toMatchObject({
+        pendingSave: { recipe: { title: "Soup" } },
+        status: "queued"
+      });
+      expect(v2Events("recipe_saved")).toHaveLength(0);
+    });
+
+    it("saves a waiting recipe before a link that would need another import", async () => {
+      usedFreeImports(2);
+      await enqueueImport({ url: "https://a.com/soup" });
+      apiMocks.extractRecipe
+        .mockImplementationOnce(takeLastSlotFirst(success("Soup", "https://a.com/soup")))
+        .mockResolvedValue(success("Stew", "https://b.com/stew"));
+      await runImportQueue(signedOut());
+      // An older link that had failed is tried again: it would need an import there's none of.
+      fakeIdb.seed(IMPORT_QUEUE_STORE_NAME, [
+        {
+          attempts: 1,
+          createdAt: "2026-01-01T00:00:00.000Z",
+          id: "older",
+          status: "queued",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+          url: "https://b.com/stew"
+        }
+      ]);
+      // Room for both: only the import allowance holds the older link back.
+      await deleteSavedRecipe("r0");
+      await deleteSavedRecipe("r1");
+
+      await expect(runImportQueue(signedOut())).resolves.toEqual({
+        paused: "import_limit",
+        processed: 1
+      });
+
+      expect(apiMocks.extractRecipe).toHaveBeenCalledOnce();
+      expect(savedTitles()).toEqual(["Soup"]);
+      expect(await statuses()).toEqual([
+        ["https://b.com/stew", "queued"],
+        ["https://a.com/soup", "done"]
+      ]);
+    });
+
+    it("finishes with the recipe another tab saved from the same link meanwhile", async () => {
+      await enqueueImport({ url: "https://a.com/soup" });
+      apiMocks.extractRecipe.mockImplementationOnce(
+        takeLastSlotFirst(success("Soup", "https://a.com/soup"))
+      );
+      await runImportQueue(signedIn());
+      await deleteSavedRecipe("r0");
+      fakeIdb.seed(SAVED_RECIPES_STORE_NAME, [saved("theirs", "https://www.a.com/soup/")]);
+      resetLibraryStoreForTests();
+
+      await expect(runImportQueue(signedIn())).resolves.toEqual({ paused: null, processed: 1 });
+
+      expect(apiMocks.extractRecipe).toHaveBeenCalledOnce();
+      expect((await getImportQueue())[0]).toMatchObject({ recipeId: "theirs", status: "done" });
+      expect((await getImportQueue())[0]).not.toHaveProperty("pendingSave");
+      expect(savedTitles()).toEqual(["Recipe theirs"]);
+      expect(v2Events("recipe_saved")).toHaveLength(0);
+    });
+  });
+
+  it("keeps a recipe it imported but couldn't save, so Retry only saves it", async () => {
+    await enqueueImport({ url: "https://a.com/soup" });
+    apiMocks.extractRecipe
+      .mockImplementationOnce(() => {
+        fakeIdb.failNextPut(
+          SAVED_RECIPES_STORE_NAME,
+          new DOMException("The disk is full.", "QuotaExceededError")
+        );
+        return Promise.resolve(success("Soup", "https://a.com/soup"));
+      })
+      .mockResolvedValue(success("Soup again", "https://a.com/soup"));
+
+    await runImportQueue(context({ isAuthenticated: false, owner: "tab-a", tier: "free" }));
+    const [failed] = await getImportQueue();
+    expect(failed).toMatchObject({ pendingSave: { recipe: { title: "Soup" } }, status: "failed" });
+    expect(readWebBillingUsage()).toMatchObject({ imports: 1 });
+
+    await retryImport(failed?.id ?? "");
+    await expect(
+      runImportQueue(context({ isAuthenticated: false, owner: "tab-a", tier: "free" }))
+    ).resolves.toEqual({ paused: null, processed: 1 });
+
+    expect(apiMocks.extractRecipe).toHaveBeenCalledOnce();
+    expect(readWebBillingUsage()).toMatchObject({ imports: 1 });
+    expect((await getImportQueue())[0]).toMatchObject({ status: "done" });
+    expect(v2Events("import_succeeded")).toHaveLength(1);
+    expect(v2Events("recipe_saved")).toHaveLength(1);
+  });
+
+  it("keeps the imported recipe when the connection drops before it's saved", async () => {
+    await enqueueImport({ url: "https://a.com/soup" });
+    apiMocks.extractRecipe
+      .mockImplementationOnce(() => {
+        networkMocks.online = false;
+        fakeIdb.failNextPut(SAVED_RECIPES_STORE_NAME, new DOMException("Busy.", "UnknownError"));
+        return Promise.resolve(success("Soup", "https://a.com/soup"));
+      })
+      .mockResolvedValue(success("Soup again", "https://a.com/soup"));
+
+    await expect(runImportQueue(context({ owner: "tab-a" }))).resolves.toEqual({
+      paused: "offline",
+      processed: 0
+    });
+    expect((await getImportQueue())[0]).toMatchObject({
+      pendingSave: { recipe: { title: "Soup" } },
+      status: "queued"
+    });
+
+    networkMocks.online = true;
+    await expect(runImportQueue(context({ owner: "tab-a" }))).resolves.toEqual({
+      paused: null,
+      processed: 1
+    });
+    expect(apiMocks.extractRecipe).toHaveBeenCalledOnce();
+    expect((await getImportQueue())[0]).toMatchObject({ status: "done" });
+  });
+
+  it("lets a recipe waiting to be saved go with the item when the cookbook can't be read", async () => {
+    await enqueueImport({ url: "https://a.com/soup" });
+    apiMocks.extractRecipe.mockImplementationOnce(() => {
+      fakeIdb.failNextPut(SAVED_RECIPES_STORE_NAME, new DOMException("Busy.", "UnknownError"));
+      return Promise.resolve(success("Soup", "https://a.com/soup"));
+    });
+    await runImportQueue(context({ owner: "tab-a" }));
+    await retryImport((await getImportQueue())[0]?.id ?? "");
+    resetLibraryStoreForTests();
+    await failReads(SAVED_RECIPES_STORE_NAME, "getAll");
+
+    await expect(runImportQueue(context({ owner: "tab-a" }))).rejects.toThrow(
+      "The disk is unreadable."
+    );
+
+    expect(apiMocks.extractRecipe).toHaveBeenCalledOnce();
+    const [item] = await getImportQueue();
+    expect(item).toMatchObject({ pendingSave: { recipe: { title: "Soup" } }, status: "queued" });
     expect(item).not.toHaveProperty("claimedBy");
   });
 

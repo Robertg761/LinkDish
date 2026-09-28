@@ -40,6 +40,20 @@ const textPreview = (text: string | undefined): string => {
   return firstLine.length > 48 ? `${firstLine.slice(0, 47)}…` : firstLine || "Pasted text";
 };
 
+/** The row's status line. An item with a `pendingSave` is imported already: it only needs room. */
+const statusLine = (item: ImportQueueItem, label: string, savedTitle: string | undefined) => {
+  switch (item.status) {
+    case "queued":
+      return item.pendingSave ? `Waiting for room · ${label}` : "Waiting";
+    case "processing":
+      return item.pendingSave ? "Saving…" : "Importing…";
+    case "done":
+      return `Saved${savedTitle ? ` · ${label}` : ""}`;
+    case "failed":
+      return item.error ?? "This import didn’t work.";
+  }
+};
+
 /**
  * Links waiting to be imported (a batch paste, or shares made while offline). The page's
  * worker imports them one at a time and saves each success automatically; failures stay here
@@ -154,9 +168,11 @@ export const ImportQueuePanel: React.FC<ImportQueuePanelProps> = ({ onOpenItem, 
         {items.map((item) => {
           const label = item.url ? (getImportHost(item.url) ?? item.url) : textPreview(item.text);
           const savedTitle = item.recipeId ? titles.get(item.recipeId) : undefined;
+          const title = savedTitle ?? item.pendingSave?.recipe.title;
 
-          // One row anatomy: a title (the saved recipe, or the site in muted text while it's
-          // pending), trailing actions, and a status line that runs the full width underneath.
+          // One row anatomy: a title (the saved recipe, one imported and waiting to be saved, or
+          // the site in muted text until there's a recipe), trailing actions, and a status line
+          // that runs the full width underneath.
           return (
             <li className={`import-queue-item is-${item.status}`} key={item.id}>
               <span aria-hidden="true" className="import-queue-item-icon">
@@ -167,26 +183,20 @@ export const ImportQueuePanel: React.FC<ImportQueuePanelProps> = ({ onOpenItem, 
                   strokeWidth={item.status === "done" ? 2.8 : 2}
                 />
               </span>
-              <p className={`import-queue-item-title${savedTitle ? "" : " is-source"}`}>
+              <p className={`import-queue-item-title${title ? "" : " is-source"}`}>
                 {item.status === "done" && item.recipeId ? (
                   <Link className="import-queue-item-link" to={`/recipes/${item.recipeId}`}>
                     {savedTitle ?? label}
                   </Link>
                 ) : (
-                  label
+                  (title ?? label)
                 )}
               </p>
-              <p className="import-queue-item-status">
-                {item.status === "queued"
-                  ? "Waiting"
-                  : item.status === "processing"
-                    ? "Importing…"
-                    : item.status === "done"
-                      ? `Saved${savedTitle ? ` · ${label}` : ""}`
-                      : (item.error ?? "This import didn’t work.")}
-              </p>
+              <p className="import-queue-item-status">{statusLine(item, label, savedTitle)}</p>
               <div className="import-queue-item-actions">
-                {item.status === "failed" && item.url && onOpenItem ? (
+                {/* Opening an imported recipe that waits to be saved would import it (and spend
+                    an import) all over again: Retry saves it instead. */}
+                {item.status === "failed" && item.url && !item.pendingSave && onOpenItem ? (
                   <button
                     className="import-queue-open"
                     onClick={() => onOpenItem(item)}

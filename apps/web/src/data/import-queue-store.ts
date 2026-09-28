@@ -5,6 +5,8 @@ import { getLinkDishWebDb, IMPORT_QUEUE_STORE_NAME } from "../storage/linkdish-d
 import { emitDataChange } from "./change-feed";
 import { createResourceStore, toViewStatus, upsertById, useResource } from "./resource-store";
 
+import type { SaveRecipeInput } from "../features/library/saved-recipe-store";
+
 /**
  * Links or pasted text waiting to be imported — shared while offline, or queued in a batch.
  * A worker (the import page) claims the oldest `queued` item — one transaction marks it
@@ -12,6 +14,10 @@ import { createResourceStore, toViewStatus, upsertById, useResource } from "./re
  * `failed`. The worker renews its claim while it works; an item whose claim has lapsed (tab
  * closed mid-import) can be put back in the queue. Until another tab claims it, the tab that
  * lapsed (suspended rather than closed) may still take it back and finish it.
+ *
+ * An item whose import worked but whose recipe couldn't be kept yet (the cookbook filled up first)
+ * waits with that recipe ({@link ImportQueuePendingSave}): the import is paid for, so the item is
+ * only ever saved from then on, never imported again.
  */
 
 export type ImportQueueStatus = "queued" | "processing" | "failed" | "done";
@@ -34,8 +40,28 @@ export interface ImportQueueItem {
   claimedBy?: string | undefined;
   /** When that tab last claimed or renewed the item. */
   claimedAt?: string | undefined;
+  /**
+   * The recipe this item's import produced, while it waits to be saved (see
+   * {@link ImportQueuePendingSave}). Kept through claims, stale recovery, failure and Retry;
+   * cleared once the item is done.
+   */
+  pendingSave?: ImportQueuePendingSave | undefined;
   createdAt: string;
   updatedAt: string;
+}
+
+/**
+ * What an import produced, kept on its item until the recipe is saved: the cookbook filled up
+ * before it could be (another tab took the last free slot), or saving it didn't work. The import
+ * was paid for then (the API counted it; a signed-out import spent the allowance), so a later
+ * run saves exactly this rather than importing the link, and paying for it, again.
+ */
+export interface ImportQueuePendingSave extends Pick<
+  SaveRecipeInput,
+  "extraction" | "recipe" | "sourceUrl"
+> {
+  /** The import's analytics correlation id, which its save is reported under. */
+  correlationId: string;
 }
 
 export type ImportQueueSource = "in_app" | "share_sheet";
@@ -100,6 +126,12 @@ const withoutClaim = (item: ImportQueueItem): ImportQueueItem => {
   return next;
 };
 
+const withoutPendingSave = (item: ImportQueueItem): ImportQueueItem => {
+  const next = { ...item };
+  delete next.pendingSave;
+  return next;
+};
+
 /**
  * Whether `owner` may still write to the item: it holds the claim, or its claim lapsed and the item
  * went back in the queue but no other tab has claimed it since (so its result still counts).
@@ -125,6 +157,18 @@ const isClaimStale = (item: ImportQueueItem, now: number): boolean =>
 
 const sortByCreatedAt = (items: readonly ImportQueueItem[]): ImportQueueItem[] =>
   [...items].sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
+
+/**
+ * Items that only need saving first (they cost no import, so an older link that would pause the
+ * queue for want of one never holds them up), then the oldest.
+ */
+const sortByClaimOrder = (items: readonly ImportQueueItem[]): ImportQueueItem[] =>
+  [...items].sort(
+    (a, b) =>
+      Number(Boolean(b.pendingSave)) - Number(Boolean(a.pendingSave)) ||
+      a.createdAt.localeCompare(b.createdAt) ||
+      a.id.localeCompare(b.id)
+  );
 
 export async function getImportQueue(): Promise<ImportQueueItem[]> {
   const db = await getLinkDishWebDb();
@@ -327,17 +371,28 @@ export const markImportProcessing = (id: string, owner?: string) =>
     heldOnlyBy(owner)
   );
 
-export const markImportFailed = (id: string, error: string, owner?: string) =>
+/**
+ * With `pendingSave`, the import worked but saving its recipe didn't: the item keeps the recipe,
+ * so Retry saves it rather than importing it again. An item that already had one keeps it.
+ */
+export const markImportFailed = (
+  id: string,
+  error: string,
+  owner?: string,
+  pendingSave?: ImportQueuePendingSave
+) =>
   patchItem(
     id,
     (item) => ({
       ...withoutClaim(item),
       error: error.trim().slice(0, MAX_ERROR_LENGTH) || "This import didn't work.",
-      status: "failed"
+      status: "failed",
+      ...(pendingSave ? { pendingSave } : {})
     }),
     heldOnlyBy(owner)
   );
 
+/** The recipe is saved: it no longer waits on the item (see {@link ImportQueuePendingSave}). */
 export const markImportDone = (
   id: string,
   result: { recipeId?: string | undefined } = {},
@@ -346,7 +401,7 @@ export const markImportDone = (
   patchItem(
     id,
     (item) => ({
-      ...withoutClaim(withoutError(item)),
+      ...withoutClaim(withoutError(withoutPendingSave(item))),
       status: "done",
       ...(result.recipeId ? { recipeId: result.recipeId } : {})
     }),
@@ -367,9 +422,25 @@ export const retryImport = (id: string, owner?: string) =>
   );
 
 /**
- * Takes the oldest waiting item for `owner` (this tab's id): one readwrite transaction finds it
- * and marks it `processing`, so two tabs working through the queue never take the same item.
- * Undefined when nothing is waiting.
+ * Puts an item its worker (`owner`) imported but couldn't save back in the queue with the recipe
+ * (see {@link ImportQueuePendingSave}). The recipe is stored in the same write that lets the item
+ * go, so no run can take the link back up without it and import it again.
+ */
+export const holdImportForSave = (
+  id: string,
+  pendingSave: ImportQueuePendingSave,
+  owner?: string
+) =>
+  patchItem(
+    id,
+    (item) => ({ ...withoutClaim(withoutError(item)), pendingSave, status: "queued" }),
+    heldOnlyBy(owner)
+  );
+
+/**
+ * Takes the next waiting item for `owner` (this tab's id): one only waiting to be saved, else the
+ * oldest. One readwrite transaction finds it and marks it `processing`, so two tabs working
+ * through the queue never take the same item. Undefined when nothing is waiting.
  */
 export async function claimNextQueuedImport(
   owner: string,
@@ -378,7 +449,7 @@ export async function claimNextQueuedImport(
   const claimedAt = new Date(now).toISOString();
   const [claimed] = await updateInTransaction(
     async (store) =>
-      sortByCreatedAt((await store.index("status").getAll("queued")) as ImportQueueItem[]),
+      sortByClaimOrder((await store.index("status").getAll("queued")) as ImportQueueItem[]),
     ([next]) =>
       next ? [{ ...withoutError(next), claimedAt, claimedBy: owner, status: "processing" }] : []
   );
@@ -427,7 +498,8 @@ export async function getNextQueuedImport(): Promise<ImportQueueItem | undefined
  * Puts `processing` items whose claim has lapsed (their tab closed or crashed mid-import) back in
  * the queue. Each claim is checked inside the same transaction that re-queues it, so an item whose
  * tab is still renewing its claim is never taken away. The item keeps `claimedBy`: should that tab
- * only have been suspended, it can still finish the item until another tab claims it.
+ * only have been suspended, it can still finish the item until another tab claims it. A recipe
+ * waiting to be saved stays with it.
  */
 export async function recoverStaleImports(now: number = Date.now()): Promise<number> {
   const recovered = await updateInTransaction(
