@@ -91,6 +91,15 @@ const getTransportFailureMessage = (error: unknown) => {
     return fallbackMessage;
   }
 
+  // api-client v2 reports transport failures as ExtractorApiError with a kind.
+  if (error instanceof ExtractorApiError && error.kind === "timeout") {
+    return "The extraction service took too long to answer. Please try again in a moment.";
+  }
+
+  if (error instanceof ExtractorApiError && error.kind === "network") {
+    return fallbackMessage;
+  }
+
   if (error.message.trim().length === 0 || error.message === "Network request failed") {
     return fallbackMessage;
   }

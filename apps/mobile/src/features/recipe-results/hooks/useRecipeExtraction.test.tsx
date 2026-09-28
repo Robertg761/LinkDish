@@ -1,3 +1,4 @@
+import { ExtractorApiError } from "@linkdish/api-client";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import React from "react";
 import { Text } from "react-native";
@@ -628,6 +629,28 @@ describe("useRecipeExtraction", () => {
         }) as Record<string, unknown>
       })
     );
+  });
+
+  it("explains a timeout reported by the v2 API client instead of showing its raw message", async () => {
+    mockedExtractRecipe.mockRejectedValueOnce(
+      new ExtractorApiError("Request timed out after 120000ms", 0, undefined, { kind: "timeout" })
+    );
+
+    let renderer: ReturnType<typeof create>;
+
+    await act(() => {
+      renderer = create(<HookProbe url="https://example.com/slow-source" />);
+      return Promise.resolve();
+    });
+
+    await act(async () => {
+      await flushAsyncWork();
+    });
+
+    const output = renderer!.root.findByType(Text).props.children as string;
+    expect(output).toContain('"state":"failure"');
+    expect(output).toContain("took too long to answer");
+    expect(output).not.toContain("120000ms");
   });
 
   it("records an abandoned terminal state when an in-flight import leaves the screen", async () => {
