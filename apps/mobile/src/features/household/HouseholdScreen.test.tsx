@@ -11,7 +11,8 @@ const apiMocks = vi.hoisted(() => ({
   createExtractorApiClient: vi.fn(),
   createHousehold: vi.fn(),
   createHouseholdInvite: vi.fn(),
-  getHousehold: vi.fn()
+  getHousehold: vi.fn(),
+  leaveHousehold: vi.fn()
 }));
 
 const accountState = vi.hoisted(() => ({
@@ -250,6 +251,8 @@ describe("HouseholdScreen billing gate", () => {
     });
     shareMocks.share.mockReset();
     shareMocks.share.mockResolvedValue({ action: "sharedAction" });
+    apiMocks.leaveHousehold.mockReset();
+    apiMocks.leaveHousehold.mockResolvedValue({ household: null });
     apiMocks.createExtractorApiClient.mockReset();
     apiMocks.createExtractorApiClient.mockReturnValue({
       acceptHouseholdInvite: apiMocks.acceptHouseholdInvite,
@@ -257,9 +260,65 @@ describe("HouseholdScreen billing gate", () => {
       createHousehold: apiMocks.createHousehold,
       createHouseholdInvite: apiMocks.createHouseholdInvite,
       getHousehold: apiMocks.getHousehold,
-      leaveHousehold: vi.fn(),
+      leaveHousehold: apiMocks.leaveHousehold,
       removeHouseholdMember: vi.fn()
     });
+  });
+
+  it("asks for confirmation before leaving a household", async () => {
+    apiMocks.getHousehold.mockResolvedValue({
+      household: {
+        ...buildHousehold(),
+        members: [
+          ...buildHousehold().members,
+          {
+            email: "family@example.com",
+            joinedAt: "2026-06-02T00:00:00.000Z",
+            role: "member",
+            userId: "user_member"
+          }
+        ],
+        ownerUserId: "user_owner",
+        role: "member"
+      }
+    });
+    let renderer: ReturnType<typeof create>;
+
+    await act(async () => {
+      renderer = create(<HouseholdScreen />);
+      await flushAsyncWork();
+    });
+
+    await act(async () => {
+      (
+        renderer!.root.findByProps({ label: "Leave household" }).props as { onPress: () => void }
+      ).onPress();
+      await flushAsyncWork();
+    });
+
+    expect(apiMocks.leaveHousehold).not.toHaveBeenCalled();
+    expect(JSON.stringify(renderer!.toJSON())).toContain("Leave this household?");
+
+    await act(async () => {
+      (renderer!.root.findByProps({ label: "Stay" }).props as { onPress: () => void }).onPress();
+      await flushAsyncWork();
+    });
+
+    expect(apiMocks.leaveHousehold).not.toHaveBeenCalled();
+    expect(JSON.stringify(renderer!.toJSON())).not.toContain("Leave this household?");
+
+    await act(async () => {
+      (
+        renderer!.root.findByProps({ label: "Leave household" }).props as { onPress: () => void }
+      ).onPress();
+      await flushAsyncWork();
+    });
+    await act(async () => {
+      (renderer!.root.findByProps({ label: "Leave" }).props as { onPress: () => void }).onPress();
+      await flushAsyncWork();
+    });
+
+    expect(apiMocks.leaveHousehold).toHaveBeenCalledTimes(1);
   });
 
   it("lets server-verified Family users create a household without local RevenueCat customer info", async () => {

@@ -31,8 +31,8 @@ interface UpgradeMomentContextValue {
 const triggerCopy: Record<UpgradeMomentTrigger, { body: string; eyebrow: string; title: string }> =
   {
     fourth_import_monthly: {
-      body: "You have one free import left this month. Plus and Family keep the recipe pipeline open when the week gets busy.",
-      eyebrow: "One left this month",
+      body: "You have one free import left. Plus and Family keep the recipe pipeline open when the week gets busy.",
+      eyebrow: "One import left",
       title: "Keep saving the recipes worth cooking"
     },
     save_limit: {

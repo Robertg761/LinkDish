@@ -57,7 +57,7 @@ import { BillingProvider } from "../../billing/BillingContext";
 import { getBillingPeriodKey } from "../../billing/store";
 import { createSavedRecipeRecord } from "../../saved-recipes/store";
 
-import { useRecipeExtraction } from "./useRecipeExtraction";
+import { shouldShowLastFreeImportPrompt, useRecipeExtraction } from "./useRecipeExtraction";
 
 import type { ExtractRecipeRequest } from "@linkdish/api-contracts";
 
@@ -278,6 +278,105 @@ describe("useRecipeExtraction", () => {
         }) as Record<string, unknown>
       })
     );
+  });
+
+  it("offers the one-import-left upgrade moment on the Free import that leaves one", async () => {
+    upgradeMomentMocks.showUpgradeMoment.mockClear();
+    mockedAsyncStorage.getItem.mockImplementation((key) =>
+      Promise.resolve(
+        key === "linkdish.billing"
+          ? JSON.stringify({
+              tier: "free",
+              usage: {
+                imports: 1,
+                periodKey: getBillingPeriodKey(),
+                strongExtractions: 0
+              },
+              usageAccountingVersion: 3
+            })
+          : null
+      )
+    );
+    mockedExtractRecipe.mockResolvedValueOnce({
+      status: "success",
+      recipe: {
+        title: "Second Soup",
+        sourceUrl: "https://example.com/second",
+        sourceType: "article",
+        ingredients: [{ text: "1 onion" }],
+        steps: [{ index: 1, text: "Cook." }],
+        servings: "4 servings",
+        prepTimeMinutes: 10,
+        cookTimeMinutes: 20,
+        nutrition: null,
+        confidence: {
+          score: 0.81,
+          summary: "Confident extraction.",
+          missingFields: [],
+          notes: [],
+          fieldProvenance: {
+            title: "visible-text",
+            ingredients: "visible-text",
+            steps: "visible-text",
+            servings: "visible-text",
+            prepTimeMinutes: "visible-text",
+            cookTimeMinutes: "visible-text",
+            nutrition: null
+          }
+        }
+      },
+      extraction: {
+        sourceType: "article",
+        strategy: "article-pattern",
+        confidenceScore: 0.81,
+        missingFields: [],
+        warnings: [],
+        fetchMode: "http",
+        provenance: ["readability", "visible-text"]
+      }
+    });
+
+    await act(() => {
+      create(<HookProbe url="https://example.com/second" />);
+      return Promise.resolve();
+    });
+
+    await act(async () => {
+      await flushAsyncWork();
+    });
+
+    expect(upgradeMomentMocks.showUpgradeMoment).toHaveBeenCalledWith("fourth_import_monthly");
+  });
+
+  it("only offers the one-import-left moment for locally metered Free imports", () => {
+    expect(
+      shouldShowLastFreeImportPrompt({
+        planId: "free",
+        remainingImportsBeforeThisImport: 2,
+        usesServerBillingGate: false
+      })
+    ).toBe(true);
+    expect(
+      shouldShowLastFreeImportPrompt({
+        planId: "free",
+        remainingImportsBeforeThisImport: 3,
+        usesServerBillingGate: false
+      })
+    ).toBe(false);
+    expect(
+      shouldShowLastFreeImportPrompt({
+        planId: "free",
+        remainingImportsBeforeThisImport: 2,
+        usesServerBillingGate: true
+      })
+    ).toBe(false);
+    expect(
+      shouldShowLastFreeImportPrompt({
+        planId: "plus",
+        remainingImportsBeforeThisImport: 2,
+        usesServerBillingGate: false
+      })
+    ).toBe(false);
   });
 
   it("lets signed-in users rely on server billing so household quota can apply", async () => {
