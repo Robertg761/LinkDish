@@ -218,7 +218,11 @@ export default defineConfig({
     react(),
     preloadLandingRoute(LANDING_ROUTE_MODULE),
     VitePWA({
-      registerType: "autoUpdate",
+      // A new version waits until the reader says "Reload" (or navigates after ignoring the
+      // prompt), instead of swapping code under an open page. The app registers the worker
+      // itself (platform/app-update.ts via virtual:pwa-register) once the page is idle.
+      registerType: "prompt",
+      injectRegister: false,
       // The plugin generates /manifest.webmanifest (there is no hand-written copy in public/).
       manifest: {
         name: "LinkDish",

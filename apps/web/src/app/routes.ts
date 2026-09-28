@@ -51,6 +51,9 @@ export const ShoppingListPage = lazyWithRetry(() =>
     default: module.ShoppingListPage
   }))
 );
+export const SsoCallbackPage = lazyWithRetry(() =>
+  import("./SsoCallbackPage").then((module) => ({ default: module.SsoCallbackPage }))
+);
 export const SupportPage = lazyWithRetry(() =>
   import("../components/SupportPage").then((module) => ({ default: module.SupportPage }))
 );

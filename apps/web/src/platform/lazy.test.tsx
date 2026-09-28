@@ -134,4 +134,34 @@ describe("lazyWithRetry", () => {
     await LazyPage.preload();
     expect(factory).toHaveBeenCalledTimes(1);
   });
+
+  it("renders a preloaded page on the first render, without a Suspense fallback", async () => {
+    const Page: React.FC<{ name: string }> = ({ name }) => <p>Hello {name}</p>;
+    const LazyPage = lazyWithRetry(() => Promise.resolve({ default: Page }));
+
+    await LazyPage.preload();
+    render(
+      <Suspense fallback={<p>Loading</p>}>
+        <LazyPage name="cook" />
+      </Suspense>
+    );
+
+    // Synchronously there: no fallback frame, no extra render pass.
+    expect(screen.getByText("Hello cook")).toBeInTheDocument();
+    expect(screen.queryByText("Loading")).not.toBeInTheDocument();
+  });
+
+  it("still suspends when the page was not preloaded", async () => {
+    const Page: React.FC = () => <p>Loaded later</p>;
+    const LazyPage = lazyWithRetry(() => Promise.resolve({ default: Page }));
+
+    render(
+      <Suspense fallback={<p>Loading</p>}>
+        <LazyPage />
+      </Suspense>
+    );
+
+    expect(screen.getByText("Loading")).toBeInTheDocument();
+    expect(await screen.findByText("Loaded later")).toBeInTheDocument();
+  });
 });

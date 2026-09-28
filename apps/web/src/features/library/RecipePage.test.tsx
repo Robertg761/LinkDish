@@ -503,6 +503,15 @@ describe("RecipePage saved route", () => {
     expect(await screen.findByRole("dialog", { name: "Edit recipe" })).toBeInTheDocument();
   });
 
+  it("opens cook mode for ?cook=1 links (the command palette's Start cooking)", async () => {
+    await seed([savedRecipe()]);
+    renderAt("/recipes/recipe_local?cook=1");
+
+    expect(
+      await screen.findByRole("dialog", { name: "Cooking mode for Weeknight Chili" })
+    ).toBeInTheDocument();
+  });
+
   it("logs a finished cook from cook mode", async () => {
     await seed([savedRecipe()]);
     renderAt("/recipes/recipe_local");

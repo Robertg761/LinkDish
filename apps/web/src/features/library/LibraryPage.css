@@ -43,7 +43,7 @@
 /* Sticks to the top while scrolling, so search is always a thumb away. */
 .library-search-bar {
   position: sticky;
-  top: 0;
+  top: var(--app-sticky-top, 0px);
   z-index: var(--z-sticky);
   margin: -8px calc(-1 * var(--page-gutter)) -4px;
   padding: calc(8px + env(safe-area-inset-top, 0px)) var(--page-gutter) 8px;

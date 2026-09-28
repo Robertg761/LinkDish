@@ -133,7 +133,7 @@
 
   .recipe-view-ingredients {
     position: sticky;
-    top: calc(var(--topbar-height) + 16px);
+    top: calc(var(--app-sticky-top, 0px) + var(--topbar-height) + 16px);
   }
 
   .recipe-view-ingredients-card {

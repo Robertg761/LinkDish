@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import React from "react";
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -182,5 +182,97 @@ describe("AppShell side rail", () => {
     expect(onOpenPalette).toHaveBeenCalledTimes(1);
 
     window.removeEventListener(OPEN_COMMAND_PALETTE_EVENT, onOpenPalette);
+  });
+});
+
+describe("AppShell search, shortcuts and status", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  it("puts a search button in the phone top bar on secondary routes", () => {
+    const onOpenPalette = vi.fn();
+    window.addEventListener(OPEN_COMMAND_PALETTE_EVENT, onOpenPalette);
+
+    renderShell("/recipes/recipe_1");
+    fireEvent.click(screen.getByRole("button", { name: "Search recipes and commands" }));
+
+    expect(onOpenPalette).toHaveBeenCalledTimes(1);
+    expect((onOpenPalette.mock.calls[0]?.[0] as CustomEvent).detail).toEqual({
+      source: "topbar_search"
+    });
+    window.removeEventListener(OPEN_COMMAND_PALETTE_EVENT, onOpenPalette);
+  });
+
+  it("keeps destination pages free of the top bar search", () => {
+    renderShell("/");
+
+    expect(
+      screen.queryByRole("button", { name: "Search recipes and commands" })
+    ).not.toBeInTheDocument();
+  });
+
+  it("advertises keyboard shortcuts on the rail", () => {
+    mockMatchMedia((query) => query.includes("min-width: 1024px"));
+    renderShell("/");
+
+    expect(screen.getByRole("link", { name: "Plan" })).toHaveAttribute("aria-keyshortcuts", "G P");
+    expect(screen.getByRole("link", { name: "Shopping" })).toHaveAttribute(
+      "aria-keyshortcuts",
+      "G S"
+    );
+    expect(screen.getByRole("link", { name: "Go to Cookbook" })).toHaveAttribute(
+      "aria-keyshortcuts",
+      "G C"
+    );
+    expect(screen.getByRole("link", { name: "Add recipe" })).toHaveAttribute(
+      "aria-keyshortcuts",
+      "N"
+    );
+    expect(screen.getByRole("button", { name: /search recipes/i })).toHaveAttribute(
+      "aria-keyshortcuts",
+      expect.stringMatching(/^(Meta|Control)\+K$/)
+    );
+    expect(
+      screen.queryByRole("button", { name: "Search recipes and commands" })
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows a slim offline banner, then a brief back-online note", () => {
+    vi.useFakeTimers();
+    const onLine = vi.spyOn(navigator, "onLine", "get").mockReturnValue(true);
+    renderShell("/");
+    const banner = screen.getByTestId("offline-banner");
+
+    expect(banner).toHaveAttribute("role", "status");
+    expect(banner).toBeEmptyDOMElement();
+
+    onLine.mockReturnValue(false);
+    act(() => {
+      window.dispatchEvent(new Event("offline"));
+    });
+    expect(banner).toHaveTextContent("You're offline — your recipes still work");
+
+    onLine.mockReturnValue(true);
+    act(() => {
+      window.dispatchEvent(new Event("online"));
+    });
+    expect(banner).toHaveTextContent("Back online");
+
+    act(() => {
+      vi.advanceTimersByTime(3000);
+    });
+    expect(banner).toBeEmptyDOMElement();
+  });
+
+  it("skips the entrance animation for the page a visit lands on", () => {
+    renderShell("/");
+    const main = screen.getByRole("main");
+
+    expect(main).toHaveAttribute("data-initial-view");
+
+    fireEvent.click(screen.getByRole("link", { name: "Plan" }));
+    expect(main).not.toHaveAttribute("data-initial-view");
   });
 });
