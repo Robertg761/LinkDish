@@ -200,7 +200,7 @@ export const slotFit = (recipe: WebSavedRecipe, slot: MealPlanSlot): number => {
  */
 export const rankRecipesForPlanning = (
   recipes: readonly WebSavedRecipe[],
-  slot?: MealPlanSlot  
+  slot?: MealPlanSlot
 ): WebSavedRecipe[] =>
   recipes
     .map((recipe) => ({

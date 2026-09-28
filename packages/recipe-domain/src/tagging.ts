@@ -118,6 +118,8 @@ const COURSE_RULES: ReadonlyArray<{ course: RecipeCourse; pattern: RegExp }> = [
       "cupcakes?",
       "cheesecakes?",
       "cookies?",
+      "shortbread",
+      "biscotti",
       "brownies?",
       "blondies?",
       "(?<!pot |shepherd'?s |cottage |meat |chicken |pork )pies?",
