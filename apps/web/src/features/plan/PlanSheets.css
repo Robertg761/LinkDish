@@ -352,7 +352,7 @@
 }
 
 .plan-add-day.is-today:not(.is-selected) .plan-add-day-name {
-  color: var(--color-tomato);
+  color: var(--color-tomato-ink);
 }
 
 .plan-add-day.is-today:not(.is-selected) {
