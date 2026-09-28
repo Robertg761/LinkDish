@@ -1,0 +1,50 @@
+/* Phones: the editor takes (nearly) the whole screen. */
+.sheet.recipe-editor-sheet {
+  height: calc(100dvh - 12px - env(safe-area-inset-top, 0px));
+}
+
+.recipe-editor-form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.recipe-editor-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.recipe-editor-grid > :first-child {
+  grid-column: 1 / -1;
+}
+
+.recipe-editor-lines .field-textarea {
+  font-size: 0.9375rem;
+  line-height: 1.6;
+}
+
+.recipe-editor-error {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  background: var(--color-danger-soft);
+  color: var(--color-on-danger-soft);
+  font-size: var(--text-small);
+  font-weight: 600;
+}
+
+@media (min-width: 768px) {
+  .sheet.recipe-editor-sheet {
+    height: auto;
+    max-height: min(900px, calc(100dvh - 64px));
+  }
+
+  .recipe-editor-grid {
+    grid-template-columns: minmax(0, 1.4fr) repeat(2, minmax(0, 1fr));
+  }
+
+  .recipe-editor-grid > :first-child {
+    grid-column: auto;
+  }
+}

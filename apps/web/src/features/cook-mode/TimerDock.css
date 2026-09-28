@@ -1,0 +1,251 @@
+/* Floating kitchen timers: above the tab bar on phones, bottom-right on larger screens. */
+.timer-dock {
+  position: fixed;
+  right: 12px;
+  bottom: calc(var(--app-bottom-inset) + 12px + var(--timer-dock-lift, 0px));
+  left: 12px;
+  z-index: calc(var(--z-immersive) + 1);
+  pointer-events: none;
+  transition: bottom var(--transition-normal);
+}
+
+.timer-dock.is-empty {
+  display: none;
+}
+
+/* While cooking, the dock clears cook mode's footer instead of the tab bar. */
+:root.cook-mode-open .timer-dock {
+  bottom: calc(env(safe-area-inset-bottom, 0px) + var(--cook-mode-footer-height, 96px) + 10px);
+}
+
+.timer-dock-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: min(50vh, 360px);
+  /* Room for the cards' shadows inside the scroll box. */
+  margin: -14px -12px;
+  padding: 14px 12px;
+  overflow-y: auto;
+  list-style: none;
+  pointer-events: auto;
+  scrollbar-width: none;
+}
+
+.timer-dock-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 60px;
+  padding: 8px 8px 8px 10px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-card);
+  background: color-mix(in srgb, var(--color-surface-raised) 94%, transparent);
+  box-shadow: var(--shadow-md);
+  color: var(--color-ink);
+  backdrop-filter: blur(18px) saturate(1.3);
+  -webkit-backdrop-filter: blur(18px) saturate(1.3);
+  animation: timer-dock-in var(--duration-slow) var(--ease-out) both;
+}
+
+.timer-dock-ring {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  color: var(--color-tomato);
+}
+
+.timer-dock-ring-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+
+.timer-dock-ring circle {
+  fill: none;
+  stroke-width: 3.5;
+}
+
+.timer-dock-ring-track {
+  stroke: var(--color-tomato-soft);
+}
+
+.timer-dock-ring-fill {
+  stroke: var(--color-tomato);
+  stroke-linecap: round;
+  transition: stroke-dashoffset 1s linear;
+}
+
+.timer-dock-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.timer-dock-time {
+  font-size: 1.375rem;
+  font-weight: 750;
+  letter-spacing: -0.01em;
+  line-height: 1.1;
+}
+
+.timer-dock-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  min-width: 0;
+  color: var(--color-ink-muted);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line-height);
+}
+
+.timer-dock-label {
+  flex: none;
+  max-width: 55%;
+  overflow: hidden;
+  color: var(--color-ink);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timer-dock-recipe {
+  min-width: 0;
+  overflow: hidden;
+  color: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+a.timer-dock-recipe:hover {
+  color: var(--color-primary);
+  text-decoration: underline;
+}
+
+.timer-dock-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.timer-dock-add {
+  min-width: 44px;
+  height: 36px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--color-surface-tint);
+  color: var(--color-ink);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--text-caption);
+  font-weight: 700;
+  white-space: nowrap;
+  transition: background-color var(--transition-fast);
+}
+
+.timer-dock-add:hover {
+  background: var(--color-state-pressed);
+}
+
+.timer-dock-add:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.timer-dock-item.is-paused .timer-dock-time {
+  color: var(--color-ink-muted);
+}
+
+.timer-dock-item.is-paused .timer-dock-ring {
+  color: var(--color-ink-muted);
+}
+
+.timer-dock-item.is-paused .timer-dock-ring-fill {
+  stroke: var(--color-ink-subtle);
+}
+
+.timer-dock-item.is-done {
+  border-color: transparent;
+  background: var(--color-tomato);
+  box-shadow: var(--shadow-tomato), var(--shadow-md);
+  color: var(--color-on-tomato);
+}
+
+.timer-dock-item.is-done .timer-dock-meta,
+.timer-dock-item.is-done .timer-dock-label {
+  color: color-mix(in srgb, var(--color-on-tomato) 88%, transparent);
+}
+
+.timer-dock-item.is-done .timer-dock-ring {
+  color: var(--color-on-tomato);
+  animation: timer-dock-ring 1.2s var(--ease-standard) infinite;
+}
+
+.timer-dock-item.is-done .timer-dock-ring-track {
+  stroke: color-mix(in srgb, var(--color-on-tomato) 30%, transparent);
+}
+
+.timer-dock-item.is-done .timer-dock-ring-fill {
+  stroke: var(--color-on-tomato);
+}
+
+.timer-dock-item.is-done .timer-dock-add {
+  background: color-mix(in srgb, var(--color-on-tomato) 18%, transparent);
+  color: var(--color-on-tomato);
+}
+
+.timer-dock-item.is-done .icon-btn-filled {
+  background: var(--color-on-tomato);
+  color: var(--color-tomato);
+}
+
+@keyframes timer-dock-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.98);
+  }
+}
+
+@keyframes timer-dock-ring {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+
+  50% {
+    transform: scale(1.08);
+  }
+}
+
+@media (min-width: 768px) {
+  .timer-dock {
+    right: 24px;
+    left: auto;
+    width: 380px;
+  }
+}
+
+@media (min-width: 1024px) {
+  .timer-dock {
+    bottom: calc(24px + var(--timer-dock-lift, 0px));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .timer-dock-item,
+  .timer-dock-item.is-done .timer-dock-ring {
+    animation: none;
+  }
+}
+
+@media print {
+  .timer-dock {
+    display: none !important;
+  }
+}
