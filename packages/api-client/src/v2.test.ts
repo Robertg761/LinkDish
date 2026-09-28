@@ -31,12 +31,12 @@ const hangingFetch: FetchSignature = (_input, init) =>
     const signal = init?.signal;
 
     if (signal?.aborted) {
-      reject(signal.reason);
+      reject(signal.reason instanceof Error ? signal.reason : new Error("aborted"));
       return;
     }
 
     signal?.addEventListener("abort", () => {
-      reject(signal.reason);
+      reject(signal.reason instanceof Error ? signal.reason : new Error("aborted"));
     });
   });
 
@@ -281,7 +281,7 @@ describe("new endpoints", () => {
     const call = fetchImplementation.mock.calls[0];
     expect(call?.[0]).toBe("https://api.test/extract");
     expect(call?.[1]?.method).toBe("POST");
-    expect(JSON.parse(String(call?.[1]?.body))).toEqual({ text, attempt: "fallback" });
+    expect(JSON.parse(call?.[1]?.body as string)).toEqual({ text, attempt: "fallback" });
     expect(response.status === "success" ? response.quota?.remaining : null).toBe(1);
   });
 
