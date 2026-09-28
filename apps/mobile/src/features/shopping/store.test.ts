@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import {
   addShoppingItemsToList,
+  applyRemoteShoppingItems,
   clearCheckedShoppingItemsInList,
+  getSyncableDirtyItems,
   groupShoppingItemsByAisle,
+  markShoppingItemsSynced,
   parseShoppingItems,
   parseShoppingLine,
   readShoppingItems,
@@ -11,6 +14,7 @@ import {
   serializeShoppingItems,
   setShoppingItemCheckedInList,
   shoppingTextFromQuantity,
+  toApiShoppingItem,
   type MobileShoppingItem
 } from "./store";
 
@@ -209,6 +213,66 @@ describe("shopping store helpers", () => {
       ["canned", ["a"]]
     ]);
     expect(groups[0]?.label).toBe("Produce");
+  });
+
+  it("keeps a pending merge when a stale copy with the same timestamp comes back", () => {
+    // Another member's device stamped this item ahead of our clock, so merging "3 eggs" into it
+    // changes the amount without advancing updatedAt. A sync response computed before the merge
+    // still carries the old copy with that same timestamp: it is not this edit coming back.
+    const aheadOfThisDevice = "2026-07-04T12:00:30.000Z";
+    const eggs = buildItem({
+      addedBy: "user_2",
+      id: "eggs",
+      qty: 2,
+      sync: { lastSyncedAt: aheadOfThisDevice, status: "synced" },
+      text: "eggs",
+      updatedAt: aheadOfThisDevice
+    });
+    const merged = addShoppingItemsToList([eggs], [{ text: "3 eggs" }], {
+      canSync: true,
+      now,
+      userId: "user_1"
+    });
+
+    expect(merged[0]).toMatchObject({
+      id: "eggs",
+      qty: 5,
+      sync: { status: "dirty" },
+      updatedAt: aheadOfThisDevice
+    });
+
+    const afterStaleResponse = applyRemoteShoppingItems(
+      markShoppingItemsSynced(merged, new Map(), "2026-07-04T12:00:11.000Z"),
+      [toApiShoppingItem(eggs)]
+    );
+
+    expect(afterStaleResponse[0]).toMatchObject({ qty: 5, sync: { status: "dirty" } });
+    expect(getSyncableDirtyItems(afterStaleResponse).map((item) => item.id)).toEqual(["eggs"]);
+  });
+
+  it("marks a pushed version synced when the server echoes it, and takes newer remote edits", () => {
+    const pushed = buildItem({ id: "milk", qty: 1 });
+    const echoed = applyRemoteShoppingItems(
+      markShoppingItemsSynced([pushed], new Map([["milk", now]]), now),
+      [toApiShoppingItem(pushed)]
+    );
+
+    expect(echoed[0]?.sync.status).toBe("synced");
+
+    const failedLocal = buildItem({ id: "milk", qty: 1, sync: { status: "sync_failed" } });
+    const newerRemote = {
+      ...toApiShoppingItem(pushed),
+      qty: 3,
+      updatedAt: "2026-07-04T12:01:00.000Z"
+    };
+
+    expect(applyRemoteShoppingItems([failedLocal], [newerRemote])[0]).toMatchObject({
+      qty: 3,
+      sync: { status: "synced" }
+    });
+    expect(
+      applyRemoteShoppingItems([failedLocal], [{ ...newerRemote, qty: 9, updatedAt: now }])[0]
+    ).toMatchObject({ qty: 1, sync: { status: "sync_failed" } });
   });
 
   it("marks check-off transitions dirty with the acting user", () => {

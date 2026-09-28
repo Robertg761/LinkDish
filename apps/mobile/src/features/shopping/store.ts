@@ -302,15 +302,17 @@ export const applyRemoteShoppingItems = (
   for (const remoteItem of remoteItems) {
     const localItem = localById.get(remoteItem.id);
 
-    // The server stores the client's updatedAt, so a remote copy with the same timestamp as a
-    // dirty local item is that exact edit coming back: it is synced now, not still "Syncing".
-    // A local tombstone waits for its delete to go through unless the remote edit is newer.
+    // A local edit or tombstone that has not been pushed yet wins unless the remote edit is
+    // strictly newer. A same-timestamp remote copy is not proof that this edit reached the
+    // server: a merge into an item stamped ahead of this device's clock keeps that timestamp, and
+    // a response computed before the merge carries the old copy. The echo of what this pass
+    // pushed is already marked synced by markShoppingItemsSynced before this runs.
     if (
       localItem &&
-      (localItem.isDeleted
-        ? !isRemoteNewer(remoteItem.updatedAt, localItem.updatedAt)
-        : (localItem.sync.status === "dirty" || localItem.sync.status === "sync_failed") &&
-          isRemoteNewer(localItem.updatedAt, remoteItem.updatedAt))
+      (localItem.isDeleted ||
+        localItem.sync.status === "dirty" ||
+        localItem.sync.status === "sync_failed") &&
+      !isRemoteNewer(remoteItem.updatedAt, localItem.updatedAt)
     ) {
       continue;
     }
