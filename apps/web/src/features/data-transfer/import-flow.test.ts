@@ -34,9 +34,11 @@ import { WEB_BACKUP_EXTRAS_KEY } from "./backup-format";
 import { prepareImport, previewImport, runImport } from "./data-transfer";
 import { DataTransferError } from "./errors";
 import { loadExportSnapshot } from "./export-snapshot";
+import { MAX_IMPORT_FILE_BYTES } from "./import-formats";
 import {
   buildPaprikaExport,
   fileFromBytes,
+  fileOfSize,
   jsonBytes,
   paprikaRecipe
 } from "./testing/zip-fixtures";
@@ -642,6 +644,19 @@ describe("importing into the cookbook", () => {
     expect(fakeIdb.records(COLLECTIONS_STORE_NAME)).toEqual([]);
     expect(fakeIdb.records(MEAL_PLAN_STORE_NAME)).toEqual([]);
     expect(changes).toEqual([]);
+  });
+
+  it("turns away a file over the size limit before reading any of it", async () => {
+    const arrayBuffer = vi.fn(() => Promise.reject(new Error("The whole file was read.")));
+
+    await expect(
+      prepareImport(fileOfSize("export.paprikarecipes", MAX_IMPORT_FILE_BYTES + 1, arrayBuffer))
+    ).rejects.toMatchObject({
+      code: "file_too_large",
+      message: expect.stringMatching(/too big to open/u) as string
+    });
+    expect(arrayBuffer).not.toHaveBeenCalled();
+    expect(fakeIdb.records(SAVED_RECIPES_STORE_NAME)).toEqual([]);
   });
 
   it("never writes when the file can't be read", async () => {
