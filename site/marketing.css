@@ -2554,6 +2554,24 @@
     height: 30px;
   }
 
+  .video-play {
+    top: 30%;
+    width: 42px;
+    height: 42px;
+  }
+
+  .video-meta {
+    padding: 28px 10px 10px;
+  }
+
+  .video-meta b {
+    font-size: 0.8rem;
+  }
+
+  .video-meta small {
+    font-size: 0.7rem;
+  }
+
   .bento-cook {
     grid-row: auto;
   }
