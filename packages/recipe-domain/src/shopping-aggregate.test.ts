@@ -335,6 +335,25 @@ describe("mergeShoppingItemLists", () => {
     ]);
   });
 
+  it("keeps a name at the length limit within it when the new total re-inflects it", () => {
+    const name = `${"x".repeat(196)} egg`;
+    expect(name).toHaveLength(MAX_SHOPPING_ITEM_TEXT_LENGTH);
+
+    const [merged] = mergeShoppingItemLists<Item>(
+      [{ id: "a", text: name, qty: 1 }],
+      [{ id: "b", text: name, qty: 1 }],
+      combine
+    );
+
+    expect(merged?.qty).toBe(2);
+    expect(merged?.text.length).toBeLessThanOrEqual(MAX_SHOPPING_ITEM_TEXT_LENGTH);
+    expect(merged?.text.startsWith("x".repeat(196))).toBe(true);
+
+    const [aggregated] = mergeShoppingInputs([{ text: `1 ${name}` }, { text: `1 ${name}` }]);
+    expect(aggregated?.qty).toBe(2);
+    expect(aggregated?.text.length).toBeLessThanOrEqual(MAX_SHOPPING_ITEM_TEXT_LENGTH);
+  });
+
   it("merges number and range quantities instead of dropping them (bug 17)", () => {
     const [eggs] = mergeShoppingItemLists<Item>(
       [{ id: "a", text: "egg", qty: 1 }],
