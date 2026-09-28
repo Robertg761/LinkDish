@@ -97,6 +97,10 @@ const withStarterFlagById = (recipe: WebSavedRecipe): WebSavedRecipe => {
   return personal;
 };
 
+/** Characters of the images' data URLs: about the bytes they add to a JSON backup. */
+export const measureSourceImageBytes = (images: readonly ExtractRecipeImage[]): number =>
+  images.reduce((sum, image) => sum + (image.dataUrl?.length ?? 0), 0);
+
 /** Separates the heavy `sourceImages` payload from the record that goes into `savedRecipes`. */
 const splitSourceImages = (input: WebSavedRecipe): SplitRecord => {
   const recipe = withStarterFlagById(input);
@@ -114,10 +118,18 @@ const splitSourceImages = (input: WebSavedRecipe): SplitRecord => {
   if (sourceImages.length === 0) {
     const withoutCount: WebSavedRecipe = { ...rest };
     delete withoutCount.sourceImageCount;
+    delete withoutCount.sourceImageBytes;
     return { images: [], record: withoutCount };
   }
 
-  return { images: sourceImages, record: { ...rest, sourceImageCount: sourceImages.length } };
+  return {
+    images: sourceImages,
+    record: {
+      ...rest,
+      sourceImageBytes: measureSourceImageBytes(sourceImages),
+      sourceImageCount: sourceImages.length
+    }
+  };
 };
 
 /** The lightweight shape list reads return: never carries `sourceImages`. */

@@ -10,7 +10,7 @@ import {
   SAVED_RECIPES_STORE_NAME
 } from "../../storage/linkdish-db";
 
-import type { WebRecipeSourceImagesRecord } from "../library/saved-recipe-types";
+import type { WebRecipeSourceImagesRecord, WebSavedRecipe } from "../library/saved-recipe-types";
 
 export interface SourceImageStats {
   recipes: number;
@@ -19,24 +19,40 @@ export interface SourceImageStats {
   bytes: number;
 }
 
-/** How much the original scans would add to a backup. */
+/**
+ * How much the original scans would add to a backup (for `recipeIds`, or every recipe). Sizes
+ * come from the recipe records, which note them when the scans are stored, so the scans
+ * themselves (up to megabytes each) are not loaded. A recipe stored before sizes were noted has
+ * its own scans read, one recipe at a time.
+ */
 export const measureSourceImages = async (
   recipeIds?: ReadonlySet<string>
 ): Promise<SourceImageStats> => {
   const db = await getLinkDishWebDb();
-  const records = (await db.getAll(
-    RECIPE_SOURCE_IMAGES_STORE_NAME
-  )) as WebRecipeSourceImagesRecord[];
+  const ids = recipeIds
+    ? Array.from(recipeIds)
+    : (await db.getAllKeys(RECIPE_SOURCE_IMAGES_STORE_NAME)).map(String);
   const stats: SourceImageStats = { recipes: 0, images: 0, bytes: 0 };
 
-  for (const record of records) {
-    if (!record.images?.length || (recipeIds && !recipeIds.has(record.recipeId))) {
-      continue;
+  for (const id of ids) {
+    const recipe = (await db.get(SAVED_RECIPES_STORE_NAME, id)) as WebSavedRecipe | undefined;
+    let images = recipe?.sourceImageCount ?? 0;
+    let bytes = recipe?.sourceImageBytes;
+
+    if (images > 0 && bytes === undefined) {
+      const stored = (await db.get(RECIPE_SOURCE_IMAGES_STORE_NAME, id)) as
+        | WebRecipeSourceImagesRecord
+        | undefined;
+      const scans = stored?.images ?? recipe?.sourceImages ?? [];
+      images = scans.length;
+      bytes = scans.reduce((sum, image) => sum + image.dataUrl.length, 0);
     }
 
-    stats.recipes += 1;
-    stats.images += record.images.length;
-    stats.bytes += record.images.reduce((sum, image) => sum + image.dataUrl.length, 0);
+    if (images > 0) {
+      stats.recipes += 1;
+      stats.images += images;
+      stats.bytes += bytes ?? 0;
+    }
   }
 
   return stats;

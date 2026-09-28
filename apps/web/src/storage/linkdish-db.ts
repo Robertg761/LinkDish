@@ -172,7 +172,14 @@ export async function migrateRecipeSourceImages(
     await sourceImages.put(imageRecord);
   }
 
-  await savedRecipes.put(images.length > 0 ? { ...rest, sourceImageCount: images.length } : rest);
+  const bytes = images.reduce<number>((sum, image) => {
+    const dataUrl = isPlainRecord(image) ? image.dataUrl : undefined;
+    return sum + (typeof dataUrl === "string" ? dataUrl.length : 0);
+  }, 0);
+
+  await savedRecipes.put(
+    images.length > 0 ? { ...rest, sourceImageBytes: bytes, sourceImageCount: images.length } : rest
+  );
   return images.length > 0 ? "moved" : "stripped";
 }
 

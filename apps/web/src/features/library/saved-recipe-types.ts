@@ -35,6 +35,11 @@ export interface WebSavedRecipe {
   sourceImages?: ExtractRecipeImage[] | undefined;
   /** How many source images are stored separately for this recipe (set since IndexedDB v4). */
   sourceImageCount?: number | undefined;
+  /**
+   * Characters of those images' data URLs (about the bytes they add to a JSON backup), so their
+   * size is known without loading them. Missing on records written before it was recorded.
+   */
+  sourceImageBytes?: number | undefined;
   timesCooked?: number | undefined;
   sync?: {
     status: "local_only" | "synced" | "dirty" | "sync_failed";
