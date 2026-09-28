@@ -30,6 +30,7 @@ import { resetShoppingListStoreForTests } from "../shopping/shopping-list-store"
 import { resetShoppingSyncForTests, SHOPPING_HOUSEHOLD_CACHE_KEY } from "../shopping/shopping-sync";
 
 import { RecipePage } from "./RecipePage";
+import { LOCAL_LIMIT_FREE } from "./saved-recipe-store";
 
 import type { WebSavedRecipe } from "./saved-recipe-types";
 import type * as ApiClientModuleNamespace from "../../api/client";
@@ -474,6 +475,35 @@ describe("RecipePage saved route", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Undo" }));
     await waitFor(() => expect(stored("recipe_local")?.recipe.title).toBe("Weeknight Chili"));
+  });
+
+  it("keeps a recipe deleted when Undo would take a free cookbook past its limit", async () => {
+    await seed([
+      savedRecipe(),
+      ...Array.from({ length: LOCAL_LIMIT_FREE - 1 }, (_, index) =>
+        savedRecipe({ id: `recipe_${index}` })
+      )
+    ]);
+    upgradeMocks.requestUpgradeSheet.mockReturnValue(true);
+    renderAt("/recipes/recipe_local");
+    await screen.findByRole("heading", { level: 1, name: "Weeknight Chili" });
+
+    fireEvent.click(within(openMenu()).getByRole("menuitem", { name: "Delete recipe" }));
+    expect(await screen.findByText("Cookbook route")).toBeInTheDocument();
+    // A save elsewhere fills the free cookbook again before Undo.
+    fakeIdb.seed(SAVED_RECIPES_STORE_NAME, [savedRecipe({ id: "recipe_new" })]);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Undo" }));
+
+    expect(
+      await screen.findByText(
+        `Your cookbook is full, so “Weeknight Chili” stays deleted. Free cookbooks hold ${LOCAL_LIMIT_FREE} recipes.`
+      )
+    ).toBeInTheDocument();
+    expect(stored("recipe_local")).toBeUndefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Upgrade" }));
+    expect(upgradeMocks.requestUpgradeSheet).toHaveBeenCalledWith("save_limit");
   });
 
   it("keeps the Undo when an ignored app update is waiting to apply on navigation", async () => {

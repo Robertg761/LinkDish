@@ -50,7 +50,9 @@ import {
   getSavedRecipeSourceImages,
   getSharedRecipeOwnerLabel,
   getSourceHost,
+  LOCAL_LIMIT_FREE,
   putSavedRecipe,
+  restoreSavedRecipe,
   SavedRecipeLimitError,
   saveSharedRecipeCopy,
   sharedRecipeToWebSavedRecipe,
@@ -623,9 +625,26 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
       action: {
         label: "Undo",
         onClick: () => {
-          void putSavedRecipe(snapshot).then(
+          void restoreSavedRecipe(snapshot, { isPremiumUser }).then(
             () => showToast({ message: `“${title}” is back in your cookbook.` }),
-            () => showToast({ message: "That recipe couldn’t be restored.", tone: "danger" })
+            (error: unknown) =>
+              showToast(
+                error instanceof SavedRecipeLimitError
+                  ? {
+                      // The cookbook filled up again since the delete: it stays deleted.
+                      action: {
+                        label: "Upgrade",
+                        onClick: () => {
+                          if (!requestUpgradeSheet("save_limit")) {
+                            void navigate("/pricing?upgrade=plus");
+                          }
+                        }
+                      },
+                      icon: "lock",
+                      message: `Your cookbook is full, so “${title}” stays deleted. Free cookbooks hold ${LOCAL_LIMIT_FREE} recipes.`
+                    }
+                  : { message: "That recipe couldn’t be restored.", tone: "danger" }
+              )
           );
         }
       },

@@ -438,6 +438,37 @@ describe("LibraryPage", () => {
     await waitFor(() => expect(storedRecipe("soup")?.recipe.title).toBe("Tomato Soup"));
   });
 
+  it("keeps a recipe deleted when Undo would take a free cookbook past its limit", async () => {
+    seedRecipes(
+      Array.from({ length: 15 }, (_, index) =>
+        makeRecipe(`recipe-${index}`, { daysAgo: index + 1, title: `Recipe ${index}` })
+      )
+    );
+
+    renderPage();
+    await screen.findByText("Recipe 0");
+    fireEvent.click(within(openCardMenu("Recipe 0")).getByRole("menuitem", { name: "Delete" }));
+    await waitFor(() => expect(storedRecipe("recipe-0")).toBeUndefined());
+
+    // Another recipe was saved (say, in another tab) before Undo: the cookbook is full again.
+    seedRecipes([makeRecipe("recipe-new", { title: "Fresh Save" })]);
+    upgradeMocks.requestUpgradeSheet.mockReturnValue(false);
+    fireEvent.click(await screen.findByRole("button", { name: "Undo" }));
+
+    expect(
+      await screen.findByText(
+        "Your cookbook is full, so “Recipe 0” stays deleted. Free cookbooks hold 15 recipes."
+      )
+    ).toBeInTheDocument();
+    expect(storedRecipe("recipe-0")).toBeUndefined();
+    expect(fakeIdb.records(SAVED_RECIPES_STORE_NAME)).toHaveLength(15);
+
+    fireEvent.click(screen.getByRole("button", { name: "Upgrade" }));
+    expect(upgradeMocks.requestUpgradeSheet).toHaveBeenCalledWith("save_limit");
+    // With the upgrade sheet already seen this session, the plans page opens instead.
+    expect(await screen.findByTestId("location")).toHaveTextContent("/pricing?upgrade=plus");
+  });
+
   it("confirms before deleting a household-synced recipe and removes the household copy first", async () => {
     authMocks.user = { billingPlan: "family", email: "owner@example.com", id: "user_owner" };
     seedRecipes([

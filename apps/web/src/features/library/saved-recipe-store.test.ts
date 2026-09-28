@@ -27,6 +27,7 @@ import {
   markRecipeOpened,
   normalizeRecipeTags,
   removeCollectionFromAllRecipes,
+  restoreSavedRecipe,
   saveSharedRecipeCopy,
   SavedRecipeLimitError,
   seedStarterRecipesIfNeeded,
@@ -40,6 +41,7 @@ import {
   updateSavedRecipe
 } from "./saved-recipe-store";
 
+import type { WebSavedRecipe } from "./saved-recipe-types";
 import type { SharedRecipe } from "@linkdish/api-contracts";
 import type { Recipe } from "@linkdish/recipe-domain";
 import type * as RecipeDomain from "@linkdish/recipe-domain";
@@ -298,6 +300,36 @@ describe("saved-recipe-store", () => {
     expect(res.success).toBe(false);
     expect(res.error).toBe("limit_exceeded");
     expect(await countSavedRecipes()).toBe(LOCAL_LIMIT_FREE);
+  });
+
+  it("restores a deleted recipe only while a free cookbook has room for it", async () => {
+    await seedStarterRecipesIfNeeded();
+    const first = await saveRecipe(createSaveInput(0), false);
+    const deleted = first.recipe as WebSavedRecipe;
+    await deleteSavedRecipe(deleted.id);
+
+    // The cookbook filled up again after the delete.
+    for (let i = 1; i <= LOCAL_LIMIT_FREE; i += 1) {
+      await saveRecipe(createSaveInput(i), false);
+    }
+
+    await expect(restoreSavedRecipe(deleted)).rejects.toBeInstanceOf(SavedRecipeLimitError);
+    expect(await getSavedRecipeById(deleted.id)).toBeUndefined();
+    expect(await countQuotaSavedRecipes()).toBe(LOCAL_LIMIT_FREE);
+
+    // Plus has no limit, a starter never counts, and a record still stored just goes back.
+    await restoreSavedRecipe(deleted, { isPremiumUser: true });
+    expect((await getSavedRecipeById(deleted.id))?.recipe.title).toBe(deleted.recipe.title);
+
+    const [starter] = (await getSavedRecipes()).filter((recipe) =>
+      recipe.id.startsWith("starter-")
+    );
+    await deleteSavedRecipe(starter?.id ?? "");
+    await restoreSavedRecipe(starter as WebSavedRecipe);
+    expect(await getSavedRecipeById(starter?.id ?? "")).toBeDefined();
+
+    await restoreSavedRecipe({ ...deleted, notes: "Still here" });
+    expect((await getSavedRecipeById(deleted.id))?.notes).toBe("Still here");
   });
 
   it("excludes starter recipes from the free save limit", async () => {

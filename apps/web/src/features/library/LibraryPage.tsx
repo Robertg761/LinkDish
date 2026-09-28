@@ -88,7 +88,7 @@ import { isSharedRecipeNotFoundError, useSharedRecipes } from "./components/use-
 import {
   getSavedRecipeById,
   LOCAL_LIMIT_FREE,
-  putSavedRecipe,
+  restoreSavedRecipe,
   SavedRecipeLimitError,
   syncRecipeToHousehold
 } from "./saved-recipe-store";
@@ -375,7 +375,25 @@ export const LibraryPage: React.FC = () => {
         ? {
             label: "Undo",
             onClick: () => {
-              putSavedRecipe(restorable).catch((error: unknown) => {
+              restoreSavedRecipe(restorable, { isPremiumUser }).catch((error: unknown) => {
+                if (error instanceof SavedRecipeLimitError) {
+                  // The cookbook filled up again since the delete: it stays deleted.
+                  showToast({
+                    action: {
+                      label: "Upgrade",
+                      onClick: () => {
+                        if (!requestUpgradeSheet("save_limit")) {
+                          void navigate("/pricing?upgrade=plus");
+                        }
+                      }
+                    },
+                    icon: "lock",
+                    id: `library-delete-${recipe.id}`,
+                    message: `Your cookbook is full, so “${recipe.recipe.title}” stays deleted. Free cookbooks hold ${LOCAL_LIMIT_FREE} recipes.`
+                  });
+                  return;
+                }
+
                 console.error("Restore failed:", error);
                 showToast({ message: getFriendlyErrorMessage(error, "save"), tone: "danger" });
               });
