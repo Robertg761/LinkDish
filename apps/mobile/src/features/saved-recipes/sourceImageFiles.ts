@@ -84,3 +84,31 @@ export const persistRecipeSourceImages = (
 
   return persistedImages.length > 0 ? persistedImages : undefined;
 };
+
+/**
+ * Deletes scan files that no saved recipe uses anymore (see getOrphanedSourceImageUris, which
+ * keeps files a clone still shares). Only files inside documents/recipe-scans are touched; a
+ * file that is already gone or cannot be deleted is skipped.
+ */
+export const deleteRecipeSourceImageFiles = (uris: readonly string[]): number => {
+  let deleted = 0;
+
+  for (const uri of uris) {
+    if (!uri.startsWith("file:") || !uri.includes(`/${SCAN_DIRECTORY_NAME}/`)) {
+      continue;
+    }
+
+    try {
+      const file = new File(uri);
+
+      if (file.exists) {
+        file.delete();
+        deleted += 1;
+      }
+    } catch (error) {
+      console.warn("Failed to delete a scanned recipe image.", error);
+    }
+  }
+
+  return deleted;
+};

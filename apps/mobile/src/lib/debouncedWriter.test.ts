@@ -62,6 +62,32 @@ describe("createDebouncedWriter", () => {
     expect(written).toEqual(["good"]);
   });
 
+  it("lets an explicit write replace a pending snapshot and report its failure", async () => {
+    const written: string[] = [];
+    const onBackgroundError = vi.fn();
+    const write = vi.fn((value: string) => {
+      if (value === "explicit-fail") {
+        return Promise.reject(new Error("quota"));
+      }
+
+      written.push(value);
+      return Promise.resolve();
+    });
+    const writer = createDebouncedWriter(write, 100, onBackgroundError);
+
+    writer.schedule("older snapshot");
+    await writer.writeNow("explicit save");
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(written).toEqual(["explicit save"]);
+
+    await expect(writer.writeNow("explicit-fail")).rejects.toThrow("quota");
+
+    writer.schedule("explicit-fail");
+    await vi.advanceTimersByTimeAsync(100);
+    expect(onBackgroundError).toHaveBeenCalledTimes(1);
+  });
+
   it("drops a pending value on cancel", async () => {
     const write = vi.fn(() => Promise.resolve());
     const writer = createDebouncedWriter(write, 100);

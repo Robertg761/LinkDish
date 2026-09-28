@@ -2,10 +2,14 @@ import { createStarterRecipeSeedRecords } from "@linkdish/recipe-domain";
 import { describe, expect, it } from "vitest";
 
 import {
+  buildSavedRecipeSearchIndex,
   cloneSavedRecipeRecord,
   createSharedRecipeSourceId,
   createSavedRecipeRecord,
+  getOrphanedSourceImageUris,
   getQuotaSavedRecipeCount,
+  getSavedRecipeRecordBySourceUrl,
+  setSavedRecipeFavorite,
   incrementSavedRecipeTimesCooked,
   savedRecipeRecordToSharedRecipeRequest,
   parseSavedRecipeRecords,
@@ -458,5 +462,82 @@ describe("saved recipe store helpers", () => {
   it("drops invalid saved recipe payloads", () => {
     expect(parseSavedRecipeRecords('[{"savedAt":"2026-04-19T12:00:00.000Z"}]')).toEqual([]);
     expect(parseSavedRecipeRecords("not json")).toEqual([]);
+  });
+
+  it("reads favorites additively and round-trips them", () => {
+    const recipe = createSavedRecipeRecord(buildSuccessState(), "2026-04-19T12:00:00.000Z");
+    const legacyBlob = JSON.stringify([recipe]);
+
+    expect(parseSavedRecipeRecords(legacyBlob)[0]?.favorite).toBeUndefined();
+    expect(serializeSavedRecipeRecords(parseSavedRecipeRecords(legacyBlob))).not.toContain(
+      "favorite"
+    );
+
+    const favorited = setSavedRecipeFavorite([recipe], recipe.id, true);
+    const stored = parseSavedRecipeRecords(serializeSavedRecipeRecords(favorited));
+
+    expect(stored[0]?.favorite).toBe(true);
+    expect(setSavedRecipeFavorite(stored, recipe.id, false)[0]?.favorite).toBeUndefined();
+    expect(
+      parseSavedRecipeRecords(JSON.stringify([{ ...recipe, favorite: "yes" }]))[0]?.favorite
+    ).toBeUndefined();
+  });
+
+  it("does not copy the heart onto a duplicate", () => {
+    const recipe = {
+      ...createSavedRecipeRecord(buildSuccessState(), "2026-04-19T12:00:00.000Z"),
+      favorite: true
+    };
+
+    expect(cloneSavedRecipeRecord([recipe], recipe).favorite).toBeUndefined();
+  });
+
+  it("finds a saved recipe from a tracked or reformatted link to the same page", () => {
+    const soup = createSavedRecipeRecord(
+      buildSuccessState({
+        recipe: { ...buildSuccessState().recipe, sourceUrl: "https://www.example.com/soup/" }
+      }),
+      "2026-04-19T12:00:00.000Z"
+    );
+
+    expect(
+      getSavedRecipeRecordBySourceUrl([soup], "https://example.com/soup?utm_source=tiktok")?.id
+    ).toBe(soup.id);
+    expect(getSavedRecipeRecordBySourceUrl([soup], "https://example.com/stew")).toBeUndefined();
+  });
+
+  it("only reports scan files no remaining recipe uses", () => {
+    const scan = { mimeType: "image/jpeg" as const, uri: "file:///documents/recipe-scans/a-0.jpg" };
+    const onlyMine = {
+      mimeType: "image/jpeg" as const,
+      uri: "file:///documents/recipe-scans/a-1.jpg"
+    };
+    const original = {
+      ...createSavedRecipeRecord(buildSuccessState(), "2026-04-19T12:00:00.000Z"),
+      sourceImages: [scan, onlyMine]
+    };
+    const clone = { ...cloneSavedRecipeRecord([original], original), sourceImages: [scan] };
+    const external = {
+      ...createSavedRecipeRecord(buildSuccessState(), "2026-04-19T12:00:00.000Z"),
+      sourceImages: [{ mimeType: "image/png" as const, uri: "content://media/external/1" }]
+    };
+
+    expect(getOrphanedSourceImageUris([clone], [original])).toEqual([onlyMine.uri]);
+    expect(getOrphanedSourceImageUris([], [original, clone])).toEqual([scan.uri, onlyMine.uri]);
+    expect(getOrphanedSourceImageUris([], [external])).toEqual([]);
+  });
+
+  it("searches with the shared domain index and tolerates malformed stored recipes", () => {
+    const soup = createSavedRecipeRecord(buildSuccessState(), "2026-04-19T12:00:00.000Z");
+    const malformed = {
+      ...soup,
+      id: "broken",
+      recipe: { ...soup.recipe, ingredients: undefined, steps: [null], title: "Broken Chicken" }
+    } as unknown as typeof soup;
+
+    expect(searchSavedRecipeRecords([soup, malformed], "chick").map((entry) => entry.id)).toEqual([
+      "broken"
+    ]);
+    expect(buildSavedRecipeSearchIndex([soup, malformed]).size).toBe(2);
   });
 });
