@@ -1,0 +1,141 @@
+.library-shelf {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.library-shelf-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.library-shelf-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.library-shelf-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--color-ink);
+  font-family: var(--font-family-serif);
+  font-size: 1.3125rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.library-shelf-icon {
+  display: inline-grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-pill);
+  background: var(--color-tomato-soft);
+  color: var(--color-on-tomato-soft);
+}
+
+.library-shelf-subtitle {
+  color: var(--color-ink-muted);
+  font-size: var(--text-small);
+  line-height: var(--text-small-line-height);
+}
+
+.library-shelf-tools {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.library-shelf-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 36px;
+  padding: 0 4px 0 10px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--color-primary);
+  font-size: var(--text-small);
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+}
+
+.library-shelf-action:hover {
+  background: var(--color-state-hover);
+}
+
+.library-shelf-arrows {
+  display: none;
+  gap: 6px;
+}
+
+@media (hover: hover) and (pointer: fine) and (min-width: 768px) {
+  .library-shelf-arrows {
+    display: inline-flex;
+  }
+}
+
+/* The track bleeds into the page gutter so cards scroll edge to edge. */
+.library-shelf-track {
+  display: grid;
+  grid-auto-columns: 156px;
+  grid-auto-flow: column;
+  gap: 12px;
+  margin: 0 calc(-1 * var(--page-gutter));
+  padding: 2px var(--page-gutter) 10px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scroll-padding-inline: var(--page-gutter);
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+  list-style: none;
+}
+
+.library-shelf-track::-webkit-scrollbar {
+  display: none;
+}
+
+.library-shelf-track > li {
+  display: flex;
+  min-width: 0;
+  scroll-snap-align: start;
+}
+
+.library-shelf-track > li > * {
+  flex: 1 1 auto;
+}
+
+@media (min-width: 640px) {
+  .library-shelf-track {
+    grid-auto-columns: 208px;
+    gap: 16px;
+  }
+}
+
+/* With a pointer, shelves page through whole cards inside the column instead of bleeding. */
+@media (min-width: 1024px) {
+  .library-shelf-track {
+    grid-auto-columns: calc((100% - 3 * 16px) / 4);
+    margin: 0;
+    padding: 2px 0 10px;
+    scroll-padding-inline: 0;
+  }
+}
+
+@media (min-width: 1280px) {
+  .library-shelf-track {
+    grid-auto-columns: calc((100% - 4 * 18px) / 5);
+    gap: 18px;
+  }
+}

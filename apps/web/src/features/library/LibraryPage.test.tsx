@@ -1,18 +1,33 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import React from "react";
-import { MemoryRouter } from "react-router-dom";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { EMPTY_LIBRARY_LINES } from "../../lib/flavor-copy";
+import { ToastProvider } from "../../components/Toast";
+import { resetDataChangeFeedForTests, setDataChannelFactoryForTests } from "../../data/change-feed";
+import { resetCollectionsStoreForTests } from "../../data/collections-store";
+import { resetLibraryStoreForTests } from "../../data/library-store";
+import {
+  COLLECTIONS_STORE_NAME,
+  getLinkDishWebDb,
+  resetLinkDishWebDbForTests,
+  SAVED_RECIPES_STORE_NAME
+} from "../../storage/linkdish-db";
+import { fakeIdb } from "../../storage/testing/fake-idb";
 
+import { resetLibrarySessionStateForTests } from "./components/library-model";
+import { resetSearchEngineForTests } from "./components/use-library-search";
+import { resetSharedRecipesCacheForTests } from "./components/use-shared-recipes";
 import { LibraryPage } from "./LibraryPage";
 
 import type { WebSavedRecipe } from "./saved-recipe-types";
+import type { WebCollection } from "../../data/collections-store";
 import type { SharedRecipe } from "@linkdish/api-contracts";
 
-const apiClientMocks = vi.hoisted(() => ({
-  deleteSharedRecipe: vi.fn(),
-  ExtractorApiError: class ExtractorApiError extends Error {
+vi.mock("idb", async () => (await import("../../storage/testing/fake-idb")).fakeIdbModule);
+
+const apiMocks = vi.hoisted(() => {
+  class ExtractorApiError extends Error {
     public constructor(
       message: string,
       public readonly statusCode: number,
@@ -21,485 +36,957 @@ const apiClientMocks = vi.hoisted(() => ({
       super(message);
       this.name = "ExtractorApiError";
     }
-  },
-  getSharedRecipes: vi.fn()
-}));
+  }
+
+  return {
+    ExtractorApiError,
+    createSharedRecipe: vi.fn(),
+    deleteSharedRecipe: vi.fn(),
+    getHousehold: vi.fn(),
+    getSharedRecipes: vi.fn(),
+    updateSharedRecipe: vi.fn()
+  };
+});
 
 vi.mock("../../api/client", () => ({
   apiBaseUrl: "/api",
   apiClient: {
-    deleteSharedRecipe: apiClientMocks.deleteSharedRecipe,
-    getSharedRecipes: apiClientMocks.getSharedRecipes
+    createSharedRecipe: apiMocks.createSharedRecipe,
+    deleteSharedRecipe: apiMocks.deleteSharedRecipe,
+    getHousehold: apiMocks.getHousehold,
+    getSharedRecipes: apiMocks.getSharedRecipes,
+    updateSharedRecipe: apiMocks.updateSharedRecipe
   },
-  ExtractorApiError: apiClientMocks.ExtractorApiError
+  ExtractorApiError: apiMocks.ExtractorApiError,
+  isExtractorApiError: (error: unknown) => error instanceof apiMocks.ExtractorApiError
 }));
 
 const authMocks = vi.hoisted(() => ({
-  user: {
-    billingPlan: "family",
-    email: "owner@example.com",
-    id: "user_owner"
-  } as { billingPlan?: string; email: string; id: string } | null
+  user: null as { billingPlan?: string; email: string; id: string } | null
 }));
 
 vi.mock("../../auth/AuthProvider", () => ({
-  useAuth: () => ({
-    isAuthenticated: Boolean(authMocks.user),
-    user: authMocks.user
-  })
+  useAuth: () => ({ isAuthenticated: Boolean(authMocks.user), user: authMocks.user })
 }));
 
-const storeMocks = vi.hoisted(() => ({
-  deleteSavedRecipe: vi.fn(),
-  duplicateSavedRecipe: vi.fn(),
-  getSavedRecipes: vi.fn(),
-  getSharedRecipeOwnerLabel: vi.fn(
-    (recipe: SharedRecipe) => recipe.ownerDisplayName ?? recipe.ownerEmail
-  ),
-  getSharedRecipeSourceHost: vi.fn(
-    (recipe: SharedRecipe) => new URL(recipe.recipe.sourceUrl).hostname
-  ),
-  saveSharedRecipeCopy: vi.fn(),
-  seedStarterRecipesIfNeeded: vi.fn(),
-  syncRecipeToHousehold: vi.fn()
+const upgradeMocks = vi.hoisted(() => ({ requestUpgradeSheet: vi.fn(() => true) }));
+
+vi.mock("../upgrade/UpgradeSheet", () => ({
+  useUpgradeSheet: () => ({ requestUpgradeSheet: upgradeMocks.requestUpgradeSheet })
 }));
 
-vi.mock("./saved-recipe-store", () => ({
-  deleteSavedRecipe: storeMocks.deleteSavedRecipe,
-  duplicateSavedRecipe: storeMocks.duplicateSavedRecipe,
-  getSavedRecipes: storeMocks.getSavedRecipes,
-  getSharedRecipeOwnerLabel: storeMocks.getSharedRecipeOwnerLabel,
-  getSharedRecipeSourceHost: storeMocks.getSharedRecipeSourceHost,
-  saveSharedRecipeCopy: storeMocks.saveSharedRecipeCopy,
-  seedStarterRecipesIfNeeded: storeMocks.seedStarterRecipesIfNeeded,
-  syncRecipeToHousehold: storeMocks.syncRecipeToHousehold
+const analyticsMocks = vi.hoisted(() => ({ trackWebEvent: vi.fn() }));
+
+vi.mock("../../analytics/client", () => ({
+  trackWebError: vi.fn(),
+  trackWebEvent: analyticsMocks.trackWebEvent,
+  trackWebV2AnalyticsEvent: vi.fn()
 }));
 
-const personalRecipe: WebSavedRecipe = {
-  createdAt: "2026-06-01T12:00:00.000Z",
-  extraction: {
-    fetchMode: "http",
-    provenance: ["jsonld"],
-    strategy: "recipe-schema",
-    warnings: []
-  },
-  id: "recipe_1",
-  recipe: {
-    confidence: {
-      fieldProvenance: {
-        cookTimeMinutes: "jsonld",
-        ingredients: "jsonld",
-        nutrition: null,
-        prepTimeMinutes: "jsonld",
-        servings: "jsonld",
-        steps: "jsonld",
-        title: "jsonld"
-      },
-      missingFields: [],
-      notes: [],
-      score: 0.95,
-      summary: "High confidence"
+const DAY = 86_400_000;
+const NOW = Date.now();
+const iso = (daysAgo: number) => new Date(NOW - daysAgo * DAY).toISOString();
+
+interface RecipeOptions {
+  title: string;
+  daysAgo?: number;
+  ingredients?: string[];
+  servings?: string | null;
+  prep?: number | null;
+  cook?: number | null;
+  image?: boolean;
+  extra?: Partial<WebSavedRecipe>;
+}
+
+const makeRecipe = (id: string, options: RecipeOptions): WebSavedRecipe => {
+  const sourceUrl = `https://example.com/${id}`;
+
+  return {
+    createdAt: iso(options.daysAgo ?? 1),
+    extraction: {
+      fetchMode: "http",
+      provenance: ["jsonld"],
+      strategy: "recipe-schema",
+      warnings: []
     },
-    cookTimeMinutes: 20,
-    ingredients: [{ text: "1 cup rice" }],
-    nutrition: null,
-    prepTimeMinutes: 5,
-    servings: "4 servings",
-    sourceType: "recipe-webpage",
-    sourceUrl: "https://example.com/rice",
-    steps: [{ index: 1, text: "Cook it" }],
-    title: "Personal Rice"
-  },
-  sourceHost: "example.com",
-  sourceUrl: "https://example.com/rice",
-  sync: {
-    status: "local_only"
-  },
-  updatedAt: "2026-06-01T12:00:00.000Z"
+    id,
+    recipe: {
+      confidence: {
+        fieldProvenance: {
+          cookTimeMinutes: null,
+          ingredients: "jsonld",
+          nutrition: null,
+          prepTimeMinutes: null,
+          servings: null,
+          steps: "jsonld",
+          title: "jsonld"
+        },
+        missingFields: [],
+        notes: [],
+        score: 0.9,
+        summary: "ok"
+      },
+      cookTimeMinutes: options.cook ?? null,
+      image: options.image ? { source: "jsonld", url: `https://images.test/${id}.jpg` } : null,
+      ingredients: (options.ingredients ?? ["1 onion"]).map((text) => ({ text })),
+      nutrition: null,
+      prepTimeMinutes: options.prep ?? null,
+      servings: options.servings === undefined ? "4 servings" : options.servings,
+      sourceType: "recipe-webpage",
+      sourceUrl,
+      steps: [{ index: 1, text: "Cook it." }],
+      title: options.title
+    },
+    sourceHost: "example.com",
+    sourceUrl,
+    sync: { status: "local_only" },
+    timesCooked: 0,
+    updatedAt: iso(options.daysAgo ?? 1),
+    ...options.extra
+  } as WebSavedRecipe;
 };
 
-const sharedRecipe: SharedRecipe = {
-  createdAt: "2026-06-02T12:00:00.000Z",
+const seedRecipes = (recipes: WebSavedRecipe[]) => fakeIdb.seed(SAVED_RECIPES_STORE_NAME, recipes);
+
+const seedCollections = (collections: WebCollection[]) =>
+  fakeIdb.seed(COLLECTIONS_STORE_NAME, collections);
+
+const storedRecipe = (id: string) => fakeIdb.record<WebSavedRecipe>(SAVED_RECIPES_STORE_NAME, id);
+
+const LocationProbe: React.FC = () => {
+  const location = useLocation();
+  return <p data-testid="location">{`${location.pathname}${location.search}`}</p>;
+};
+
+const renderPage = () =>
+  render(
+    <ToastProvider>
+      <MemoryRouter initialEntries={["/"]}>
+        <Routes>
+          <Route element={<LibraryPage />} path="/" />
+          <Route element={<LocationProbe />} path="*" />
+        </Routes>
+      </MemoryRouter>
+    </ToastProvider>
+  );
+
+const cardFor = (title: string): HTMLElement => {
+  const link = screen.getByRole("link", { name: title });
+  const card = link.closest("article");
+  expect(card).not.toBeNull();
+  return card as HTMLElement;
+};
+
+const gridTitles = () =>
+  Array.from(document.querySelectorAll(".library-results .recipe-card-title")).map(
+    (element) => element.textContent
+  );
+
+const openCardMenu = (title: string) => {
+  fireEvent.click(screen.getByRole("button", { name: `More actions for ${title}` }));
+  return screen.getByRole("menu", { name: `Actions for ${title}` });
+};
+
+const sharedRecipe = (overrides: Partial<SharedRecipe> = {}): SharedRecipe => ({
+  createdAt: iso(3),
   fetchMode: "http",
   householdId: "household_1",
   id: "shared_1",
-  notes: "Family favorite",
   ownerDisplayName: "Robert",
-  ownerEmail: "owner@example.com",
+  ownerEmail: "robert@example.com",
   ownerUserId: "user_owner",
   provenance: ["jsonld"],
-  recipe: {
-    ...personalRecipe.recipe,
-    sourceUrl: "https://family.example.com/chili",
-    title: "Family Chili"
-  },
+  recipe: makeRecipe("family-chili", { title: "Family Chili", prep: 10, cook: 40 }).recipe,
   strategy: "recipe-schema",
-  updatedAt: "2026-06-03T12:00:00.000Z",
-  warnings: []
-};
+  updatedAt: iso(3),
+  warnings: [],
+  ...overrides
+});
 
 describe("LibraryPage", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    fakeIdb.reset();
     localStorage.clear();
-    authMocks.user = {
-      billingPlan: "family",
-      email: "owner@example.com",
-      id: "user_owner"
-    };
-    apiClientMocks.deleteSharedRecipe.mockReset();
-    apiClientMocks.getSharedRecipes.mockReset();
-    apiClientMocks.getSharedRecipes.mockResolvedValue({ recipes: [sharedRecipe] });
-    storeMocks.deleteSavedRecipe.mockReset();
-    storeMocks.duplicateSavedRecipe.mockReset();
-    storeMocks.duplicateSavedRecipe.mockResolvedValue({
-      ...personalRecipe,
-      id: "recipe_duplicate"
+    sessionStorage.clear();
+    resetLinkDishWebDbForTests();
+    resetDataChangeFeedForTests();
+    resetLibraryStoreForTests();
+    resetCollectionsStoreForTests();
+    resetLibrarySessionStateForTests();
+    resetSharedRecipesCacheForTests();
+    resetSearchEngineForTests();
+    setDataChannelFactoryForTests(() => ({
+      close: vi.fn(),
+      onmessage: null,
+      postMessage: vi.fn()
+    }));
+    let uuid = 0;
+    vi.spyOn(crypto, "randomUUID").mockImplementation(() => {
+      uuid += 1;
+      return `00000000-0000-4000-8000-${String(uuid).padStart(12, "0")}`;
     });
-    storeMocks.getSavedRecipes.mockReset();
-    storeMocks.getSavedRecipes.mockResolvedValue([personalRecipe]);
-    storeMocks.saveSharedRecipeCopy.mockReset();
-    storeMocks.saveSharedRecipeCopy.mockResolvedValue({
-      ...personalRecipe,
-      id: "recipe_copy",
-      recipe: {
-        ...personalRecipe.recipe,
-        title: "Family Chili Copy"
-      }
-    });
-    storeMocks.seedStarterRecipesIfNeeded.mockReset();
-    storeMocks.seedStarterRecipesIfNeeded.mockResolvedValue(undefined);
-    storeMocks.syncRecipeToHousehold.mockReset();
-    storeMocks.syncRecipeToHousehold.mockResolvedValue(personalRecipe);
-  });
+    // Starters are already seeded; each test seeds exactly the cookbook it needs.
+    localStorage.setItem("linkdish:web:starter-recipes-seeded:v1", "true");
+    await getLinkDishWebDb();
 
-  it("keeps personal row actions outside recipe links", async () => {
-    render(
-      <MemoryRouter>
-        <LibraryPage />
-      </MemoryRouter>
-    );
-
-    const titleLink = await screen.findByRole("link", { name: "Personal Rice" });
-    expect(titleLink).toHaveAttribute("href", "/recipes/recipe_1");
-
-    const personalRow = titleLink.closest(".recipe-row");
-    expect(personalRow?.querySelector(".recipe-row-thumb")).toHaveTextContent("P");
-
-    const removeButton = screen.getByRole("button", { name: "Remove Personal Rice" });
-    const duplicateButton = screen.getByRole("button", { name: "Duplicate Personal Rice" });
-
-    expect(removeButton.closest("a")).toBeNull();
-    expect(duplicateButton.closest("a")).toBeNull();
-    expect(screen.queryByRole("button", { name: "Delete Personal Rice" })).not.toBeInTheDocument();
-  });
-
-  it("uses an inline confirmation group before removing a recipe", async () => {
-    render(
-      <MemoryRouter>
-        <LibraryPage />
-      </MemoryRouter>
-    );
-
-    const removeButton = await screen.findByRole("button", { name: "Remove Personal Rice" });
-    fireEvent.click(removeButton);
-
-    const confirmation = screen.getByRole("group", { name: "Confirm remove Personal Rice" });
-    expect(within(confirmation).getByRole("button", { name: "Keep" })).toBeInTheDocument();
-    expect(within(confirmation).getByRole("button", { name: "Remove" })).toBeInTheDocument();
-  });
-
-  it("uses the shared flavor-copy list for the empty library headline", async () => {
-    apiClientMocks.getSharedRecipes.mockResolvedValue({ recipes: [] });
-    storeMocks.getSavedRecipes.mockResolvedValue([]);
-
-    render(
-      <MemoryRouter>
-        <LibraryPage />
-      </MemoryRouter>
-    );
-
-    const emptyTitle = await screen.findByRole("heading", { level: 2 });
-
-    expect(EMPTY_LIBRARY_LINES).toContain(emptyTitle.textContent);
-    expect(screen.getByRole("link", { name: "Import a Recipe" })).toHaveAttribute(
-      "href",
-      "/import"
-    );
-  });
-
-  it("renders extracted servings text without appending a duplicate label", async () => {
-    render(
-      <MemoryRouter>
-        <LibraryPage />
-      </MemoryRouter>
-    );
-
-    expect(screen.queryByLabelText("Search Recipes")).not.toBeInTheDocument();
-    expect(
-      screen.getByPlaceholderText("Search title, ingredients, method, notes")
-    ).toBeInTheDocument();
-
-    const personalRow = (await screen.findByText("Personal Rice")).closest(".recipe-row");
-    expect(personalRow).not.toBeNull();
-    expect(
-      within(personalRow as HTMLElement).getByText("4 servings · Prep 5 min · Cook 20 min")
-    ).toBeInTheDocument();
-    expect(
-      within(personalRow as HTMLElement).queryByText("4 servings servings")
-    ).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("tab", { name: "Family" }));
-
-    const familyRow = await screen.findByText("Family Chili");
-    const familyRecipeRow = familyRow.closest(".recipe-row");
-    expect(familyRecipeRow).not.toBeNull();
-    expect(
-      within(familyRecipeRow as HTMLElement).getByText("4 servings · Prep 5 min · Cook 20 min")
-    ).toBeInTheDocument();
-    expect(
-      within(familyRecipeRow as HTMLElement).queryByText("4 servings servings")
-    ).not.toBeInTheDocument();
-  });
-
-  it("renders family recipes from the API without turning them into personal cards", async () => {
-    render(
-      <MemoryRouter>
-        <LibraryPage />
-      </MemoryRouter>
-    );
-
-    fireEvent.click(await screen.findByRole("tab", { name: "Family" }));
-
-    const familyRow = (await screen.findByText("Family Chili")).closest(".recipe-row");
-    expect(familyRow).not.toBeNull();
-    expect(
-      within(familyRow as HTMLElement).getByRole("link", { name: "Family Chili" })
-    ).toHaveAttribute("href", "/recipes/shared/shared_1");
-    expect(within(familyRow as HTMLElement).getByText("Owned by Robert")).toBeInTheDocument();
-
-    fireEvent.click(
-      within(familyRow as HTMLElement).getByRole("button", {
-        name: "Save copy of Family Chili"
-      })
-    );
-
-    await waitFor(() => {
-      expect(storeMocks.saveSharedRecipeCopy).toHaveBeenCalledWith(sharedRecipe);
-    });
-  });
-
-  it("disables the family tab when the account cannot access shared recipes", async () => {
-    apiClientMocks.getSharedRecipes.mockRejectedValue(
-      new apiClientMocks.ExtractorApiError("Extractor API request failed.", 403, {
-        message: "An active LinkDish Family household is required."
-      })
-    );
-
-    render(
-      <MemoryRouter>
-        <LibraryPage />
-      </MemoryRouter>
-    );
-
-    const familyTab = await screen.findByRole("tab", { name: "Family" });
-
-    await waitFor(() => {
-      expect(familyTab).not.toBeDisabled();
-      expect(familyTab).toHaveAttribute("aria-disabled", "true");
-    });
-    fireEvent.click(familyTab);
-    expect(
-      screen.getByText(
-        "Family recipe sharing is available after you create or join an active Family household."
-      )
-    ).toBeInTheDocument();
-    expect(screen.queryByText("Your family recipe book is empty.")).not.toBeInTheDocument();
-  });
-
-  it("opens a dismissible sign-in prompt when a signed-out reader chooses Family", async () => {
     authMocks.user = null;
-
-    render(
-      <MemoryRouter>
-        <LibraryPage />
-      </MemoryRouter>
-    );
-
-    const familyTab = await screen.findByRole("tab", { name: "Family" });
-    expect(familyTab).not.toHaveAttribute("aria-disabled");
-    fireEvent.click(familyTab);
-
-    const prompt = screen.getByRole("dialog", { name: "Cook together, in one place." });
-    expect(prompt).toHaveAttribute("aria-modal", "true");
-    expect(prompt.closest(".library-sign-in-prompt-backdrop")?.parentElement).toBe(document.body);
-    expect(within(prompt).getByRole("link", { name: "Sign in" })).toHaveAttribute(
-      "href",
-      "/account"
-    );
-    expect(screen.getByRole("button", { name: "Sign in to use Family" })).toBeInTheDocument();
-
-    fireEvent.click(within(prompt).getByRole("button", { name: "Cancel" }));
-    expect(
-      screen.queryByRole("dialog", { name: "Cook together, in one place." })
-    ).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "Sign in to use Family" }));
-    expect(
-      screen.getByRole("dialog", { name: "Cook together, in one place." })
-    ).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "Close Family sign-in prompt" }));
-    expect(
-      screen.queryByRole("dialog", { name: "Cook together, in one place." })
-    ).not.toBeInTheDocument();
+    upgradeMocks.requestUpgradeSheet.mockReset();
+    upgradeMocks.requestUpgradeSheet.mockReturnValue(true);
+    analyticsMocks.trackWebEvent.mockReset();
+    apiMocks.createSharedRecipe.mockReset();
+    apiMocks.deleteSharedRecipe.mockReset();
+    apiMocks.deleteSharedRecipe.mockResolvedValue({ deleted: true });
+    apiMocks.getHousehold.mockReset();
+    apiMocks.getHousehold.mockResolvedValue({ household: null });
+    apiMocks.getSharedRecipes.mockReset();
+    apiMocks.getSharedRecipes.mockResolvedValue({ recipes: [] });
+    apiMocks.updateSharedRecipe.mockReset();
   });
 
-  it("keeps the cookbook controls and recipe rows in one centered content column", async () => {
-    render(
-      <MemoryRouter>
-        <LibraryPage />
-      </MemoryRouter>
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("shows photo cards with clean meta, a recipe count and the controls in one column", async () => {
+    seedRecipes([
+      makeRecipe("bread", {
+        cook: 40,
+        image: true,
+        prep: 12,
+        servings: "16, 1 loaf",
+        title: "Classic Sandwich Bread"
+      })
+    ]);
+
+    renderPage();
+
+    await screen.findByText("Classic Sandwich Bread");
+    const card = cardFor("Classic Sandwich Bread");
+    expect(screen.getByRole("heading", { level: 1, name: "Cookbook" })).toBeInTheDocument();
+    expect(screen.getByText("1 recipe")).toBeInTheDocument();
+    expect(card.textContent).toContain("52 min");
+    expect(card.textContent).toContain("Serves 16");
+    expect(card.textContent).not.toContain("16, 1 loaf");
+    expect(within(card).getByRole("link", { name: "Classic Sandwich Bread" })).toHaveAttribute(
+      "href",
+      "/recipes/bread"
+    );
+    expect(card.querySelector("img")).toHaveAttribute(
+      "src",
+      expect.stringContaining("/api/image?")
+    );
+    expect(
+      within(card).getByRole("button", { name: "Favorite Classic Sandwich Bread" }).closest("a")
+    ).toBeNull();
+    expect(screen.getByRole("searchbox", { name: "Search your cookbook" })).toBeInTheDocument();
+    expect(screen.getByRole("radiogroup", { name: "Cookbook" })).toBeInTheDocument();
+  });
+
+  it("ranks title matches above ingredient matches and highlights the matched words", async () => {
+    seedRecipes([
+      makeRecipe("rice-bowl", {
+        daysAgo: 1,
+        ingredients: ["2 chicken thighs", "1 cup rice"],
+        title: "Sesame Rice Bowl"
+      }),
+      makeRecipe("lemon-chicken", { daysAgo: 5, title: "Lemon Chicken" }),
+      makeRecipe("soup", { daysAgo: 2, ingredients: ["1 can tomatoes"], title: "Tomato Soup" })
+    ]);
+
+    renderPage();
+    await screen.findByText("Tomato Soup");
+
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search your cookbook" }), {
+      target: { value: "chicken" }
+    });
+
+    await waitFor(() => expect(gridTitles()).toEqual(["Lemon Chicken", "Sesame Rice Bowl"]));
+    expect(screen.getByText(/for “chicken”/)).toHaveTextContent("2 recipes for “chicken”");
+    await waitFor(() =>
+      expect(cardFor("Lemon Chicken").querySelector("mark")).toHaveTextContent("Chicken")
+    );
+    expect(screen.queryByRole("region", { name: /Cook again/ })).not.toBeInTheDocument();
+  });
+
+  it("offers to drop filters when a search only matches outside them", async () => {
+    seedRecipes([
+      makeRecipe("curry", { title: "Red Curry" }),
+      makeRecipe("salad", { extra: { favorite: true }, title: "Green Salad" })
+    ]);
+
+    renderPage();
+    await screen.findByText("Red Curry");
+
+    fireEvent.click(screen.getByRole("button", { name: /Favorites/ }));
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search your cookbook" }), {
+      target: { value: "curry" }
+    });
+
+    expect(
+      await screen.findByRole("heading", { name: "No recipes match “curry”" })
+    ).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "Show 1 match without filters" }));
+
+    await waitFor(() => expect(gridTitles()).toEqual(["Red Curry"]));
+    expect(screen.getByRole("button", { name: /Favorites/ })).toHaveAttribute(
+      "aria-pressed",
+      "false"
+    );
+  });
+
+  it("combines filter chips with AND and clears them in one tap", async () => {
+    seedRecipes([
+      makeRecipe("fav-quick", {
+        cook: 10,
+        daysAgo: 3,
+        extra: { favorite: true },
+        prep: 5,
+        title: "Fast Favorite"
+      }),
+      makeRecipe("fav-slow", {
+        cook: 120,
+        daysAgo: 2,
+        extra: { favorite: true },
+        title: "Slow Favorite"
+      }),
+      makeRecipe("quick", { cook: 15, daysAgo: 1, title: "Quick Noodles" }),
+      makeRecipe("cooked", {
+        daysAgo: 4,
+        extra: { lastCookedAt: iso(2), timesCooked: 2 },
+        title: "Cooked Before"
+      })
+    ]);
+
+    renderPage();
+    await screen.findByText("Quick Noodles");
+
+    const favorites = screen.getByRole("button", { name: /Favorites/ });
+    expect(favorites).toHaveTextContent("2");
+    fireEvent.click(favorites);
+    await waitFor(() => expect(gridTitles()).toEqual(["Slow Favorite", "Fast Favorite"]));
+
+    fireEvent.click(screen.getByRole("button", { name: /Quick/ }));
+    await waitFor(() => expect(gridTitles()).toEqual(["Fast Favorite"]));
+    expect(screen.getByText(/of/, { selector: ".library-results-count" })).toHaveTextContent(
+      "1 of 4 recipes"
     );
 
-    const content = screen
-      .getByRole("heading", { name: "Cookbook", level: 1 })
-      .closest(".library-content");
-    expect(content).not.toBeNull();
-    expect(within(content as HTMLElement).getByRole("tablist")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Clear" }));
+    await waitFor(() => expect(gridTitles()).toHaveLength(4));
+
+    fireEvent.click(screen.getByRole("button", { name: /Not cooked yet/ }));
+    await waitFor(() => expect(gridTitles()).not.toContain("Cooked Before"));
+  });
+
+  it("toggles a favorite optimistically and saves it", async () => {
+    seedRecipes([makeRecipe("soup", { title: "Tomato Soup" })]);
+
+    renderPage();
+    const heart = await screen.findByRole("button", { name: "Favorite Tomato Soup" });
+    expect(heart).toHaveAttribute("aria-pressed", "false");
+
+    fireEvent.click(heart);
+
+    expect(screen.getByRole("button", { name: "Favorite Tomato Soup" })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    );
+    await waitFor(() => expect(storedRecipe("soup")?.favorite).toBe(true));
+  });
+
+  it("deletes a local recipe instantly and restores it with Undo", async () => {
+    seedRecipes([
+      makeRecipe("soup", { title: "Tomato Soup" }),
+      makeRecipe("salad", { title: "Salad" })
+    ]);
+
+    renderPage();
+    await screen.findByText("Tomato Soup");
+
+    fireEvent.click(within(openCardMenu("Tomato Soup")).getByRole("menuitem", { name: "Delete" }));
+
+    await waitFor(() => expect(screen.queryByText("Tomato Soup")).not.toBeInTheDocument());
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await waitFor(() => expect(storedRecipe("soup")).toBeUndefined());
+    expect(await screen.findByText("Deleted “Tomato Soup”")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+
+    expect(await screen.findByRole("link", { name: "Tomato Soup" })).toBeInTheDocument();
+    await waitFor(() => expect(storedRecipe("soup")?.recipe.title).toBe("Tomato Soup"));
+  });
+
+  it("confirms before deleting a household-synced recipe and removes the household copy first", async () => {
+    authMocks.user = { billingPlan: "family", email: "owner@example.com", id: "user_owner" };
+    seedRecipes([
+      makeRecipe("chili", {
+        extra: { sync: { sharedRecipeId: "shared_9", status: "synced" } },
+        title: "Chili"
+      })
+    ]);
+
+    renderPage();
+    await screen.findByText("Chili");
+
+    fireEvent.click(within(openCardMenu("Chili")).getByRole("menuitem", { name: "Delete" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Delete shared recipe?" });
+    expect(storedRecipe("chili")).toBeDefined();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete everywhere" }));
+
+    await waitFor(() => expect(storedRecipe("chili")).toBeUndefined());
+    expect(apiMocks.deleteSharedRecipe).toHaveBeenCalledWith("shared_9");
+  });
+
+  it("keeps a synced recipe when the household copy could not be deleted", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    authMocks.user = { billingPlan: "family", email: "owner@example.com", id: "user_owner" };
+    apiMocks.deleteSharedRecipe.mockRejectedValue(new apiMocks.ExtractorApiError("nope", 500));
+    seedRecipes([
+      makeRecipe("chili", {
+        extra: { sync: { sharedRecipeId: "shared_9", status: "synced" } },
+        title: "Chili"
+      })
+    ]);
+
+    renderPage();
+    await screen.findByText("Chili");
+    fireEvent.click(within(openCardMenu("Chili")).getByRole("menuitem", { name: "Delete" }));
+    fireEvent.click(
+      within(await screen.findByRole("dialog", { name: "Delete shared recipe?" })).getByRole(
+        "button",
+        { name: "Delete everywhere" }
+      )
+    );
+
     expect(
-      within(content as HTMLElement).getByPlaceholderText(
-        "Search title, ingredients, method, notes"
+      await screen.findByText(
+        "This recipe could not be deleted from your household. Please try again."
       )
     ).toBeInTheDocument();
-    expect(
-      within(content as HTMLElement).getByRole("group", { name: "Recipe sort" })
-    ).toBeInTheDocument();
-    expect((await screen.findByText("Personal Rice")).closest(".recipe-row")).not.toBeNull();
+    expect(storedRecipe("chili")).toBeDefined();
   });
 
-  it("keeps the family tab available when shared recipes fail to load", async () => {
-    apiClientMocks.getSharedRecipes.mockRejectedValue(new Error("Network unavailable"));
+  it("duplicates a recipe and opens the copy", async () => {
+    seedRecipes([makeRecipe("soup", { title: "Tomato Soup" })]);
 
-    render(
-      <MemoryRouter>
-        <LibraryPage />
-      </MemoryRouter>
-    );
-
-    const familyTab = await screen.findByRole("tab", { name: "Family" });
-
-    await waitFor(() => {
-      expect(familyTab).not.toBeDisabled();
-      expect(familyTab).toHaveAttribute("aria-disabled", "false");
-    });
-    expect(
-      screen.getByText("Family recipes could not be loaded. Check your connection and try again.")
-    ).toBeInTheDocument();
-  });
-
-  it("sorts personal rows from an overlay menu and reverses the selected order", async () => {
-    const olderPopularRecipe: WebSavedRecipe = {
-      ...personalRecipe,
-      id: "recipe_older_popular",
-      recipe: {
-        ...personalRecipe.recipe,
-        title: "Ziti Bake"
-      },
-      timesCooked: 3,
-      updatedAt: "2026-05-01T12:00:00.000Z"
-    };
-    const newerRecipe: WebSavedRecipe = {
-      ...personalRecipe,
-      id: "recipe_newer",
-      recipe: {
-        ...personalRecipe.recipe,
-        title: "Apple Salad"
-      },
-      timesCooked: 1,
-      updatedAt: "2026-06-05T12:00:00.000Z"
-    };
-    storeMocks.getSavedRecipes.mockResolvedValue([newerRecipe, olderPopularRecipe]);
-
-    render(
-      <MemoryRouter>
-        <LibraryPage />
-      </MemoryRouter>
-    );
-
-    const getRowTitles = () =>
-      screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent);
-
-    await screen.findByText("Apple Salad");
-    expect(getRowTitles()).toEqual(["Apple Salad", "Ziti Bake"]);
-
-    const selectSort = (label: string) => {
-      fireEvent.click(screen.getByRole("button", { name: /Sort recipes\. Current:/ }));
-      const menu = screen.getByRole("menu", { name: "Sort recipes" });
-      expect(menu).toHaveClass("library-sort-menu");
-      fireEvent.click(within(menu).getByRole("menuitemradio", { name: label }));
-    };
-
-    selectSort("A-Z");
-    expect(getRowTitles()).toEqual(["Apple Salad", "Ziti Bake"]);
-
-    selectSort("Most cooked");
-    expect(getRowTitles()).toEqual(["Ziti Bake", "Apple Salad"]);
-    expect(localStorage.getItem("linkdish:web:cookbook-sort:v1")).toBe("mostCooked");
-
+    renderPage();
+    await screen.findByText("Tomato Soup");
     fireEvent.click(
-      screen.getByRole("button", { name: "Order: Most cooked first. Reverse order" })
+      within(openCardMenu("Tomato Soup")).getByRole("menuitem", { name: "Duplicate" })
     );
-    expect(getRowTitles()).toEqual(["Apple Salad", "Ziti Bake"]);
-    expect(localStorage.getItem("linkdish:web:cookbook-sort-direction:v1")).toBe("reverse");
 
-    selectSort("Recent");
-    expect(getRowTitles()).toEqual(["Ziti Bake", "Apple Salad"]);
-    expect(screen.queryByRole("menuitemradio", { name: "Oldest" })).not.toBeInTheDocument();
+    const location = await screen.findByTestId("location");
+    const copy = fakeIdb
+      .records<WebSavedRecipe>(SAVED_RECIPES_STORE_NAME)
+      .find((recipe) => recipe.recipe.title === "Tomato Soup (copy)");
+    expect(copy).toBeDefined();
+    expect(location).toHaveTextContent(`/recipes/${copy?.id ?? ""}`);
   });
 
-  it("restores the last sort and direction without offering cook counts to Family", async () => {
-    localStorage.setItem("linkdish:web:cookbook-sort:v1", "az");
-    localStorage.setItem("linkdish:web:cookbook-sort-direction:v1", "reverse");
-
-    render(
-      <MemoryRouter>
-        <LibraryPage />
-      </MemoryRouter>
+  it("asks free cooks to upgrade instead of duplicating past the limit", async () => {
+    seedRecipes(
+      Array.from({ length: 15 }, (_, index) =>
+        makeRecipe(`recipe-${index}`, { daysAgo: index + 1, title: `Recipe ${index}` })
+      )
     );
 
-    await screen.findByText("Personal Rice");
-    expect(screen.getByRole("button", { name: "Sort recipes. Current: A-Z" })).toBeInTheDocument();
+    renderPage();
+    await screen.findByText("Recipe 0");
+    fireEvent.click(within(openCardMenu("Recipe 0")).getByRole("menuitem", { name: "Duplicate" }));
+
+    await waitFor(() =>
+      expect(upgradeMocks.requestUpgradeSheet).toHaveBeenCalledWith("save_limit")
+    );
+    expect(screen.queryByTestId("location")).not.toBeInTheDocument();
+    expect(fakeIdb.records(SAVED_RECIPES_STORE_NAME)).toHaveLength(15);
+  });
+
+  it("shows a quota meter that turns into an upgrade prompt near the free limit", async () => {
+    seedRecipes([
+      ...Array.from({ length: 12 }, (_, index) =>
+        makeRecipe(`recipe-${index}`, { title: `Recipe ${index}` })
+      ),
+      makeRecipe("starter-soup", { extra: { isStarter: true }, title: "Starter Soup" })
+    ]);
+
+    renderPage();
+
+    const meter = await screen.findByRole("region", { name: "Free cookbook" });
+    expect(within(meter).getByText("Your cookbook is nearly full")).toBeInTheDocument();
+    expect(within(meter).getByText("12 of 15 recipes saved")).toBeInTheDocument();
+
+    fireEvent.click(within(meter).getByRole("button", { name: "Get Plus" }));
+    expect(upgradeMocks.requestUpgradeSheet).toHaveBeenCalledWith("save_limit");
+  });
+
+  it("hides the quota meter for Plus cooks", async () => {
+    authMocks.user = { billingPlan: "plus", email: "plus@example.com", id: "user_plus" };
+    seedRecipes([makeRecipe("soup", { title: "Tomato Soup" })]);
+
+    renderPage();
+    await screen.findByText("Tomato Soup");
+
+    expect(screen.queryByRole("region", { name: "Free cookbook" })).not.toBeInTheDocument();
+  });
+
+  it("welcomes an empty cookbook with a paste-a-link field that opens the importer", async () => {
+    const readText = vi.fn().mockResolvedValue("Look at this https://example.com/soup!");
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { readText } });
+
+    renderPage();
+
     expect(
-      screen.getByRole("button", { name: "Order: Z to A. Reverse order" })
+      await screen.findByRole("heading", { name: "Paste a link. Get cooking." })
     ).toBeInTheDocument();
+    expect(screen.getByText("No recipes yet")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("searchbox", { name: "Search your cookbook" })
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("list", { name: "How it works" }).children).toHaveLength(3);
 
-    fireEvent.click(screen.getByRole("tab", { name: "Family" }));
-    fireEvent.click(screen.getByRole("button", { name: "Sort recipes. Current: A-Z" }));
+    fireEvent.click(screen.getByRole("button", { name: "Paste" }));
 
-    expect(screen.getByRole("menuitemradio", { name: "Recent" })).toBeInTheDocument();
-    expect(screen.getByRole("menuitemradio", { name: "A-Z" })).toBeInTheDocument();
-    expect(screen.queryByRole("menuitemradio", { name: "Most cooked" })).not.toBeInTheDocument();
+    expect(await screen.findByTestId("location")).toHaveTextContent(
+      "/import?url=https%3A%2F%2Fexample.com%2Fsoup"
+    );
+    expect(readText).toHaveBeenCalled();
+    Reflect.deleteProperty(navigator, "clipboard");
   });
 
-  it("maps a remembered Most cooked preference to Recent while Family is visible", async () => {
+  it("validates a typed link before importing and lists sample recipes", async () => {
+    renderPage();
+
+    const input = await screen.findByRole("textbox", { name: "Recipe link" });
+    fireEvent.change(input, { target: { value: "not a link" } });
+    fireEvent.click(screen.getByRole("button", { name: "Import" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("doesn't look like a link");
+
+    const samples = await screen.findByRole("region", { name: "Try a sample" });
+    expect(within(samples).getByRole("link", { name: "Classic Sandwich Bread" })).toHaveAttribute(
+      "href",
+      "/featured/classic-sandwich-bread"
+    );
+
+    fireEvent.change(input, { target: { value: "www.seriouseats.com/best-chili" } });
+    fireEvent.click(screen.getByRole("button", { name: "Import" }));
+    expect(await screen.findByTestId("location")).toHaveTextContent(
+      "/import?url=https%3A%2F%2Fwww.seriouseats.com%2Fbest-chili"
+    );
+  });
+
+  it("greets a cook who only has starter recipes and lists them below", async () => {
+    seedRecipes([
+      makeRecipe("starter-bars", { extra: { isStarter: true }, title: "Berry Oat Bars" })
+    ]);
+
+    renderPage();
+
+    expect(
+      await screen.findByRole("heading", { name: "Paste a link. Get cooking." })
+    ).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /Starter recipes/ })).toBeInTheDocument();
+    expect(cardFor("Berry Oat Bars").textContent).toContain("Starter");
+  });
+
+  it("shows an error with a retry instead of an empty cookbook when storage fails", async () => {
+    resetLinkDishWebDbForTests();
+    fakeIdb.failNextOpen(new Error("disk on fire"));
+
+    renderPage();
+
+    expect(
+      await screen.findByRole("heading", { name: "We couldn't open your cookbook" })
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "Paste a link. Get cooking." })
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
+  });
+
+  it("asks to reload when another tab upgrades storage", async () => {
+    seedRecipes([makeRecipe("soup", { title: "Tomato Soup" })]);
+
+    renderPage();
+    await screen.findByText("Tomato Soup");
+    act(() => {
+      fakeIdb.fireBlocking();
+    });
+
+    expect(
+      await screen.findByText("LinkDish was updated in another tab. Reload to keep going.")
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reload" })).toBeInTheDocument();
+  });
+
+  it("sorts from a menu, remembers the choice and supports the old stored keys", async () => {
     localStorage.setItem("linkdish:web:cookbook-sort:v1", "mostCooked");
+    seedRecipes([
+      makeRecipe("apple", { daysAgo: 1, extra: { timesCooked: 1 }, title: "Apple Salad" }),
+      makeRecipe("ziti", { daysAgo: 9, extra: { timesCooked: 5 }, title: "Ziti Bake" }),
+      makeRecipe("miso", { cook: 5, daysAgo: 4, prep: 5, title: "Miso Soup" })
+    ]);
 
-    render(
-      <MemoryRouter>
-        <LibraryPage />
-      </MemoryRouter>
-    );
+    renderPage();
+    await screen.findByText("Ziti Bake");
+    expect(gridTitles()).toEqual(["Ziti Bake", "Apple Salad", "Miso Soup"]);
 
-    await screen.findByText("Personal Rice");
-    fireEvent.click(screen.getByRole("tab", { name: "Family" }));
+    const chooseSort = (label: string) => {
+      fireEvent.click(screen.getByRole("button", { name: /^Sort recipes\. Current:/ }));
+      fireEvent.click(screen.getByRole("menuitemradio", { name: label }));
+    };
 
-    expect(
-      screen.getByRole("button", { name: "Sort recipes. Current: Recent" })
-    ).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("tab", { name: "Personal" }));
     expect(
       screen.getByRole("button", { name: "Sort recipes. Current: Most cooked" })
     ).toBeInTheDocument();
-    expect(localStorage.getItem("linkdish:web:cookbook-sort:v1")).toBe("mostCooked");
+    chooseSort("A–Z");
+    expect(gridTitles()).toEqual(["Apple Salad", "Miso Soup", "Ziti Bake"]);
+    expect(localStorage.getItem("linkdish:web:cookbook-sort:v1")).toBe("az");
+
+    chooseSort("Quickest");
+    expect(gridTitles()[0]).toBe("Miso Soup");
+
+    chooseSort("Recently added");
+    expect(gridTitles()).toEqual(["Apple Salad", "Miso Soup", "Ziti Bake"]);
+
+    fireEvent.click(screen.getByRole("button", { name: /^Sort recipes\. Current:/ }));
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Reverse order" }));
+    expect(gridTitles()).toEqual(["Ziti Bake", "Miso Soup", "Apple Salad"]);
+    expect(localStorage.getItem("linkdish:web:cookbook-sort-direction:v1")).toBe("reverse");
+  });
+
+  it("switches between grid and list and remembers the layout", async () => {
+    seedRecipes([makeRecipe("soup", { title: "Tomato Soup" })]);
+
+    renderPage();
+    await screen.findByText("Tomato Soup");
+    expect(cardFor("Tomato Soup")).toHaveClass("recipe-card-grid");
+
+    fireEvent.click(screen.getByRole("button", { name: "List view" }));
+
+    expect(cardFor("Tomato Soup")).toHaveClass("recipe-card-list");
+    expect(screen.getByRole("button", { name: "List view" })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    );
+    expect(localStorage.getItem("linkdish:web:cookbook-view:v1")).toBe("list");
+  });
+
+  it("shows Cook again and Quick weeknights shelves for a bigger cookbook", async () => {
+    seedRecipes([
+      makeRecipe("a", {
+        cook: 10,
+        extra: { lastCookedAt: iso(1), timesCooked: 3 },
+        title: "Alpha"
+      }),
+      makeRecipe("b", {
+        cook: 20,
+        extra: { lastCookedAt: iso(3), timesCooked: 1 },
+        title: "Bravo"
+      }),
+      makeRecipe("c", { cook: 90, title: "Charlie" }),
+      makeRecipe("d", { cook: 15, title: "Delta" }),
+      makeRecipe("e", { cook: 60, title: "Echo" }),
+      makeRecipe("f", { cook: 120, title: "Foxtrot" })
+    ]);
+
+    renderPage();
+
+    const cookAgain = await screen.findByRole("region", { name: "Cook again" });
+    expect(
+      within(cookAgain)
+        .getAllByRole("link")
+        .map((link) => link.textContent)
+    ).toEqual(["Alpha", "Bravo"]);
+    const quick = screen.getByRole("region", { name: "Quick weeknights" });
+    expect(within(quick).getAllByRole("link")).toHaveLength(3);
+
+    fireEvent.click(within(quick).getByRole("button", { name: "Show all quick recipes" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("region", { name: "Cook again" })).not.toBeInTheDocument()
+    );
+    expect(screen.getByRole("button", { name: /Quick/ })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("jumps to search with the slash key when not typing", async () => {
+    seedRecipes([makeRecipe("soup", { title: "Tomato Soup" })]);
+
+    renderPage();
+    await screen.findByText("Tomato Soup");
+
+    fireEvent.keyDown(window, { key: "/" });
+
+    expect(screen.getByRole("searchbox", { name: "Search your cookbook" })).toHaveFocus();
+  });
+
+  it("adds a recipe to a new collection and filters by it", async () => {
+    seedRecipes([
+      makeRecipe("soup", { title: "Tomato Soup" }),
+      makeRecipe("salad", { title: "Salad" })
+    ]);
+
+    renderPage();
+    await screen.findByText("Tomato Soup");
+    fireEvent.click(
+      within(openCardMenu("Tomato Soup")).getByRole("menuitem", { name: "Add to collection…" })
+    );
+
+    const sheet = await screen.findByRole("dialog", { name: "Add to collection" });
+    fireEvent.change(within(sheet).getByRole("textbox", { name: "Collection name" }), {
+      target: { value: "Weeknight dinners" }
+    });
+    fireEvent.click(within(sheet).getByRole("radio", { name: "🍲" }));
+    fireEvent.click(within(sheet).getByRole("button", { name: "Create and add" }));
+
+    await waitFor(() => expect(fakeIdb.records(COLLECTIONS_STORE_NAME)).toHaveLength(1));
+    const [collection] = fakeIdb.records<WebCollection>(COLLECTIONS_STORE_NAME);
+    expect(collection).toMatchObject({ emoji: "🍲", name: "Weeknight dinners" });
+    await waitFor(() => expect(storedRecipe("soup")?.collectionIds).toEqual([collection?.id]));
+    const option = await within(sheet).findByRole("checkbox", { name: /Weeknight dinners/ });
+    expect(option).toHaveAttribute("aria-checked", "true");
+
+    fireEvent.click(within(sheet).getByRole("button", { name: "Done" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Weeknight dinners/ }));
+
+    await waitFor(() => expect(gridTitles()).toEqual(["Tomato Soup"]));
+  });
+
+  it("edits tags with suggestions and turns shared tags into filter chips", async () => {
+    seedRecipes([
+      makeRecipe("soup", { title: "Tomato Soup" }),
+      makeRecipe("salad", { extra: { tags: ["Weeknight"] }, title: "Salad" })
+    ]);
+
+    renderPage();
+    await screen.findByText("Tomato Soup");
+    fireEvent.click(
+      within(openCardMenu("Tomato Soup")).getByRole("menuitem", { name: "Edit tags…" })
+    );
+
+    const sheet = await screen.findByRole("dialog", { name: "Tags" });
+    fireEvent.click(within(sheet).getByRole("button", { name: "Add tag Weeknight" }));
+    await waitFor(() => expect(storedRecipe("soup")?.tags).toEqual(["Weeknight"]));
+
+    const input = within(sheet).getByRole("textbox", { name: "Add a tag" });
+    fireEvent.change(input, { target: { value: "  comfort   food " } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(storedRecipe("soup")?.tags).toEqual(["Weeknight", "comfort food"]));
+
+    fireEvent.click(within(sheet).getByRole("button", { name: "Remove tag comfort food" }));
+    await waitFor(() => expect(storedRecipe("soup")?.tags).toEqual(["Weeknight"]));
+
+    fireEvent.click(within(sheet).getByRole("button", { name: "Done" }));
+    expect(await screen.findByRole("button", { name: /Weeknight/ })).toHaveTextContent("2");
+  });
+
+  it("renames, reorders and deletes collections", async () => {
+    const now = iso(10);
+    seedCollections([
+      {
+        createdAt: now,
+        emoji: "🍰",
+        id: "col-baking",
+        name: "Baking",
+        sortOrder: 0,
+        updatedAt: now
+      },
+      { createdAt: now, id: "col-quick", name: "Quick", sortOrder: 1, updatedAt: now }
+    ]);
+    seedRecipes([
+      makeRecipe("cake", { extra: { collectionIds: ["col-baking"] }, title: "Cake" }),
+      makeRecipe("soup", { title: "Soup" })
+    ]);
+
+    renderPage();
+    await screen.findByText("Cake");
+    fireEvent.click(screen.getByRole("button", { name: "Collections" }));
+
+    const sheet = await screen.findByRole("dialog", { name: "Collections" });
+    const name = within(sheet).getByRole("textbox", { name: "Name of Baking" });
+    fireEvent.change(name, { target: { value: "Baking day" } });
+    fireEvent.blur(name);
+    await waitFor(() =>
+      expect(fakeIdb.record<WebCollection>(COLLECTIONS_STORE_NAME, "col-baking")?.name).toBe(
+        "Baking day"
+      )
+    );
+
+    fireEvent.click(within(sheet).getByRole("button", { name: "Move Quick up" }));
+    await waitFor(() =>
+      expect(fakeIdb.record<WebCollection>(COLLECTIONS_STORE_NAME, "col-quick")?.sortOrder).toBe(0)
+    );
+
+    fireEvent.click(within(sheet).getByRole("button", { name: "Delete Baking day" }));
+    const confirm = within(sheet).getByRole("group", { name: "Delete Baking day" });
+    expect(confirm).toHaveTextContent("1 recipe stay in your cookbook");
+    fireEvent.click(within(confirm).getByRole("button", { name: "Delete" }));
+
+    await waitFor(() =>
+      expect(fakeIdb.record(COLLECTIONS_STORE_NAME, "col-baking")).toBeUndefined()
+    );
+    await waitFor(() => expect(storedRecipe("cake")?.collectionIds).toBeUndefined());
+    expect(storedRecipe("cake")).toBeDefined();
+  });
+
+  it("opens a sign-in sheet when a signed-out cook taps the locked Family tab", async () => {
+    seedRecipes([makeRecipe("soup", { title: "Tomato Soup" })]);
+
+    renderPage();
+    await screen.findByText("Tomato Soup");
+    fireEvent.click(screen.getByRole("radio", { name: "Family" }));
+
+    const sheet = await screen.findByRole("dialog", { name: "Cook together, in one place." });
+    expect(within(sheet).getByRole("link", { name: "Sign in" })).toHaveAttribute(
+      "href",
+      "/account"
+    );
+    expect(screen.getByRole("radio", { name: "Personal" })).toHaveAttribute("aria-checked", "true");
+    expect(
+      screen.getByText("Sign in to create or join an active Family household.")
+    ).toBeInTheDocument();
+
+    fireEvent.click(within(sheet).getByRole("button", { name: "Cancel" }));
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: "Cook together, in one place." })
+      ).not.toBeInTheDocument()
+    );
+    expect(apiMocks.getSharedRecipes).not.toHaveBeenCalled();
+  });
+
+  it("keeps Family locked with an explainer when the account has no household", async () => {
+    authMocks.user = { billingPlan: "plus", email: "plus@example.com", id: "user_plus" };
+    apiMocks.getSharedRecipes.mockRejectedValue(
+      new apiMocks.ExtractorApiError("Forbidden", 403, {
+        message: "An active LinkDish Family household is required."
+      })
+    );
+    seedRecipes([makeRecipe("soup", { title: "Tomato Soup" })]);
+
+    renderPage();
+    await screen.findByText("Tomato Soup");
+    await waitFor(() => expect(apiMocks.getSharedRecipes).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole("radio", { name: "Family" }));
+
+    expect(
+      await screen.findByText(
+        "Family recipe sharing is available after you create or join an active Family household."
+      )
+    ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Set up Family" })).toHaveAttribute(
+      "href",
+      "/household"
+    );
+    expect(screen.getByRole("radio", { name: "Personal" })).toHaveAttribute("aria-checked", "true");
+  });
+
+  it("shows Family recipes with who added them and saves personal copies", async () => {
+    authMocks.user = { billingPlan: "family", email: "owner@example.com", id: "user_owner" };
+    apiMocks.getSharedRecipes.mockResolvedValue({
+      recipes: [
+        sharedRecipe(),
+        sharedRecipe({
+          id: "shared_2",
+          ownerDisplayName: "Ana",
+          ownerEmail: "ana@example.com",
+          ownerUserId: "user_ana",
+          recipe: makeRecipe("pie", { title: "Apple Pie" }).recipe
+        })
+      ]
+    });
+    seedRecipes([makeRecipe("soup", { title: "Tomato Soup" })]);
+
+    renderPage();
+    await screen.findByText("Tomato Soup");
+    fireEvent.click(screen.getByRole("radio", { name: "Family" }));
+
+    const chili = await screen.findByRole("link", { name: "Family Chili" });
+    expect(chili).toHaveAttribute("href", "/recipes/shared/shared_1");
+    expect(cardFor("Family Chili").textContent).toContain("You");
+    expect(cardFor("Apple Pie").textContent).toContain("Ana");
+    expect(screen.getByText("2 family recipes")).toBeInTheDocument();
+
+    // Only the owner can remove a recipe from Family.
+    expect(
+      within(openCardMenu("Apple Pie")).queryByRole("menuitem", { name: "Remove from Family" })
+    ).toBeNull();
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+
+    fireEvent.click(
+      within(openCardMenu("Family Chili")).getByRole("menuitem", {
+        name: "Save a copy to Personal"
+      })
+    );
+
+    expect(await screen.findByText("Saved “Family Chili (copy)” to Personal")).toBeInTheDocument();
+    expect(
+      fakeIdb.records<WebSavedRecipe>(SAVED_RECIPES_STORE_NAME).map((recipe) => recipe.recipe.title)
+    ).toContain("Family Chili (copy)");
+
+    fireEvent.click(
+      within(openCardMenu("Family Chili")).getByRole("menuitem", { name: "Remove from Family" })
+    );
+    fireEvent.click(
+      within(await screen.findByRole("dialog", { name: "Remove from Family?" })).getByRole(
+        "button",
+        {
+          name: "Remove"
+        }
+      )
+    );
+    await waitFor(() =>
+      expect(screen.queryByRole("link", { name: "Family Chili" })).not.toBeInTheDocument()
+    );
+    expect(apiMocks.deleteSharedRecipe).toHaveBeenCalledWith("shared_1");
+  });
+
+  it("shares a personal recipe to Family and tracks the first share", async () => {
+    authMocks.user = { billingPlan: "family", email: "owner@example.com", id: "user_owner" };
+    apiMocks.getHousehold.mockResolvedValue({ household: { id: "household_1" } });
+    apiMocks.createSharedRecipe.mockResolvedValue({
+      recipe: sharedRecipe({ id: "shared_new", updatedAt: iso(0) })
+    });
+    seedRecipes([makeRecipe("soup", { title: "Tomato Soup" })]);
+
+    renderPage();
+    await screen.findByText("Tomato Soup");
+    await waitFor(() => expect(apiMocks.getSharedRecipes).toHaveBeenCalled());
+    fireEvent.click(
+      within(openCardMenu("Tomato Soup")).getByRole("menuitem", { name: "Share to Family" })
+    );
+
+    expect(await screen.findByText("Shared with your Family cookbook")).toBeInTheDocument();
+    await waitFor(() => expect(storedRecipe("soup")?.sync?.sharedRecipeId).toBe("shared_new"));
+    expect(analyticsMocks.trackWebEvent).toHaveBeenCalledWith({
+      eventName: "family_shared",
+      properties: { recipe_count: 1, share_scope: "household" },
+      routeOrScreen: "/"
+    });
+    expect(await within(cardFor("Tomato Soup")).findByText("Family")).toBeInTheDocument();
+  });
+
+  it("remembers search and filters for the trip to a recipe and back", async () => {
+    seedRecipes([
+      makeRecipe("soup", { extra: { favorite: true }, title: "Tomato Soup" }),
+      makeRecipe("salad", { title: "Salad" })
+    ]);
+
+    const first = renderPage();
+    await screen.findByText("Tomato Soup");
+    fireEvent.click(screen.getByRole("button", { name: /Favorites/ }));
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search your cookbook" }), {
+      target: { value: "tomato" }
+    });
+    first.unmount();
+
+    renderPage();
+
+    expect(await screen.findByRole("searchbox", { name: "Search your cookbook" })).toHaveValue(
+      "tomato"
+    );
+    expect(screen.getByRole("button", { name: /Favorites/ })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    );
   });
 });

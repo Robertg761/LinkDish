@@ -1,0 +1,79 @@
+.paste-link {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.paste-link-field {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 60px;
+  padding: 6px 6px 6px 48px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface-raised);
+  box-shadow: var(--shadow-sm);
+  transition:
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+.paste-link-field:focus-within {
+  border-color: var(--color-primary);
+  box-shadow:
+    0 0 0 4px var(--color-focus-ring-strong),
+    var(--shadow-sm);
+}
+
+.paste-link-field.has-error {
+  border-color: var(--color-danger);
+}
+
+.paste-link-icon {
+  position: absolute;
+  left: 18px;
+  color: var(--color-tomato);
+  pointer-events: none;
+}
+
+.paste-link-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 46px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-ink);
+  font-size: var(--text-body-lg);
+  outline: none;
+}
+
+.paste-link-input::placeholder {
+  color: var(--color-placeholder);
+  opacity: 1;
+}
+
+.paste-link-button.btn {
+  flex-shrink: 0;
+  min-height: 46px;
+  padding-inline: 18px;
+}
+
+.paste-link-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 0 16px;
+  color: var(--color-danger);
+  font-size: var(--text-small);
+  font-weight: 600;
+  line-height: var(--text-small-line-height);
+}
+
+.paste-link-error svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
