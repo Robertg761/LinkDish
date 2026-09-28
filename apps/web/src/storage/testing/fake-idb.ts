@@ -73,8 +73,7 @@ const requireStore = (name: string) => {
 };
 
 const tick = async <T>(run: () => T): Promise<T> => {
-  // With isolation on, a transaction's requests wait until the transaction has started.
-  await (placingRequestIn?.started ?? Promise.resolve());
+  await Promise.resolve();
   return run();
 };
 
@@ -145,123 +144,8 @@ const createStoreApi = (name: string, track: <T>(promise: Promise<T>) => Promise
 
 const untracked = <T>(promise: Promise<T>) => promise;
 
-/* ------------------------------------------------------------------------------------------------
- * Opt-in transaction isolation (see `fakeIdb.isolateTransactions`)
- * ---------------------------------------------------------------------------------------------- */
-
-interface FakeIsolatedTransaction {
-  /** Resolves once the transaction has committed. */
-  finished: Promise<void>;
-  mode: IDBTransactionMode;
-  names: readonly string[];
-  /** Resolves once every earlier transaction this one has to wait for has committed. */
-  started: Promise<void>;
-}
-
-/** Transactions that have not committed yet, oldest first; `null` while isolation is off. */
-let isolatedTransactions: Set<FakeIsolatedTransaction> | null = null;
-/** The transaction a request is being placed in right now (read by `tick`). */
-let placingRequestIn: FakeIsolatedTransaction | null = null;
-
-const createIsolatedTransaction = (names: readonly string[], mode: IDBTransactionMode) => {
-  const running = isolatedTransactions ?? new Set<FakeIsolatedTransaction>();
-  // Like IndexedDB: it waits for every earlier overlapping transaction where either one writes.
-  const blockers = Array.from(running).filter(
-    (other) =>
-      (mode !== "readonly" || other.mode !== "readonly") &&
-      other.names.some((name) => names.includes(name))
-  );
-  let commit: () => void = () => undefined;
-  const transaction: FakeIsolatedTransaction = {
-    finished: new Promise<void>((resolve) => {
-      commit = resolve;
-    }),
-    mode,
-    names,
-    started: Promise.all(blockers.map((other) => other.finished)).then(() => undefined)
-  };
-  let active = true;
-  let pending = 0;
-  running.add(transaction);
-
-  // It commits when no request is pending once control returns to the event loop.
-  const commitWhenIdle = () => {
-    setTimeout(() => {
-      if (active && pending === 0) {
-        active = false;
-        running.delete(transaction);
-        commit();
-      }
-    }, 0);
-  };
-
-  const track = <T>(request: Promise<T>): Promise<T> => {
-    pending += 1;
-    const settle = () => {
-      pending -= 1;
-
-      if (pending === 0) {
-        commitWhenIdle();
-      }
-    };
-    void request.then(settle, settle);
-    return request;
-  };
-
-  const place =
-    <Args extends unknown[], Result>(request: (...args: Args) => Result, writes = false) =>
-    (...args: Args): Result => {
-      if (!active) {
-        throw new DOMException("The transaction has finished.", "TransactionInactiveError");
-      }
-
-      if (writes && mode === "readonly") {
-        throw new DOMException("The transaction is read-only.", "ReadOnlyError");
-      }
-
-      placingRequestIn = transaction;
-
-      try {
-        return request(...args);
-      } finally {
-        placingRequestIn = null;
-      }
-    };
-
-  const objectStore = (name: string) => {
-    if (!names.includes(name)) {
-      throw new DOMException(`${name} is not part of this transaction`, "NotFoundError");
-    }
-
-    const api = createStoreApi(name, track);
-
-    return {
-      ...api,
-      clear: place(api.clear, true),
-      count: place(api.count),
-      delete: place(api.delete, true),
-      get: place(api.get),
-      getAll: place(api.getAll),
-      getAllKeys: place(api.getAllKeys),
-      index: (indexName: string) => {
-        const index = api.index(indexName);
-        return { ...index, count: place(index.count), getAll: place(index.getAll) };
-      },
-      put: place(api.put, true)
-    };
-  };
-
-  commitWhenIdle();
-
-  return { done: transaction.finished, objectStore, store: objectStore(names[0] ?? "") };
-};
-
 const createDatabase = () => {
-  // With isolation on, every shortcut (`db.get`, `db.put`...) is a transaction of its own.
-  const storeApi = (name: string) =>
-    isolatedTransactions
-      ? createIsolatedTransaction([name], "readwrite").objectStore(name)
-      : createStoreApi(name, untracked);
+  const storeApi = (name: string) => createStoreApi(name, untracked);
 
   return {
     close: () => undefined,
@@ -278,15 +162,11 @@ const createDatabase = () => {
       contains: (name: string) => state.definitions.has(name)
     },
     put: (storeName: string, value: unknown) => storeApi(storeName).put(value),
-    transaction: (storeNames: string | string[], mode: IDBTransactionMode = "readonly") => {
+    transaction: (storeNames: string | string[]) => {
       const names = Array.isArray(storeNames) ? storeNames : [storeNames];
 
       for (const name of names) {
         requireStore(name);
-      }
-
-      if (isolatedTransactions) {
-        return createIsolatedTransaction(names, mode);
       }
 
       const first = names[0] ?? "";
@@ -460,8 +340,6 @@ export const fakeIdb = {
     state.callbacks = null;
     state.failPuts = new Map();
     fakeIdb.createdStores = [];
-    isolatedTransactions = null;
-    placingRequestIn = null;
   },
 
   /** Declares a store as if an earlier schema version had created it. */
@@ -530,17 +408,5 @@ export const fakeIdb = {
   /** Simulates the browser abnormally closing the connection. */
   fireTerminated(): void {
     state.callbacks?.terminated?.();
-  },
-
-  /**
-   * Until the next reset, transactions are isolated like IndexedDB's (e.g. two tabs' writes):
-   * one waits until every earlier overlapping transaction where either writes has committed; each
-   * commits once no request is pending when control returns to the event loop (a request after
-   * that throws TransactionInactiveError, a write in a readonly one ReadOnlyError); and every
-   * shortcut (`db.get`, `db.put`...) is a transaction of its own. Commits wait for a `setTimeout`,
-   * so it is opt-in (fake timers would hold them back). Failed requests do not abort or roll back.
-   */
-  isolateTransactions(): void {
-    isolatedTransactions = new Set();
   }
 };

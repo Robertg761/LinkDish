@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { COOK_SESSIONS_STORE_NAME, resetLinkDishWebDbForTests } from "../storage/linkdish-db";
 import { fakeIdb } from "../storage/testing/fake-idb";
+import { isolateFakeIdbTransactions } from "../storage/testing/fake-idb-isolation";
 
 import { resetDataChangeFeedForTests, setDataChannelFactoryForTests } from "./change-feed";
 import {
@@ -21,7 +22,10 @@ import {
   useCookSession
 } from "./cook-session-store";
 
-vi.mock("idb", async () => (await import("../storage/testing/fake-idb")).fakeIdbModule);
+vi.mock(
+  "idb",
+  async () => (await import("../storage/testing/fake-idb-isolation")).isolatingFakeIdbModule
+);
 
 const NOW = Date.parse("2026-09-27T18:00:00.000Z");
 
@@ -51,6 +55,7 @@ describe("cook timers", () => {
 describe("cook-session-store", () => {
   beforeEach(() => {
     fakeIdb.reset();
+    isolateFakeIdbTransactions(false);
     resetLinkDishWebDbForTests();
     resetDataChangeFeedForTests();
     resetCookSessionStoreForTests();
@@ -100,7 +105,7 @@ describe("cook-session-store", () => {
   });
 
   it("keeps both of two concurrent updates (say, from two tabs)", async () => {
-    fakeIdb.isolateTransactions();
+    isolateFakeIdbTransactions();
     await updateCookSession("r4", { stepIndex: 1 }, NOW);
 
     // Each tab has its own write queue, so nothing but IndexedDB orders these two.

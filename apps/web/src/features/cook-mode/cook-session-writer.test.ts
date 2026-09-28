@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { resetDataChangeFeedForTests, setDataChannelFactoryForTests } from "../../data/change-feed";
 import {
+  COOK_SESSION_TTL_MS,
   getCookSession,
   resetCookSessionStoreForTests,
   saveCookSession,
@@ -11,6 +12,7 @@ import {
 } from "../../data/cook-session-store";
 import { COOK_SESSIONS_STORE_NAME, resetLinkDishWebDbForTests } from "../../storage/linkdish-db";
 import { fakeIdb } from "../../storage/testing/fake-idb";
+import { isolateFakeIdbTransactions } from "../../storage/testing/fake-idb-isolation";
 
 import {
   flushCookSessionWrites,
@@ -20,7 +22,10 @@ import {
 
 import type { CookSession } from "../../data/cook-session-store";
 
-vi.mock("idb", async () => (await import("../../storage/testing/fake-idb")).fakeIdbModule);
+vi.mock(
+  "idb",
+  async () => (await import("../../storage/testing/fake-idb-isolation")).isolatingFakeIdbModule
+);
 
 const NOW = Date.now();
 
@@ -54,8 +59,12 @@ const openOtherTab = async () => {
   const feed = await import("../../data/change-feed");
   const store = await import("../../data/cook-session-store");
   const writer = await import("./cook-session-writer");
+  // A tab that is already running has its database connection open.
+  await (await import("../../storage/linkdish-db")).getLinkDishWebDb();
   return { feed, store, writer };
 };
+
+type OtherTabStore = Awaited<ReturnType<typeof openOtherTab>>["store"];
 
 const storedSession = (recipeId: string) =>
   fakeIdb.record<CookSession>(COOK_SESSIONS_STORE_NAME, recipeId);
@@ -63,7 +72,7 @@ const storedSession = (recipeId: string) =>
 describe("cook-session writes from two tabs", () => {
   beforeEach(async () => {
     fakeIdb.reset();
-    fakeIdb.isolateTransactions();
+    isolateFakeIdbTransactions();
     resetLinkDishWebDbForTests();
     resetDataChangeFeedForTests();
     resetCookSessionStoreForTests();
@@ -126,6 +135,31 @@ describe("cook-session writes from two tabs", () => {
     ]);
 
     expect(await getCookSession("r1")).toMatchObject({
+      checkedIngredients: [],
+      stepIndex: 0,
+      timers: [timer]
+    });
+  });
+
+  it.each([
+    ["cleans up expired sessions", (store: OtherTabStore) => store.getCookSessions()],
+    ["reads the expired session", (store: OtherTabStore) => store.getCookSession("old")]
+  ])("keeps a session this tab revives while the other tab %s", async (_, readInOtherTab) => {
+    await saveCookSession(
+      { checkedIngredients: ["flour"], recipeId: "old", scale: 1, stepIndex: 2, timers: [] },
+      NOW - COOK_SESSION_TTL_MS - 60_000
+    );
+    const other = await openOtherTab();
+    const timer = startCookTimer({ durationMs: 600_000, id: "t2", label: "Proof" });
+
+    // The other tab reads the expired session, then this tab starts a fresh one in its place
+    // before the other tab's delete runs.
+    await Promise.all([
+      readInOtherTab(other.store),
+      queueCookSessionUpdate("old", (session) => ({ timers: [...session.timers, timer] }))
+    ]);
+
+    expect(storedSession("old")).toMatchObject({
       checkedIngredients: [],
       stepIndex: 0,
       timers: [timer]

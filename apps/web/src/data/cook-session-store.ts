@@ -111,6 +111,37 @@ const sanitizeSession = (session: CookSession): CookSession => ({
   stepIndex: Number.isInteger(session.stepIndex) && session.stepIndex >= 0 ? session.stepIndex : 0
 });
 
+/**
+ * Deletes those of `recipeIds` whose session is still expired, checking each again inside the
+ * deleting readwrite transaction: another tab may have started a fresh session under that recipe
+ * since it was read, and that one must stay. Returns the recipe ids actually deleted.
+ */
+async function deleteExpiredCookSessions(
+  recipeIds: readonly string[],
+  now: number
+): Promise<string[]> {
+  const db = await getLinkDishWebDb();
+  const tx = db.transaction(COOK_SESSIONS_STORE_NAME, "readwrite");
+  const store = tx.objectStore(COOK_SESSIONS_STORE_NAME);
+  const deleted: string[] = [];
+  const deleteIfExpired = async (recipeId: string) => {
+    const session = (await store.get(recipeId)) as CookSession | undefined;
+
+    if (session && isCookSessionExpired(session, now)) {
+      deleted.push(recipeId);
+      await store.delete(recipeId);
+    }
+  };
+
+  await Promise.all([...recipeIds.map(deleteIfExpired), tx.done]);
+
+  if (deleted.length) {
+    emitDataChange({ deletedIds: deleted, topic: "cookSessions" });
+  }
+
+  return deleted;
+}
+
 /** Deletes every expired session. Returns how many were removed. */
 export async function cleanupExpiredCookSessions(now: number = Date.now()): Promise<number> {
   const db = await getLinkDishWebDb();
@@ -121,14 +152,11 @@ export async function cleanupExpiredCookSessions(now: number = Date.now()): Prom
     return 0;
   }
 
-  const tx = db.transaction(COOK_SESSIONS_STORE_NAME, "readwrite");
-  const store = tx.objectStore(COOK_SESSIONS_STORE_NAME);
-  await Promise.all([...expired.map((session) => store.delete(session.recipeId)), tx.done]);
-  emitDataChange({
-    deletedIds: expired.map((session) => session.recipeId),
-    topic: "cookSessions"
-  });
-  return expired.length;
+  const deleted = await deleteExpiredCookSessions(
+    expired.map((session) => session.recipeId),
+    now
+  );
+  return deleted.length;
 }
 
 /** Every live session keyed by recipe id (expired ones are cleaned up first). */
@@ -152,8 +180,15 @@ export async function getCookSession(
   }
 
   if (isCookSessionExpired(session, now)) {
-    await clearCookSession(recipeId);
-    return undefined;
+    const deleted = await deleteExpiredCookSessions([recipeId], now);
+
+    if (deleted.length) {
+      return undefined;
+    }
+
+    // Another tab started a fresh session (or removed it) since the read above.
+    const current = (await db.get(COOK_SESSIONS_STORE_NAME, recipeId)) as CookSession | undefined;
+    return current && !isCookSessionExpired(current, now) ? current : undefined;
   }
 
   return session;
