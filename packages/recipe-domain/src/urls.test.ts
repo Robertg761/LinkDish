@@ -124,5 +124,15 @@ describe("recipeSourceLabel", () => {
     expect(recipeSourceLabel("https://www.seriouseats.com/x")).toBe("seriouseats.com");
     expect(recipeSourceLabel("https://linkdish.app/image-imports/abc")).toBe("Scanned image");
     expect(recipeSourceLabel("nonsense")).toBe("Saved recipe");
+    expect(recipeSourceLabel("https://linkdish.app/text-imports/abc123")).toBe("Pasted text");
+    expect(recipeSourceLabel("https://linkdish.app/imports/paprika/banana-bread-1a2b")).toBe(
+      "Imported from Paprika"
+    );
+    expect(recipeSourceLabel("https://linkdish.app/imports/mela/soup-9f")).toBe(
+      "Imported from Mela"
+    );
+    expect(recipeSourceLabel("https://linkdish.app/imports/schema-org/stew-77")).toBe(
+      "Imported recipe"
+    );
   });
 });

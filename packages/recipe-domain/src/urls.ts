@@ -235,9 +235,28 @@ export const extractFirstUrl = (text: string): string | null => {
  * A short label for where a recipe came from: the host without "www." ("seriouseats.com"), or
  * "Scanned image" for photo imports. Falls back to "Saved recipe" for unreadable URLs.
  */
+const IMPORTED_APP_URL_PATTERN = /linkdish\.app\/imports\/([a-z0-9-]+)\//iu;
+
+const IMPORTED_APP_LABELS: Readonly<Record<string, string>> = {
+  linkdish: "Imported from a LinkDish backup",
+  mela: "Imported from Mela",
+  paprika: "Imported from Paprika"
+};
+
 export const recipeSourceLabel = (sourceUrl: string): string => {
   if (sourceUrl.includes("linkdish.app/image-imports/")) {
     return "Scanned image";
+  }
+
+  // Pasted-text imports and recipes restored from other apps carry made-up linkdish.app URLs.
+  if (sourceUrl.includes("linkdish.app/text-imports/")) {
+    return "Pasted text";
+  }
+
+  const importedApp = IMPORTED_APP_URL_PATTERN.exec(sourceUrl)?.[1];
+
+  if (importedApp !== undefined) {
+    return IMPORTED_APP_LABELS[importedApp.toLowerCase()] ?? "Imported recipe";
   }
 
   const parsed = parseUrl(sourceUrl);

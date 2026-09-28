@@ -22,7 +22,15 @@ const META_ICONS: Record<string, IconName> = {
 
 export const RecipeSourceChip: React.FC<{ source: RecipeSourceInfo }> = ({ source }) => {
   const icon: IconName =
-    source.kind === "photos" ? "camera" : source.kind === "starter" ? "chef-hat" : "globe";
+    source.kind === "photos"
+      ? "camera"
+      : source.kind === "starter"
+        ? "chef-hat"
+        : source.kind === "text"
+          ? "file-text"
+          : source.kind === "imported"
+            ? "download"
+            : "globe";
   const content = (
     <>
       <Icon name={icon} size={15} />
