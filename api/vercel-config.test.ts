@@ -197,3 +197,38 @@ describe("apps/web/vercel.json caching", () => {
     });
   });
 });
+
+describe("vercel.json app hosts", () => {
+  interface HeaderRule {
+    source: string;
+    has?: Array<{ type: string; value: string }>;
+    headers: Array<{ key: string; value: string }>;
+  }
+
+  const rootConfig = JSON.parse(
+    readFileSync(new URL("../vercel.json", import.meta.url), "utf8")
+  ) as {
+    headers?: HeaderRule[];
+  };
+  const cspOf = (rule: { headers: Array<{ key: string; value: string }> } | undefined) =>
+    rule?.headers.find((header) => header.key.toLowerCase() === "content-security-policy")?.value;
+
+  it("serves the app hosts the same CSP as the web app, theme bootstrap hash included", () => {
+    const appHostRule = rootConfig.headers?.find((rule) =>
+      rule.has?.some((condition) => condition.type === "host" && condition.value.includes("app"))
+    );
+    const webCsp = toRoutes(webConfig)
+      .map((route) =>
+        Object.entries(route.headers ?? {}).find(
+          ([key]) => key.toLowerCase() === "content-security-policy"
+        )
+      )
+      .find(Boolean)?.[1];
+
+    expect(cspOf(appHostRule)).toBeDefined();
+    // One policy for the app, whichever config serves it, so an inline-script hash can't drift.
+    expect(webCsp).toBeDefined();
+    expect(cspOf(appHostRule)).toBe(webCsp);
+    expect(cspOf(appHostRule)).toContain("'sha256-Gx75g3P/94t2dubzu/zEVZUhlNzdIAiLifLVj8l4WJA='");
+  });
+});
