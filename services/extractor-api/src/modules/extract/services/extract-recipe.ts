@@ -12,6 +12,7 @@ import {
 } from "../../../../../../packages/recipe-domain/src/index.js";
 import { extractorApiEnv } from "../../../config/env.js";
 import { toHandoffSourceDocument, type FallbackHandoff } from "../cache/fallback-handoff.js";
+import { isStrongStructuredCandidate } from "../confidence/score-recipe.js";
 import { successConfidenceThresholds } from "../confidence/thresholds.js";
 import {
   createRequestDeadline,
@@ -630,7 +631,14 @@ const decidePrimaryOutcome = (
     );
   }
 
-  if (normalized.confidenceScore < successConfidenceThresholds[sourceType]) {
+  /*
+   * A site's own Recipe JSON-LD/microdata with a title, ingredients and steps is a success even
+   * when servings or times are missing (the normaliser notes the gaps as a warning).
+   */
+  if (
+    normalized.confidenceScore < successConfidenceThresholds[sourceType] &&
+    !isStrongStructuredCandidate(candidate)
+  ) {
     return buildRetryDecision(
       sourceType,
       candidate,

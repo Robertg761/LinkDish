@@ -249,10 +249,47 @@ const sanitizeIngredientText = (value: string): string => {
     .trim();
 };
 
-export const toIngredientLines = (values: string[]): { text: string }[] =>
-  uniqueNonEmptyText(values.map(sanitizeIngredientText))
+export interface LineBuilderOptions {
+  /**
+   * Lines that come from structured recipe data (JSON-LD, microdata). The site already said
+   * these are ingredients or steps, so short ones ("Salt", "Toss.") are kept instead of being
+   * filtered out as page noise.
+   */
+  structured?: boolean;
+}
+
+/* A list published twice in a row ([a, b, a, b]) is a site bug; one copy is kept. */
+const withoutRepeatedList = (values: string[]): string[] => {
+  if (values.length < 2 || values.length % 2 !== 0) {
+    return values;
+  }
+
+  const half = values.length / 2;
+  const firstHalf = values.slice(0, half);
+
+  return firstHalf.every((value, index) => value === values[half + index]) ? firstHalf : values;
+};
+
+export const toIngredientLines = (
+  values: string[],
+  options: LineBuilderOptions = {}
+): { text: string }[] => {
+  const sanitized = values.map(sanitizeIngredientText);
+
+  if (options.structured) {
+    /*
+     * Structured lines are not de-duplicated: "1 cup sugar" in the cake and again in the
+     * frosting are two real ingredients.
+     */
+    return withoutRepeatedList(sanitized.filter((value) => value.length > 0)).map((text) => ({
+      text
+    }));
+  }
+
+  return uniqueNonEmptyText(sanitized)
     .filter((value) => looksLikeIngredient(value) || value.length > 6)
     .map((text) => ({ text }));
+};
 
 const splitInstructionText = (value: string): string[] => {
   const lineParts = value
@@ -277,22 +314,36 @@ const splitInstructionText = (value: string): string[] => {
       return [line];
     }
 
-    return markers
-      .map((marker, index) => {
+    // "Stuff the bird. 2. Rub with oil. 3. Roast." keeps its unnumbered first step too.
+    const leadingStep = line.slice(0, markers[0]?.start ?? 0).trim();
+
+    return [
+      leadingStep,
+      ...markers.map((marker, index) => {
         const nextMarker = markers[index + 1];
         return line.slice(marker.end, nextMarker?.start).trim();
       })
-      .filter(Boolean);
+    ].filter(Boolean);
   });
 };
 
-export const toStepLines = (values: string[]): { index: number; text: string }[] =>
-  uniqueNonEmptyText(values.flatMap(splitInstructionText))
-    .filter((value) => looksLikeStep(value) || value.length > 20)
+export const toStepLines = (
+  values: string[],
+  options: LineBuilderOptions = {}
+): { index: number; text: string }[] => {
+  const lines = uniqueNonEmptyText(values.flatMap(splitInstructionText));
+  const kept = options.structured
+    ? lines
+    : lines.filter((value) => looksLikeStep(value) || value.length > 20);
+
+  return kept
+    .map((text) => text.replace(/^\d+\.\s*/, "").trim())
+    .filter((text) => text.length > 0)
     .map((text, index) => ({
       index: index + 1,
-      text: text.replace(/^\d+\.\s*/, "")
+      text
     }));
+};
 
 export const parseTextRecipeSignals = (
   textBlocks: string[]

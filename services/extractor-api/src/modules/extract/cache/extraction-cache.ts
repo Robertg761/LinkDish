@@ -22,7 +22,7 @@ import type { DetectionResult } from "../types.js";
  * Bump EXTRACTOR_CACHE_VERSION whenever extraction output changes (parsers,
  * normalisation, scoring, prompts) so stale results stop being served.
  */
-export const EXTRACTOR_CACHE_VERSION = "2026-09-27.1";
+export const EXTRACTOR_CACHE_VERSION = "2026-09-27.2";
 
 const cacheKeyPrefix = "linkdish:extract-cache:v1";
 const cacheEntryVersion = 1;

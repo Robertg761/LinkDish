@@ -19,11 +19,13 @@ import { looksLikeNotFoundHtml, looksLikeShellHtml, looksLikeThinHtml } from "./
 import { buildHtmlSourceDocument, getParsedHtmlDocument } from "./parsed-html-document";
 
 /*
- * extractor-outputs.json was generated from the extractors *before* they were
- * moved onto one shared parse per document (each helper used to re-parse the
- * page). These tests prove the single-parse pipeline returns identical output
- * for every fixture, including a larger @graph/WPRM page, an adapter DOM page
- * and a sectioned article.
+ * extractor-outputs.json was first generated from the extractors *before* they
+ * were moved onto one shared parse per document (each helper used to re-parse
+ * the page). These tests prove the single-parse pipeline returns identical
+ * output for every fixture, including a larger @graph/WPRM page, an adapter DOM
+ * page and a sectioned article. When extractor output changes on purpose
+ * (richer metadata, better yield/step parsing), regenerate the snapshot with
+ * scripts/generate-parity-snapshot.ts and review the JSON diff.
  */
 type ParitySnapshot = Record<
   string,

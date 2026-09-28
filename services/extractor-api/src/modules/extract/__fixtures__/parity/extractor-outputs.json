@@ -806,14 +806,22 @@
           },
           {
             "index": 3,
-            "text": "Roast for 70 minutes."
+            "text": "Stuff the chicken with lemon, garlic and thyme."
           },
           {
             "index": 4,
+            "text": "Rub with oil."
+          },
+          {
+            "index": 5,
+            "text": "Roast for 70 minutes."
+          },
+          {
+            "index": 6,
             "text": "Rest 10 minutes before carving."
           }
         ],
-        "servings": "4, 4 servings",
+        "servings": "4 servings",
         "prepTimeMinutes": 15,
         "cookTimeMinutes": 70,
         "nutrition": {
@@ -824,7 +832,9 @@
           "fiber": null,
           "sugar": null,
           "sodium": null
-        }
+        },
+        "description": "Crispy skin, juicy meat, one pan.",
+        "siteName": "Fixture Kitchen"
       },
       "strategy": "recipe-schema",
       "evidence": ["Detected Recipe JSON-LD on the page."],
@@ -941,7 +951,7 @@
     "shell": false,
     "thin": false,
     "notFound": false,
-    "fallbackInput": "Extract a clean cooking recipe from the provided source.\n\nOnly return recipe data that is directly supported by the source. Be conservative with inferences.\n\nPreserve ingredient grouping exactly when the source has sections. For example, if a recipe has Cake and Frosting ingredients, attach section \"Cake\" to cake ingredients and section \"Frosting\" to frosting ingredients.\n\nMethod steps must make ingredient usage clear enough for cook mode. When a step uses only one section or a subset of ingredients, name that section or ingredients in the step text instead of relying on the user to look back.\n\nSource type: recipe-webpage\n\nDetection confidence: high\n\nFetch mode: http\n\nSource URL: https://fixture-kitchen.test/lemon-herb-roast-chicken/\n\nDeterministic candidate:\n\n{\n  \"title\": \"Lemon Herb Roast Chicken\",\n  \"ingredients\": [\n    {\n      \"text\": \"1 (4 lb) whole chicken\"\n    },\n    {\n      \"text\": \"2 lemons, halved\"\n    },\n    {\n      \"text\": \"6 cloves garlic, smashed\"\n    },\n    {\n      \"text\": \"2 tbsp olive oil (divided)\"\n    },\n    {\n      \"text\": \"1 tsp kosher salt, plus more\"\n    },\n    {\n      \"text\": \"fresh thyme\"\n    }\n  ],\n  \"steps\": [\n    {\n      \"index\": 1,\n      \"text\": \"Heat the oven to 425F.\"\n    },\n    {\n      \"index\": 2,\n      \"text\": \"Pat the chicken dry and season it all over with salt.\"\n    },\n    {\n      \"index\": 3,\n      \"text\": \"Roast for 70 minutes.\"\n    },\n    {\n      \"index\": 4,\n      \"text\": \"Rest 10 minutes before carving.\"\n    }\n  ],\n  \"servings\": \"4, 4 servings\",\n  \"prepTimeMinutes\": 15,\n  \"cookTimeMinutes\": 70,\n  \"nutrition\": {\n    \"calories\": \"520 kcal\",\n    \"protein\": \"48 g\",\n    \"carbohydrates\": null,\n    \"fat\": \"30 g\",\n    \"fiber\": null,\n    \"sugar\": null,\n    \"sodium\": null\n  },\n  \"warnings\": [],\n  \"evidence\": [\n    \"Detected Recipe JSON-LD on the page.\"\n  ]\n}\n\nSource document:\n\nPage title: Lemon Herb Roast Chicken\nMeta description: Crispy skin, juicy meat, one pan.\nHeadings: Lemon Herb Roast Chicken | Lemon Herb Roast Chicken\nVisible text excerpt: Lemon Herb Roast Chicken Jump to Recipe Lemon Herb Roast Chicken 1 (4 lb) whole chicken 2 lemons, halved Heat the oven to 425F. Roast until golden. Calories: 520kcal Protein: 48g Fat: 30g Sodium: 900mg This site is protected by reCAPTCHA and the Google Privacy Policy applies.",
+    "fallbackInput": "Extract a clean cooking recipe from the provided source.\n\nOnly return recipe data that is directly supported by the source. Be conservative with inferences.\n\nPreserve ingredient grouping exactly when the source has sections. For example, if a recipe has Cake and Frosting ingredients, attach section \"Cake\" to cake ingredients and section \"Frosting\" to frosting ingredients.\n\nMethod steps must make ingredient usage clear enough for cook mode. When a step uses only one section or a subset of ingredients, name that section or ingredients in the step text instead of relying on the user to look back.\n\nSource type: recipe-webpage\n\nDetection confidence: high\n\nFetch mode: http\n\nSource URL: https://fixture-kitchen.test/lemon-herb-roast-chicken/\n\nDeterministic candidate:\n\n{\n  \"title\": \"Lemon Herb Roast Chicken\",\n  \"ingredients\": [\n    {\n      \"text\": \"1 (4 lb) whole chicken\"\n    },\n    {\n      \"text\": \"2 lemons, halved\"\n    },\n    {\n      \"text\": \"6 cloves garlic, smashed\"\n    },\n    {\n      \"text\": \"2 tbsp olive oil (divided)\"\n    },\n    {\n      \"text\": \"1 tsp kosher salt, plus more\"\n    },\n    {\n      \"text\": \"fresh thyme\"\n    }\n  ],\n  \"steps\": [\n    {\n      \"index\": 1,\n      \"text\": \"Heat the oven to 425F.\"\n    },\n    {\n      \"index\": 2,\n      \"text\": \"Pat the chicken dry and season it all over with salt.\"\n    },\n    {\n      \"index\": 3,\n      \"text\": \"Stuff the chicken with lemon, garlic and thyme.\"\n    },\n    {\n      \"index\": 4,\n      \"text\": \"Rub with oil.\"\n    },\n    {\n      \"index\": 5,\n      \"text\": \"Roast for 70 minutes.\"\n    },\n    {\n      \"index\": 6,\n      \"text\": \"Rest 10 minutes before carving.\"\n    }\n  ],\n  \"servings\": \"4 servings\",\n  \"prepTimeMinutes\": 15,\n  \"cookTimeMinutes\": 70,\n  \"nutrition\": {\n    \"calories\": \"520 kcal\",\n    \"protein\": \"48 g\",\n    \"carbohydrates\": null,\n    \"fat\": \"30 g\",\n    \"fiber\": null,\n    \"sugar\": null,\n    \"sodium\": null\n  },\n  \"warnings\": [],\n  \"evidence\": [\n    \"Detected Recipe JSON-LD on the page.\"\n  ]\n}\n\nSource document:\n\nPage title: Lemon Herb Roast Chicken\nMeta description: Crispy skin, juicy meat, one pan.\nHeadings: Lemon Herb Roast Chicken | Lemon Herb Roast Chicken\nVisible text excerpt: Lemon Herb Roast Chicken Jump to Recipe Lemon Herb Roast Chicken 1 (4 lb) whole chicken 2 lemons, halved Heat the oven to 425F. Roast until golden. Calories: 520kcal Protein: 48g Fat: 30g Sodium: 900mg This site is protected by reCAPTCHA and the Google Privacy Policy applies.",
     "helpers": {
       "sectionList": [],
       "sectionContent": [],

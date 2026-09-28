@@ -1,3 +1,9 @@
+import { canonicalizeRecipeUrl } from "../../../../../../packages/recipe-domain/src/index.js";
+import {
+  isKnownLinkShortener,
+  isSameRegistrableDomain
+} from "../source-detection/registrable-domain.js";
+
 import type { InternalFetchFailureKind } from "../types.js";
 
 export const browserLikeHeaders = {
@@ -32,11 +38,16 @@ const notFoundTitlePatterns = [
   /\bcontent unavailable\b/i
 ] as const;
 
+/* Checked against the page title, and against readable text of short (error-sized) pages. */
 const redirectHintPatterns = [
   /\bthis recipe has moved\b/i,
   /\bpage not found\b/i,
   /\bnot found\b/i
 ] as const;
+/* Specific enough to check near the top of a full page's readable text. */
+const strongRedirectHintPatterns = [/\bthis recipe has moved\b/i, /\bpage not found\b/i] as const;
+const maxShortPageVisibleTextChars = 1_500;
+const redirectHintVisibleTextWindow = 4_000;
 
 /*
  * The extract path fetches attacker-supplied URLs, so response bodies are
@@ -338,6 +349,42 @@ const tokenizeUrlPath = (value: string): string[] =>
         token.length >= 4 && !["recipe", "recipes", "article", "blog", "videos"].includes(token)
     );
 
+/* The address a page is known by, ignoring scheme, www., tracking parameters and trailing slashes. */
+const toPageAddress = (url: URL): string =>
+  canonicalizeRecipeUrl(url.toString())
+    .replace(/^https?:\/\//iu, "")
+    .replace(/^www\./iu, "");
+
+const isHomepagePath = (url: URL): boolean =>
+  (url.pathname === "/" || url.pathname === "") && url.search === "";
+
+/*
+ * "Not found" wording is only trusted where a moved or missing page shows it: the title, or the
+ * readable text of a short page. Scanning the raw HTML matched inline scripts and i18n bundles
+ * ("not found" error strings) on perfectly good recipe pages.
+ */
+const hasRedirectHint = (title: string | null, html: string): boolean => {
+  if (title && redirectHintPatterns.some((pattern) => pattern.test(title))) {
+    return true;
+  }
+
+  const visibleText = extractVisibleHtmlText(html);
+
+  if (visibleText.length <= maxShortPageVisibleTextChars) {
+    return redirectHintPatterns.some((pattern) => pattern.test(visibleText));
+  }
+
+  const leadingText = visibleText.slice(0, redirectHintVisibleTextWindow);
+  return strongRedirectHintPatterns.some((pattern) => pattern.test(leadingText));
+};
+
+/**
+ * True when a fetch that was redirected landed somewhere that is probably not the recipe the
+ * user linked: a page announcing it moved or is missing, a different site, the site's homepage,
+ * or a path with nothing in common with the one requested. Redirects that keep the page's
+ * address (http→https, apex↔www, a trailing slash, tracking parameters) never count, and link
+ * shorteners (pin.it, bit.ly, t.co...) may send people to any site.
+ */
 export const looksLikeUnrelatedRedirect = ({
   requestedUrl,
   finalUrl,
@@ -353,18 +400,39 @@ export const looksLikeUnrelatedRedirect = ({
     return false;
   }
 
-  if (redirectHintPatterns.some((pattern) => pattern.test(title ?? "") || pattern.test(html))) {
+  let requested: URL;
+  let final: URL;
+
+  try {
+    requested = new URL(requestedUrl);
+    final = new URL(finalUrl);
+  } catch {
+    return false;
+  }
+
+  if (toPageAddress(requested) === toPageAddress(final)) {
+    return false;
+  }
+
+  if (hasRedirectHint(title, html)) {
     return true;
   }
 
-  const requested = new URL(requestedUrl);
-  const final = new URL(finalUrl);
+  if (isKnownLinkShortener(requested.hostname)) {
+    return false;
+  }
 
-  if (requested.hostname !== final.hostname) {
+  if (!isSameRegistrableDomain(requested.hostname, final.hostname)) {
     return true;
   }
 
   const requestedTokens = tokenizeUrlPath(requested.pathname);
+
+  /* A deep recipe link that lands on the homepage means the recipe is gone. */
+  if (requestedTokens.length > 0 && isHomepagePath(final)) {
+    return true;
+  }
+
   const finalTokens = tokenizeUrlPath(final.pathname);
 
   if (requestedTokens.length === 0 || finalTokens.length === 0) {
