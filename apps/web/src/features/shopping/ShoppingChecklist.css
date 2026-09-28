@@ -1,0 +1,198 @@
+.shopping-checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.shopping-checklist-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.shopping-checklist-count {
+  color: var(--color-ink-muted);
+  font-size: var(--text-small);
+  font-weight: 600;
+}
+
+.shopping-checklist-bulk {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.shopping-checklist-dot {
+  color: var(--color-ink-subtle);
+}
+
+.shopping-checklist-link {
+  min-height: 36px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--color-primary);
+  font: inherit;
+  font-size: var(--text-small);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.shopping-checklist-link:hover:not(:disabled) {
+  background: var(--color-state-hover);
+}
+
+.shopping-checklist-link:disabled {
+  color: var(--color-ink-subtle);
+  cursor: default;
+}
+
+.shopping-checklist-staples {
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  background: var(--color-surface-sunken);
+}
+
+.shopping-checklist-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.shopping-checklist-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 0;
+  color: var(--color-ink-muted);
+  font-family: var(--font-family-sans);
+  font-size: var(--text-label);
+  font-weight: 800;
+  letter-spacing: var(--text-label-letter-spacing);
+  text-transform: uppercase;
+}
+
+.shopping-checklist-aisle {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-xs);
+  background: var(--color-primary-soft);
+  color: var(--color-on-primary-soft);
+}
+
+.shopping-checklist-rows {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  list-style: none;
+}
+
+.shopping-checklist-rows > li + li {
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.shopping-checklist-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+  min-height: 52px;
+  padding: 12px 14px;
+  border: 0;
+  background: transparent;
+  color: var(--color-ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+}
+
+@media (hover: hover) {
+  .shopping-checklist-row:hover {
+    background: var(--color-state-hover);
+  }
+}
+
+.shopping-checklist-row:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: -2px;
+}
+
+.shopping-checklist-box {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  margin-top: 1px;
+  border: 2px solid var(--color-border-strong);
+  border-radius: 8px;
+  background: var(--color-surface);
+  color: transparent;
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.shopping-checklist-row.is-selected .shopping-checklist-box {
+  border-color: var(--color-primary);
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+}
+
+.shopping-checklist-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.shopping-checklist-label {
+  font-size: var(--text-body);
+  font-variant-numeric: lining-nums tabular-nums;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.shopping-checklist-row:not(.is-selected) .shopping-checklist-label {
+  color: var(--color-ink-muted);
+}
+
+.shopping-checklist-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.shopping-checklist-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--color-surface-tint);
+  color: var(--color-ink-muted);
+  font-size: var(--text-caption);
+  font-weight: 700;
+}
+
+.shopping-checklist-tag.is-on-list {
+  background: var(--color-butter-soft);
+  color: var(--color-on-butter-soft);
+}
+
+.shopping-checklist-detail {
+  color: var(--color-ink-subtle);
+  font-size: var(--text-caption);
+}

@@ -247,7 +247,7 @@ describe("RecipePage shared route", () => {
     fireEvent.click(screen.getByRole("button", { name: "Add to shopping list" }));
 
     const shoppingDialog = screen.getByRole("dialog", { name: "Add ingredients" });
-    expect(shoppingDialog.closest(".shopping-sheet-backdrop")?.parentElement).toBe(document.body);
+    expect(shoppingDialog.closest(".sheet-backdrop")?.parentElement).toBe(document.body);
   });
 
   it("uses an app-native confirmation before unsharing a recipe", async () => {

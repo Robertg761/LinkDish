@@ -1,126 +1,47 @@
+import { upsertShoppingItemsRequestSchema } from "@linkdish/api-contracts";
+import { renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { resetLinkDishWebDbForTests } from "../../storage/linkdish-db";
+import { getLinkDishWebDb, resetLinkDishWebDbForTests } from "../../storage/linkdish-db";
+import { fakeIdb } from "../../storage/testing/fake-idb";
 
+import { formatItem } from "./shopping-format";
 import {
   addShoppingItems,
+  clearAllShoppingItems,
+  clearCheckedShoppingItems,
+  deleteShoppingItems,
   getShoppingItems,
+  getShoppingListSnapshot,
   handleUpsertShoppingSyncResult,
+  loadShoppingList,
   mergeShoppingItems,
+  parseManualShoppingLine,
+  putShoppingItems,
+  recipeIngredientsToShoppingInputs,
+  resetShoppingListStoreForTests,
+  restoreShoppingItems,
+  roundUpCountForShopping,
   setShoppingItemChecked,
+  splitShoppingLines,
+  syncShoppingItems,
+  toApiShoppingItem,
+  updateShoppingItemFromLine,
+  useShoppingList,
   type WebShoppingItem
 } from "./shopping-list-store";
 
-const idbMocks = vi.hoisted(() => ({
-  createObjectStore: vi.fn(),
-  oldVersion: 2,
-  openDB: vi.fn(),
-  stores: new Map<string, Map<string, unknown>>()
+import type { UpsertShoppingItemsRequest } from "@linkdish/api-contracts";
+import type { Recipe } from "@linkdish/recipe-domain";
+
+const apiMocks = vi.hoisted(() => ({
+  deleteShoppingItems: vi.fn(),
+  getShoppingList: vi.fn(),
+  upsertShoppingItems: vi.fn()
 }));
 
-vi.mock("../../api/client", () => ({
-  apiClient: {
-    deleteShoppingItems: vi.fn(),
-    getShoppingList: vi.fn(),
-    upsertShoppingItems: vi.fn()
-  }
-}));
-
-vi.mock("idb", () => {
-  const getStore = (name: string) => {
-    let store = idbMocks.stores.get(name);
-
-    if (!store) {
-      store = new Map<string, unknown>();
-      idbMocks.stores.set(name, store);
-    }
-
-    return store;
-  };
-
-  return {
-    openDB: idbMocks.openDB.mockImplementation(
-      async (
-        _name: string,
-        _version: number,
-        options?: {
-          upgrade?: (
-            db: {
-              createObjectStore: ReturnType<typeof vi.fn>;
-              objectStoreNames: { contains: (name: string) => boolean };
-            },
-            oldVersion: number,
-            newVersion: number,
-            transaction: never
-          ) => void;
-        }
-      ) => {
-        await Promise.resolve();
-        const db = {
-          createObjectStore: idbMocks.createObjectStore.mockImplementation((name: string) => {
-            getStore(name);
-            return { createIndex: vi.fn() };
-          }),
-          objectStoreNames: {
-            contains: (name: string) => idbMocks.stores.has(name)
-          },
-          transaction: (storeName: string) => ({
-            objectStore: () => ({
-              get: async (key: string) => {
-                await Promise.resolve();
-                return getStore(storeName).get(key);
-              },
-              getAll: async () => {
-                await Promise.resolve();
-                return Array.from(getStore(storeName).values());
-              },
-              put: async (value: unknown) => {
-                await Promise.resolve();
-                getStore(storeName).set((value as { id: string }).id, value);
-              }
-            })
-          }),
-          delete: async (storeName: string, key: string) => {
-            await Promise.resolve();
-            getStore(storeName).delete(key);
-          },
-          get: async (storeName: string, key: string) => {
-            await Promise.resolve();
-            return getStore(storeName).get(key);
-          },
-          getAll: async (storeName: string) => {
-            await Promise.resolve();
-            return Array.from(getStore(storeName).values());
-          },
-          put: async (storeName: string, value: unknown) => {
-            await Promise.resolve();
-            getStore(storeName).set((value as { id: string }).id, value);
-          }
-        };
-
-        const upgradeTransaction = {
-          objectStore: (storeName: string) => ({
-            get: async (key: string) => {
-              await Promise.resolve();
-              return getStore(storeName).get(key);
-            },
-            getAllKeys: async () => {
-              await Promise.resolve();
-              return Array.from(getStore(storeName).keys());
-            },
-            put: async (value: unknown) => {
-              await Promise.resolve();
-              getStore(storeName).set((value as { id: string }).id, value);
-            }
-          })
-        };
-
-        options?.upgrade?.(db, idbMocks.oldVersion, _version, upgradeTransaction as never);
-        return db;
-      }
-    )
-  };
-});
+vi.mock("../../api/client", () => ({ apiClient: apiMocks }));
+vi.mock("idb", async () => (await import("../../storage/testing/fake-idb")).fakeIdbModule);
 
 const makeItem = (overrides: Partial<WebShoppingItem>): WebShoppingItem => ({
   addedBy: "user-1",
@@ -134,13 +55,17 @@ const makeItem = (overrides: Partial<WebShoppingItem>): WebShoppingItem => ({
   ...overrides
 });
 
+const live = async () => getShoppingItems();
+const byText = async (text: string) => (await live()).find((item) => item.text === text);
+
 describe("shopping-list-store", () => {
   beforeEach(() => {
-    idbMocks.createObjectStore.mockClear();
-    idbMocks.openDB.mockClear();
-    idbMocks.oldVersion = 2;
-    idbMocks.stores.clear();
+    fakeIdb.reset();
     resetLinkDishWebDbForTests();
+    resetShoppingListStoreForTests();
+    apiMocks.deleteShoppingItems.mockReset();
+    apiMocks.getShoppingList.mockReset();
+    apiMocks.upsertShoppingItems.mockReset();
 
     let uuidIndex = 0;
     vi.spyOn(crypto, "randomUUID").mockImplementation(() => {
@@ -149,11 +74,11 @@ describe("shopping-list-store", () => {
     });
   });
 
-  it("creates the shopping object store when upgrading to the v4 schema", async () => {
+  it("opens the v4 database with the shopping store", async () => {
     await getShoppingItems();
 
-    expect(idbMocks.openDB).toHaveBeenCalledWith("linkdish-web", 4, expect.any(Object));
-    expect(idbMocks.createObjectStore).toHaveBeenCalledWith("shoppingItems", { keyPath: "id" });
+    expect(fakeIdb.openCalls[0]).toMatchObject({ name: "linkdish-web", version: 4 });
+    expect(fakeIdb.hasStore("shoppingItems")).toBe(true);
   });
 
   it("round-trips local-only shopping items through IndexedDB", async () => {
@@ -171,7 +96,7 @@ describe("shopping-list-store", () => {
     });
   });
 
-  it("merges identical item text only when units match", () => {
+  it("merges the same thing only when the units can be added", () => {
     const merged = mergeShoppingItems(
       [makeItem({ id: "cup-sugar", qty: 1, text: "sugar", unit: "cup" })],
       [
@@ -183,6 +108,153 @@ describe("shopping-list-store", () => {
     expect(merged).toHaveLength(2);
     expect(merged.find((item) => item.id === "cup-sugar")?.qty).toBe(3);
     expect(merged.find((item) => item.id === "gram-sugar")?.qty).toBe(100);
+  });
+
+  it("adds amounts with friendly fractions, keeps ranges and every recipe", async () => {
+    await addShoppingItems(
+      [
+        { recipeId: "r1", recipeTitle: "Cookies", text: "2/3 cup brown sugar, packed" },
+        { recipeId: "r2", recipeTitle: "Blondies", text: "2/3 cup brown sugar" },
+        { recipeId: "r1", recipeTitle: "Cookies", text: "2 cups flour" },
+        { recipeId: "r2", recipeTitle: "Blondies", text: "1-2 cups flour" },
+        { text: "2 tsp sugar" },
+        { text: "1 Tbsp sugar" }
+      ],
+      { canSync: false }
+    );
+
+    const items = await live();
+    const brownSugar = items.find((item) => item.text === "brown sugar");
+    const flour = items.find((item) => item.text === "flour");
+    const sugar = items.find((item) => item.text === "sugar");
+
+    expect(items).toHaveLength(3);
+    expect(brownSugar && formatItem(brownSugar)).toBe("1 ⅓ cups brown sugar");
+    expect(brownSugar?.recipeTitles).toEqual(["Cookies", "Blondies"]);
+    expect(brownSugar?.recipeIds).toEqual(["r1", "r2"]);
+    expect(brownSugar?.recipeTitle).toBe("Cookies");
+    expect(flour?.qty).toEqual({ max: 4, min: 3 });
+    expect(sugar && formatItem(sugar)).toBe("1 ⅔ Tbsp sugar");
+  });
+
+  it("brings a bought item back with just the new amount", async () => {
+    await addShoppingItems([{ text: "2 lemons" }], { canSync: false });
+    const lemons = await byText("lemons");
+    await setShoppingItemChecked(lemons?.id ?? "", true, { canSync: false });
+
+    await addShoppingItems([{ text: "3 lemons" }], { canSync: false });
+
+    const items = await live();
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ checked: false, qty: 3, text: "lemons" });
+  });
+
+  it("writes only the records that changed", async () => {
+    await addShoppingItems(
+      Array.from({ length: 20 }, (_unused, index) => ({ text: `${index + 1} item-${index}` })),
+      { canSync: false }
+    );
+    const db = await getLinkDishWebDb();
+    const originalTransaction = db.transaction.bind(db);
+    let puts = 0;
+    vi.spyOn(db, "transaction").mockImplementation(((
+      ...args: Parameters<typeof db.transaction>
+    ) => {
+      const tx = originalTransaction(...args);
+      const originalObjectStore = tx.objectStore.bind(tx);
+
+      return Object.assign(tx, {
+        objectStore: (name: string) => {
+          const store = originalObjectStore(name as never) as unknown as {
+            put: (value: unknown) => Promise<unknown>;
+          };
+          const originalPut = store.put.bind(store);
+          return Object.assign(store, {
+            put: (value: unknown) => {
+              puts += 1;
+              return originalPut(value as never);
+            }
+          });
+        }
+      });
+    }) as typeof db.transaction);
+
+    await addShoppingItems([{ text: "4 item-3" }], { canSync: false });
+
+    expect(puts).toBe(1);
+    expect((await byText("item-3"))?.qty).toBe(8);
+  });
+
+  it("splits a pasted list and keeps typed words when there is no amount", () => {
+    const lines = splitShoppingLines(
+      "- 2 lemons\n• milk, oat if possible\n\n[ ] 1 cup rice\r\n3. eggs\n  \n"
+    );
+
+    expect(lines).toHaveLength(4);
+    expect(lines.map(parseManualShoppingLine)).toEqual([
+      { qty: 2, text: "lemons" },
+      { text: "milk, oat if possible" },
+      { qty: 1, text: "rice", unit: "cup" },
+      { text: "eggs" }
+    ]);
+    expect(parseManualShoppingLine("   ")).toBeNull();
+  });
+
+  it("edits an item from one line, keeping a note after a comma", async () => {
+    await addShoppingItems([{ text: "milk" }], { canSync: false });
+    const milk = await byText("milk");
+
+    await updateShoppingItemFromLine(milk?.id ?? "", "2 cups oat milk, unsweetened", {
+      canSync: false
+    });
+
+    expect(await live()).toEqual([
+      expect.objectContaining({ qty: 2, text: "oat milk, unsweetened", unit: "cup" })
+    ]);
+  });
+
+  it("undoes deletes for local and household items", async () => {
+    await addShoppingItems([{ text: "basil" }], { canSync: false });
+    await addShoppingItems([{ text: "2 limes" }], { canSync: true, userId: "user-1" });
+    const basil = await byText("basil");
+    const limes = await byText("limes");
+
+    const removed = await deleteShoppingItems([basil?.id ?? "", limes?.id ?? ""], {
+      canSync: true
+    });
+
+    expect(removed).toHaveLength(2);
+    expect(await live()).toHaveLength(0);
+    const all = await getShoppingItems({ includeDeleted: true });
+    expect(all).toEqual([
+      expect.objectContaining({ isDeleted: true, sync: { status: "dirty" }, text: "limes" })
+    ]);
+
+    await restoreShoppingItems(removed);
+
+    const restored = await live();
+    expect(restored.map((item) => item.text).sort()).toEqual(["basil", "limes"]);
+    expect(restored.find((item) => item.text === "basil")?.sync.status).toBe("local_only");
+    expect(restored.find((item) => item.text === "limes")).toMatchObject({
+      sync: { status: "dirty" }
+    });
+    expect(restored.find((item) => item.text === "limes")?.isDeleted).toBeUndefined();
+  });
+
+  it("clears the cart or the whole list and hands back what it removed", async () => {
+    await addShoppingItems([{ text: "eggs" }, { text: "bread" }, { text: "jam" }], {
+      canSync: false
+    });
+    const eggs = await byText("eggs");
+    await setShoppingItemChecked(eggs?.id ?? "", true, { canSync: false });
+
+    const cart = await clearCheckedShoppingItems({ canSync: false });
+    expect(cart.map((item) => item.text)).toEqual(["eggs"]);
+    expect((await live()).map((item) => item.text)).toEqual(["bread", "jam"]);
+
+    const everything = await clearAllShoppingItems({ canSync: false });
+    expect(everything).toHaveLength(2);
+    expect(await live()).toEqual([]);
   });
 
   it("moves check-off state between unchecked and checked with dirty sync status", async () => {
@@ -202,11 +274,7 @@ describe("shopping-list-store", () => {
       checkedBy: "user-1",
       sync: { status: "dirty" }
     });
-    expect(unchecked).toMatchObject({
-      checked: false,
-      checkedBy: null,
-      sync: { status: "dirty" }
-    });
+    expect(unchecked).toMatchObject({ checked: false, checkedBy: null, sync: { status: "dirty" } });
   });
 
   it("keeps ignored LWW upserts out of the synced state", async () => {
@@ -228,5 +296,104 @@ describe("shopping-list-store", () => {
       lastError: "Household has a newer copy. Refresh to pull it in.",
       status: "sync_failed"
     });
+  });
+
+  it("clips items to the household limits so one long item can't fail the batch", async () => {
+    await putShoppingItems([
+      makeItem({
+        id: "long",
+        recipeTitle: "R".repeat(300),
+        section: "S".repeat(200),
+        text: `${"very long item ".repeat(40)}end`,
+        unit: "u".repeat(60)
+      }),
+      makeItem({ id: "normal", text: "lemons" }),
+      makeItem({ id: "blank", text: "   " })
+    ]);
+    const sent: UpsertShoppingItemsRequest[] = [];
+    apiMocks.upsertShoppingItems.mockImplementation((input: UpsertShoppingItemsRequest) => {
+      sent.push(upsertShoppingItemsRequestSchema.parse(input));
+      return Promise.resolve({ ignored: [], items: input.items });
+    });
+    apiMocks.getShoppingList.mockImplementation(() =>
+      Promise.resolve({ items: sent.flatMap((request) => request.items) })
+    );
+
+    await syncShoppingItems({ canSync: true });
+
+    expect(sent).toHaveLength(1);
+    const long = sent[0]?.items.find((item) => item.id === "long");
+    expect(long?.text.length).toBeLessThanOrEqual(200);
+    expect(long?.recipeTitle).toHaveLength(200);
+    expect(long?.section).toHaveLength(120);
+    expect(long?.unit).toHaveLength(40);
+    expect(sent[0]?.items.map((item) => item.id).sort()).toEqual(["long", "normal"]);
+    const all = await getShoppingItems({ includeDeleted: true });
+    expect(all.find((item) => item.id === "blank")?.sync.status).toBe("sync_failed");
+    expect(all.find((item) => item.id === "normal")?.sync.status).toBe("synced");
+    expect(toApiShoppingItem(makeItem({ text: " " }))).toBeNull();
+  });
+
+  it("drops synced items another household member deleted and confirms pushed ones", async () => {
+    await putShoppingItems([
+      makeItem({ id: "gone", sync: { status: "synced" }, text: "cream" }),
+      makeItem({ id: "kept", sync: { status: "synced" }, text: "butter" }),
+      makeItem({ id: "new", sync: { status: "dirty" }, text: "jam" })
+    ]);
+    const pushed: UpsertShoppingItemsRequest["items"] = [];
+    apiMocks.upsertShoppingItems.mockImplementation((input: UpsertShoppingItemsRequest) => {
+      pushed.push(...input.items);
+      return Promise.resolve({ ignored: [], items: input.items });
+    });
+    const kept = toApiShoppingItem(makeItem({ id: "kept", text: "butter" }));
+    apiMocks.getShoppingList.mockImplementation(() =>
+      Promise.resolve({ items: [...(kept ? [kept] : []), ...pushed] })
+    );
+
+    await syncShoppingItems({ canSync: true });
+
+    const items = await live();
+    expect(items.map((item) => item.id).sort()).toEqual(["kept", "new"]);
+    expect(items.every((item) => item.sync.status === "synced")).toBe(true);
+  });
+
+  it("keeps a reactive in-memory copy that follows writes", async () => {
+    await loadShoppingList();
+    expect(getShoppingListSnapshot().status).toBe("ready");
+
+    await addShoppingItems([{ text: "3 lemons" }], { canSync: false });
+    expect(getShoppingListSnapshot().items.map((item) => item.text)).toEqual(["lemons"]);
+
+    const { result } = renderHook(() => useShoppingList());
+    await waitFor(() => expect(result.current.items).toHaveLength(1));
+  });
+
+  it("rounds counts up to whole things to buy", () => {
+    expect(roundUpCountForShopping({ qty: 0.625, text: "small onion" })).toEqual({
+      qty: 1,
+      text: "small onion"
+    });
+    expect(roundUpCountForShopping({ qty: 2.5, text: "large eggs" }).qty).toBe(3);
+    expect(roundUpCountForShopping({ qty: { max: 1.5, min: 0.5 }, unit: "clove" }).qty).toEqual({
+      max: 2,
+      min: 1
+    });
+    expect(roundUpCountForShopping({ qty: 0.5, unit: "cup" }).qty).toBe(0.5);
+  });
+
+  it("builds recipe inputs with the recipe page's scale and units", () => {
+    const recipe = {
+      ingredients: [{ text: "1 cup flour" }, { section: "Glaze", text: "2 tbsp milk" }],
+      title: "Scones"
+    } as Pick<Recipe, "ingredients" | "title">;
+
+    expect(recipeIngredientsToShoppingInputs(recipe, "r1", { factor: 2 })).toEqual([
+      { recipeId: "r1", recipeTitle: "Scones", text: "2 cups flour" },
+      { recipeId: "r1", recipeTitle: "Scones", section: "Glaze", text: "4 Tbsp milk" }
+    ]);
+    expect(
+      recipeIngredientsToShoppingInputs(recipe, "r1", { factor: 1, unitPreference: "alternate" })[0]
+        ?.text
+    ).toMatch(/ml|g/u);
   });
 });

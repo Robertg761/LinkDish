@@ -1,173 +1,333 @@
+import {
+  canonicalIngredientKey,
+  formatShoppingItemText,
+  getIngredientUnitSummary,
+  isPantryStaple,
+  parseServings,
+  parseShoppingLine
+} from "@linkdish/recipe-domain";
 import React, { useMemo, useState } from "react";
-import { createPortal } from "react-dom";
+import { useNavigate } from "react-router-dom";
 
 import { trackWebEvent } from "../../analytics/client";
+import { getFriendlyErrorMessage } from "../../api/error-message";
 import { Button } from "../../components/Button";
 import { Icon } from "../../components/Icon";
+import { SegmentedControl } from "../../components/SegmentedControl";
+import { Sheet } from "../../components/Sheet";
+import { Stepper } from "../../components/Stepper";
+import { useToast } from "../../components/Toast";
+import { usePreference } from "../../preferences/preferences-store";
 
 import {
   addShoppingItems,
   recipeIngredientsToShoppingInputs,
-  syncShoppingItems,
-  type AddShoppingItemInput
+  roundUpCountForShopping,
+  useShoppingList,
+  type ShoppingScaling
 } from "./shopping-list-store";
+import { getShoppingWriteOptions, requestShoppingSync } from "./shopping-sync";
+import { ShoppingChecklist } from "./ShoppingChecklist";
 
-import type { RecipeScalingState } from "../recipes/CookMode";
-import type { Recipe } from "@linkdish/recipe-domain";
+import type { ShoppingChecklistGroup } from "./ShoppingChecklist";
+import type { IngredientUnitsPreference, Recipe } from "@linkdish/recipe-domain";
+
 import "./AddRecipeToShoppingSheet.css";
 
-interface AddRecipeToShoppingSheetProps {
-  canSync: boolean;
+export interface AddRecipeToShoppingSheetProps {
+  /** Defaults to true so callers can mount the sheet conditionally. */
+  open?: boolean | undefined;
   onClose: () => void;
-  onAdded?: (count: number) => void;
+  /** Called with the number of ingredients added. */
+  onAdded?: ((count: number) => void) | undefined;
   recipe: Recipe;
   recipeId: string;
-  scaling: RecipeScalingState;
+  /** Current scale and units on the recipe page (factor 1, original units by default). */
+  scaling?: ShoppingScaling | undefined;
+  /** Household sync; defaults to what the shopping sync layer knows about this account. */
+  canSync?: boolean | undefined;
   userId?: string | undefined;
 }
 
-const groupInputs = (inputs: AddShoppingItemInput[]) => {
-  const groups: Array<{ key: string; section: string | null; inputs: AddShoppingItemInput[] }> = [];
+const UNIT_OPTIONS = [
+  { label: "As written", value: "original" },
+  { label: "US", value: "us" },
+  { label: "Metric", value: "metric" }
+] as const;
 
-  inputs.forEach((input, index) => {
-    const section = input.section?.trim() || null;
-    const currentGroup = groups[groups.length - 1];
+const initialUnits = (
+  recipe: Recipe,
+  scaling: ShoppingScaling | undefined,
+  preferred: IngredientUnitsPreference
+): IngredientUnitsPreference => {
+  if (scaling?.units) {
+    return scaling.units;
+  }
 
-    if (!currentGroup || currentGroup.section !== section) {
-      groups.push({
-        inputs: [],
-        key: `${section ?? "ingredients"}-${index}`,
-        section
-      });
-    }
+  if (scaling?.unitPreference === "alternate") {
+    return getIngredientUnitSummary(recipe.ingredients).primarySystem === "metric"
+      ? "us"
+      : "metric";
+  }
 
-    groups[groups.length - 1]?.inputs.push(input);
-  });
-
-  return groups;
+  return preferred;
 };
 
+const roundScale = (value: number) => Math.round(value * 100) / 100;
+
+/**
+ * "Add ingredients to your shopping list": pick servings and units, untick what you have, see
+ * what's already on the list, then add in one go (merged with the list, amounts summed).
+ */
 export const AddRecipeToShoppingSheet: React.FC<AddRecipeToShoppingSheetProps> = ({
-  canSync,
-  onAdded,
+  open = true,
   onClose,
+  onAdded,
   recipe,
   recipeId,
   scaling,
+  canSync,
   userId
 }) => {
-  const inputs = useMemo(
-    () => recipeIngredientsToShoppingInputs(recipe, recipeId, scaling),
-    [recipe, recipeId, scaling]
+  const navigate = useNavigate();
+  const { showToast } = useToast();
+  const preferredUnits = usePreference("units");
+  const { items: listItems } = useShoppingList();
+  const baseServings = useMemo(() => parseServings(recipe.servings)?.min ?? null, [recipe]);
+  const initialFactor = scaling?.factor && scaling.factor > 0 ? scaling.factor : 1;
+  const [servings, setServings] = useState<number>(() =>
+    baseServings ? Math.max(1, Math.round(baseServings * initialFactor)) : 1
   );
-  const [selectedTexts, setSelectedTexts] = useState<Set<string>>(
-    () => new Set(inputs.map((input) => input.text))
+  const [factor, setFactor] = useState<number>(initialFactor);
+  const [units, setUnits] = useState<IngredientUnitsPreference>(() =>
+    initialUnits(recipe, scaling, preferredUnits)
+  );
+  const canConvert = useMemo(
+    () => getIngredientUnitSummary(recipe.ingredients).canConvert,
+    [recipe]
+  );
+  const scale = baseServings ? servings / baseServings : factor;
+  const inputs = useMemo(
+    () => recipeIngredientsToShoppingInputs(recipe, recipeId, { factor: scale, units }),
+    [recipe, recipeId, scale, units]
+  );
+  const openKeys = useMemo(
+    () =>
+      new Set(
+        listItems.filter((item) => !item.checked).map((item) => canonicalIngredientKey(item.text))
+      ),
+    [listItems]
+  );
+  const rows = useMemo(
+    () =>
+      inputs
+        .map((input, index) => {
+          const parsed = roundUpCountForShopping(parseShoppingLine(input.text));
+
+          return {
+            id: String(index),
+            input,
+            label: formatShoppingItemText(parsed),
+            onList: openKeys.has(canonicalIngredientKey(input.text)),
+            section: input.section?.trim() || "",
+            staple: isPantryStaple(input.text),
+            usable: parsed.text.trim().length > 0
+          };
+        })
+        .filter((row) => row.usable),
+    [inputs, openKeys]
+  );
+  const stapleIds = useMemo(() => rows.filter((row) => row.staple).map((row) => row.id), [rows]);
+  const [includeStaples, setIncludeStaples] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(
+    () => new Set(rows.filter((row) => !row.staple).map((row) => row.id))
   );
   const [submitting, setSubmitting] = useState(false);
-  const groups = useMemo(() => groupInputs(inputs), [inputs]);
-  const selectedInputs = inputs.filter((input) => selectedTexts.has(input.text));
+  const [error, setError] = useState("");
 
-  const toggleInput = (text: string) => {
-    setSelectedTexts((current) => {
+  const groups = useMemo<ShoppingChecklistGroup[]>(() => {
+    const result: ShoppingChecklistGroup[] = [];
+
+    rows.forEach((row) => {
+      const current = result[result.length - 1];
+
+      if (!current || current.label !== (row.section || undefined)) {
+        result.push({ id: `group-${row.id}`, label: row.section || undefined, rows: [] });
+      }
+
+      result[result.length - 1]?.rows.push({
+        id: row.id,
+        label: row.label,
+        onList: row.onList,
+        staple: row.staple
+      });
+    });
+
+    return result;
+  }, [rows]);
+
+  const selectedInputs = rows.filter((row) => selected.has(row.id)).map((row) => row.input);
+
+  const toggle = (id: string) => {
+    setSelected((current) => {
       const next = new Set(current);
 
-      if (next.has(text)) {
-        next.delete(text);
+      if (next.has(id)) {
+        next.delete(id);
       } else {
-        next.add(text);
+        next.add(id);
       }
 
       return next;
     });
   };
 
+  const setStaples = (include: boolean) => {
+    setIncludeStaples(include);
+    setSelected((current) => {
+      const next = new Set(current);
+      stapleIds.forEach((id) => (include ? next.add(id) : next.delete(id)));
+      return next;
+    });
+  };
+
   const confirmAdd = async () => {
-    if (selectedInputs.length === 0) {
+    if (selectedInputs.length === 0 || submitting) {
       return;
     }
 
     setSubmitting(true);
+    setError("");
 
     try {
-      await addShoppingItems(selectedInputs, { canSync, userId });
-      if (canSync) {
-        await syncShoppingItems({ canSync: true });
+      const defaults = getShoppingWriteOptions();
+      const writeOptions = {
+        canSync: canSync ?? defaults.canSync,
+        ...((userId ?? defaults.userId) ? { userId: userId ?? defaults.userId } : {})
+      };
+      await addShoppingItems(selectedInputs, writeOptions);
+
+      if (writeOptions.canSync) {
+        requestShoppingSync({ delayMs: 0 });
       }
+
+      const count = selectedInputs.length;
       trackWebEvent({
         eventName: "shopping_item_added",
-        routeOrScreen: window.location.pathname,
-        properties: {
-          count: selectedInputs.length,
-          source: "recipe"
-        }
+        properties: { count, method: "recipe_sheet", source: "recipe" },
+        routeOrScreen: window.location.pathname
       });
-      onAdded?.(selectedInputs.length);
+      showToast({
+        action: {
+          label: "View list",
+          onClick: () => {
+            void navigate("/shopping");
+          }
+        },
+        icon: "shopping-basket",
+        id: "shopping-added",
+        message: `Added ${count} ${count === 1 ? "item" : "items"} to your list`,
+        tone: "success"
+      });
+      onAdded?.(count);
       onClose();
+    } catch (addError) {
+      setError(getFriendlyErrorMessage(addError, "shopping"));
     } finally {
       setSubmitting(false);
     }
   };
 
-  return createPortal(
-    <div className="shopping-sheet-backdrop" role="presentation">
-      <section
-        aria-labelledby="shopping-sheet-title"
-        className="shopping-sheet"
-        role="dialog"
-        aria-modal="true"
-      >
-        <div className="shopping-sheet-header">
-          <div>
-            <p className="shopping-sheet-eyebrow">Shopping list</p>
-            <h2 id="shopping-sheet-title">Add ingredients</h2>
-          </div>
-          <button
-            aria-label="Close add ingredients"
-            className="shopping-sheet-close"
-            onClick={onClose}
-            type="button"
-          >
-            <Icon name="x" size={20} />
-          </button>
-        </div>
+  const count = selectedInputs.length;
 
-        <div className="shopping-sheet-list">
-          {groups.map((group) => (
-            <div className="shopping-sheet-group" key={group.key}>
-              {group.section ? <p className="shopping-sheet-section">{group.section}</p> : null}
-              {group.inputs.map((input) => {
-                const selected = selectedTexts.has(input.text);
-
-                return (
-                  <button
-                    aria-checked={selected}
-                    className={`shopping-sheet-row${selected ? " is-selected" : ""}`}
-                    key={`${input.section ?? "base"}-${input.text}`}
-                    onClick={() => toggleInput(input.text)}
-                    role="checkbox"
-                    type="button"
-                  >
-                    <span className="shopping-sheet-check">
-                      {selected ? <Icon name="check" size={13} /> : null}
-                    </span>
-                    <span>{input.text}</span>
-                  </button>
-                );
-              })}
-            </div>
-          ))}
-        </div>
-
-        <div className="shopping-sheet-actions">
-          <Button onClick={confirmAdd} loading={submitting} disabled={selectedInputs.length === 0}>
-            Add {selectedInputs.length || ""} item{selectedInputs.length === 1 ? "" : "s"}
-          </Button>
-          <Button variant="ghost" onClick={onClose} disabled={submitting}>
+  return (
+    <Sheet
+      className="add-to-shopping-sheet"
+      description={recipe.title}
+      dismissible={!submitting}
+      footer={
+        <>
+          <Button disabled={submitting} onClick={onClose} variant="ghost">
             Cancel
           </Button>
-        </div>
-      </section>
-    </div>,
-    document.body
+          <Button
+            disabled={count === 0}
+            icon="shopping-basket"
+            loading={submitting}
+            onClick={() => {
+              void confirmAdd();
+            }}
+          >
+            {count === 0 ? "Pick some items" : `Add ${count} ${count === 1 ? "item" : "items"}`}
+          </Button>
+        </>
+      }
+      onClose={onClose}
+      open={open}
+      testId="add-to-shopping-sheet"
+      title="Add ingredients"
+    >
+      <div className="add-to-shopping-controls">
+        {baseServings ? (
+          <div className="add-to-shopping-control">
+            <span className="add-to-shopping-control-label">Servings</span>
+            <Stepper
+              formatValue={(value) => String(value)}
+              label="Servings"
+              max={99}
+              min={1}
+              onChange={setServings}
+              size="sm"
+              value={servings}
+            />
+          </div>
+        ) : (
+          <div className="add-to-shopping-control">
+            <span className="add-to-shopping-control-label">Scale</span>
+            <Stepper
+              formatValue={(value) => `${value}×`}
+              label="Scale"
+              max={12}
+              min={0.5}
+              onChange={(value) => setFactor(roundScale(value))}
+              size="sm"
+              step={0.5}
+              value={factor}
+            />
+          </div>
+        )}
+        {canConvert ? (
+          <SegmentedControl
+            aria-label="Units"
+            className="add-to-shopping-units"
+            onChange={setUnits}
+            options={UNIT_OPTIONS}
+            size="sm"
+            value={units}
+          />
+        ) : null}
+      </div>
+
+      {error ? (
+        <p className="add-to-shopping-error" role="alert">
+          <Icon name="alert-circle" size={18} /> {error}
+        </p>
+      ) : null}
+
+      {rows.length === 0 ? (
+        <p className="add-to-shopping-empty">This recipe has no ingredients to add yet.</p>
+      ) : (
+        <ShoppingChecklist
+          groups={groups}
+          includeStaples={includeStaples}
+          onIncludeStaplesChange={setStaples}
+          onSelectAll={() => setSelected(new Set(rows.map((row) => row.id)))}
+          onSelectNone={() => setSelected(new Set())}
+          onToggle={toggle}
+          selected={selected}
+          stapleCount={stapleIds.length}
+        />
+      )}
+    </Sheet>
   );
 };
