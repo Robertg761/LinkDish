@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from "react";
+import React, { createContext, Suspense, useContext, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
@@ -6,6 +6,8 @@ import { FirstRunOnboardingSheet } from "../features/onboarding/FirstRunOnboardi
 import { requestCommandPalette } from "../lib/command-palette-events";
 import { SAVE_FEEDBACK_EVENT } from "../lib/delight-events";
 import { RAIL_MEDIA_QUERY, useMediaQuery } from "../lib/use-media-query";
+import { lazyWithRetry } from "../platform/lazy";
+import { OptionalChunkBoundary } from "../platform/OptionalChunkBoundary";
 
 import { getAppRouteMeta } from "./app-route-meta";
 import { BrandMark } from "./BrandMark";
@@ -64,6 +66,11 @@ const isMacLike = () => {
     return false;
   }
 };
+
+// Kitchen timers float above the tab bar on every page; the dock loads after first paint.
+const TimerDock = lazyWithRetry(() =>
+  import("../features/cook-mode/TimerDock").then((module) => ({ default: module.TimerDock }))
+);
 
 const TopBarActionsContext = createContext<HTMLElement | null>(null);
 
@@ -278,6 +285,12 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
           </main>
         </TopBarActionsContext.Provider>
       </div>
+
+      <OptionalChunkBoundary name="Timer dock">
+        <Suspense fallback={null}>
+          <TimerDock />
+        </Suspense>
+      </OptionalChunkBoundary>
 
       <FirstRunOnboardingSheet />
     </div>

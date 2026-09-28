@@ -2,7 +2,7 @@ import { parseIngredientQuantity } from "@linkdish/recipe-domain";
 
 import { apiClient } from "../../api/client";
 import { getLinkDishWebDb, SHOPPING_ITEMS_STORE_NAME } from "../../storage/linkdish-db";
-import { getScaledIngredientText, type RecipeScalingState } from "../recipes/CookMode";
+import { getScaledIngredientText, type RecipeScalingState } from "../recipe-view/recipe-scaling";
 
 import type {
   DeleteShoppingItemsResponse,
@@ -99,9 +99,7 @@ export const shoppingTextFromQuantity = (
   return `${quantityText}${unit ? ` ${unit}` : ""} ${text}`.trim();
 };
 
-export const parseShoppingLine = (
-  line: string
-): Pick<WebShoppingItem, "qty" | "text" | "unit"> => {
+export const parseShoppingLine = (line: string): Pick<WebShoppingItem, "qty" | "text" | "unit"> => {
   const parsed = parseIngredientQuantity(line);
 
   if (!parsed.confident) {
@@ -176,7 +174,9 @@ export const mergeShoppingItems = (
   return mergedItems;
 };
 
-export async function getShoppingItems(options: { includeDeleted?: boolean } = {}): Promise<WebShoppingItem[]> {
+export async function getShoppingItems(
+  options: { includeDeleted?: boolean } = {}
+): Promise<WebShoppingItem[]> {
   const db = await getLinkDishWebDb();
   const items = (await db.getAll(STORE_NAME)) as WebShoppingItem[];
 
@@ -253,10 +253,7 @@ export async function setShoppingItemChecked(
   return updated;
 }
 
-export async function deleteShoppingItem(
-  id: string,
-  options: { canSync: boolean }
-): Promise<void> {
+export async function deleteShoppingItem(id: string, options: { canSync: boolean }): Promise<void> {
   const db = await getLinkDishWebDb();
   const existing = (await db.get(STORE_NAME, id)) as WebShoppingItem | undefined;
 
@@ -376,7 +373,8 @@ export async function syncShoppingItems(options: { canSync: boolean }): Promise<
 
   const allItems = await getShoppingItems({ includeDeleted: true });
   const dirtyActiveItems = allItems.filter(
-    (item) => !item.isDeleted && (item.sync.status === "dirty" || item.sync.status === "sync_failed")
+    (item) =>
+      !item.isDeleted && (item.sync.status === "dirty" || item.sync.status === "sync_failed")
   );
   const dirtyDeletedItems = allItems.filter(
     (item) => item.isDeleted && (item.sync.status === "dirty" || item.sync.status === "sync_failed")

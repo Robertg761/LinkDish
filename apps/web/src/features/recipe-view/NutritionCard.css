@@ -1,0 +1,91 @@
+.nutrition-card {
+  padding: 0;
+}
+
+.nutrition-card-summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 60px;
+  padding: 10px 18px;
+  cursor: pointer;
+  list-style: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.nutrition-card-summary::-webkit-details-marker {
+  display: none;
+}
+
+.nutrition-card-summary:focus-visible {
+  border-radius: var(--radius-card);
+  outline: 2px solid var(--color-focus);
+  outline-offset: -2px;
+}
+
+.nutrition-card-peek {
+  margin-left: auto;
+  color: var(--color-ink);
+  font-size: var(--text-small);
+  font-weight: 700;
+}
+
+.nutrition-card-peek-hint {
+  color: var(--color-ink-muted);
+  font-weight: 500;
+}
+
+.nutrition-card-chevron {
+  flex: none;
+  color: var(--color-ink-muted);
+  transition: transform var(--transition-fast);
+}
+
+.nutrition-card[open] .nutrition-card-chevron {
+  transform: rotate(180deg);
+}
+
+.nutrition-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0 18px;
+}
+
+.nutrition-card-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-tint);
+}
+
+.nutrition-card-cell dt {
+  color: var(--color-ink-muted);
+  font-size: var(--text-label);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.nutrition-card-cell dd {
+  margin: 0;
+  color: var(--color-ink);
+  font-size: var(--text-body);
+  font-weight: 700;
+}
+
+.nutrition-card-footnote {
+  margin: 0;
+  padding: 10px 18px 16px;
+  color: var(--color-ink-subtle);
+  font-size: var(--text-caption);
+}
+
+@media print {
+  .nutrition-card {
+    display: none !important;
+  }
+}

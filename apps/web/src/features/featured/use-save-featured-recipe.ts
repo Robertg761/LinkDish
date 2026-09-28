@@ -1,0 +1,148 @@
+import { useEffect, useState } from "react";
+
+import { trackWebV2AnalyticsEvent } from "../../analytics/client";
+import { getFriendlyErrorMessage } from "../../api/error-message";
+import { useAuth } from "../../auth/AuthProvider";
+import { useSavedRecipe } from "../../data/library-store";
+import { requestSaveFeedback } from "../../lib/delight-events";
+import { safeSetItem } from "../../platform/safe-storage";
+import {
+  forceSaveRecipe,
+  generateDeterministicId,
+  saveRecipe,
+  syncRecipeToHousehold
+} from "../library/saved-recipe-store";
+import { useUpgradeSheet } from "../upgrade/UpgradeSheet";
+
+import type { FeaturedRecipe } from "./types";
+import type { WebSavedRecipe } from "../library/saved-recipe-types";
+
+export type FeaturedSaveStatus = "idle" | "saving" | "syncing" | "saved" | "duplicate" | "error";
+
+export interface FeaturedSave {
+  status: FeaturedSaveStatus;
+  /** The copy in this browser's cookbook, when there is one. */
+  savedRecipeId: string | null;
+  error: string;
+  syncWarning: string;
+  save: () => Promise<void>;
+  replace: () => Promise<void>;
+  dismissDuplicate: () => void;
+}
+
+/**
+ * "Save to my cookbook" for a featured recipe — the same rules as saving an import: the free
+ * limit (upgrade sheet), a duplicate check with an optional replace, and a household sync when
+ * signed in.
+ */
+export const useSaveFeaturedRecipe = (featured: FeaturedRecipe): FeaturedSave => {
+  const { isAuthenticated, user } = useAuth();
+  const { requestUpgradeSheet } = useUpgradeSheet();
+  const [status, setStatus] = useState<FeaturedSaveStatus>("idle");
+  const [error, setError] = useState("");
+  const [syncWarning, setSyncWarning] = useState("");
+  const [deterministicId, setDeterministicId] = useState<string | null>(null);
+  const { recipe: existing } = useSavedRecipe(deterministicId ?? undefined);
+  const isPremium = user?.billingPlan === "plus" || user?.billingPlan === "family";
+  const input = {
+    extraction: featured.extraction,
+    recipe: featured.recipe,
+    sourceUrl: featured.sourceUrl
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    generateDeterministicId(featured.sourceUrl, featured.recipe.title).then(
+      (id) => {
+        if (!cancelled) {
+          setDeterministicId(id);
+        }
+      },
+      () => undefined
+    );
+
+    return () => {
+      cancelled = true;
+    };
+  }, [featured.recipe.title, featured.sourceUrl]);
+
+  const afterSave = async (saved: WebSavedRecipe) => {
+    trackWebV2AnalyticsEvent({
+      name: "recipe_saved",
+      properties: { source_type: "url", surface: "import_result" },
+      routeOrScreen: "/"
+    });
+
+    if (isAuthenticated) {
+      setStatus("syncing");
+      const synced = await syncRecipeToHousehold(saved);
+
+      if (synced.sync?.status === "sync_failed") {
+        setSyncWarning("Saved here. Household sync failed; you can retry from the recipe.");
+      }
+    }
+
+    setStatus("saved");
+    safeSetItem("linkdish:web:has-extracted-recipe", "true");
+
+    try {
+      requestSaveFeedback();
+    } catch {
+      // Delight only.
+    }
+  };
+
+  const save = async () => {
+    setStatus("saving");
+    setError("");
+    setSyncWarning("");
+
+    try {
+      const result = await saveRecipe(input, isPremium);
+
+      if (result.success && result.recipe) {
+        await afterSave(result.recipe);
+        return;
+      }
+
+      if (result.error === "limit_exceeded") {
+        setStatus("error");
+        setError("Your free cookbook is full: 15 recipes saved. Upgrade for unlimited recipes.");
+        requestUpgradeSheet("save_limit");
+        return;
+      }
+
+      setStatus(result.error === "duplicate_prompt" ? "duplicate" : "idle");
+    } catch (saveError) {
+      console.error("Featured save failed:", saveError);
+      setStatus("error");
+      setError(getFriendlyErrorMessage(saveError, "save"));
+    }
+  };
+
+  const replace = async () => {
+    setStatus("saving");
+    setError("");
+
+    try {
+      await afterSave(await forceSaveRecipe(input));
+    } catch (saveError) {
+      console.error("Featured replace failed:", saveError);
+      setStatus("error");
+      setError(getFriendlyErrorMessage(saveError, "save"));
+    }
+  };
+
+  const dismissDuplicate = () => setStatus("idle");
+  const alreadySaved = Boolean(existing) && status !== "duplicate";
+
+  return {
+    dismissDuplicate,
+    error,
+    replace,
+    save,
+    savedRecipeId: existing?.id ?? (status === "saved" ? deterministicId : null),
+    status: alreadySaved && status === "idle" ? "saved" : status,
+    syncWarning
+  };
+};

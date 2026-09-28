@@ -12,7 +12,7 @@ import {
   type AddShoppingItemInput
 } from "./shopping-list-store";
 
-import type { RecipeScalingState } from "../recipes/CookMode";
+import type { RecipeScalingState } from "../recipe-view/recipe-scaling";
 import type { Recipe } from "@linkdish/recipe-domain";
 import "./AddRecipeToShoppingSheet.css";
 

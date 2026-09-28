@@ -68,6 +68,7 @@ export const ExtractResult: React.FC<ExtractResultProps> = ({
   const [syncWarning, setSyncWarning] = useState("");
   const [saveFeedbackActive, setSaveFeedbackActive] = useState(false);
   const [nutritionExpanded, setNutritionExpanded] = useState(true);
+  const [cookModeOpen, setCookModeOpen] = useState(false);
 
   const isPremium = user?.billingPlan === "plus" || user?.billingPlan === "family";
   const safeSourceUrl = parseSafeSourceUrl(sourceUrl);
@@ -336,7 +337,10 @@ export const ExtractResult: React.FC<ExtractResultProps> = ({
         <section className="recipe-section recipe-steps-section">
           <div className="recipe-section-header">
             <h2 className="section-title">Method</h2>
-            <CookMode recipe={recipe} />
+            <Button icon="chef-hat" onClick={() => setCookModeOpen(true)} size="sm" variant="tonal">
+              Cook mode
+            </Button>
+            <CookMode onClose={() => setCookModeOpen(false)} open={cookModeOpen} recipe={recipe} />
           </div>
           <ol className="steps-list">
             {[...recipe.steps]
