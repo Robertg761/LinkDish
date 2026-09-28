@@ -208,6 +208,77 @@ describe("import queue runner", () => {
     expect(v2Events("import_succeeded")).toHaveLength(2);
   });
 
+  it("imports each queued link exactly once when two tabs run the queue at the same time", async () => {
+    // No navigator.locks (older Safari, insecure origins): every open import page runs a worker.
+    await enqueueImport({ url: "https://a.com/soup" });
+    await enqueueImport({ url: "https://b.com/stew" });
+    await enqueueImport({ url: "https://c.com/pie" });
+    apiMocks.extractRecipe.mockImplementation(async (request) => {
+      const url = (request as { url: string }).url;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return success(`From ${new URL(url).host}`, url);
+    });
+
+    const [first, second] = await Promise.all([
+      runImportQueue(context({ owner: "tab-a" })),
+      runImportQueue(context({ owner: "tab-b" }))
+    ]);
+
+    const extracted = apiMocks.extractRecipe.mock.calls
+      .map(([request]) => (request as { url: string }).url)
+      .sort();
+    expect(extracted).toEqual(["https://a.com/soup", "https://b.com/stew", "https://c.com/pie"]);
+    expect(first.processed + second.processed).toBe(3);
+    expect(await statuses()).toEqual([
+      ["https://a.com/soup", "done"],
+      ["https://b.com/stew", "done"],
+      ["https://c.com/pie", "done"]
+    ]);
+    expect(v2Events("import_succeeded")).toHaveLength(3);
+  });
+
+  it("never takes over an import another tab is still working on, however long it takes", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+
+    try {
+      await enqueueImport({ url: "https://slow.com/stew" });
+      let started: () => void = () => undefined;
+      const extracting = new Promise<void>((resolve) => {
+        started = resolve;
+      });
+      let finish: (response: unknown) => void = () => undefined;
+      apiMocks.extractRecipe
+        .mockImplementationOnce(() => {
+          started();
+          return new Promise((resolve) => {
+            finish = resolve;
+          });
+        })
+        .mockResolvedValue(success("Stew again", "https://slow.com/stew"));
+
+      const slowTab = runImportQueue(context({ owner: "tab-a" }));
+      await extracting;
+      // Well past the lease: only tab-a's renewals show it is still at work.
+      await vi.advanceTimersByTimeAsync(2 * STALE_PROCESSING_MS);
+
+      await expect(runImportQueue(context({ owner: "tab-b" }))).resolves.toEqual({
+        paused: null,
+        processed: 0
+      });
+      expect((await getImportQueue())[0]).toMatchObject({
+        claimedBy: "tab-a",
+        status: "processing"
+      });
+
+      finish(success("Stew", "https://slow.com/stew"));
+      await expect(slowTab).resolves.toEqual({ paused: null, processed: 1 });
+      expect(apiMocks.extractRecipe).toHaveBeenCalledOnce();
+      expect((await getImportQueue())[0]?.status).toBe("done");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("skips links that are already in the cookbook without spending an import", async () => {
     fakeIdb.seed(SAVED_RECIPES_STORE_NAME, [saved("existing", "https://www.a.com/soup")]);
     await enqueueImport({ url: "https://a.com/soup/?utm_source=x" });

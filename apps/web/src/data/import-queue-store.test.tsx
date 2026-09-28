@@ -6,6 +6,7 @@ import { fakeIdb } from "../storage/testing/fake-idb";
 
 import { resetDataChangeFeedForTests, setDataChannelFactoryForTests } from "./change-feed";
 import {
+  claimNextQueuedImport,
   clearFinishedImports,
   enqueueImport,
   getImportQueue,
@@ -16,6 +17,7 @@ import {
   markImportProcessing,
   recoverStaleImports,
   removeImportQueueItem,
+  renewImportClaim,
   resetImportQueueStoreForTests,
   retryImport,
   STALE_PROCESSING_MS,
@@ -99,6 +101,63 @@ describe("import-queue-store", () => {
       await recoverStaleImports(Date.parse(processing.updatedAt) + STALE_PROCESSING_MS + 1)
     ).toBe(1);
     expect((await getNextQueuedImport())?.id).toBe(item.id);
+  });
+
+  it("claims each waiting item for one tab only, oldest first", async () => {
+    const first = await enqueueImport({ url: "https://example.com/soup" });
+    const second = await enqueueImport({ url: "https://example.com/stew" });
+
+    // Two tabs asking at the same moment (no navigator.locks to keep them apart).
+    const claims = await Promise.all([
+      claimNextQueuedImport("tab-a"),
+      claimNextQueuedImport("tab-b"),
+      claimNextQueuedImport("tab-c")
+    ]);
+
+    expect(claims.map((item) => item?.id)).toEqual([first.id, second.id, undefined]);
+    expect(fakeIdb.record(IMPORT_QUEUE_STORE_NAME, first.id)).toMatchObject({
+      attempts: 0,
+      claimedBy: "tab-a",
+      status: "processing"
+    });
+    expect(fakeIdb.record(IMPORT_QUEUE_STORE_NAME, second.id)).toMatchObject({
+      claimedBy: "tab-b",
+      status: "processing"
+    });
+  });
+
+  it("keeps a renewed claim, recovers a lapsed one, and ignores its old tab afterwards", async () => {
+    const item = await enqueueImport({ url: "https://example.com/pie" });
+    const start = Date.parse("2026-09-28T10:00:00.000Z");
+    await claimNextQueuedImport("tab-a", start);
+
+    // tab-a is still working: its renewals keep the item well past the first lease.
+    await renewImportClaim(item.id, "tab-a", start + 4 * 60_000);
+    expect(await recoverStaleImports(start + STALE_PROCESSING_MS + 60_000)).toBe(0);
+    expect(await renewImportClaim(item.id, "tab-b", start + 5 * 60_000)).toBeUndefined();
+
+    // tab-a went away: once its last renewal lapses, the item waits again for any tab.
+    expect(await recoverStaleImports(start + 4 * 60_000 + STALE_PROCESSING_MS + 1)).toBe(1);
+    const recovered = fakeIdb.record(IMPORT_QUEUE_STORE_NAME, item.id);
+    expect(recovered).toMatchObject({ status: "queued" });
+    expect(recovered).not.toHaveProperty("claimedBy");
+    expect(recovered).not.toHaveProperty("claimedAt");
+
+    // Should tab-a wake up, it no longer writes over the item.
+    expect(await markImportDone(item.id, { recipeId: "late" }, "tab-a")).toBeUndefined();
+    expect(await renewImportClaim(item.id, "tab-a")).toBeUndefined();
+    expect((await claimNextQueuedImport("tab-b"))?.id).toBe(item.id);
+    expect(await markImportFailed(item.id, "late", "tab-a")).toBeUndefined();
+    expect(await markImportProcessing(item.id, "tab-b")).toMatchObject({
+      attempts: 1,
+      claimedBy: "tab-b",
+      status: "processing"
+    });
+    expect(await markImportDone(item.id, { recipeId: "recipe-1" }, "tab-b")).toMatchObject({
+      recipeId: "recipe-1",
+      status: "done"
+    });
+    expect(fakeIdb.record(IMPORT_QUEUE_STORE_NAME, item.id)).not.toHaveProperty("claimedBy");
   });
 
   it("counts pending and failed items in the hook", async () => {
