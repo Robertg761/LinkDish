@@ -69,12 +69,15 @@ const asciiFraction = String.raw`\d+\/\d+`;
  * - a decimal or whole number with an optional fraction, spaced or glued ("1 1/2", "1 ½", "1½");
  * - an ASCII fraction ("3/4"), a leading-dot decimal (".5") or a vulgar fraction ("½").
  *
+ * The fraction after a whole number is a glued vulgar fraction, or whitespace and then either
+ * kind: one `\s+` instead of the overlapping `\s*½|\s+1/2`, so the spaces are scanned once.
+ *
  * Callers normalize the Unicode fraction slash (U+2044 "1⁄2") to "/" first; see
  * `normalizeFractionSlashes`.
  */
-export const NUMBER_PHRASE_PATTERN = String.raw`(?:\d+-(?:${asciiFraction}|${vulgarFractionClass})|\d+(?:\.\d+)?(?:\s*${vulgarFractionClass}|\s+${asciiFraction})?|${asciiFraction}|\.\d+|${vulgarFractionClass})`;
+export const NUMBER_PHRASE_PATTERN = String.raw`(?:\d+-(?:${asciiFraction}|${vulgarFractionClass})|\d+(?:\.\d+)?(?:${vulgarFractionClass}|\s+(?:${vulgarFractionClass}|${asciiFraction}))?|${asciiFraction}|\.\d+|${vulgarFractionClass})`;
 
-const FRACTION_SLASH_PATTERN = /\s*[⁄∕]\s*/gu;
+const FRACTION_SLASH_PATTERN = /[⁄∕]/u;
 const WHITESPACE_PATTERN = /\s+/u;
 const HYPHENATED_MIXED_PATTERN = /^(\d+)-(.+)$/u;
 const GLUED_VULGAR_PATTERN = new RegExp(`^(\\d+(?:\\.\\d+)?)\\s*(${vulgarFractionClass})$`, "u");
@@ -82,9 +85,26 @@ const GLUED_VULGAR_PATTERN = new RegExp(`^(\\d+(?:\\.\\d+)?)\\s*(${vulgarFractio
 /**
  * Rewrites the Unicode fraction slash (U+2044, and the division slash U+2215) as an ASCII "/",
  * dropping the spaces some sites put around it ("1 ⁄ 2" → "1/2").
+ *
+ * Splits on the slash and trims the pieces instead of a global replace of `\s*[⁄∕]\s*`, which
+ * rescanned a run of spaces from each of its positions (quadratic on long runs); the result is
+ * the same, since `trim` removes exactly the characters `\s` matches.
  */
-export const normalizeFractionSlashes = (text: string): string =>
-  text.includes("⁄") || text.includes("∕") ? text.replace(FRACTION_SLASH_PATTERN, "/") : text;
+export const normalizeFractionSlashes = (text: string): string => {
+  if (!text.includes("⁄") && !text.includes("∕")) {
+    return text;
+  }
+
+  const pieces = text.split(FRACTION_SLASH_PATTERN);
+  const last = pieces.length - 1;
+
+  return pieces
+    .map((piece, index) => {
+      const trimmedStart = index > 0 ? piece.trimStart() : piece;
+      return index < last ? trimmedStart.trimEnd() : trimmedStart;
+    })
+    .join("/");
+};
 
 const parseProperFraction = (value: string): number | null => {
   const parsed = parseNumberPhrase(value);

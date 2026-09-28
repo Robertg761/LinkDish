@@ -5,6 +5,9 @@
  */
 import { formatQuantity } from "./number-format.js";
 import { NUMBER_PHRASE_PATTERN, parseNumberPhrase, WORD_NUMBER_PATTERN } from "./number-phrases.js";
+import { replaceBracketedGroups, trimEndMatching } from "./text-scan.js";
+
+import type { BracketPair } from "./text-scan.js";
 
 export type ParsedServings = {
   /** Smallest count ("4" in "4-6 servings"). */
@@ -36,13 +39,19 @@ const PREFIX_PATTERN =
   /^(?:yields?|makes|serves|servings?|portions?|serving size|recipe yield|feeds)\s*[:\-–]?\s*/i;
 const SERVES_PREFIX_PATTERN = /^(?:serves|servings?|portions?|feeds)\b/i;
 const MAKES_PREFIX_PATTERN = /^(?:yields?|makes|recipe yield)\b/i;
-const SEGMENT_SEPARATOR_PATTERN = /\s*[,;]\s*|\s+\/\s+/u;
+/**
+ * "16, 1 loaf", "4 quarts; 10 servings", "4 servings / 1 loaf". parseServings collapses every
+ * whitespace run to one space first, so a single `\s` stands for the `\s*`/`\s+` a raw string
+ * would need; unbounded quantifiers here backtracked quadratically on long runs of spaces.
+ */
+const SEGMENT_SEPARATOR_PATTERN = /\s?[,;]\s?|\s\/\s/u;
 const SERVING_NOUN_PATTERN =
   /^(?:servings?|serving\(s\)|portions?|people|persons?|adults?|guests?|serves)\b/i;
 const DOZEN_PATTERN = /^dozen\b\s*/i;
-const PARENTHETICAL_PATTERN = /\s*\([^)]*\)\s*/gu;
+/** "(about 2 cups)" in a noun; dropped with a linear scan (see text-scan.ts). */
+const PARENTHESES: readonly BracketPair[] = [["(", ")"]];
 const WHITESPACE_PATTERN = /\s+/gu;
-const TRAILING_PUNCTUATION_PATTERN = /[.:;,\s]+$/u;
+const TRAILING_PUNCTUATION_CHARACTER = /[.:;,\s]/u;
 /** Side yields longer than this make the header label too long, so the label drops them. */
 const MAX_YIELD_LABEL_LENGTH = 24;
 
@@ -74,11 +83,10 @@ const parseSegment = (text: string): Segment | null => {
 
   let min = Math.min(first, second ?? first);
   let max = Math.max(first, second ?? first);
-  let noun = (match[3] ?? "")
-    .replace(PARENTHETICAL_PATTERN, " ")
-    .replace(WHITESPACE_PATTERN, " ")
-    .replace(TRAILING_PUNCTUATION_PATTERN, "")
-    .trim();
+  let noun = trimEndMatching(
+    replaceBracketedGroups(match[3] ?? "", PARENTHESES, " ").replace(WHITESPACE_PATTERN, " "),
+    TRAILING_PUNCTUATION_CHARACTER
+  ).trim();
 
   if (DOZEN_PATTERN.test(noun)) {
     min *= 12;

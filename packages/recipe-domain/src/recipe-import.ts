@@ -25,6 +25,7 @@ import {
   MAX_RECIPE_TITLE_LENGTH,
   recipeSchema
 } from "./recipe-schema.js";
+import { trimEndMatching } from "./text-scan.js";
 
 import type {
   Recipe,
@@ -90,7 +91,8 @@ const PAPRIKA_DATE_PATTERN = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}(?::\d{2})?)$/
 const BASE64_PATTERN = /^[A-Za-z0-9+/=\s]+$/u;
 const NUTRITION_LINE_PATTERN = /^\s*([A-Za-z ]+?)\s*[:=]\s*(.+)$/u;
 const TRAILING_COLON_PATTERN = /:$/u;
-const TRAILING_SLASHES_PATTERN = /\/+$/u;
+/** Trailing slashes come off the synthetic source base with a linear scan, not /\/+$/. */
+const SLASH_CHARACTER = /\//u;
 const KEYWORD_SEPARATOR_PATTERN = /[,;]/u;
 
 const HIGH_SURROGATE_END_PATTERN = /[\uD800-\uDBFF]$/u;
@@ -288,9 +290,9 @@ const resolveSourceUrl = (
     }
   }
 
-  const base = (options.syntheticSourceBase ?? `https://linkdish.app/imports/${app}`).replace(
-    TRAILING_SLASHES_PATTERN,
-    ""
+  const base = trimEndMatching(
+    options.syntheticSourceBase ?? `https://linkdish.app/imports/${app}`,
+    SLASH_CHARACTER
   );
   return { sourceUrl: `${base}/${slugify(title)}-${hashText(identity)}`, synthetic: true };
 };
