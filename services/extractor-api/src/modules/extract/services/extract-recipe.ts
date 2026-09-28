@@ -512,7 +512,11 @@ const fetchSourceDocument = async (
     };
   }
 
-  const fetchResult = await runtime.fetchHtmlDocument(url, { deadline });
+  /* The HTTP fetch may overlap billing; a browser render waits for it to allow the request. */
+  const fetchResult = await runtime.fetchHtmlDocument(url, {
+    deadline,
+    awaitAuthorized: () => ensureAuthorized(context)
+  });
   const { detectSourceType } = await loadHtmlAnalysis();
 
   return {
@@ -1610,6 +1614,11 @@ const extractFromUrl = async (
     error: unknown,
     detection: DetectionResult = initialDetection
   ): ExtractionResult => {
+    /* Billing denied the request while a browser render waited for it: that is no fetch error. */
+    if (error instanceof ExtractionCancelledError) {
+      throw error;
+    }
+
     const response = mapFetchErrorToResponse(error, detection.sourceType);
     const metadata = getFetchErrorMetadata(error);
 

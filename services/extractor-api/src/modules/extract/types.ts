@@ -177,6 +177,11 @@ export interface RecipeTextCleaner {
 
 export interface SourceFetchOptions {
   deadline?: RequestDeadline | undefined;
+  /**
+   * Resolves once billing has allowed the request and rejects (ExtractionCancelledError) when
+   * it has not. The plain HTTP fetch may overlap billing; a browser render waits for this.
+   */
+  awaitAuthorized?: (() => Promise<void>) | undefined;
 }
 
 export interface ExtractorRuntime {

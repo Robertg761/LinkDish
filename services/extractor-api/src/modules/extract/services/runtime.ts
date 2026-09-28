@@ -2,6 +2,7 @@ import { extractorApiEnv } from "../../../config/env.js";
 import { getSharedManagedFallbackExtractor } from "../../admin/model-control.js";
 import { createExtractionResultCache } from "../cache/extraction-cache.js";
 import { createFallbackHandoffStore } from "../cache/fallback-handoff.js";
+import { ExtractionCancelledError } from "../deadline.js";
 import { BrowserFetchError, HtmlFetchError } from "../fetchers/errors.js";
 import { getDomainAdapter } from "../source-detection/domain-adapters.js";
 import { parseYouTubeVideoId } from "../source-detection/parse-youtube-video-id.js";
@@ -12,7 +13,6 @@ import {
 } from "../text-cleanup/gemini-recipe-text-cleaner.js";
 
 import type * as BrowserEscalation from "./browser-escalation.js";
-import type { RequestDeadline } from "../deadline.js";
 import type * as HtmlFetcher from "../fetchers/fetch-html-document.js";
 import type * as TikTokFetcher from "../fetchers/fetch-tiktok-document.js";
 import type * as YouTubeFetcher from "../fetchers/fetch-youtube-document.js";
@@ -100,9 +100,16 @@ export const createDefaultExtractorRuntime = (): ExtractorRuntime => {
 
   const fetchWithBrowser = async (
     url: string,
-    deadline: RequestDeadline | undefined,
+    options: SourceFetchOptions | undefined,
     blockSignalPatterns: RegExp[] | undefined
   ): Promise<FetchResult> => {
+    /*
+     * A render launches Chromium, which cannot be aborted once started, so it waits for billing:
+     * only the plain HTTP fetch overlaps the billing lookups.
+     */
+    await options?.awaitAuthorized?.();
+
+    const deadline = options?.deadline;
     const timeoutMs = deadline
       ? deadline.budgetMs(extractorApiEnv.BROWSER_FETCH_TIMEOUT_MS, browserRenderReserveMs)
       : extractorApiEnv.BROWSER_FETCH_TIMEOUT_MS;
@@ -152,7 +159,7 @@ export const createDefaultExtractorRuntime = (): ExtractorRuntime => {
             document: httpResult.document
           })
         ) {
-          return await fetchWithBrowser(url, deadline, blockSignalPatterns);
+          return await fetchWithBrowser(url, options, blockSignalPatterns);
         }
 
         return httpResult;
@@ -165,10 +172,14 @@ export const createDefaultExtractorRuntime = (): ExtractorRuntime => {
             error.reason === "timeout" ||
             error.reason === "unreachable")
         ) {
-          return fetchWithBrowser(url, deadline, blockSignalPatterns);
+          return fetchWithBrowser(url, options, blockSignalPatterns);
         }
 
-        if (error instanceof BrowserFetchError || error instanceof HtmlFetchError) {
+        if (
+          error instanceof BrowserFetchError ||
+          error instanceof HtmlFetchError ||
+          error instanceof ExtractionCancelledError
+        ) {
           throw error;
         }
 

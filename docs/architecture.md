@@ -184,8 +184,10 @@ parses `extractRecipeAnyRequestSchema`.
 2. Billing authorization and extraction start together. URL validation (DNS), the
    result-cache lookup and the page fetch overlap the auth, household and RevenueCat
    lookups. If billing denies, the in-flight fetch is aborted and the `plan_limit`
-   response is returned. Deterministic extraction, browser renders started after the
-   fetch, LLM calls and cache writes all wait for billing's answer.
+   response is returned. Only the plain HTTP fetch overlaps billing: a Playwright render
+   (the escalation for a blocked, shell or thin page, which launches Chromium and cannot
+   be aborted) awaits billing's answer through `SourceFetchOptions.awaitAuthorized`, as do
+   deterministic extraction, LLM calls and cache writes.
 3. Usage is committed before responding, exactly as before, including for cache hits
    (a cache hit is still an import).
 4. Durable Postgres analytics, cache writes and fallback hand-off writes run after the
