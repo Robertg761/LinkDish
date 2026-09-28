@@ -1,5 +1,4 @@
 import { waitUntil } from "@vercel/functions";
-import { ZodError } from "zod";
 
 import { extractRecipeAnyRequestSchema } from "../packages/api-contracts/src/index.js";
 import { corsJson, corsPreflight } from "../services/extractor-api/src/http/vercel-cors.js";
@@ -52,7 +51,26 @@ export async function POST(request: Request) {
       );
     }
 
-    const payload = extractRecipeAnyRequestSchema.parse(await request.json());
+    /*
+     * Only the request itself is the client's fault. A ZodError from inside the extraction
+     * (an extracted value failing the response contract) is a server error below.
+     */
+    const parsedPayload = extractRecipeAnyRequestSchema.safeParse(await request.json());
+
+    if (!parsedPayload.success) {
+      return corsJson(
+        request,
+        {
+          message: "Invalid extract request.",
+          issues: parsedPayload.error.issues
+        },
+        {
+          status: 400
+        }
+      );
+    }
+
+    const payload = parsedPayload.data;
     /*
      * Durable analytics and the extraction cache/hand-off writes run after the
      * response through waitUntil, so the recipe is returned as soon as usage
@@ -88,19 +106,6 @@ export async function POST(request: Request) {
             "retry-after": "30"
           },
           status: 503
-        }
-      );
-    }
-
-    if (error instanceof ZodError) {
-      return corsJson(
-        request,
-        {
-          message: "Invalid extract request.",
-          issues: error.issues
-        },
-        {
-          status: 400
         }
       );
     }

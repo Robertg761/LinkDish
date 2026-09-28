@@ -132,7 +132,8 @@ platforms map onto them and are told apart internally by the detection `adapterK
   canonical watch page. The description is the full `videoDetails.shortDescription` from
   the player response (og:description is truncated). The channel becomes `author`.
 - **Pinterest** pins (and pin.it links that land on one): the pin's outbound link
-  (`og:see_also`, else `"link"` in the pin's app state) is validated with the same SSRF
+  (`og:see_also`, else `"link"` in the pin's app state), when it is a valid recipe
+  `sourceUrl` (http(s), at most 2048 characters), is validated with the same SSRF
   checks and extracted instead, through the same path a direct link to it takes: YouTube
   through the transcript path, TikTok through its caption, and other social or video
   sites are rejected as `unsupported_source` before anything is fetched. The recipe's
@@ -191,7 +192,9 @@ parses `extractRecipeAnyRequestSchema`.
 
 `api/extract.ts` and the Fastify route share `services/extract-request-pipeline.ts`:
 
-1. IP rate limit (Upstash), then request parsing.
+1. IP rate limit (Upstash), then request parsing. Only a request that fails
+   `extractRecipeAnyRequestSchema` is a 400; any later error, a ZodError from the
+   extraction included, is a 500.
 2. Billing authorization and extraction start together. URL validation (DNS), the
    result-cache lookup and the page fetch overlap the auth, household and RevenueCat
    lookups. If billing denies, the in-flight fetch is aborted and the `plan_limit`

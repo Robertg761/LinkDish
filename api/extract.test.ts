@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ZodError } from "zod";
 
 const mocks = vi.hoisted(() => {
   class MockRateLimitUnavailableError extends Error {}
@@ -298,6 +299,18 @@ describe("Vercel extract adapter request identity", () => {
 
     expect(response.status).toBe(400);
     expect(mocks.extractRecipe).not.toHaveBeenCalled();
+  });
+
+  it("answers 500, not 400, when a valid request fails validation inside the extraction", async () => {
+    mocks.extractRecipe.mockRejectedValueOnce(
+      new ZodError([{ code: "custom", path: ["recipe", "sourceUrl"], message: "Too long" }])
+    );
+    const extractApi = await import("./extract.js");
+
+    const response = await extractApi.POST(createRequest());
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({ message: "Unexpected extractor error." });
   });
 
   it("returns the committed quota with a success", async () => {

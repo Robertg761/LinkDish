@@ -358,6 +358,21 @@ describe("Pinterest pins", () => {
     });
   });
 
+  it("does not follow an outbound link too long to be a recipe's source URL", async () => {
+    const tooLong = `${recipeUrl}?ref=${"a".repeat(2_100)}`;
+    const fetchHtmlDocument = vi.fn((url: string) =>
+      Promise.resolve(htmlResult(url, url === pinUrl ? pinHtml(tooLong) : recipeJsonLd))
+    );
+
+    const { response } = await extractRecipe(
+      { url: pinUrl, attempt: "primary" },
+      createRuntime({ fetchHtmlDocument })
+    );
+
+    expect(fetchHtmlDocument.mock.calls.map(([url]) => url)).toEqual([pinUrl]);
+    expect(response.status).not.toBe("success");
+  });
+
   it("rejects a linked social or video site it cannot read without fetching it", async () => {
     const fetchHtmlDocument = vi.fn((url: string) =>
       Promise.resolve(htmlResult(url, pinHtml("https://www.instagram.com/p/abc123/")))
