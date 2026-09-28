@@ -7,6 +7,7 @@ import { isCachedUserPremium } from "../../auth/auth-cache";
 import { emitDataChange } from "../../data/change-feed";
 import { safeGetItem, safeSetItem } from "../../platform/safe-storage";
 import {
+  COLLECTIONS_STORE_NAME,
   COOK_SESSIONS_STORE_NAME,
   getLinkDishWebDb,
   RECIPE_SOURCE_IMAGES_STORE_NAME,
@@ -230,11 +231,15 @@ export async function countQuotaSavedRecipes(): Promise<number> {
   return keys.filter((key) => !isStarterRecipeId(key)).length;
 }
 
-/** Throws {@link SavedRecipeLimitError} when a free user has no room for another recipe. */
-export async function assertCanAddSavedRecipe(options?: SavedRecipeQuotaOptions): Promise<void> {
-  const isPremiumUser = options?.isPremiumUser ?? isCachedUserPremium();
+const isPremium = (options?: SavedRecipeQuotaOptions): boolean =>
+  options?.isPremiumUser ?? isCachedUserPremium();
 
-  if (isPremiumUser) {
+/**
+ * Throws {@link SavedRecipeLimitError} when a free user has no room for another recipe. An early
+ * answer for the UI: writes check the limit again in the transaction that adds the recipe.
+ */
+export async function assertCanAddSavedRecipe(options?: SavedRecipeQuotaOptions): Promise<void> {
+  if (isPremium(options)) {
     return;
   }
 
@@ -247,62 +252,189 @@ export async function assertCanAddSavedRecipe(options?: SavedRecipeQuotaOptions)
  * Writes
  * ---------------------------------------------------------------------------------------------- */
 
+interface RecordStore {
+  delete(key: string): Promise<unknown>;
+  put(value: unknown): Promise<unknown>;
+}
+
+/** Queues the writes of a record and of its images (see {@link SplitRecord}) in a transaction. */
+const putSplitRecord = (
+  recipes: RecordStore,
+  imagesStore: RecordStore,
+  { images, record }: SplitRecord
+): Array<Promise<unknown>> => [
+  recipes.put(record),
+  ...(images === undefined
+    ? []
+    : [
+        images.length
+          ? imagesStore.put(imagesRecordFor(record.id, images, record.updatedAt))
+          : imagesStore.delete(record.id)
+      ])
+];
+
 /** Writes the record and its images atomically; returns the stored (image-free) record. */
 async function writeSavedRecipe(recipe: WebSavedRecipe): Promise<WebSavedRecipe> {
   const db = await getDb();
-  const { images, record } = splitSourceImages(recipe);
+  const split = splitSourceImages(recipe);
 
-  if (images === undefined) {
-    await db.put(STORE_NAME, record);
+  if (split.images === undefined) {
+    await db.put(STORE_NAME, split.record);
   } else {
     const tx = db.transaction([STORE_NAME, IMAGES_STORE_NAME], "readwrite");
-    const imagesStore = tx.objectStore(IMAGES_STORE_NAME);
 
     await Promise.all([
-      tx.objectStore(STORE_NAME).put(record),
-      images.length
-        ? imagesStore.put(imagesRecordFor(record.id, images, record.updatedAt))
-        : imagesStore.delete(record.id),
+      ...putSplitRecord(tx.objectStore(STORE_NAME), tx.objectStore(IMAGES_STORE_NAME), split),
       tx.done
     ]);
   }
 
-  emitDataChange({ topic: "savedRecipes", upserted: [record] });
-  return record;
+  emitDataChange({ topic: "savedRecipes", upserted: [split.record] });
+  return split.record;
+}
+
+interface NewRecipeChecks {
+  /** Write nothing when a recipe with this id is already stored. */
+  ifAbsent?: boolean | undefined;
+  /**
+   * Write nothing when the recipe would be one personal recipe too many for a free cookbook
+   * ({@link LOCAL_LIMIT_FREE}). Starters, and a recipe that is already stored, always fit.
+   */
+  withinFreeLimit?: boolean | undefined;
+}
+
+type NewRecipeOutcome =
+  | { record: WebSavedRecipe; refused?: undefined }
+  /** `stored` is the record already there (image-free), left as it was. */
+  | { record?: undefined; refused: "duplicate"; stored: WebSavedRecipe }
+  | { record?: undefined; refused: "limit_exceeded" };
+
+/**
+ * Writes a recipe once `checks` pass. The checks read what is stored inside the readwrite
+ * transaction that writes, so two tabs saving at once can't both pass them: the second finds the
+ * recipe already there, or the free cookbook full.
+ */
+async function writeNewSavedRecipe(
+  recipe: WebSavedRecipe,
+  checks: NewRecipeChecks
+): Promise<NewRecipeOutcome> {
+  const db = await getDb();
+  const split = splitSourceImages(recipe);
+  const tx = db.transaction([STORE_NAME, IMAGES_STORE_NAME], "readwrite");
+  const done = tx.done;
+  // A failed request rejects below; keep `done` from also surfacing as an unhandled rejection.
+  done.catch(() => undefined);
+  const recipes = tx.objectStore(STORE_NAME);
+  const stored = (await recipes.get(split.record.id)) as WebSavedRecipe | undefined;
+
+  if (checks.ifAbsent && stored) {
+    await done;
+    return { refused: "duplicate", stored: toSavedRecipeListRecord(stored) };
+  }
+
+  if (checks.withinFreeLimit && !stored && !isStarterRecipeId(split.record.id)) {
+    const keys = await recipes.getAllKeys();
+
+    if (keys.filter((key) => !isStarterRecipeId(key)).length >= LOCAL_LIMIT_FREE) {
+      await done;
+      return { refused: "limit_exceeded" };
+    }
+  }
+
+  await Promise.all([...putSplitRecord(recipes, tx.objectStore(IMAGES_STORE_NAME), split), done]);
+  emitDataChange({ topic: "savedRecipes", upserted: [split.record] });
+  return { record: split.record };
 }
 
 /**
- * Read-modify-write of one stored record in a single transaction, so concurrent metadata updates
- * never overwrite each other. Returns the stored (image-free) record.
+ * Writes a recipe unless it would be one personal recipe too many for a free cookbook, in which
+ * case it throws {@link SavedRecipeLimitError}. Returns the stored (image-free) record.
  */
-async function patchStoredRecipe(
+async function writeWithinFreeLimit(
+  recipe: WebSavedRecipe,
+  options?: SavedRecipeQuotaOptions
+): Promise<WebSavedRecipe> {
+  const outcome = await writeNewSavedRecipe(recipe, { withinFreeLimit: !isPremium(options) });
+
+  if (outcome.refused) {
+    throw new SavedRecipeLimitError();
+  }
+
+  return outcome.record;
+}
+
+interface StoredRecipeUpdateOptions {
+  /**
+   * Change nothing unless this collection still exists. It is read in the same transaction, so
+   * when another tab deletes the collection, that delete either lands first (and the recipe is
+   * not added to it) or after (and takes the recipe out of it again).
+   */
+  whileCollectionExists?: string | undefined;
+}
+
+/**
+ * Read-modify-write of one stored record in a single readwrite transaction, so updates from this
+ * tab and others never overwrite each other. `updater` gets the stored record (`undefined` when
+ * there is none) and returns the record to store, or `undefined` to leave things as they are. It
+ * must be synchronous: awaiting anything else would let the transaction commit before the write.
+ * Returns the stored (image-free) record, `undefined` when there is none.
+ */
+async function updateStoredRecipe(
   id: string,
-  updater: (existing: WebSavedRecipe) => WebSavedRecipe
+  updater: (existing: WebSavedRecipe | undefined) => WebSavedRecipe | undefined,
+  { whileCollectionExists }: StoredRecipeUpdateOptions = {}
 ): Promise<WebSavedRecipe | undefined> {
   const db = await getDb();
-  const tx = db.transaction([STORE_NAME, IMAGES_STORE_NAME], "readwrite");
+  const tx = db.transaction(
+    whileCollectionExists
+      ? [STORE_NAME, IMAGES_STORE_NAME, COLLECTIONS_STORE_NAME]
+      : [STORE_NAME, IMAGES_STORE_NAME],
+    "readwrite"
+  );
+  const done = tx.done;
+  // A failed request rejects below; keep `done` from also surfacing as an unhandled rejection.
+  done.catch(() => undefined);
   const recipes = tx.objectStore(STORE_NAME);
-  const existing = (await recipes.get(id)) as WebSavedRecipe | undefined;
+  const [existing, collection] = await Promise.all([
+    recipes.get(id) as Promise<WebSavedRecipe | undefined>,
+    whileCollectionExists
+      ? (tx.objectStore(COLLECTIONS_STORE_NAME).get(whileCollectionExists) as Promise<unknown>)
+      : undefined
+  ]);
 
-  if (!existing) {
-    await tx.done;
-    return undefined;
+  if (whileCollectionExists && collection === undefined) {
+    await done;
+
+    if (!existing) {
+      return undefined;
+    }
+
+    // Nothing changed, but this tab may already show the change (optimistically): correct it.
+    const unchanged = toSavedRecipeListRecord(existing);
+    emitDataChange({ topic: "savedRecipes", upserted: [unchanged] });
+    return unchanged;
   }
 
-  const { images, record } = splitSourceImages(updater(existing));
-  await recipes.put(record);
+  const next = updater(existing);
 
-  if (images !== undefined) {
-    const imagesStore = tx.objectStore(IMAGES_STORE_NAME);
-    await (images.length
-      ? imagesStore.put(imagesRecordFor(record.id, images, record.updatedAt))
-      : imagesStore.delete(record.id));
+  if (!next) {
+    await done;
+    return existing && toSavedRecipeListRecord(existing);
   }
 
-  await tx.done;
-  emitDataChange({ topic: "savedRecipes", upserted: [record] });
-  return record;
+  const split = splitSourceImages(next);
+  await Promise.all([...putSplitRecord(recipes, tx.objectStore(IMAGES_STORE_NAME), split), done]);
+  emitDataChange({ topic: "savedRecipes", upserted: [split.record] });
+  return split.record;
 }
+
+/** {@link updateStoredRecipe} for a recipe that must already be stored (nothing is created). */
+const patchStoredRecipe = (
+  id: string,
+  updater: (existing: WebSavedRecipe) => WebSavedRecipe,
+  options?: StoredRecipeUpdateOptions
+): Promise<WebSavedRecipe | undefined> =>
+  updateStoredRecipe(id, (existing) => existing && updater(existing), options);
 
 const hydrateImages = async (record: WebSavedRecipe | undefined) => {
   if (!record?.sourceImageCount) {
@@ -411,24 +543,7 @@ export async function saveRecipe(
   recipe?: WebSavedRecipe;
   error?: "limit_exceeded" | "duplicate_prompt";
 }> {
-  const db = await getDb();
   const id = await generateDeterministicId(input.sourceUrl, input.recipe.title);
-
-  // Check if same ID already exists
-  const existing = (await db.get(STORE_NAME, id)) as WebSavedRecipe | undefined;
-  if (existing) {
-    // Return explicit indicator to let user know they can replace it
-    return { success: false, error: "duplicate_prompt" };
-  }
-
-  // Check limit if not premium
-  if (!isPremiumUser) {
-    const count = await countQuotaSavedRecipes();
-    if (count >= LOCAL_LIMIT_FREE) {
-      return { success: false, error: "limit_exceeded" };
-    }
-  }
-
   const now = new Date().toISOString();
   const savedRecipe: WebSavedRecipe = {
     id,
@@ -445,41 +560,64 @@ export async function saveRecipe(
     }
   };
 
-  const stored = await writeSavedRecipe(savedRecipe);
-  return { success: true, recipe: withImages(stored, input.sourceImages) };
+  // The duplicate check and the free limit read what is stored in the transaction that writes.
+  const outcome = await writeNewSavedRecipe(savedRecipe, {
+    ifAbsent: true,
+    withinFreeLimit: !isPremiumUser
+  });
+
+  if (outcome.refused) {
+    // A duplicate lets the cook choose to replace it (forceSaveRecipe).
+    return {
+      success: false,
+      error: outcome.refused === "duplicate" ? "duplicate_prompt" : "limit_exceeded"
+    };
+  }
+
+  return { success: true, recipe: withImages(outcome.record, input.sourceImages) };
 }
 
+/**
+ * Saves the recipe over the stored one with the same id (a re-import), keeping its personal notes
+ * and metadata. Merged with the record as stored inside one readwrite transaction, so a favorite,
+ * tag or cook another tab saves meanwhile is kept.
+ */
 export async function forceSaveRecipe(input: SaveRecipeInput): Promise<WebSavedRecipe> {
-  const db = await getDb();
   const id = await generateDeterministicId(input.sourceUrl, input.recipe.title);
-  const existing = (await db.get(STORE_NAME, id)) as WebSavedRecipe | undefined;
-  const existingSync = existing?.sync;
   const now = new Date().toISOString();
-  const savedRecipe: WebSavedRecipe = {
-    // Personal notes and metadata survive a re-import of the same recipe.
-    ...(existing ? toSavedRecipeListRecord(existing) : {}),
-    id,
-    recipe: input.recipe,
-    sourceUrl: input.sourceUrl,
-    sourceHost: getSourceHost(input.sourceUrl),
-    createdAt: existing ? existing.createdAt : now,
-    updatedAt: now,
-    extraction: input.extraction,
-    timesCooked: existing?.timesCooked ?? 0,
-    sync: existingSync?.sharedRecipeId
-      ? {
-          ...existingSync,
-          status: "dirty"
-        }
-      : (existingSync ?? { status: "local_only" }),
-    ...(input.sourceImages
-      ? { sourceImages: input.sourceImages }
-      : existing?.sourceImages
-        ? { sourceImages: existing.sourceImages }
-        : {})
-  };
+  const stored = await updateStoredRecipe(id, (existing): WebSavedRecipe => {
+    const existingSync = existing?.sync;
 
-  const stored = await writeSavedRecipe(savedRecipe);
+    return {
+      // Personal notes and metadata survive a re-import of the same recipe.
+      ...(existing ? toSavedRecipeListRecord(existing) : {}),
+      id,
+      recipe: input.recipe,
+      sourceUrl: input.sourceUrl,
+      sourceHost: getSourceHost(input.sourceUrl),
+      createdAt: existing ? existing.createdAt : now,
+      updatedAt: now,
+      extraction: input.extraction,
+      timesCooked: existing?.timesCooked ?? 0,
+      sync: existingSync?.sharedRecipeId
+        ? {
+            ...existingSync,
+            status: "dirty"
+          }
+        : (existingSync ?? { status: "local_only" }),
+      ...(input.sourceImages
+        ? { sourceImages: input.sourceImages }
+        : existing?.sourceImages
+          ? { sourceImages: existing.sourceImages }
+          : {})
+    };
+  });
+
+  if (!stored) {
+    // Unreachable: the updater always returns a record to write.
+    throw new Error("This recipe couldn't be saved.");
+  }
+
   return (await hydrateImages(stored)) ?? stored;
 }
 
@@ -492,43 +630,95 @@ export async function putSavedRecipe(recipe: WebSavedRecipe): Promise<WebSavedRe
   return recipe;
 }
 
+export interface RestoredSavedRecipe {
+  /** The recipe as stored now (without its scans). */
+  recipe: WebSavedRecipe;
+  /**
+   * False when the recipe was already back (saved again since the delete, say in another tab):
+   * that record, with its own edits and scans, stays as it is.
+   */
+  restored: boolean;
+}
+
 /**
- * Puts a deleted recipe back (Undo), like {@link putSavedRecipe}. When a free cookbook filled up
- * again after the delete there is no room for it, so this throws {@link SavedRecipeLimitError}
- * instead of going past the limit. Starters, and a record that is still stored, go straight back.
+ * Puts a deleted recipe (and its scans) back for Undo, unless a recipe with its id is stored
+ * again by now: that newer record is kept, never replaced by the older snapshot. When a free
+ * cookbook filled up again after the delete there is no room for it, so this throws
+ * {@link SavedRecipeLimitError} instead of going past the limit. Starters always fit. Both checks
+ * read what is stored in the transaction that writes, so a save in another tab can't slip in
+ * between them and the write.
  */
 export async function restoreSavedRecipe(
   recipe: WebSavedRecipe,
   options?: SavedRecipeQuotaOptions
-): Promise<WebSavedRecipe> {
-  if (!isStarterRecipeId(recipe.id)) {
-    const db = await getDb();
+): Promise<RestoredSavedRecipe> {
+  const outcome = await writeNewSavedRecipe(recipe, {
+    ifAbsent: true,
+    withinFreeLimit: !isPremium(options)
+  });
 
-    if ((await db.get(STORE_NAME, recipe.id)) === undefined) {
-      await assertCanAddSavedRecipe(options);
-    }
+  if (outcome.refused === "limit_exceeded") {
+    throw new SavedRecipeLimitError();
   }
 
-  return putSavedRecipe(recipe);
+  if (outcome.refused === "duplicate") {
+    // This tab may still show the recipe as deleted: show the stored one.
+    emitDataChange({ topic: "savedRecipes", upserted: [outcome.stored] });
+    return { recipe: outcome.stored, restored: false };
+  }
+
+  return { recipe: outcome.record, restored: true };
 }
 
+/** An edit from the recipe editor: only what the cook changed. */
+export interface SavedRecipeEdit {
+  /** New notes (`null` or blank clears them). Left out, the stored notes stay. */
+  notes?: string | null | undefined;
+  /** The recipe fields the cook changed; the others stay as stored. */
+  recipe?: Partial<Recipe> | undefined;
+  /** A new source link. */
+  sourceUrl?: string | undefined;
+}
+
+/**
+ * Saves an edit of the recipe (and, with `sourceUrl`, its link) in one read-modify-write that
+ * changes only what `edit` holds, so a note or recipe edit another tab saved meanwhile (or a
+ * cook, a favorite) is kept. An edit that holds nothing writes nothing.
+ */
 export async function updateSavedRecipe(
   id: string,
-  update: {
-    notes?: string | undefined;
-    recipe: Recipe;
-  }
+  edit: SavedRecipeEdit
 ): Promise<WebSavedRecipe | undefined> {
-  const updated = await patchStoredRecipe(id, (existing) => ({
-    ...existing,
-    notes: update.notes?.trim() || undefined,
-    recipe: update.recipe,
-    updatedAt: new Date().toISOString(),
-    sync: {
-      ...(existing.sync || { status: "local_only" }),
-      status: existing.sync?.sharedRecipeId ? "dirty" : (existing.sync?.status ?? "local_only")
+  const { notes, recipe, sourceUrl } = edit;
+  const recipeChanges = recipe && Object.keys(recipe).length > 0 ? recipe : undefined;
+  const updated = await updateStoredRecipe(id, (existing) => {
+    if (!existing || (notes === undefined && !recipeChanges && !sourceUrl)) {
+      return undefined;
     }
-  }));
+
+    const next: WebSavedRecipe = {
+      ...existing,
+      ...(recipeChanges ? { recipe: { ...existing.recipe, ...recipeChanges } } : {}),
+      ...(sourceUrl ? { sourceHost: getSourceHost(sourceUrl), sourceUrl } : {}),
+      updatedAt: new Date().toISOString(),
+      sync: {
+        ...(existing.sync || { status: "local_only" }),
+        status: existing.sync?.sharedRecipeId ? "dirty" : (existing.sync?.status ?? "local_only")
+      }
+    };
+
+    if (notes !== undefined) {
+      const trimmed = notes?.trim();
+
+      if (trimmed) {
+        next.notes = trimmed;
+      } else {
+        delete next.notes;
+      }
+    }
+
+    return next;
+  });
 
   return hydrateImages(updated);
 }
@@ -611,7 +801,8 @@ export async function duplicateSavedRecipe(
     }
   };
 
-  return putSavedRecipe(duplicate);
+  await writeWithinFreeLimit(duplicate, options);
+  return duplicate;
 }
 
 export function sharedRecipeToWebSavedRecipe(sharedRecipe: SharedRecipe): WebSavedRecipe {
@@ -684,7 +875,7 @@ export async function saveSharedRecipeCopy(
     updatedAt: now
   };
 
-  return writeSavedRecipe(savedRecipe);
+  return writeWithinFreeLimit(savedRecipe, options);
 }
 
 /**
@@ -870,23 +1061,61 @@ export function setRecipeFavorite(
   );
 }
 
+/** New tags, or how to change the stored ones (e.g. add one: `(tags) => [...tags, "Quick"]`). */
+export type RecipeTagsUpdate =
+  | readonly string[]
+  | ((current: readonly string[]) => readonly string[]);
+
+/**
+ * Sets the recipe's tags. Pass a function to change the tags as stored when the write happens
+ * (inside its transaction) rather than a list read earlier, so a tag another tab adds meanwhile
+ * is kept. The function must be synchronous.
+ */
 export function setRecipeTags(
   id: string,
-  tags: readonly string[]
+  tags: RecipeTagsUpdate
 ): Promise<WebSavedRecipe | undefined> {
-  const normalized = normalizeRecipeTags(tags);
-  return patchStoredRecipe(id, (existing) =>
-    withOptional(existing, "tags", normalized.length ? normalized : undefined)
-  );
+  return patchStoredRecipe(id, (existing) => {
+    const normalized = normalizeRecipeTags(
+      typeof tags === "function" ? tags(existing.tags ?? []) : tags
+    );
+    return withOptional(existing, "tags", normalized.length ? normalized : undefined);
+  });
 }
+
+const uniqueCollectionIds = (collectionIds: readonly string[]): string[] =>
+  Array.from(new Set(collectionIds.map((entry) => entry.trim()).filter(Boolean)));
 
 export function setRecipeCollections(
   id: string,
   collectionIds: readonly string[]
 ): Promise<WebSavedRecipe | undefined> {
-  const unique = Array.from(new Set(collectionIds.map((entry) => entry.trim()).filter(Boolean)));
+  const unique = uniqueCollectionIds(collectionIds);
   return patchStoredRecipe(id, (existing) =>
     withOptional(existing, "collectionIds", unique.length ? unique : undefined)
+  );
+}
+
+/**
+ * Adds the recipe to a collection (or, with `member: false`, takes it out) as stored when the
+ * write happens, so a membership another tab changes meanwhile is kept. Adding does nothing when
+ * the collection no longer exists (another tab deleted it).
+ */
+export function setRecipeCollectionMembership(
+  id: string,
+  collectionId: string,
+  member: boolean
+): Promise<WebSavedRecipe | undefined> {
+  return patchStoredRecipe(
+    id,
+    (existing) => {
+      const current = existing.collectionIds ?? [];
+      const next = uniqueCollectionIds(
+        member ? [...current, collectionId] : current.filter((entry) => entry !== collectionId)
+      );
+      return withOptional(existing, "collectionIds", next.length ? next : undefined);
+    },
+    member ? { whileCollectionExists: collectionId } : {}
   );
 }
 

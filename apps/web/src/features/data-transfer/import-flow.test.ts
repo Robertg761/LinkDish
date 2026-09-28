@@ -18,6 +18,7 @@ import {
 } from "../../storage/linkdish-db";
 import { fakeIdb } from "../../storage/testing/fake-idb";
 import {
+  deleteSavedRecipe,
   duplicateSavedRecipe,
   generateDeterministicId,
   getSavedRecipeById,
@@ -447,6 +448,58 @@ describe("importing into the cookbook", () => {
     });
     expect(again.preview.membershipAdditions).toEqual([]);
     expect(again.result.plan.recipes).toEqual([]);
+  });
+
+  describe("a starter that changes between the preview and the import", () => {
+    const starterBackup = () =>
+      jsonBytes(
+        createLinkDishBackup({
+          exportedAt: "2026-09-27T10:00:00.000Z",
+          recipes: [
+            {
+              id: starterId,
+              recipe: starterRecipe,
+              meta: {
+                notes: "Use raspberries.",
+                createdAt: "2026-09-01T00:00:00.000Z",
+                updatedAt: "2026-09-01T00:00:00.000Z",
+                sourceUrl: starterRecipe.sourceUrl
+              }
+            }
+          ]
+        })
+      );
+    const settings = { duplicateMode: "skip", isPremium: false } as const;
+
+    it("keeps a starter made personal after the preview", async () => {
+      await putSavedRecipe(starterRecord());
+      const prepared = await prepareImport(fileFromBytes(starterBackup(), "linkdish-backup.json"));
+      expect(previewImport(prepared, settings).counts).toMatchObject({ restoredStarters: 1 });
+
+      // Another tab favorites the starter before the import is confirmed.
+      await setRecipeFavorite(starterId, true);
+      const result = await runImport(prepared, settings);
+
+      expect(result.plan.counts).toMatchObject({ restoredStarters: 0, skippedDuplicates: 1 });
+      expect(result.recipeIds).toEqual([]);
+      const starter = await getSavedRecipeById(starterId);
+      expect(starter).toMatchObject({ favorite: true, isStarter: true });
+      expect(starter?.notes).toBeUndefined();
+    });
+
+    it("restores a starter deleted after the preview as a starter", async () => {
+      await putSavedRecipe(starterRecord());
+      const prepared = await prepareImport(fileFromBytes(starterBackup(), "linkdish-backup.json"));
+      await deleteSavedRecipe(starterId);
+
+      const result = await runImport(prepared, settings);
+
+      expect(result.plan.counts).toMatchObject({ imported: 0, restoredStarters: 1 });
+      expect(await getSavedRecipeById(starterId)).toMatchObject({
+        isStarter: true,
+        notes: "Use raspberries."
+      });
+    });
   });
 
   describe("restoring a LinkDish backup made from this app", () => {

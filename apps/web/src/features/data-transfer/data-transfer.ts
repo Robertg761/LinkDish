@@ -165,6 +165,7 @@ export const previewImport = (
     ...options,
     existingRecipeIds: prepared.existingRecipeIds,
     quotaUsed: prepared.analysis.quotaUsed,
+    untouchedStarterIds: prepared.analysis.untouchedStarterIds,
     existingCollections: prepared.existingCollections,
     existingMealPlan: prepared.existingMealPlan,
     now: new Date().toISOString(),

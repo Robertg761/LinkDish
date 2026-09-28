@@ -51,13 +51,11 @@ import {
   getSharedRecipeOwnerLabel,
   getSourceHost,
   LOCAL_LIMIT_FREE,
-  putSavedRecipe,
   restoreSavedRecipe,
   SavedRecipeLimitError,
   saveSharedRecipeCopy,
   sharedRecipeToWebSavedRecipe,
   syncRecipeToHousehold,
-  toSavedRecipeListRecord,
   updateSavedRecipe
 } from "./saved-recipe-store";
 
@@ -626,7 +624,13 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
         label: "Undo",
         onClick: () => {
           void restoreSavedRecipe(snapshot, { isPremiumUser }).then(
-            () => showToast({ message: `“${title}” is back in your cookbook.` }),
+            ({ recipe: current, restored }) =>
+              showToast({
+                // Saved again (say, in another tab) since the delete: that newer copy stays.
+                message: restored
+                  ? `“${title}” is back in your cookbook.`
+                  : `“${current.recipe.title}” is already back in your cookbook.`
+              }),
             (error: unknown) =>
               showToast(
                 error instanceof SavedRecipeLimitError
@@ -721,24 +725,19 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
       return;
     }
 
+    // One write of only what was changed in the editor (and the link), so a note, edit, cook or
+    // favorite saved meanwhile, here or in another tab, is kept.
     const updated = await updateSavedRecipe(record.id, {
-      notes: values.notes ?? undefined,
-      recipe: values.recipe
+      ...values.changes,
+      ...(values.sourceUrl ? { sourceUrl: values.sourceUrl } : {})
     });
 
     if (!updated) {
       throw new Error("This saved recipe is no longer available.");
     }
 
-    if (values.sourceUrl) {
-      await putSavedRecipe({
-        ...toSavedRecipeListRecord(updated),
-        sourceHost: getSourceHost(values.sourceUrl),
-        sourceUrl: values.sourceUrl
-      });
-    }
-
-    if (updated.sync?.sharedRecipeId && isAuthenticated) {
+    // A save that changed nothing leaves a synced recipe synced: there is nothing to sync then.
+    if (updated.sync?.sharedRecipeId && updated.sync.status !== "synced" && isAuthenticated) {
       showToast({
         action: { label: "Sync now", onClick: () => void handleSync() },
         message: "Saved here. Sync to update your household’s copy."

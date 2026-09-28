@@ -145,7 +145,62 @@ describe("RecipeEditorSheet", () => {
       ],
       title: "Onion Soup"
     });
+    expect(values.changes).toEqual({
+      notes: null,
+      recipe: {
+        cookTimeMinutes: null,
+        ingredients: [
+          { section: "Soup", text: "2 cups stock" },
+          { section: "To serve", text: "Croutons" }
+        ],
+        sourceUrl: "https://example.com/better-soup"
+      }
+    });
     await waitFor(() => expect(props.onClose).toHaveBeenCalled());
+  });
+
+  it("sends only what the cook changed since the editor opened", async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    const onClose = vi.fn();
+    const props = {
+      notes: "Family favourite",
+      onClose,
+      onSave,
+      open: true,
+      recipe,
+      sourceUrl: "https://example.com/soup"
+    };
+    const { rerender } = render(<RecipeEditorSheet {...props} />);
+
+    // A note and a new title arrive from another tab while the editor is open.
+    rerender(
+      <RecipeEditorSheet
+        {...props}
+        notes="Saved in another tab"
+        recipe={{ ...recipe, title: "Golden Onion Soup" }}
+      />
+    );
+    // What the editor shows stays as it opened, and nothing counts as an unsaved edit.
+    expect(screen.getByLabelText("Title")).toHaveValue("Onion Soup");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("dialog", { name: "Discard changes?" })).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Servings"), { target: { value: " 6 " } });
+    // Edits that save the same value as before are no change.
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Onion Soup " } });
+    fireEvent.change(screen.getByLabelText("Method"), {
+      target: { value: "Chop the onion.\n\nSimmer.\n" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => expect(onSave).toHaveBeenCalled());
+    const [values] = onSave.mock.calls[0] as [RecipeEditorValues];
+    expect(values.changes).toEqual({ recipe: { servings: "6" } });
+    // The whole recipe (for a family recipe) is the newest one with the cook's change.
+    expect(values.notes).toBe("Saved in another tab");
+    expect(values.recipe).toMatchObject({ servings: "6", title: "Golden Onion Soup" });
+    expect(values).not.toHaveProperty("sourceUrl");
   });
 
   it("never offers the synthetic source link of a photo import", () => {
