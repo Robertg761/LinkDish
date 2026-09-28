@@ -53,10 +53,22 @@ There is no compilation step. GitHub Pages publishes this directory through
 
 ## Images
 
-- Screenshots are served with `<picture>`: AVIF and WebP at 360 and 720 px
-  (`screen-*-360.avif`, `screen-*-720.webp`, ...) with the original PNG as the
-  fallback. Every `<img>` needs `alt`, `width` and `height`, and every
-  `srcset` file must exist (`pnpm check:site` checks all three).
+- Screenshots are served with `<picture>`: AVIF and WebP at 360, 600 and 720 px
+  (`screen-*-360.avif`, `screen-*-600.webp`, ...) with a 720 px PNG as the
+  fallback, and `sizes` set to the width the frame really renders at (so a 2x
+  phone picks 600 and a 3x phone 720). Every `<img>` needs `alt`, `width` and
+  `height`, and every `srcset` file must exist (`pnpm check:site` checks all
+  three).
+- The screenshots are real captures of the web app (a production build with the
+  API stubbed and a seeded cookbook, week plan and shopping list), taken at
+  390 x 844 with a 3x device scale and an iPhone status bar and home indicator
+  added, so every one is 720 x 1558 at the fallback size: `screen-cookbook`,
+  `screen-recipe` (Metric selected), `screen-cookmode` (running timer),
+  `screen-shopping` (by aisle), `screen-planner`, `screen-import` (a YouTube
+  import) and `screen-dark` (the cookbook in dark mode). Keep that frame when
+  replacing one, and retake them when the app's look changes.
+- `photo-*` are the recipe photos from those captures, as AVIF and WebP at 240
+  and 480 px with a JPEG fallback, for the homepage photo card.
 - The header and footer logo use `linkdish-icon-64.png`/`-128.png`; the 512 px
   `linkdish-icon.png` is only for structured data and external links.
 - Social cards stay under 300 KB (WhatsApp drops larger previews).
@@ -116,15 +128,16 @@ When artwork changes, add a new 1200 x 630 PNG with a dated filename such as
 putting pricing or quota promises into the image unless production plan
 configuration was verified in the same change.
 
-The current card is `assets/social-card-20260928.png`; every page uses it.
-`assets/social-card-20260729.png` stays because the web app
-(`apps/web/index.html`) still points its own preview at it.
+The current card is `assets/social-card-20260928b.png`, built from the real app
+screenshots; every page and the web app (`apps/web/index.html`) use it. The
+older `social-card-20260928.png` and `social-card-20260729.png` stay so links
+already shared with them keep their preview.
 
 ## Deployment And Ownership
 
 Changes under `site/` deploy from the public `Robertg761/LinkDish` repository
-after they reach `main`. The workflow uploads only this directory; app and API
-files are not part of the Pages artifact.
+after they reach `main`. The workflow uploads only this directory, without this
+README; app and API files are not part of the Pages artifact.
 
 The custom domain, Pages configuration, deployment workflow, and complete site
 history are owned by this monorepo. The former `Robertg761/LinkDish-site`

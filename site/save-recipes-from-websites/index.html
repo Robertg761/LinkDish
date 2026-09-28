@@ -20,7 +20,7 @@
       content="Paste a recipe link and LinkDish saves the ingredients, steps, times and photo from any public recipe website, without the ads and pop-ups, and keeps the source credited."
     />
     <meta property="og:url" content="https://linkdish.ca/save-recipes-from-websites/" />
-    <meta property="og:image" content="https://linkdish.ca/assets/social-card-20260928.png" />
+    <meta property="og:image" content="https://linkdish.ca/assets/social-card-20260928b.png" />
     <meta property="og:image:type" content="image/png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
@@ -35,7 +35,7 @@
       name="twitter:description"
       content="Paste a recipe link and LinkDish saves the ingredients, steps, times and photo from any public recipe website, without the ads and pop-ups, and keeps the source credited."
     />
-    <meta name="twitter:image" content="https://linkdish.ca/assets/social-card-20260928.png" />
+    <meta name="twitter:image" content="https://linkdish.ca/assets/social-card-20260928b.png" />
     <meta
       name="twitter:image:alt"
       content="LinkDish: Paste a link. Get cooking. Save recipes from websites, YouTube, TikTok, Pinterest and photos."
@@ -440,26 +440,34 @@
               <li>Ingredients, with sections like "For the filling" when the site uses them</li>
               <li>Numbered steps with timers taken from the method</li>
               <li>Prep and cook times, servings and the photo</li>
-              <li>The site and author, one tap away</li>
+              <li>The original page, one tap away</li>
             </ul>
           </div>
           <figure class="shot-frame" data-reveal>
             <picture class="shot-crop">
               <source
                 type="image/avif"
-                srcset="/assets/screen-recipe-360.avif 360w, /assets/screen-recipe-720.avif 720w"
-                sizes="(max-width: 560px) 80vw, 320px"
+                srcset="
+                  /assets/screen-recipe-360.avif 360w,
+                  /assets/screen-recipe-600.avif 600w,
+                  /assets/screen-recipe-720.avif 720w
+                "
+                sizes="(max-width: 640px) 234px, 304px"
               />
               <source
                 type="image/webp"
-                srcset="/assets/screen-recipe-360.webp 360w, /assets/screen-recipe-720.webp 720w"
-                sizes="(max-width: 560px) 80vw, 320px"
+                srcset="
+                  /assets/screen-recipe-360.webp 360w,
+                  /assets/screen-recipe-600.webp 600w,
+                  /assets/screen-recipe-720.webp 720w
+                "
+                sizes="(max-width: 640px) 234px, 304px"
               />
               <img
                 src="/assets/screen-recipe.png"
-                alt="A recipe saved from a website in LinkDish, with servings, ingredients and source"
+                alt="A recipe saved in LinkDish: the dish photo, the weeknightkitchen.com source, total, prep and cook times, a five-star rating with how often it was cooked, and the ingredients with servings and Metric selected"
                 width="720"
-                height="1482"
+                height="1558"
                 loading="lazy"
                 decoding="async"
               />

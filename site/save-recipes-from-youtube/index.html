@@ -6,7 +6,7 @@
     <title>Save Recipes From YouTube Videos and Shorts | LinkDish</title>
     <meta
       name="description"
-      content="Turn a YouTube cooking video or Short into a written recipe. LinkDish reads the recipe from the video description and saves ingredients and steps with the channel credited."
+      content="Turn a YouTube cooking video or Short into a written recipe. LinkDish reads the recipe from the video description and saves ingredients and steps with the video one tap away."
     />
     <link rel="canonical" href="https://linkdish.ca/save-recipes-from-youtube/" />
     <meta name="theme-color" content="#f4efe7" media="(prefers-color-scheme: light)" />
@@ -17,10 +17,10 @@
     <meta property="og:title" content="Save recipes from YouTube videos and Shorts" />
     <meta
       property="og:description"
-      content="Turn a YouTube cooking video or Short into a written recipe. LinkDish reads the recipe from the video description and saves ingredients and steps with the channel credited."
+      content="Turn a YouTube cooking video or Short into a written recipe. LinkDish reads the recipe from the video description and saves ingredients and steps with the video one tap away."
     />
     <meta property="og:url" content="https://linkdish.ca/save-recipes-from-youtube/" />
-    <meta property="og:image" content="https://linkdish.ca/assets/social-card-20260928.png" />
+    <meta property="og:image" content="https://linkdish.ca/assets/social-card-20260928b.png" />
     <meta property="og:image:type" content="image/png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
@@ -33,9 +33,9 @@
     <meta name="twitter:title" content="Save recipes from YouTube videos and Shorts" />
     <meta
       name="twitter:description"
-      content="Turn a YouTube cooking video or Short into a written recipe. LinkDish reads the recipe from the video description and saves ingredients and steps with the channel credited."
+      content="Turn a YouTube cooking video or Short into a written recipe. LinkDish reads the recipe from the video description and saves ingredients and steps with the video one tap away."
     />
-    <meta name="twitter:image" content="https://linkdish.ca/assets/social-card-20260928.png" />
+    <meta name="twitter:image" content="https://linkdish.ca/assets/social-card-20260928b.png" />
     <meta
       name="twitter:image:alt"
       content="LinkDish: Paste a link. Get cooking. Save recipes from websites, YouTube, TikTok, Pinterest and photos."
@@ -164,7 +164,7 @@
             "name": "Does LinkDish credit the creator?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "Yes. The channel is saved as the recipe's author, and the original video stays one tap away."
+              "text": "Yes. Every recipe saved from YouTube keeps the video as its source, one tap away, so the person who made it gets the credit."
             }
           },
           {
@@ -285,8 +285,8 @@
             <h1 id="page-title">From cooking video<br /><em>to recipe card.</em></h1>
             <p class="hero-lede">
               Paste a YouTube video or Short and LinkDish reads the recipe from its description,
-              then saves the ingredients and steps with the channel credited and the video one tap
-              away. No more pausing and rewinding with floury hands.
+              then saves the ingredients and steps with the original video one tap away. No more
+              pausing and rewinding with floury hands.
             </p>
             <form
               class="paste-form"
@@ -343,7 +343,7 @@
             <div
               class="video-demo"
               role="img"
-              aria-label="A YouTube cooking Short turned into a LinkDish recipe card with the channel credited"
+              aria-label="A YouTube cooking Short turned into a LinkDish recipe card that links back to the video"
             >
               <div class="video-card" aria-hidden="true">
                 <svg class="video-art" viewBox="0 0 120 90" preserveAspectRatio="xMidYMid slice">
@@ -369,7 +369,7 @@
                   <li><span class="num">2 Tbsp</span> toasted sesame oil</li>
                   <li><span class="num">1 Tbsp</span> grated fresh ginger</li>
                 </ul>
-                <small>By the channel · YouTube</small>
+                <small>From youtube.com</small>
               </div>
             </div>
           </div>
@@ -401,8 +401,8 @@
               <span class="step-number num">02</span>
               <h3>LinkDish reads the description</h3>
               <p>
-                The written recipe becomes ingredients and steps. The channel is saved as the
-                author.
+                The written recipe becomes ingredients and steps, with the video thumbnail as the
+                photo.
               </p>
             </li>
             <li data-reveal>
@@ -417,7 +417,58 @@
         </div>
       </section>
 
-      <section class="section" aria-labelledby="honest-title">
+      <section class="section" aria-labelledby="result-title">
+        <div class="shell lp-split">
+          <div class="feature-copy" data-reveal>
+            <p class="eyebrow">What you get</p>
+            <h2 class="section-title" id="result-title">
+              A recipe card,<br /><em>not a timestamp.</em>
+            </h2>
+            <p>
+              The description becomes a real recipe with the photo, times, servings and every
+              ingredient, ready to scale, switch to metric, plan and cook from.
+            </p>
+            <ul class="check-list">
+              <li>Ingredients and steps read from the description</li>
+              <li>Scale servings and switch between US and metric</li>
+              <li>Add it to the week and to your shopping list</li>
+              <li>The video one tap away when you need the technique</li>
+            </ul>
+          </div>
+          <figure class="shot-frame" data-reveal>
+            <picture class="shot-crop">
+              <source
+                type="image/avif"
+                srcset="
+                  /assets/screen-import-360.avif 360w,
+                  /assets/screen-import-600.avif 600w,
+                  /assets/screen-import-720.avif 720w
+                "
+                sizes="(max-width: 640px) 234px, 304px"
+              />
+              <source
+                type="image/webp"
+                srcset="
+                  /assets/screen-import-360.webp 360w,
+                  /assets/screen-import-600.webp 600w,
+                  /assets/screen-import-720.webp 720w
+                "
+                sizes="(max-width: 640px) 234px, 304px"
+              />
+              <img
+                src="/assets/screen-import.png"
+                alt="A recipe just imported from a YouTube video in LinkDish: Smoky Three-Bean Chili with its photo, the youtube.com source, times, servings and ingredients, and a Save to cookbook button"
+                width="720"
+                height="1558"
+                loading="lazy"
+                decoding="async"
+              />
+            </picture>
+          </figure>
+        </div>
+      </section>
+
+      <section class="section section-surface" aria-labelledby="honest-title">
         <div class="shell">
           <div class="section-head" data-reveal>
             <p class="eyebrow">Good to know</p>
@@ -494,8 +545,8 @@
               <summary>Does LinkDish credit the creator?</summary>
               <div>
                 <p>
-                  Yes. The channel is saved as the recipe's author, and the original video stays one
-                  tap away.
+                  Yes. Every recipe saved from YouTube keeps the video as its source, one tap away,
+                  so the person who made it gets the credit.
                 </p>
               </div>
             </details>

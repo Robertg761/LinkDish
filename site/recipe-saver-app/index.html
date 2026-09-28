@@ -20,7 +20,7 @@
       content="LinkDish is a recipe saver app that keeps recipes from any website, YouTube, TikTok, Pinterest or a photo in one clean cookbook, with cook mode, meal planning and shopping lists."
     />
     <meta property="og:url" content="https://linkdish.ca/recipe-saver-app/" />
-    <meta property="og:image" content="https://linkdish.ca/assets/social-card-20260928.png" />
+    <meta property="og:image" content="https://linkdish.ca/assets/social-card-20260928b.png" />
     <meta property="og:image:type" content="image/png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
@@ -35,7 +35,7 @@
       name="twitter:description"
       content="LinkDish is a recipe saver app that keeps recipes from any website, YouTube, TikTok, Pinterest or a photo in one clean cookbook, with cook mode, meal planning and shopping lists."
     />
-    <meta name="twitter:image" content="https://linkdish.ca/assets/social-card-20260928.png" />
+    <meta name="twitter:image" content="https://linkdish.ca/assets/social-card-20260928b.png" />
     <meta
       name="twitter:image:alt"
       content="LinkDish: Paste a link. Get cooking. Save recipes from websites, YouTube, TikTok, Pinterest and photos."
@@ -335,19 +335,27 @@
               <picture class="shot-crop">
                 <source
                   type="image/avif"
-                  srcset="/assets/screen-recipe-360.avif 360w, /assets/screen-recipe-720.avif 720w"
-                  sizes="(max-width: 560px) 80vw, 320px"
+                  srcset="
+                    /assets/screen-recipe-360.avif 360w,
+                    /assets/screen-recipe-600.avif 600w,
+                    /assets/screen-recipe-720.avif 720w
+                  "
+                  sizes="(max-width: 640px) 234px, 304px"
                 />
                 <source
                   type="image/webp"
-                  srcset="/assets/screen-recipe-360.webp 360w, /assets/screen-recipe-720.webp 720w"
-                  sizes="(max-width: 560px) 80vw, 320px"
+                  srcset="
+                    /assets/screen-recipe-360.webp 360w,
+                    /assets/screen-recipe-600.webp 600w,
+                    /assets/screen-recipe-720.webp 720w
+                  "
+                  sizes="(max-width: 640px) 234px, 304px"
                 />
                 <img
                   src="/assets/screen-recipe.png"
-                  alt="A saved recipe in LinkDish with servings controls, ingredients and the original source"
+                  alt="A recipe saved in LinkDish: the dish photo, the weeknightkitchen.com source, total, prep and cook times, a five-star rating with how often it was cooked, and the ingredients with servings and Metric selected"
                   width="720"
-                  height="1482"
+                  height="1558"
                   fetchpriority="high"
                 />
               </picture>
