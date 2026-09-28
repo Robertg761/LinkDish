@@ -5,13 +5,28 @@ import { htmlFragmentToLines, htmlFragmentToText } from "./html-text";
 const TAG_OPENER = /<[!/?A-Za-z]/u;
 const HOSTILE = 100_000;
 
-/** Fastest of three runs: a GC pause cannot fail the check, and quadratic work never is fast. */
-const fastestMilliseconds = (run: () => unknown): number =>
+/*
+ * Stripping takes several linear passes over up to half again the input, so on a loaded
+ * machine a bare time bound gets tight. The linear-time check holds it against the same call on
+ * ordinary markup of the same length instead: linear work on the hostile inputs takes up to
+ * about 6 times as long as that, quadratic work thousands of times ("<br" and 40,000 spaces
+ * took a second before these patterns were fixed). The limit sits between the two with room
+ * for a busy machine, whose time slices can land in the middle of a few-millisecond call.
+ */
+const MAX_SLOWDOWN = 100;
+
+/**
+ * How many times longer `run` takes than `ordinary`: the least of three trials that each time
+ * the two back to back, so load slows both alike and a pause in one trial cannot fail a check.
+ */
+const slowdown = (run: () => unknown, ordinary: () => unknown): number =>
   Math.min(
     ...[0, 1, 2].map(() => {
       const started = performance.now();
+      ordinary();
+      const ordinaryDone = performance.now();
       run();
-      return performance.now() - started;
+      return (performance.now() - ordinaryDone) / (ordinaryDone - started);
     })
   );
 
@@ -39,8 +54,24 @@ describe("htmlFragmentToText", () => {
     expect(htmlFragmentToText("<scr<b>ipt>alert(1)</scr</b>ipt> Serve")).toBe("alert(1) Serve");
     expect(htmlFragmentToText("<scr<scr<scr<b>ipt>ipt>ipt>alert(1)")).toBe("alert(1)");
     expect(htmlFragmentToText("&lt;scr&lt;b&gt;ipt&gt;alert(1)")).toBe("alert(1)");
-    expect(htmlFragmentToText("Mix well <script src=x")).toBe("Mix well script src=x");
-    expect(htmlFragmentToText("&lt;&lt;script&gt;x")).toBe("x");
+    expect(htmlFragmentToText("Mix well <script src=x")).toBe("Mix well < script src=x");
+    expect(htmlFragmentToText("&lt;&lt;script&gt;x")).toBe("< x");
+  });
+
+  it("keeps a less-than sign that is not part of a tag, and the text after it", () => {
+    expect(htmlFragmentToText("Heat to <medium, then simmer")).toBe(
+      "Heat to < medium, then simmer"
+    );
+    expect(htmlFragmentToText("Jane Doe <jane@example.com>")).toBe("Jane Doe < jane@example.com>");
+    expect(htmlFragmentToText("See <https://example.com/recipe>")).toBe(
+      "See < https://example.com/recipe>"
+    );
+    expect(htmlFragmentToText("Contact &lt;chef@example.com&gt; with questions")).toBe(
+      "Contact < chef@example.com> with questions"
+    );
+    expect(htmlFragmentToText("Keep temp <<b>boiling</b>, stir if > 5 min")).toBe(
+      "Keep temp < boiling, stir if > 5 min"
+    );
   });
 
   it("never returns a tag opener for any mix of markup characters", () => {
@@ -87,10 +118,23 @@ describe("htmlFragmentToText", () => {
       `${"&lt;a".repeat(HOSTILE / 8)}${"&gt;".repeat(HOSTILE / 8)}`
     ];
 
+    const paragraph = '<p>Stir <b>well</b> &amp; <a href="/x" title="rest">rest</a>.</p>';
+    const ordinary = paragraph.repeat(Math.ceil(HOSTILE / paragraph.length));
+
     for (const input of inputs) {
       expect(TAG_OPENER.test(htmlFragmentToText(input))).toBe(false);
-      expect(fastestMilliseconds(() => htmlFragmentToText(input))).toBeLessThan(50);
-      expect(fastestMilliseconds(() => htmlFragmentToLines(input))).toBeLessThan(50);
+      expect(
+        slowdown(
+          () => htmlFragmentToText(input),
+          () => htmlFragmentToText(ordinary)
+        )
+      ).toBeLessThan(MAX_SLOWDOWN);
+      expect(
+        slowdown(
+          () => htmlFragmentToLines(input),
+          () => htmlFragmentToLines(ordinary)
+        )
+      ).toBeLessThan(MAX_SLOWDOWN);
     }
   });
 });

@@ -1,6 +1,6 @@
 import {
   decodeHtmlEntities,
-  removeTagOpeners
+  defuseTagOpeners
 } from "../../../../../../packages/utils/src/index.js";
 
 /*
@@ -15,9 +15,10 @@ import {
  *
  * Removing one tag can join the text around it into another ("<scr<b>ipt>" → "<script>"), so
  * stripping repeats while a pass still finds tags — a few passes at most, which keeps the work
- * linear on deliberately nested input — and removeTagOpeners then drops any "<" that could still
- * open markup (an unclosed "<script", or nesting deeper than the pass limit). Whatever the
- * input, the output has no "<" that a browser would read as the start of a tag.
+ * linear on deliberately nested input — and defuseTagOpeners then puts a space after any "<"
+ * that could still open markup (an unclosed "<script", nesting deeper than the pass limit, or a
+ * plain "Heat to <medium"). Whatever the input, the output has no "<" that a browser would read
+ * as the start of a tag, while a "<" that is only text keeps its place.
  */
 
 /*
@@ -85,7 +86,7 @@ export const htmlFragmentToText = (
   if (hasMarkupPattern.test(text)) {
     // Stripped, decoded, then stripped again: some sites entity-encode their markup
     // ("&lt;p&gt;Mix&lt;/p&gt;"), which only becomes a tag after decoding.
-    text = removeTagOpeners(stripTags(decodeHtmlEntities(stripTags(text))));
+    text = defuseTagOpeners(stripTags(decodeHtmlEntities(stripTags(text))));
   }
 
   text = text.replace(/\u00a0/gu, " ");

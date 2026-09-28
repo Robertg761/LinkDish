@@ -30,6 +30,31 @@ const fastestMilliseconds = (run: () => unknown): number =>
     })
   );
 
+/*
+ * Markup takes several linear passes over up to half again the input, more work per character
+ * than the other checks, so on a loaded machine a bare 50 ms gets tight. It is held against the
+ * same call on ordinary markup of the same length instead: linear work on these inputs takes up
+ * to about 5 times as long as that, quadratic work over 500 times (2–4 s at 100,000 characters
+ * for the tag pattern this replaced). The limit sits between the two with room for a busy
+ * machine, whose time slices can land in the middle of a few-millisecond call.
+ */
+const MAX_MARKUP_SLOWDOWN = 100;
+
+/**
+ * How many times longer `run` takes than `ordinary`: the least of three trials that each time
+ * the two back to back, so load slows both alike and a pause in one trial cannot fail a check.
+ */
+const slowdown = (run: () => unknown, ordinary: () => unknown): number =>
+  Math.min(
+    ...[0, 1, 2].map(() => {
+      const started = performance.now();
+      ordinary();
+      const ordinaryDone = performance.now();
+      run();
+      return (performance.now() - ordinaryDone) / (ordinaryDone - started);
+    })
+  );
+
 describe("servings on hostile input", () => {
   it("drops parentheticals in linear time, even with a long run of unclosed '('", () => {
     const text = `4 ${"(".repeat(HOSTILE)}x`;
@@ -167,7 +192,7 @@ describe("recipe import markup", () => {
     );
     expect(importDescription("&lt;p&gt;Serve warm.&lt;/p&gt;")).toBe("Serve warm.");
     expect(importDescription("&lt;scr&lt;b&gt;ipt&gt;alert(1)")).toBe("alert(1)");
-    expect(importDescription("Mix well <script src=x")).toBe("Mix well script src=x");
+    expect(importDescription("Mix well <script src=x")).toBe("Mix well < script src=x");
     expect(importDescription("Line one<br>Line two</p>Line three")).toBe(
       "Line one\nLine two\nLine three"
     );
@@ -180,17 +205,62 @@ describe("recipe import markup", () => {
     expect(importDescription("Cook to &lt; 165&deg;F &lt;3")).toBe("Cook to < 165°F <3");
   });
 
+  it("strips a tag whole when a quoted attribute value holds '<' or '>'", () => {
+    expect(importDescription('<img src="step1.jpg" alt="Cook to < 165°F">Cook the chicken.')).toBe(
+      "Cook the chicken."
+    );
+    expect(importDescription('<a href="/x" title="I <3 this">Grandma</a> recipe')).toBe(
+      "Grandma recipe"
+    );
+    expect(
+      importDescription("<p>Roast until done.</p><img alt='Temp <165°F'><p>Rest 5 min.</p>")
+    ).toBe("Roast until done.\nRest 5 min.");
+    expect(importDescription("<img alt='a > b' src=x>Serve")).toBe("Serve");
+    expect(importDescription("<o:p></o:p>Serve warm.<o:p>&nbsp;</o:p>")).toBe("Serve warm.");
+  });
+
+  it("keeps a less-than sign that opens no tag, with every word after it", () => {
+    expect(importDescription("Heat to <medium, then simmer")).toBe("Heat to < medium, then simmer");
+    expect(importDescription("if a<b then")).toBe("if a< b then");
+    expect(importDescription("Keep temp <<b>boiling</b>, stir if > 5 min")).toBe(
+      "Keep temp < boiling, stir if > 5 min"
+    );
+    expect(importDescription("Heat oil to <<b>smoking</b>, about 2 min > then add")).toBe(
+      "Heat oil to < smoking, about 2 min > then add"
+    );
+    expect(importDescription("Jane Doe <jane@example.com>")).toBe("Jane Doe < jane@example.com>");
+  });
+
+  it("reads entity-encoded tags as the extractor does", () => {
+    expect(importDescription("a&lt;br&gt;b")).toBe("a\nb");
+    expect(importDescription("Contact &lt;chef@example.com&gt; with questions")).toBe(
+      "Contact < chef@example.com> with questions"
+    );
+    expect(importDescription("&lt;https://example.com&gt;")).toBe("< https://example.com>");
+    // Shaped like a tag once decoded, so it goes, as in htmlFragmentToText.
+    expect(importDescription("Serve with &lt;your favorite&gt; sauce")).toBe("Serve with sauce");
+  });
+
   it("strips markup in linear time and leaves no tag opener, however deep the nesting", () => {
+    const fit = (unit: string): string => unit.repeat(Math.ceil(HOSTILE / unit.length));
     const inputs = [
       "<".repeat(HOSTILE),
       "<a".repeat(HOSTILE / 2),
       `${"<a".repeat(HOSTILE / 4)}${">".repeat(HOSTILE / 4)}`,
-      `${"&lt;a".repeat(HOSTILE / 8)}${"&gt;".repeat(HOSTILE / 8)}`
+      `${"&lt;a".repeat(HOSTILE / 8)}${"&gt;".repeat(HOSTILE / 8)}`,
+      `<a "${fit("<a ")}`,
+      fit(`<a "<a '`)
     ];
+    const ordinary = fit('<p>Stir <b>well</b> &amp; <a href="/x" title="rest">rest</a>.</p>');
 
     for (const input of inputs) {
       expect(TAG_OPENER.test(importDescription(input) ?? "")).toBe(false);
-      expect(fastestMilliseconds(() => importDescription(input))).toBeLessThan(MAX_MILLISECONDS);
+      expect(
+        slowdown(
+          () => importDescription(input),
+          () => importDescription(ordinary)
+        )
+      ).toBeLessThan(MAX_MARKUP_SLOWDOWN);
     }
   });
 });

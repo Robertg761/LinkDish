@@ -6,7 +6,9 @@
  * retried at every start position, and each retry rescans the rest of a long run ("((((…" with
  * no ")", "     …x", "……x"), so 40,000 pasted characters took most of a second. These scans
  * visit each character a bounded number of times and return exactly what the patterns they
- * replace returned.
+ * replace returned. removeHtmlTags is the exception: it reads tags by its own rules, quoted
+ * attribute values included, which a regex could only do with nested alternatives that come
+ * with no such guarantee.
  */
 
 const SPACE_CHARACTER = /\s/u;
@@ -85,4 +87,140 @@ export const trimEndMatching = (text: string, character: RegExp): string => {
   }
 
   return end === text.length ? text : text.slice(0, end);
+};
+
+/** An ASCII letter, by UTF-16 code unit (NaN, past the end of the text, is none). */
+const isLetterCode = (code: number): boolean =>
+  (code >= 0x41 && code <= 0x5a) || (code >= 0x61 && code <= 0x7a);
+
+/** A letter, a digit or "-": what may follow the first letter of a tag name. */
+const isTagNameCode = (code: number): boolean =>
+  isLetterCode(code) || (code >= 0x30 && code <= 0x39) || code === 0x2d;
+
+const LESS_THAN = 0x3c;
+const GREATER_THAN = 0x3e;
+const SLASH = 0x2f;
+const COLON = 0x3a;
+const EXCLAMATION_MARK = 0x21;
+const QUESTION_MARK = 0x3f;
+const DOUBLE_QUOTE = 0x22;
+const SINGLE_QUOTE = 0x27;
+
+/**
+ * Where the tag name starting at `index` ends: a letter, then letters, digits and "-", with one
+ * optional namespace part ("o:p", as Word writes it). `index` itself when no name starts there.
+ */
+const tagNameEnd = (text: string, index: number): number => {
+  if (!isLetterCode(text.charCodeAt(index))) {
+    return index;
+  }
+
+  let end = index + 1;
+  while (isTagNameCode(text.charCodeAt(end))) {
+    end += 1;
+  }
+
+  if (text.charCodeAt(end) === COLON && isLetterCode(text.charCodeAt(end + 1))) {
+    end += 2;
+    while (isTagNameCode(text.charCodeAt(end))) {
+      end += 1;
+    }
+  }
+
+  return end;
+};
+
+/**
+ * The index just past the tag that the "<" at `start` opens, or -1 when it opens none. A tag
+ * is "<!" or "<?" (a comment, declaration or processing instruction) up to the next ">" with
+ * no "<" before it, or "<" or "</" and a tag name followed by ">", or by whitespace or "/" and
+ * then attributes up to the first ">" outside a quoted value. A "<" outside quotes or the end
+ * of the text means there was no tag after all.
+ */
+const tagEnd = (text: string, start: number): number => {
+  const marker = text.charCodeAt(start + 1);
+
+  if (marker === EXCLAMATION_MARK || marker === QUESTION_MARK) {
+    for (let index = start + 2; index < text.length; index += 1) {
+      const code = text.charCodeAt(index);
+
+      if (code === GREATER_THAN) {
+        return index + 1;
+      }
+      if (code === LESS_THAN) {
+        return -1;
+      }
+    }
+    return -1;
+  }
+
+  const nameStart = marker === SLASH ? start + 2 : start + 1;
+  let index = tagNameEnd(text, nameStart);
+  const after = text.charCodeAt(index);
+
+  if (index === nameStart || (after !== GREATER_THAN && after !== SLASH && !isSpace(text[index]))) {
+    return -1;
+  }
+
+  while (index < text.length) {
+    const code = text.charCodeAt(index);
+
+    if (code === GREATER_THAN) {
+      return index + 1;
+    }
+    if (code === LESS_THAN) {
+      return -1;
+    }
+    if (code === DOUBLE_QUOTE || code === SINGLE_QUOTE) {
+      const close = text.indexOf(text.charAt(index), index + 1);
+
+      // A quote that nothing closes is a stray character, as in '<a href="x>'.
+      index = close === -1 ? index + 1 : close + 1;
+    } else {
+      index += 1;
+    }
+  }
+
+  return -1;
+};
+
+/**
+ * `text` without its HTML tags: "<p>", "</li>", "<br />", "<o:p>", "<!-- note -->" and
+ * '<img alt="Cook to < 165°F">' go, and a ">" or "<" inside a quoted attribute value stays part
+ * of its tag. Text that merely has angle brackets stays: "cook to < 165°F, then > 5 min",
+ * "<3", "<jane@example.com>" and "<boiling, stir if >" are not tags, because a tag name has to
+ * be followed by ">", whitespace or "/".
+ *
+ * Linear, although a "<" that turns out not to open a tag is followed by a fresh attempt at the
+ * next "<", even one inside a quote the failed attempt skipped. Among the attributes an attempt
+ * is in one of three states (outside quotes, inside "…", inside '…'); each character maps the
+ * three one-to-one (a quote swaps "outside" with "inside" its kind), except the last quote of
+ * each kind, where "outside" and "inside" both go on outside. An attempt that started earlier
+ * is inside quotes wherever a later one starts (else it would have stopped at that "<"; tag
+ * names hold no quotes), so attempts that overlap are in different states, but for those two
+ * merges, and only a handful of them ever read the same character.
+ */
+export const removeHtmlTags = (text: string): string => {
+  const parts: string[] = [];
+  let copied = 0;
+  let index = text.indexOf("<");
+
+  while (index !== -1) {
+    const end = tagEnd(text, index);
+
+    if (end === -1) {
+      index = text.indexOf("<", index + 1);
+    } else {
+      parts.push(text.slice(copied, index));
+      copied = end;
+      index = text.indexOf("<", end);
+    }
+  }
+
+  if (parts.length === 0) {
+    return text;
+  }
+
+  parts.push(text.slice(copied));
+  return parts.join("");
 };

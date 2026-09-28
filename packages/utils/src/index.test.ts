@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { decodeHtmlEntities, removeTagOpeners, toTrimmedOrNull } from "./index.js";
+import { decodeHtmlEntities, defuseTagOpeners, toTrimmedOrNull } from "./index.js";
 
 // String.prototype.isWellFormed is ES2024; this package targets ES2022, so detect lone
 // surrogates directly.
@@ -134,29 +134,31 @@ describe("decodeHtmlEntities recipe vocabulary (bug 1)", () => {
   });
 });
 
-describe("removeTagOpeners", () => {
+describe("defuseTagOpeners", () => {
   const TAG_OPENER = /<[!/?A-Za-z]/u;
 
-  it("drops each '<' that would open a tag, end tag, comment or declaration", () => {
-    expect(removeTagOpeners("<script>alert(1)")).toBe("script>alert(1)");
-    expect(removeTagOpeners("Mix well</p")).toBe("Mix well/p");
-    expect(removeTagOpeners("<!-- note")).toBe("!-- note");
-    expect(removeTagOpeners("<?xml")).toBe("?xml");
-    expect(removeTagOpeners("Serve <em")).toBe("Serve em");
+  it("puts a space after each '<' that would open a tag, end tag, comment or declaration", () => {
+    expect(defuseTagOpeners("<script>alert(1)")).toBe("< script>alert(1)");
+    expect(defuseTagOpeners("Mix well</p")).toBe("Mix well< /p");
+    expect(defuseTagOpeners("<!-- note")).toBe("< !-- note");
+    expect(defuseTagOpeners("<?xml")).toBe("< ?xml");
+    expect(defuseTagOpeners("<<script")).toBe("<< script");
   });
 
-  it("drops a whole run of '<' so no removal rebuilds an opener", () => {
-    expect(removeTagOpeners("<<script")).toBe("script");
-    expect(removeTagOpeners("a <<< b <<<b")).toBe("a <<< b b");
+  it("keeps a real less-than sign in plain text, so the text keeps its meaning", () => {
+    expect(defuseTagOpeners("Heat to <medium, then simmer")).toBe("Heat to < medium, then simmer");
+    expect(defuseTagOpeners("if a<b then")).toBe("if a< b then");
+    expect(defuseTagOpeners("I <3 it </3 when gone")).toBe("I <3 it < /3 when gone");
+    expect(defuseTagOpeners("Jane Doe <jane@example.com>")).toBe("Jane Doe < jane@example.com>");
   });
 
-  it("keeps '<' that HTML reads as text", () => {
+  it("leaves '<' that HTML reads as text as it is", () => {
     for (const text of ["cook to < 165°F", "<3", "<- stir", "1 <= 2", "a < b > c", "x<", "<"]) {
-      expect(removeTagOpeners(text)).toBe(text);
+      expect(defuseTagOpeners(text)).toBe(text);
     }
   });
 
-  it("never leaves an opener and only ever removes '<'", () => {
+  it("never leaves an opener and only ever adds a space after an opening '<'", () => {
     let seed = 11;
     const next = (): number => {
       seed = (seed * 16_807) % 2_147_483_647;
@@ -169,10 +171,16 @@ describe("removeTagOpeners", () => {
         { length: Math.floor(next() * 16) },
         () => alphabet[Math.floor(next() * alphabet.length)] ?? ""
       ).join("");
-      const output = removeTagOpeners(input);
+      const output = defuseTagOpeners(input);
+      const spaced = input
+        .split("")
+        .map((character, index) =>
+          character === "<" && TAG_OPENER.test(input.slice(index, index + 2)) ? "< " : character
+        )
+        .join("");
 
       expect(TAG_OPENER.test(output), JSON.stringify(input)).toBe(false);
-      expect(output.replaceAll("<", ""), JSON.stringify(input)).toBe(input.replaceAll("<", ""));
+      expect(output, JSON.stringify(input)).toBe(spaced);
     }
   });
 
@@ -181,13 +189,13 @@ describe("removeTagOpeners", () => {
       Math.min(
         ...[0, 1, 2].map(() => {
           const started = performance.now();
-          removeTagOpeners(input);
+          defuseTagOpeners(input);
           return performance.now() - started;
         })
       );
 
-    expect(removeTagOpeners(`${"<".repeat(100_000)}a`)).toBe("a");
-    expect(removeTagOpeners("<a".repeat(50_000))).toBe("a".repeat(50_000));
+    expect(defuseTagOpeners(`${"<".repeat(100_000)}a`)).toBe(`${"<".repeat(100_000)} a`);
+    expect(defuseTagOpeners("<a".repeat(50_000))).toBe("< a".repeat(50_000));
 
     for (const input of [`${"<".repeat(100_000)}a`, "<a".repeat(50_000), "<".repeat(100_000)]) {
       expect(fastestMilliseconds(input)).toBeLessThan(50);

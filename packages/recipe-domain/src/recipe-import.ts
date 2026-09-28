@@ -7,7 +7,7 @@
  * when the source lacks what LinkDish requires (a title, ingredients and steps); `meta` carries
  * the personal data (favorite, rating, notes, tags, photo) the app stores beside the recipe.
  */
-import { decodeHtmlEntities, removeTagOpeners } from "../../utils/src/index.js";
+import { decodeHtmlEntities, defuseTagOpeners } from "../../utils/src/index.js";
 
 import { parseDuration } from "./durations.js";
 import {
@@ -25,7 +25,7 @@ import {
   MAX_RECIPE_TITLE_LENGTH,
   recipeSchema
 } from "./recipe-schema.js";
-import { trimEndMatching } from "./text-scan.js";
+import { removeHtmlTags, trimEndMatching } from "./text-scan.js";
 
 import type {
   Recipe,
@@ -75,12 +75,6 @@ export type SchemaOrgImportOptions = {
 const DEFAULT_MAX_PHOTO_CHARS = 1_500_000;
 const MAX_TAGS = 50;
 const MAX_TAG_LENGTH = 60;
-/**
- * A tag: "<", then a letter, "/", "!" or "?" (what makes HTML read "<" as markup), then anything
- * but angle brackets up to ">". "cook to < 165°F, then > 5 min" is text, and stopping at the
- * next "<" keeps each attempt short, so a long run of "<" scans in linear time.
- */
-const HTML_TAG_PATTERN = /<[!/?A-Za-z][^<>]*>/gu;
 const BREAK_TAG_PATTERN = /<br\s*\/?>|<\/p>|<\/li>/giu;
 /** Tags that only appear once others are gone ("<scr<b>ipt>") need another pass; see stripMarkup. */
 const MAX_MARKUP_PASSES = 4;
@@ -118,16 +112,16 @@ const asText = (value: unknown): string =>
       : "";
 
 /**
- * Turns block tags into line breaks and drops the other tags, passing again while a pass
- * exposes a new tag, then drops any "<" that could still open one (an unclosed "<script", or
- * nesting deeper than MAX_MARKUP_PASSES, which only hostile input has). The pass limit keeps
- * the work linear; removeTagOpeners makes the result complete anyway.
+ * Turns block tags into line breaks and drops the other tags (see removeHtmlTags for what is a
+ * tag), passing again while a pass exposes a new tag, then defuses any "<" that could still open
+ * one (an unclosed "<script", or nesting deeper than MAX_MARKUP_PASSES, which only hostile input
+ * has). The pass limit keeps the work linear; defuseTagOpeners makes the result complete anyway.
  */
 const stripMarkup = (text: string): string => {
   let stripped = text;
 
   for (let pass = 0; pass < MAX_MARKUP_PASSES; pass += 1) {
-    const next = stripped.replace(BREAK_TAG_PATTERN, "\n").replace(HTML_TAG_PATTERN, "");
+    const next = removeHtmlTags(stripped.replace(BREAK_TAG_PATTERN, "\n"));
 
     if (next === stripped) {
       break;
@@ -136,12 +130,14 @@ const stripMarkup = (text: string): string => {
     stripped = next;
   }
 
-  return removeTagOpeners(stripped);
+  return defuseTagOpeners(stripped);
 };
 
 /**
  * Plain text from an export field: markup stripped, entities decoded, and markup stripped
- * again, since some exports entity-encode their tags ("&lt;p&gt;Mix&lt;/p&gt;").
+ * again, since some exports entity-encode their tags ("&lt;p&gt;Mix&lt;/p&gt;"). The second
+ * pass reads tags as the first does, and as the extractor does after decoding: an encoded
+ * "&lt;chef@example.com&gt;" stays text, while "&lt;your favorite&gt;" reads as a tag and goes.
  */
 const cleanText = (value: unknown): string =>
   stripMarkup(decodeHtmlEntities(stripMarkup(asText(value))))

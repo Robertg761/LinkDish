@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { replaceBracketedGroups, trimEndMatching } from "./text-scan.js";
+import { removeHtmlTags, replaceBracketedGroups, trimEndMatching } from "./text-scan.js";
 
 /** Deterministic strings over `alphabet`, so a failure names a reproducible input. */
 const seededStrings = (alphabet: readonly string[], count: number, maxLength: number) => {
@@ -92,5 +92,83 @@ describe("trimEndMatching", () => {
     expect(trimEndMatching(padded, /[.:;,\s]/u)).toBe(input);
     expect(fastestMilliseconds(() => trimEndMatching(input, /[.:;,\s]/u))).toBeLessThan(50);
     expect(fastestMilliseconds(() => trimEndMatching(padded, /[.:;,\s]/u))).toBeLessThan(50);
+  });
+});
+
+describe("removeHtmlTags", () => {
+  /*
+   * The same tags as a regex, for short inputs only: a quote that nothing closes is found with a
+   * lookahead over the rest of the text. Its matches are cut out with matchAll, so the oracle is
+   * not itself a tag-stripping replace.
+   */
+  const TAG_ORACLE =
+    /<(?:[!?][^<>]*>|\/?[A-Za-z][A-Za-z0-9-]*(?::[A-Za-z][A-Za-z0-9-]*)?(?:[\s/](?:[^<>"']|"[^"]*"|'[^']*'|"(?![^"]*")|'(?![^']*'))*)?>)/gu;
+  const oracle = (text: string): string => {
+    let kept = "";
+    let copied = 0;
+
+    for (const match of text.matchAll(TAG_ORACLE)) {
+      kept += text.slice(copied, match.index);
+      copied = match.index + match[0].length;
+    }
+
+    return kept + text.slice(copied);
+  };
+
+  it("drops tags, comments and declarations, quoted '<' and '>' included", () => {
+    expect(removeHtmlTags("<p>Mix</p><br /><BR/><P CLASS=x>well</p >")).toBe("Mixwell");
+    expect(removeHtmlTags('<img src="a.jpg" alt="Cook to < 165°F">Cook')).toBe("Cook");
+    expect(removeHtmlTags("<span title='<3'>love</span> it")).toBe("love it");
+    expect(removeHtmlTags(`<img alt='a > b' title="it's">after`)).toBe("after");
+    expect(removeHtmlTags("<o:p></o:p>Word<!-- note --><!DOCTYPE html><?xml v?>")).toBe("Word");
+    expect(removeHtmlTags("<p\nclass=x>a<a/b>c")).toBe("ac");
+    expect(removeHtmlTags("<a href=\"x>Link</a> it's")).toBe("Link it's");
+  });
+
+  it("keeps text that only has angle brackets", () => {
+    for (const text of [
+      "Cook to < 165°F, then rest > 5 min",
+      "I <3 it </3",
+      "Jane Doe <jane@example.com>",
+      "See <https://example.com/recipe>",
+      "<Optional: garnish>",
+      "Keep temp <boiling, stir if > 5 min",
+      "Mix well <script src=x",
+      '<a title="unclosed',
+      "<>, </>, <-, <<"
+    ]) {
+      expect(removeHtmlTags(text)).toBe(text);
+    }
+  });
+
+  it("drops exactly the tags that the equivalent regex matches", () => {
+    const inputs = seededStrings(
+      ["<", "<", "</", ">", "a", "b", "1", ":", "-", " ", "\n", "/", "!", "?", '"', "'", "="],
+      8_000,
+      18
+    );
+
+    for (const input of inputs) {
+      expect(removeHtmlTags(input), JSON.stringify(input)).toBe(oracle(input));
+    }
+  });
+
+  it("scans in linear time, however the quotes pair up from each '<'", () => {
+    const fit = (unit: string): string => unit.repeat(Math.ceil(HOSTILE / unit.length));
+    const inputs = [
+      "<".repeat(HOSTILE),
+      fit("<a"),
+      fit("<a "),
+      `<a "${fit("<a ")}`,
+      fit(`<a "<a '`),
+      fit(`<a"<a '"`),
+      fit(`<b/":a'`),
+      `${fit(`<a "<a '`)}"'`,
+      fit("<!<?")
+    ];
+
+    for (const input of inputs) {
+      expect(fastestMilliseconds(() => removeHtmlTags(input))).toBeLessThan(50);
+    }
   });
 });
