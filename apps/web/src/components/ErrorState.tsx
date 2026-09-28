@@ -15,6 +15,8 @@ interface ErrorStateProps {
   icon?: IconName | undefined;
   /** Extra actions next to the retry button. */
   actions?: React.ReactNode;
+  /** 1 when the error is the whole page, so it has the page's main heading. */
+  headingLevel?: 1 | 2 | 3 | undefined;
 }
 
 export const ErrorState: React.FC<ErrorStateProps> = ({
@@ -23,14 +25,17 @@ export const ErrorState: React.FC<ErrorStateProps> = ({
   onRetry,
   retryLabel = "Try again",
   icon = "alert-triangle",
-  actions
+  actions,
+  headingLevel = 3
 }) => {
+  const Heading = headingLevel === 1 ? "h1" : headingLevel === 2 ? "h2" : "h3";
+
   return (
     <div className="error-container" role="alert">
       <div className="error-icon" aria-hidden="true">
         <Icon name={icon} size={26} />
       </div>
-      <h3 className="error-title">{title}</h3>
+      <Heading className="error-title">{title}</Heading>
       <p className="error-message">{message}</p>
       {onRetry || actions ? (
         <div className="error-actions">

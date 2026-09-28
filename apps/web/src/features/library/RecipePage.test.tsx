@@ -244,6 +244,8 @@ describe("RecipePage saved route", () => {
     renderAt("/recipes/missing");
 
     expect(await screen.findByText("Recipe not found")).toBeInTheDocument();
+    // The page's main heading, so route focus lands on it right away.
+    expect(screen.getByRole("heading", { level: 1, name: "Recipe not found" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Back to your cookbook" })).toHaveAttribute(
       "href",
       "/"
@@ -260,9 +262,7 @@ describe("RecipePage saved route", () => {
     expect(screen.queryByText("Recipe not found")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
-    expect(
-      await screen.findByRole("heading", { level: 1, name: "Weeknight Chili" })
-    ).toBeVisible();
+    expect(await screen.findByRole("heading", { level: 1, name: "Weeknight Chili" })).toBeVisible();
   });
 
   it("keeps ticked ingredients in the cook session so cook mode sees them", async () => {
@@ -316,16 +316,24 @@ describe("RecipePage saved route", () => {
       .map((item) => item.textContent);
 
     expect(labels).toEqual([
-      "Edit recipe",
-      "Duplicate",
-      "Share",
-      "Share cardA picture to post or send",
-      "Print",
       "Add to meal plan…",
       "Add to collection…",
       "Edit tags…",
+      "Share",
+      "Share cardA picture to post or send",
+      "Print",
+      "Edit recipe",
+      "Duplicate",
       "Delete recipe"
     ]);
+    // Named groups, with Delete on its own after a separator.
+    expect(within(menu).getAllByRole("group")).toHaveLength(3);
+    expect(within(menu).getByRole("group", { name: "Plan & organise" })).toBeInTheDocument();
+    expect(within(menu).getByRole("group", { name: "Share & print" })).toBeInTheDocument();
+    expect(
+      within(within(menu).getByRole("group", { name: "Edit" })).getAllByRole("menuitem")
+    ).toHaveLength(2);
+    expect(within(menu).getAllByRole("separator")).toHaveLength(3);
   });
 
   it("duplicates into a new recipe and opens it", async () => {
