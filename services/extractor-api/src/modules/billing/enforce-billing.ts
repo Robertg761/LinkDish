@@ -18,6 +18,7 @@ import {
 } from "./revenuecat-entitlements.js";
 
 import type {
+  BillingUsageResponse,
   ExtractRecipeFailure,
   ExtractRecipeResponse,
   QuotaMeteringMode,
@@ -33,12 +34,23 @@ interface QuotaPlan {
   monthlyStrongExtractions: number;
 }
 
+interface CommittedUsage {
+  logContext: BillingAuthorizationResult["logContext"];
+  /** The caller's allowance after this import was counted; null when nothing is metered. */
+  quota: QuotaStatus | null;
+}
+
 interface BillingAuthorizationResult {
   allowed: boolean;
   response?: ExtractRecipeResponse;
   commitUsage: (
     response: ExtractRecipeResponse
   ) => Promise<BillingAuthorizationResult["logContext"]>;
+  /**
+   * commitUsage plus the committed quota, so a success response can tell the client how many
+   * imports are left. Optional so test doubles of the authorization keep working.
+   */
+  commitUsageWithQuota?: (response: ExtractRecipeResponse) => Promise<CommittedUsage>;
   logContext: {
     billingClientId: string | null;
     accountUserId: string | null;
@@ -416,6 +428,13 @@ const incrementUsage = async (
   return readUsage(plan, quotaIdentityKey, quotaKind);
 };
 
+/* The allowance that runs out first (a fallback import needs both imports and strong extractions). */
+const getMostConstrainingQuota = (entries: QuotaUsageEntry[]): QuotaStatus | null =>
+  entries.reduce<QuotaUsageEntry | null>(
+    (lowest, entry) => (lowest && lowest.quota.remaining <= entry.quota.remaining ? lowest : entry),
+    null
+  )?.quota ?? null;
+
 const getRequiredQuotaKinds = (attempt: "primary" | "fallback"): QuotaKind[] =>
   attempt === "fallback" ? ["imports", "strongExtractions"] : ["imports"];
 
@@ -450,6 +469,42 @@ const isAuthorizedCanaryRequest = (headers: RequestHeaders): boolean => {
     createHash("sha256").update(canaryToken).digest(),
     createHash("sha256").update(presentedToken).digest()
   );
+};
+
+interface QuotaSubject {
+  plan: QuotaPlan;
+  activeHouseholdQuota: Awaited<ReturnType<typeof getActiveHouseholdQuotaForUser>> | null;
+  billingQuotaIdentity: BillingAuthorizationResult["logContext"]["billingQuotaIdentity"];
+  quotaIdentityKey: string;
+}
+
+/*
+ * The household lookup (which checks the owner's cached Family entitlement) and the caller's
+ * own cached paid plan are read in parallel. RevenueCat itself is only called when neither
+ * answers the question.
+ */
+const resolveQuotaSubject = async (
+  authenticatedSession: Awaited<ReturnType<typeof getAuthenticatedUser>> | null,
+  billingClientId: string,
+  headers: RequestHeaders,
+  identity?: RequestIdentity
+): Promise<QuotaSubject> => {
+  const [activeHouseholdQuota, cachedPlanId] = await Promise.all([
+    authenticatedSession ? getActiveHouseholdQuotaForUser(authenticatedSession.user.id) : null,
+    authenticatedSession ? peekCachedRevenueCatBillingPlanId(billingClientId) : null
+  ]);
+  const plan = activeHouseholdQuota
+    ? familyPlan()
+    : await getQuotaPlan(billingClientId, Boolean(authenticatedSession), cachedPlanId);
+  const { billingQuotaIdentity, quotaIdentityKey } = getQuotaIdentity(
+    plan,
+    billingClientId,
+    headers,
+    identity,
+    activeHouseholdQuota?.householdId ?? null
+  );
+
+  return { plan, activeHouseholdQuota, billingQuotaIdentity, quotaIdentityKey };
 };
 
 export const authorizeExtractionRequest = async (
@@ -534,25 +589,8 @@ export const authorizeExtractionRequest = async (
   }
 
   try {
-    /*
-     * The household lookup (which checks the owner's cached Family
-     * entitlement) and the caller's own cached paid plan are read in parallel.
-     * RevenueCat itself is only called when neither answers the question.
-     */
-    const [activeHouseholdQuota, cachedPlanId] = await Promise.all([
-      authenticatedSession ? getActiveHouseholdQuotaForUser(authenticatedSession.user.id) : null,
-      authenticatedSession ? peekCachedRevenueCatBillingPlanId(billingClientId) : null
-    ]);
-    const plan = activeHouseholdQuota
-      ? familyPlan()
-      : await getQuotaPlan(billingClientId, Boolean(authenticatedSession), cachedPlanId);
-    const { billingQuotaIdentity, quotaIdentityKey } = getQuotaIdentity(
-      plan,
-      billingClientId,
-      headers,
-      identity,
-      activeHouseholdQuota?.householdId ?? null
-    );
+    const { plan, activeHouseholdQuota, billingQuotaIdentity, quotaIdentityKey } =
+      await resolveQuotaSubject(authenticatedSession, billingClientId, headers, identity);
     const requiredQuotaKinds = getRequiredQuotaKinds(attempt);
     const usageEntries = await Promise.all(
       requiredQuotaKinds.map((requiredQuotaKind) =>
@@ -603,28 +641,36 @@ export const authorizeExtractionRequest = async (
       quotaLimit: primaryUsage?.quotaLimit ?? getQuotaLimit(plan, quotaKind)
     };
 
-    return {
-      allowed: true,
-      commitUsage: async (response) => {
-        if (response.status !== "success") {
-          return logContext;
-        }
+    const commitUsageWithQuota = async (
+      response: ExtractRecipeResponse
+    ): Promise<CommittedUsage> => {
+      if (response.status !== "success") {
+        return { logContext, quota: null };
+      }
 
-        const committedEntries = await Promise.all(
-          requiredQuotaKinds.map((requiredQuotaKind) =>
-            incrementUsage(plan, quotaIdentityKey, requiredQuotaKind)
-          )
-        );
-        const committedPrimaryUsage =
-          committedEntries.find((entry) => entry.quotaKind === quotaKind) ?? committedEntries[0];
+      const committedEntries = await Promise.all(
+        requiredQuotaKinds.map((requiredQuotaKind) =>
+          incrementUsage(plan, quotaIdentityKey, requiredQuotaKind)
+        )
+      );
+      const committedPrimaryUsage =
+        committedEntries.find((entry) => entry.quotaKind === quotaKind) ?? committedEntries[0];
 
-        return {
+      return {
+        logContext: {
           ...logContext,
           meteringMode: committedPrimaryUsage?.meteringMode ?? logContext.meteringMode,
           quotaCount: committedPrimaryUsage?.quotaCount ?? logContext.quotaCount,
           quotaLimit: committedPrimaryUsage?.quotaLimit ?? logContext.quotaLimit
-        };
-      },
+        },
+        quota: getMostConstrainingQuota(committedEntries)
+      };
+    };
+
+    return {
+      allowed: true,
+      commitUsage: async (response) => (await commitUsageWithQuota(response)).logContext,
+      commitUsageWithQuota,
       logContext
     };
   } catch (error) {
@@ -652,4 +698,46 @@ export const authorizeExtractionRequest = async (
       logContext
     };
   }
+};
+
+/**
+ * GET /billing/usage: the caller's current allowance, resolved exactly like an extraction's
+ * (same identity, plan and quota keys) but read-only. Reports the allowance that runs out
+ * first. `quota` is null when billing is off, for the live canary, or when the install cannot
+ * be identified.
+ */
+export const readBillingUsage = async (
+  headers: RequestHeaders,
+  identity?: RequestIdentity
+): Promise<BillingUsageResponse> => {
+  if (!extractorApiEnv.BILLING_ENFORCEMENT_ENABLED) {
+    return { billingEnabled: false, plan: null, quota: null };
+  }
+
+  if (isAuthorizedCanaryRequest(headers)) {
+    return { billingEnabled: true, plan: "plus", quota: null };
+  }
+
+  const authenticatedSession = extractorApiEnv.HOUSEHOLDS_ENABLED
+    ? await getAuthenticatedUser(headers).catch(() => null)
+    : null;
+  const billingClientId = authenticatedSession?.user.id ?? getClientId(headers);
+
+  if (!billingClientId) {
+    return { billingEnabled: true, plan: null, quota: null };
+  }
+
+  const { plan, quotaIdentityKey } = await resolveQuotaSubject(
+    authenticatedSession,
+    billingClientId,
+    headers,
+    identity
+  );
+  const entries = await Promise.all(
+    getRequiredQuotaKinds("fallback").map((quotaKind) =>
+      readUsage(plan, quotaIdentityKey, quotaKind)
+    )
+  );
+
+  return { billingEnabled: true, plan: plan.id, quota: getMostConstrainingQuota(entries) };
 };

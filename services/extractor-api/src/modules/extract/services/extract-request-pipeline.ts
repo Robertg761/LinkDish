@@ -159,8 +159,16 @@ export const runExtractRequestPipeline = async (
     };
   }
 
-  const { response, logContext } = await extraction;
-  const billingLogContext = await billing.commitUsage(response);
+  const { response: extractionResponse, logContext } = await extraction;
+  const committed = billing.commitUsageWithQuota
+    ? await billing.commitUsageWithQuota(extractionResponse)
+    : { logContext: await billing.commitUsage(extractionResponse), quota: null };
+  const billingLogContext = committed.logContext;
+  /* The allowance left after this import, for clients that show "2 imports left". */
+  const response: ExtractRecipeResponse =
+    extractionResponse.status === "success" && committed.quota
+      ? { ...extractionResponse, quota: committed.quota }
+      : extractionResponse;
   const latencyMs = Date.now() - input.startedAt;
   const analyticsEvent: AdminExtractionEventInput = {
     extraction: logContext,

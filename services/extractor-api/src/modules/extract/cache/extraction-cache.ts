@@ -25,6 +25,20 @@ import type { DetectionResult } from "../types.js";
 export const EXTRACTOR_CACHE_VERSION = "2026-09-27.2";
 
 const cacheKeyPrefix = "linkdish:extract-cache:v1";
+
+/*
+ * `quota` on a success response is the requesting caller's own allowance. It is attached after
+ * extraction and must never be stored in (or served from) the shared cache.
+ */
+const withoutCallerQuota = (response: unknown): unknown => {
+  if (!response || typeof response !== "object" || !("quota" in response)) {
+    return response;
+  }
+
+  const shared: Record<string, unknown> = { ...(response as Record<string, unknown>) };
+  delete shared.quota;
+  return shared;
+};
 const cacheEntryVersion = 1;
 
 export interface CachedExtraction {
@@ -89,7 +103,7 @@ export const evaluateExtractionCacheWrite = (
     return { skipReason: "cross_site_redirect" };
   }
 
-  const parsed = extractRecipeSuccessSchema.safeParse(entry.response);
+  const parsed = extractRecipeSuccessSchema.safeParse(withoutCallerQuota(entry.response));
 
   return parsed.success ? { response: parsed.data } : { skipReason: "invalid_payload" };
 };
@@ -110,7 +124,7 @@ const parseCachedEntry = (rawValue: string): CachedExtraction | null => {
     return null;
   }
 
-  const response = extractRecipeSuccessSchema.safeParse(value.response);
+  const response = extractRecipeSuccessSchema.safeParse(withoutCallerQuota(value.response));
   const detectionConfidence = value.detectionConfidence;
 
   if (

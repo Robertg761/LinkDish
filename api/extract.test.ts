@@ -300,6 +300,36 @@ describe("Vercel extract adapter request identity", () => {
     expect(mocks.extractRecipe).not.toHaveBeenCalled();
   });
 
+  it("returns the committed quota with a success", async () => {
+    const quota = {
+      limit: 3,
+      remaining: 2,
+      monthlyLimit: null,
+      remainingThisMonth: null,
+      resetsAt: null,
+      meteringMode: "free_lifetime"
+    };
+    mocks.authorizeExtractionRequest.mockResolvedValueOnce({
+      ...allowedBilling(),
+      commitUsageWithQuota: vi
+        .fn()
+        .mockResolvedValue({ logContext: { billingClientId: "free-user" }, quota })
+    });
+    mocks.extractRecipe.mockResolvedValueOnce({
+      logContext: { ...extractionLogContext, outcomeStatus: "success" },
+      response: {
+        status: "success",
+        recipe: { title: "Soup" },
+        extraction: { sourceType: "article" }
+      }
+    });
+    const extractApi = await import("./extract.js");
+
+    const response = await extractApi.POST(createRequest());
+
+    await expect(response.json()).resolves.toMatchObject({ status: "success", quota });
+  });
+
   it("reads around the result cache for live canary requests", async () => {
     const extractApi = await import("./extract.js");
 
