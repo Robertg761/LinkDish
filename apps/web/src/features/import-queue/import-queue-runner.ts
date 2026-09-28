@@ -273,7 +273,9 @@ export async function processImportQueueItem(
       const saved = await saveRecipe(input, isPaid(tier));
 
       if (saved.error === "limit_exceeded") {
-        await markImportFailed(item.id, "Your cookbook is full. Make room, then try again.", owner);
+        // Another tab took the last free slot after step 2: pause with the link still waiting,
+        // like step 2 does, so making room resumes it.
+        await retryImport(item.id, owner);
         return { reason: "save_limit", status: "paused" };
       }
 

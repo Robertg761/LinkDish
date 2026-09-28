@@ -438,6 +438,29 @@ describe("import queue runner", () => {
     expect((await getImportQueue())[0]?.status).toBe("queued");
   });
 
+  it("keeps the link waiting when another tab fills the last free slot mid-import", async () => {
+    fakeIdb.seed(
+      SAVED_RECIPES_STORE_NAME,
+      Array.from({ length: 14 }, (_, index) => saved(`r${index}`, `https://x.com/${index}`))
+    );
+    await enqueueImport({ url: "https://a.com/soup" });
+    apiMocks.extractRecipe.mockImplementation(() => {
+      // The room check passed; another tab saves the 15th recipe before this one is kept.
+      fakeIdb.seed(SAVED_RECIPES_STORE_NAME, [saved("r14", "https://x.com/14")]);
+      return Promise.resolve(success("Soup", "https://a.com/soup"));
+    });
+
+    await expect(runImportQueue(context({ owner: "tab-a", tier: "free" }))).resolves.toEqual({
+      paused: "save_limit",
+      processed: 0
+    });
+
+    const [item] = await getImportQueue();
+    // Paused, not failed: making room and resuming picks it up again.
+    expect(item?.status).toBe("queued");
+    expect(item).not.toHaveProperty("claimedBy");
+  });
+
   it("lets the link go without spending an import when the cookbook can't be read", async () => {
     await enqueueImport({ url: "https://a.com/soup" });
     await enqueueImport({ url: "https://b.com/stew" });
