@@ -16,7 +16,8 @@ import {
   buildBackup,
   buildCookbookMarkdown,
   cookbookFileName,
-  downloadTextFile
+  downloadTextFile,
+  serializeBackup
 } from "./backup-export";
 import { DataTransferError } from "./errors";
 import { selectExportRecipes } from "./export-selection";
@@ -68,10 +69,9 @@ export async function downloadBackup(options: {
     includeImages: options.includeImages,
     sourceImages
   });
-  const json = JSON.stringify(built.backup);
   const fileName = backupFileName(now);
-
-  downloadTextFile(fileName, json, "application/json");
+  // In pieces: a backup with many photos is too big for one string.
+  const bytes = downloadTextFile(fileName, serializeBackup(built.backup), "application/json");
   recordBackupDownloaded(now);
   trackWebEvent({
     eventName: "library_exported",
@@ -87,7 +87,7 @@ export async function downloadBackup(options: {
     fileName,
     recipeCount: built.recipeCount,
     imageCount: built.imageCount,
-    bytes: json.length
+    bytes
   };
 }
 

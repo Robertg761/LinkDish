@@ -43,7 +43,9 @@ const withQueueLock = async (task: () => Promise<void>): Promise<boolean> => {
  * Stale "processing" items (a tab closed mid-import) go back in the queue on mount.
  */
 export function useImportQueueRunner(enabled = true): ImportQueueRunnerState {
-  const { isAuthenticated, loading, user } = useAuth();
+  // Imports run only once requests carry the account (not while a cached Clerk user's session is
+  // still loading), so they are neither billed as anonymous nor paused for the wrong limit.
+  const { credentialsReady, isAuthenticated, user } = useAuth();
   const { requestUpgradeSheet } = useUpgradeSheet();
   const queue = useImportQueue();
   const [online, setOnline] = useState(isOnline);
@@ -89,7 +91,7 @@ export function useImportQueueRunner(enabled = true): ImportQueueRunnerState {
   useEffect(() => {
     if (
       !enabled ||
-      loading ||
+      !credentialsReady ||
       !online ||
       running ||
       paused ||
@@ -138,7 +140,17 @@ export function useImportQueueRunner(enabled = true): ImportQueueRunnerState {
           setRunning(false);
         }
       });
-  }, [enabled, hasQueued, isAuthenticated, loading, online, paused, queuedKey, running, tier]);
+  }, [
+    credentialsReady,
+    enabled,
+    hasQueued,
+    isAuthenticated,
+    online,
+    paused,
+    queuedKey,
+    running,
+    tier
+  ]);
 
   useEffect(
     () => () => {

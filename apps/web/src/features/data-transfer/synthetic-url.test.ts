@@ -32,8 +32,9 @@ describe("synthetic import URLs", () => {
     expect(isSyntheticImportUrl(undefined)).toBe(false);
   });
 
-  it("treats photo imports as internal too", () => {
+  it("treats photo and pasted-text imports as internal too", () => {
     expect(isLinkDishInternalSourceUrl("https://linkdish.app/image-imports/web-1-abc")).toBe(true);
+    expect(isLinkDishInternalSourceUrl("https://linkdish.app/text-imports/web-1-abc")).toBe(true);
     expect(isLinkDishInternalSourceUrl("https://linkdish.app/imports/paprika/x-1")).toBe(true);
     expect(isLinkDishInternalSourceUrl("https://linkdish.ca/starter/soup")).toBe(false);
   });

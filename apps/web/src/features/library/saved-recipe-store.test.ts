@@ -435,6 +435,28 @@ describe("saved-recipe-store v4 behaviour", () => {
     expect((await getSavedRecipes()).every((recipe) => !("sourceImages" in recipe))).toBe(true);
   });
 
+  it("keeps a v3 cookbook readable when the device has no room to move its scans", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const legacy = { ...(await saveScanned()), id: "legacy-scan", sourceImages: [scan(7)] };
+    fakeIdb.reset(3);
+    fakeIdb.defineStore(SAVED_RECIPES_STORE_NAME, "id", {
+      createdAt: "createdAt",
+      sourceHost: "sourceHost",
+      title: "recipe.title",
+      updatedAt: "updatedAt"
+    });
+    fakeIdb.seed(SAVED_RECIPES_STORE_NAME, [legacy]);
+    resetLinkDishWebDbForTests();
+    fakeIdb.failNextPut(
+      RECIPE_SOURCE_IMAGES_STORE_NAME,
+      new DOMException("The quota has been exceeded.", "QuotaExceededError")
+    );
+
+    expect((await getSavedRecipes()).map((recipe) => recipe.id)).toEqual(["legacy-scan"]);
+    expect(await getSavedRecipeSourceImages("legacy-scan")).toEqual([scan(7)]);
+    expect((await getSavedRecipeById("legacy-scan"))?.sourceImages).toEqual([scan(7)]);
+  });
+
   it("keeps images hydrated through edits, cooks and replacements", async () => {
     const saved = await saveScanned();
 
@@ -466,6 +488,47 @@ describe("saved-recipe-store v4 behaviour", () => {
     expect(await countSavedRecipes()).toBe(0);
     expect(fakeIdb.record(RECIPE_SOURCE_IMAGES_STORE_NAME, saved.id)).toBeUndefined();
     expect(fakeIdb.record("cookSessions", saved.id)).toBeUndefined();
+  });
+
+  it("treats an older app's copy of a starter as the personal recipe the limit counts", async () => {
+    // Before the redesign, "Duplicate" on a starter kept isStarter under a fresh id.
+    const legacyCopy = {
+      ...createSaveInput(99),
+      createdAt: "2026-06-01T00:00:00.000Z",
+      id: "0f0f0f0f-0000-4000-8000-000000000001",
+      isStarter: true,
+      sync: { status: "local_only" as const },
+      sourceHost: "example.com",
+      timesCooked: 0,
+      updatedAt: "2026-06-01T00:00:00.000Z"
+    };
+    fakeIdb.seed(SAVED_RECIPES_STORE_NAME, [legacyCopy]);
+
+    for (let i = 0; i < LOCAL_LIMIT_FREE - 1; i += 1) {
+      expect((await saveRecipe(createSaveInput(i), false)).success).toBe(true);
+    }
+
+    // What screens show agrees with what the limit enforces: 15 of 15, and no "starter" copy.
+    const listed = await getSavedRecipes();
+    expect(listed.filter((recipe) => !recipe.isStarter)).toHaveLength(LOCAL_LIMIT_FREE);
+    expect(listed.find((recipe) => recipe.id === legacyCopy.id)).not.toHaveProperty("isStarter");
+    expect(await getSavedRecipeById(legacyCopy.id)).not.toHaveProperty("isStarter");
+    expect(await countQuotaSavedRecipes()).toBe(LOCAL_LIMIT_FREE);
+    expect((await saveRecipe(createSaveInput(LOCAL_LIMIT_FREE), false)).error).toBe(
+      "limit_exceeded"
+    );
+
+    // The next write stores it that way too.
+    await setRecipeFavorite(legacyCopy.id, true);
+    expect(fakeIdb.record(SAVED_RECIPES_STORE_NAME, legacyCopy.id)).not.toHaveProperty("isStarter");
+  });
+
+  it("keeps the seeded starters as starters", async () => {
+    await seedStarterRecipesIfNeeded();
+
+    const starters = (await getSavedRecipes()).filter((recipe) => recipe.id.startsWith("starter-"));
+    expect(starters.length).toBeGreaterThan(0);
+    expect(starters.every((recipe) => recipe.isStarter)).toBe(true);
   });
 
   it("counts quota from keys without reading whole records", async () => {
@@ -645,6 +708,94 @@ describe("saved-recipe-store v4 behaviour", () => {
     expect(synced.sourceImages).toEqual([scan(1)]);
     expect(fakeIdb.record(SAVED_RECIPES_STORE_NAME, saved!.id)).not.toHaveProperty("sourceImages");
     expect(await getSavedRecipeSourceImages(saved!.id)).toEqual([scan(1)]);
+  });
+
+  /** A household sync whose create call waits until `release` is called. */
+  const holdHouseholdSync = () => {
+    let release: () => void = () => undefined;
+    apiMocks.getHousehold.mockResolvedValue({ household: { id: "house_1" } });
+    apiMocks.createSharedRecipe.mockReturnValue(
+      new Promise((resolve) => {
+        release = () =>
+          resolve({ recipe: { id: "shared_9", updatedAt: "2026-09-04T00:00:00.000Z" } });
+      })
+    );
+
+    return {
+      release: () => release(),
+      started: () => vi.waitFor(() => expect(apiMocks.createSharedRecipe).toHaveBeenCalled())
+    };
+  };
+
+  it("keeps personal metadata written while a household sync is in flight", async () => {
+    const { recipe: saved } = await saveRecipe(createSaveInput(1), true);
+    const hold = holdHouseholdSync();
+
+    const syncing = syncRecipeToHousehold(saved!);
+    await hold.started();
+    await setRecipeFavorite(saved!.id, true);
+    await setRecipeTags(saved!.id, ["weeknight"]);
+    await logRecipeCooked(saved!.id);
+    await markRecipeOpened(saved!.id);
+    hold.release();
+    const synced = await syncing;
+
+    const stored = await getSavedRecipeById(saved!.id);
+    expect(stored).toMatchObject({
+      favorite: true,
+      sync: { sharedRecipeId: "shared_9", status: "synced" },
+      tags: ["weeknight"],
+      timesCooked: 1
+    });
+    expect(stored?.lastOpenedAt).toEqual(expect.any(String));
+    expect(synced).toMatchObject({ favorite: true, tags: ["weeknight"] });
+  });
+
+  it("does not bring back a recipe deleted while a household sync is in flight", async () => {
+    const { recipe: saved } = await saveRecipe(createSaveInput(1), true);
+    const hold = holdHouseholdSync();
+
+    const syncing = syncRecipeToHousehold(saved!);
+    await hold.started();
+    await deleteSavedRecipe(saved!.id);
+    hold.release();
+    await syncing;
+
+    expect(await getSavedRecipes()).toEqual([]);
+  });
+
+  it("sends the recipe as stored, not the caller's older copy", async () => {
+    const { recipe: saved } = await saveRecipe(createSaveInput(1), true);
+    const edited = { ...saved!.recipe, title: "Grandma's Best Cookies" };
+    await updateSavedRecipe(saved!.id, { recipe: edited });
+    apiMocks.getHousehold.mockResolvedValue({ household: { id: "house_1" } });
+    apiMocks.createSharedRecipe.mockResolvedValue({
+      recipe: { id: "shared_9", updatedAt: "2026-09-04T00:00:00.000Z" }
+    });
+
+    // `saved` predates the edit (e.g. a toast action created before the editor saved).
+    const synced = await syncRecipeToHousehold(saved!);
+
+    const payload = apiMocks.createSharedRecipe.mock.calls[0]?.[0] as { recipe: Recipe };
+    expect(payload.recipe.title).toBe("Grandma's Best Cookies");
+    expect(synced.recipe.title).toBe("Grandma's Best Cookies");
+    expect((await getSavedRecipeById(saved!.id))?.recipe.title).toBe("Grandma's Best Cookies");
+  });
+
+  it("leaves a recipe edited while its household sync was in flight marked dirty", async () => {
+    const { recipe: saved } = await saveRecipe(createSaveInput(1), true);
+    const hold = holdHouseholdSync();
+
+    const syncing = syncRecipeToHousehold(saved!);
+    await hold.started();
+    await updateSavedRecipe(saved!.id, { recipe: { ...saved!.recipe, title: "Newer" } });
+    hold.release();
+    await syncing;
+
+    const stored = await getSavedRecipeById(saved!.id);
+    expect(stored?.recipe.title).toBe("Newer");
+    // The household copy has the older content, so the next sync must still send this edit.
+    expect(stored?.sync).toMatchObject({ sharedRecipeId: "shared_9", status: "dirty" });
   });
 
   it("tells subscribers in this tab about writes", async () => {

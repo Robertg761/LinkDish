@@ -30,6 +30,7 @@ import {
 } from "../../data/library-store";
 import { retryLinkDishStorage } from "../../data/storage-status";
 import { useMediaQuery } from "../../lib/use-media-query";
+import { holdAutoApplyUpdate, UNDO_UPDATE_HOLD_MS } from "../../platform/app-update";
 import { lazyWithRetry } from "../../platform/lazy";
 import { OptionalChunkBoundary } from "../../platform/OptionalChunkBoundary";
 import { getWebBillingTier } from "../billing/web-billing";
@@ -60,6 +61,7 @@ import {
   LibraryShoppingSheet,
   ManageCollectionsSheet,
   preloadRecipeMenuSheets,
+  primeShoppingAccount,
   TagEditorSheet
 } from "./components/library-sheets";
 import { LibraryFilterBar } from "./components/LibraryFilterBar";
@@ -152,17 +154,18 @@ const isMacLike = (): boolean => {
 
 interface ShoppingSheetState {
   recipe: WebSavedRecipe;
-  canSync: boolean;
+  /** Undefined until the household check answers (the sheet then uses the cached mode). */
+  canSync: boolean | undefined;
 }
 
 export const LibraryPage: React.FC = () => {
   const navigate = useNavigate();
-  const { isAuthenticated, user } = useAuth();
+  const { credentialsKey, isAuthenticated, loading: authLoading, user } = useAuth();
   const { requestUpgradeSheet } = useUpgradeSheet();
   const { showToast } = useToast();
   const library = useSavedRecipes();
   const { collections } = useCollections();
-  const shared = useSharedRecipes(isAuthenticated, user?.id);
+  const shared = useSharedRecipes(isAuthenticated, user?.id, credentialsKey);
   const showShortcutHint = useMediaQuery("(hover: hover) and (pointer: fine)");
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const [initialSession] = useState(getLibrarySessionState);
@@ -346,6 +349,12 @@ export const LibraryPage: React.FC = () => {
     }
 
     const restorable = snapshot;
+
+    if (restorable) {
+      // Undo lives in memory: a waiting app update must not reload the page on the next tap.
+      holdAutoApplyUpdate(UNDO_UPDATE_HOLD_MS);
+    }
+
     showToast({
       action: restorable
         ? {
@@ -469,7 +478,10 @@ export const LibraryPage: React.FC = () => {
   };
 
   const openShopping = (recipe: WebSavedRecipe) => {
-    setShoppingSheet({ canSync: false, recipe });
+    // Not "false" while the household check is out (or when it fails): items added then would
+    // stay on this device for good. Unknown falls back to the shopping sync layer's mode.
+    setShoppingSheet({ canSync: undefined, recipe });
+    primeShoppingAccount({ isAuthenticated, loading: authLoading, userId: user?.id });
 
     if (isAuthenticated) {
       apiClient

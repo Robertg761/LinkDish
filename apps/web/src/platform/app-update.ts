@@ -14,6 +14,9 @@ export const AUTO_APPLY_UPDATE_AFTER_MS = 2 * 60_000;
 /** How often an open tab asks the server for a newer service worker. */
 export const UPDATE_CHECK_INTERVAL_MS = 60 * 60_000;
 
+/** How long a pending Undo keeps an ignored update from reloading the page on navigation. */
+export const UNDO_UPDATE_HOLD_MS = 60_000;
+
 export interface AppUpdateSnapshot {
   /** A new version is installed and waiting to take over. */
   needRefresh: boolean;
@@ -48,6 +51,7 @@ let snapshot: AppUpdateSnapshot = initialSnapshot;
 let updateServiceWorker: UpdateServiceWorker | null = null;
 let registration: Promise<void> | null = null;
 let checkTimer: ReturnType<typeof setInterval> | null = null;
+let autoApplyHeldUntil = 0;
 const listeners = new Set<() => void>();
 
 const setSnapshot = (patch: Partial<AppUpdateSnapshot>) => {
@@ -97,7 +101,17 @@ export const shouldAutoApplyUpdate = (now: number = Date.now()): boolean =>
   snapshot.needRefresh &&
   !snapshot.applying &&
   snapshot.readySince !== null &&
-  now - snapshot.readySince >= AUTO_APPLY_UPDATE_AFTER_MS;
+  now - snapshot.readySince >= AUTO_APPLY_UPDATE_AFTER_MS &&
+  now >= autoApplyHeldUntil;
+
+/**
+ * Keeps an ignored update from applying itself (a full reload) on navigation for `ms`: e.g. a
+ * delete that moves to another page and offers Undo, whose snapshot lives only in memory. The
+ * "Reload" prompt still works; the update just waits for a later navigation.
+ */
+export const holdAutoApplyUpdate = (ms: number, now: number = Date.now()): void => {
+  autoApplyHeldUntil = Math.max(autoApplyHeldUntil, now + ms);
+};
 
 const loadRegisterSW = (): Promise<RegisterSWModule> =>
   import("virtual:pwa-register") as Promise<RegisterSWModule>;
@@ -150,6 +164,7 @@ export const resetAppUpdateForTests = (): void => {
   snapshot = initialSnapshot;
   updateServiceWorker = null;
   registration = null;
+  autoApplyHeldUntil = 0;
 
   if (checkTimer) {
     clearInterval(checkTimer);

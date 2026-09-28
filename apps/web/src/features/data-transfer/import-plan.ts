@@ -7,7 +7,7 @@
  */
 import {
   canonicalizeRecipeUrl,
-  isLikelySameRecipe,
+  recipeSiteTitleKey,
   recipeUrlIdentity,
   SAMPLE_RECIPES
 } from "@linkdish/recipe-domain";
@@ -75,31 +75,29 @@ interface ExistingIndexEntry {
   title: string;
 }
 
-/** Fast duplicate lookups: exact URL identity, then same-site + same-title. */
+/**
+ * Duplicate lookups in constant time: exact URL identity, then same site + same title (the two
+ * rules of `isLikelySameRecipe`), each a map key, so a big export from one site is not compared
+ * pair by pair.
+ */
 class RecipeIndex {
   private readonly byIdentity = new Map<string, string>();
   private readonly byCanonical = new Map<string, string>();
-  private readonly byHost = new Map<string, ExistingIndexEntry[]>();
+  private readonly bySiteTitle = new Map<string, string>();
 
   public add(entry: ExistingIndexEntry): void {
     if (isLinkDishInternalSourceUrl(entry.sourceUrl)) {
       // Made-up URLs are only equal when they are the same URL (every scan shares the host).
-      const canonical = canonicalizeRecipeUrl(entry.sourceUrl);
-      if (!this.byCanonical.has(canonical)) {
-        this.byCanonical.set(canonical, entry.id);
-      }
+      setIfAbsent(this.byCanonical, canonicalizeRecipeUrl(entry.sourceUrl), entry.id);
       return;
     }
 
-    const identity = recipeUrlIdentity(entry.sourceUrl);
-    if (!this.byIdentity.has(identity)) {
-      this.byIdentity.set(identity, entry.id);
-    }
+    setIfAbsent(this.byIdentity, recipeUrlIdentity(entry.sourceUrl), entry.id);
+    const siteTitle = recipeSiteTitleKey(entry);
 
-    const host = getSourceHost(entry.sourceUrl);
-    const list = this.byHost.get(host) ?? [];
-    list.push(entry);
-    this.byHost.set(host, list);
+    if (siteTitle !== null) {
+      setIfAbsent(this.bySiteTitle, siteTitle, entry.id);
+    }
   }
 
   public find(sourceUrl: string, title: string): string | null {
@@ -113,14 +111,17 @@ class RecipeIndex {
       return exact;
     }
 
-    const sameHost = this.byHost.get(getSourceHost(sourceUrl)) ?? [];
-    return (
-      sameHost.find((entry) =>
-        isLikelySameRecipe({ sourceUrl, title }, { sourceUrl: entry.sourceUrl, title: entry.title })
-      )?.id ?? null
-    );
+    const siteTitle = recipeSiteTitleKey({ sourceUrl, title });
+    return siteTitle === null ? null : (this.bySiteTitle.get(siteTitle) ?? null);
   }
 }
+
+/** The first entry for a key wins (the earliest recipe in the file, or the cookbook's). */
+const setIfAbsent = (map: Map<string, string>, key: string, value: string): void => {
+  if (!map.has(key)) {
+    map.set(key, value);
+  }
+};
 
 const isStarterId = (id: string): boolean => id.startsWith(STARTER_ID_PREFIX);
 
@@ -135,6 +136,8 @@ export async function analyzeImport(
   const existingById = new Map(existing.map((recipe) => [recipe.id, recipe]));
   const localIndex = new RecipeIndex();
   const fileIndex = new RecipeIndex();
+  /** File position of the first LinkDish backup entry with each original id. */
+  const fileIndexByOriginalId = new Map<string, number>();
 
   for (const recipe of existing) {
     localIndex.add({ id: recipe.id, sourceUrl: recipe.sourceUrl, title: recipe.recipe.title });
@@ -159,9 +162,25 @@ export async function analyzeImport(
     const preferredId =
       starterId ?? (originalId && !isStarterId(originalId) ? originalId : deterministicId);
 
-    const localById = existingById.get(preferredId) ?? existingById.get(deterministicId);
-    const duplicateOfLocalId =
-      localById?.id ?? localIndex.find(candidate.sourceUrl, candidate.recipe.title);
+    // A LinkDish backup names every recipe by its id: two entries are the same recipe only when
+    // the ids match. Look-alikes (a "Duplicate" copy, pasted-text imports with one title, pages
+    // of one site sharing a title) are distinct recipes the backup must bring back. Files from
+    // other apps have no such identity, so they are matched by link and title.
+    const matchById = parsed.source === "linkdish" && originalId !== null;
+    let duplicateOfLocalId: string | null;
+    let inFile: number | null;
+
+    if (matchById) {
+      duplicateOfLocalId = existingById.has(preferredId) ? preferredId : null;
+      inFile = fileIndexByOriginalId.get(originalId) ?? null;
+    } else {
+      const localById = existingById.get(preferredId) ?? existingById.get(deterministicId);
+      duplicateOfLocalId =
+        localById?.id ?? localIndex.find(candidate.sourceUrl, candidate.recipe.title);
+      const inFileId = fileIndex.find(candidate.sourceUrl, candidate.recipe.title);
+      inFile = inFileId === null ? null : Number(inFileId);
+    }
+
     const local = duplicateOfLocalId ? existingById.get(duplicateOfLocalId) : undefined;
     const replacesUntouchedStarter = Boolean(
       starterId &&
@@ -170,7 +189,6 @@ export async function analyzeImport(
       local.isStarter &&
       !isPersonalizedRecipe(local)
     );
-    const inFile = fileIndex.find(candidate.sourceUrl, candidate.recipe.title);
 
     items.push({
       candidate,
@@ -178,15 +196,21 @@ export async function analyzeImport(
       preferredId,
       starterId,
       duplicateOfLocalId: replacesUntouchedStarter ? null : duplicateOfLocalId,
-      duplicateOfIndex: inFile === null ? null : Number(inFile),
+      duplicateOfIndex: inFile,
       replacesUntouchedStarter
     });
 
-    fileIndex.add({
-      id: String(candidate.index),
-      sourceUrl: candidate.sourceUrl,
-      title: candidate.recipe.title
-    });
+    if (matchById) {
+      if (!fileIndexByOriginalId.has(originalId)) {
+        fileIndexByOriginalId.set(originalId, candidate.index);
+      }
+    } else {
+      fileIndex.add({
+        id: String(candidate.index),
+        sourceUrl: candidate.sourceUrl,
+        title: candidate.recipe.title
+      });
+    }
   }
 
   return {

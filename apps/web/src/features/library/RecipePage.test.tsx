@@ -3,27 +3,38 @@ import React from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { AppUpdatePrompt } from "../../app/AppUpdatePrompt";
 import { ToastProvider } from "../../components/Toast";
 import { resetDataChangeFeedForTests, setDataChannelFactoryForTests } from "../../data/change-feed";
 import { resetCookSessionStoreForTests } from "../../data/cook-session-store";
 import { resetLibraryStoreForTests } from "../../data/library-store";
+import {
+  AUTO_APPLY_UPDATE_AFTER_MS,
+  markUpdateReady,
+  resetAppUpdateForTests,
+  startAppUpdates
+} from "../../platform/app-update";
 import { resetPreferencesForTests } from "../../preferences/preferences-store";
 import {
   COOK_SESSIONS_STORE_NAME,
   getLinkDishWebDb,
   RECIPE_SOURCE_IMAGES_STORE_NAME,
   resetLinkDishWebDbForTests,
-  SAVED_RECIPES_STORE_NAME
+  SAVED_RECIPES_STORE_NAME,
+  SHOPPING_ITEMS_STORE_NAME
 } from "../../storage/linkdish-db";
 import { fakeIdb } from "../../storage/testing/fake-idb";
 import { flushCookSessionWrites } from "../cook-mode/cook-session-writer";
 import { resetKitchenTimersForTests } from "../cook-mode/timer-store";
+import { resetShoppingListStoreForTests } from "../shopping/shopping-list-store";
+import { resetShoppingSyncForTests, SHOPPING_HOUSEHOLD_CACHE_KEY } from "../shopping/shopping-sync";
 
 import { RecipePage } from "./RecipePage";
 
 import type { WebSavedRecipe } from "./saved-recipe-types";
 import type * as ApiClientModuleNamespace from "../../api/client";
 import type { CookSession } from "../../data/cook-session-store";
+import type { WebShoppingItem } from "../shopping/shopping-list-store";
 import type { SharedRecipe } from "@linkdish/api-contracts";
 import type { Recipe } from "@linkdish/recipe-domain";
 
@@ -31,12 +42,17 @@ type ApiClientModule = typeof ApiClientModuleNamespace;
 
 vi.mock("idb", async () => (await import("../../storage/testing/fake-idb")).fakeIdbModule);
 
+const pwa = vi.hoisted(() => ({ updateSW: vi.fn() }));
+
+vi.mock("virtual:pwa-register", () => ({ registerSW: () => pwa.updateSW }));
+
 const apiMocks = vi.hoisted(() => ({
   createSharedRecipe: vi.fn(),
   deleteSharedRecipe: vi.fn(),
   getHousehold: vi.fn(),
   getSharedRecipes: vi.fn(),
-  updateSharedRecipe: vi.fn()
+  updateSharedRecipe: vi.fn(),
+  upsertShoppingItems: vi.fn()
 }));
 
 vi.mock("../../api/client", async (importOriginal) => ({
@@ -57,6 +73,8 @@ const authMocks = vi.hoisted(() => ({
 
 vi.mock("../../auth/AuthProvider", () => ({
   useAuth: () => ({
+    credentialsKey: `session:${authMocks.user?.id ?? ""}`,
+    credentialsReady: true,
     isAuthenticated: Boolean(authMocks.user),
     loading: false,
     user: authMocks.user
@@ -168,6 +186,8 @@ beforeEach(() => {
   resetCookSessionStoreForTests();
   resetKitchenTimersForTests();
   resetPreferencesForTests();
+  resetShoppingListStoreForTests();
+  resetShoppingSyncForTests();
   setDataChannelFactoryForTests(() => null);
   authMocks.user = null;
   Object.values(apiMocks).forEach((mock) => mock.mockReset());
@@ -260,9 +280,7 @@ describe("RecipePage saved route", () => {
     expect(screen.queryByText("Recipe not found")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
-    expect(
-      await screen.findByRole("heading", { level: 1, name: "Weeknight Chili" })
-    ).toBeVisible();
+    expect(await screen.findByRole("heading", { level: 1, name: "Weeknight Chili" })).toBeVisible();
   });
 
   it("keeps ticked ingredients in the cook session so cook mode sees them", async () => {
@@ -405,6 +423,48 @@ describe("RecipePage saved route", () => {
     await waitFor(() => expect(stored("recipe_local")?.recipe.title).toBe("Weeknight Chili"));
   });
 
+  it("keeps the Undo when an ignored app update is waiting to apply on navigation", async () => {
+    resetAppUpdateForTests();
+    pwa.updateSW.mockReset().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "serviceWorker", { configurable: true, value: {} });
+
+    try {
+      await seed([savedRecipe()]);
+      render(
+        <ToastProvider>
+          <MemoryRouter initialEntries={["/recipes/recipe_local"]}>
+            <AppUpdatePrompt />
+            <Routes>
+              <Route element={<RecipePage />} path="/recipes/:id" />
+              <Route element={<div>Cookbook route</div>} path="/" />
+            </Routes>
+          </MemoryRouter>
+        </ToastProvider>
+      );
+      await screen.findByRole("heading", { level: 1, name: "Weeknight Chili" });
+      await act(async () => {
+        await startAppUpdates();
+      });
+      act(() => {
+        markUpdateReady(Date.now() - AUTO_APPLY_UPDATE_AFTER_MS - 1);
+      });
+
+      fireEvent.click(within(openMenu()).getByRole("menuitem", { name: "Delete recipe" }));
+      expect(await screen.findByText("Cookbook route")).toBeInTheDocument();
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      // Reloading now would throw away the only way back.
+      expect(pwa.updateSW).not.toHaveBeenCalled();
+      fireEvent.click(await screen.findByRole("button", { name: "Undo" }));
+      await waitFor(() => expect(stored("recipe_local")?.recipe.title).toBe("Weeknight Chili"));
+    } finally {
+      resetAppUpdateForTests();
+      Reflect.deleteProperty(navigator, "serviceWorker");
+    }
+  });
+
   it("deletes the household copy first for synced recipes", async () => {
     authMocks.user = { billingPlan: "family", email: "a@example.com", id: "user_1" };
     apiMocks.deleteSharedRecipe.mockResolvedValue(undefined);
@@ -494,6 +554,82 @@ describe("RecipePage saved route", () => {
     ).toBeVisible();
     expect(stored("recipe_local")?.sync?.status).toBe("dirty");
     expect(screen.getByText("Saved here. Sync to update your household’s copy.")).toBeVisible();
+  });
+
+  describe("'Sync now' after an edit", () => {
+    const editTitleAndSave = async (title: string) => {
+      fireEvent.click(within(openMenu()).getByRole("menuitem", { name: "Edit recipe" }));
+      const editor = screen.getByRole("dialog", { name: "Edit recipe" });
+      fireEvent.change(within(editor).getByLabelText("Title"), { target: { value: title } });
+      fireEvent.click(within(editor).getByRole("button", { name: "Save changes" }));
+      await screen.findByRole("heading", { level: 1, name: title });
+      await screen.findByText("Saved here. Sync to update your household’s copy.");
+    };
+
+    beforeEach(() => {
+      authMocks.user = { billingPlan: "family", email: "a@example.com", id: "user_1" };
+      apiMocks.getHousehold.mockResolvedValue({ household: { id: "household_1" } });
+      apiMocks.updateSharedRecipe.mockResolvedValue({
+        recipe: { id: "shared_9", updatedAt: "2026-09-28T00:00:00.000Z" }
+      });
+    });
+
+    it("sends the edit for a recipe that was in sync before it", async () => {
+      await seed([savedRecipe({ sync: { sharedRecipeId: "shared_9", status: "synced" } })]);
+      renderAt("/recipes/recipe_local");
+      await screen.findByRole("heading", { level: 1, name: "Weeknight Chili" });
+      await editTitleAndSave("Best Chili");
+
+      fireEvent.click(screen.getByRole("button", { name: "Sync now" }));
+
+      await waitFor(() => expect(stored("recipe_local")?.sync?.status).toBe("synced"));
+      expect(apiMocks.updateSharedRecipe).toHaveBeenCalledOnce();
+      expect(apiMocks.updateSharedRecipe.mock.calls[0]?.[1]).toMatchObject({
+        recipe: { title: "Best Chili" }
+      });
+      expect(await screen.findByText("Synced to your household.")).toBeVisible();
+    });
+
+    it("keeps the edit (and sends it) for a recipe that already had unsynced changes", async () => {
+      await seed([savedRecipe({ sync: { sharedRecipeId: "shared_9", status: "dirty" } })]);
+      renderAt("/recipes/recipe_local");
+      await screen.findByRole("heading", { level: 1, name: "Weeknight Chili" });
+      await editTitleAndSave("Best Chili");
+
+      fireEvent.click(screen.getByRole("button", { name: "Sync now" }));
+
+      await waitFor(() => expect(stored("recipe_local")?.sync?.status).toBe("synced"));
+      expect(apiMocks.updateSharedRecipe.mock.calls[0]?.[1]).toMatchObject({
+        recipe: { title: "Best Chili" }
+      });
+      expect(stored("recipe_local")?.recipe.title).toBe("Best Chili");
+      expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Best Chili");
+    });
+  });
+
+  it("adds a household member's ingredients to the household list even when the check fails", async () => {
+    authMocks.user = { billingPlan: "family", email: "a@example.com", id: "user_1" };
+    // This account is known (cached) to share a household list; right now the API is unreachable.
+    localStorage.setItem(
+      SHOPPING_HOUSEHOLD_CACHE_KEY,
+      JSON.stringify({ checkedAt: Date.now(), household: true, userId: "user_1" })
+    );
+    apiMocks.getHousehold.mockRejectedValue(new TypeError("Failed to fetch"));
+    apiMocks.upsertShoppingItems.mockReturnValue(new Promise(() => undefined));
+    await seed([savedRecipe()]);
+    renderAt("/recipes/recipe_local");
+    await screen.findByRole("heading", { level: 1, name: "Weeknight Chili" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Add to shopping list" }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Add \d+ items?$/u }));
+
+    await waitFor(() =>
+      expect(fakeIdb.records<WebShoppingItem>(SHOPPING_ITEMS_STORE_NAME).length).toBeGreaterThan(0)
+    );
+    // Marked for the household list, not kept on this device for good.
+    expect(
+      fakeIdb.records<WebShoppingItem>(SHOPPING_ITEMS_STORE_NAME).map((item) => item.sync.status)
+    ).not.toContain("local_only");
   });
 
   it("opens the editor for ?edit=1 links", async () => {

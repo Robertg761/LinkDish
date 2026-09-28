@@ -4,6 +4,7 @@ import {
   canonicalizeRecipeUrl,
   extractFirstUrl,
   isLikelySameRecipe,
+  recipeSiteTitleKey,
   recipeSourceLabel,
   recipeUrlIdentity
 } from "./index.js";
@@ -89,6 +90,20 @@ describe("isLikelySameRecipe", () => {
     expect(
       isLikelySameRecipe({ sourceUrl: "https://site.com/a", title: "" }, "https://site.com/a")
     ).toBe(true);
+  });
+
+  it("exposes the site + title key it compares, for indexing", () => {
+    const key = recipeSiteTitleKey({ sourceUrl: "https://m.site.com/a", title: "Crème Brûlée!" });
+
+    expect(key).not.toBeNull();
+    expect(recipeSiteTitleKey({ sourceUrl: "https://www.site.com/b", title: "creme brulee" })).toBe(
+      key
+    );
+    expect(
+      recipeSiteTitleKey({ sourceUrl: "https://other.com/a", title: "Crème Brûlée" })
+    ).not.toBe(key);
+    expect(recipeSiteTitleKey({ sourceUrl: "https://site.com/a", title: " !! " })).toBeNull();
+    expect(recipeSiteTitleKey({ sourceUrl: "not a link", title: "Soup" })).toBeNull();
   });
 });
 

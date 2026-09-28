@@ -10,8 +10,13 @@ import {
   ClerkUnavailableError,
   getClerkBridgeSnapshot,
   getBootClerkReason,
+  isClerkSessionPending,
+  markClerkBridgeFailed,
+  mayHaveClerkSession,
+  publishClerkState,
   requestClerk,
-  resetClerkBridgeForTests
+  resetClerkBridgeForTests,
+  waitForClerkSettled
 } from "./clerk-bridge";
 
 const apiClientMocks = vi.hoisted(() => ({
@@ -321,5 +326,72 @@ describe("lazy Clerk bridge", () => {
     expect(getClerkBridgeSnapshot().status).toBe("failed");
     expect(latestAuth?.clerkReady).toBe(false);
     expect(bridge.authenticateWithRedirect).not.toHaveBeenCalled();
+  });
+});
+
+describe("waiting for Clerk", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    setClerkSessionCookie(null);
+    resetClerkBridgeForTests();
+    vi.stubEnv("VITE_CLERK_PUBLISHABLE_KEY", "pk_test_bridge");
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllEnvs();
+    setClerkSessionCookie(null);
+    resetClerkBridgeForTests();
+  });
+
+  it("counts Clerk as pending only while someone may already be signed in with it", () => {
+    requestClerk("sign_in_view");
+    // Loading only for a sign-in that has not happened: nobody's credentials depend on it.
+    expect(isClerkSessionPending()).toBe(false);
+
+    resetClerkBridgeForTests();
+    setClerkSessionCookie("1790000000");
+    expect(isClerkSessionPending()).toBe(true);
+    expect(mayHaveClerkSession()).toBe(true);
+
+    publishClerkState({ isLoaded: true, isSignedIn: false, signInReady: true });
+    expect(isClerkSessionPending()).toBe(false);
+    expect(mayHaveClerkSession()).toBe(false);
+  });
+
+  it("shares one bounded wait, and does not wait again after it ran out", async () => {
+    vi.useFakeTimers();
+    setClerkSessionCookie("1790000000");
+    const settled = vi.fn();
+
+    void waitForClerkSettled(1_000).then(settled);
+    await vi.advanceTimersByTimeAsync(600);
+    // A later caller does not restart the clock.
+    void waitForClerkSettled(1_000).then(settled);
+    await vi.advanceTimersByTimeAsync(399);
+    expect(settled).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(settled).toHaveBeenCalledTimes(2);
+
+    const late = vi.fn();
+    void waitForClerkSettled(1_000).then(late);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(late).toHaveBeenCalled();
+  });
+
+  it("resolves as soon as Clerk loads or fails", async () => {
+    setClerkSessionCookie("1790000000");
+    const loaded = vi.fn();
+    void waitForClerkSettled(60_000).then(loaded);
+
+    publishClerkState({ isLoaded: true, isSignedIn: true, signInReady: true });
+    await waitFor(() => expect(loaded).toHaveBeenCalled());
+
+    resetClerkBridgeForTests();
+    const failed = vi.fn();
+    void waitForClerkSettled(60_000).then(failed);
+    markClerkBridgeFailed();
+    await waitFor(() => expect(failed).toHaveBeenCalled());
   });
 });

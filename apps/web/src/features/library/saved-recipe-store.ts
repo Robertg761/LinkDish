@@ -79,8 +79,32 @@ interface SplitRecord {
   record: WebSavedRecipe;
 }
 
+const isStarterRecipeId = (id: IDBValidKey): boolean =>
+  typeof id === "string" && id.startsWith(STARTER_RECIPE_ID_PREFIX);
+
+/**
+ * Only the seeded starters (ids "starter-…") are starter recipes, which is also how the free
+ * limit counts. Older versions' "Duplicate" of a starter kept `isStarter` under a fresh id; that
+ * copy is a personal recipe, so every read and write drops the flag from it.
+ */
+const withStarterFlagById = (recipe: WebSavedRecipe): WebSavedRecipe => {
+  if (!recipe.isStarter || isStarterRecipeId(recipe.id)) {
+    return recipe;
+  }
+
+  const personal: WebSavedRecipe = { ...recipe };
+  delete personal.isStarter;
+  return personal;
+};
+
+/** Characters of the images' data URLs: about the bytes they add to a JSON backup. */
+export const measureSourceImageBytes = (images: readonly ExtractRecipeImage[]): number =>
+  images.reduce((sum, image) => sum + (image.dataUrl?.length ?? 0), 0);
+
 /** Separates the heavy `sourceImages` payload from the record that goes into `savedRecipes`. */
-const splitSourceImages = (recipe: WebSavedRecipe): SplitRecord => {
+const splitSourceImages = (input: WebSavedRecipe): SplitRecord => {
+  const recipe = withStarterFlagById(input);
+
   if (!("sourceImages" in recipe)) {
     return { images: undefined, record: recipe };
   }
@@ -94,10 +118,18 @@ const splitSourceImages = (recipe: WebSavedRecipe): SplitRecord => {
   if (sourceImages.length === 0) {
     const withoutCount: WebSavedRecipe = { ...rest };
     delete withoutCount.sourceImageCount;
+    delete withoutCount.sourceImageBytes;
     return { images: [], record: withoutCount };
   }
 
-  return { images: sourceImages, record: { ...rest, sourceImageCount: sourceImages.length } };
+  return {
+    images: sourceImages,
+    record: {
+      ...rest,
+      sourceImageBytes: measureSourceImageBytes(sourceImages),
+      sourceImageCount: sourceImages.length
+    }
+  };
 };
 
 /** The lightweight shape list reads return: never carries `sourceImages`. */
@@ -125,9 +157,6 @@ const imagesRecordFor = (
   images: ExtractRecipeImage[],
   updatedAt: string
 ): WebRecipeSourceImagesRecord => ({ images, recipeId, updatedAt });
-
-const isStarterRecipeId = (id: IDBValidKey): boolean =>
-  typeof id === "string" && id.startsWith(STARTER_RECIPE_ID_PREFIX);
 
 /* ------------------------------------------------------------------------------------------------
  * Reads
@@ -166,18 +195,20 @@ export async function getSavedRecipeSourceImages(id: string): Promise<ExtractRec
 /** One saved recipe with its `sourceImages` hydrated (backward compatible detail read). */
 export async function getSavedRecipeById(id: string): Promise<WebSavedRecipe | undefined> {
   const db = await getDb();
-  const record = (await db.get(STORE_NAME, id)) as WebSavedRecipe | undefined;
+  const stored = (await db.get(STORE_NAME, id)) as WebSavedRecipe | undefined;
 
-  if (!record) {
+  if (!stored) {
     return undefined;
   }
+
+  const record = withStarterFlagById(stored);
 
   if (record.sourceImages?.length) {
     return record;
   }
 
-  const stored = (await db.get(IMAGES_STORE_NAME, id)) as WebRecipeSourceImagesRecord | undefined;
-  return withImages(record, stored?.images);
+  const images = (await db.get(IMAGES_STORE_NAME, id)) as WebRecipeSourceImagesRecord | undefined;
+  return withImages(record, images?.images);
 }
 
 /** Alias of {@link getSavedRecipeById}. */
@@ -623,66 +654,80 @@ export const buildHouseholdRecipePayload = (recipe: WebSavedRecipe) => ({
   warnings: recipe.extraction.warnings
 });
 
-/** Persists a sync-state change without rewriting the (possibly multi-MB) source images. */
-async function persistSyncState(recipe: WebSavedRecipe): Promise<WebSavedRecipe> {
-  await writeSavedRecipe(toSavedRecipeListRecord(recipe));
-  return recipe;
+type SavedRecipeSyncState = NonNullable<WebSavedRecipe["sync"]>;
+
+/**
+ * Stores a new sync state on the recipe as it is stored *now*, in one transaction, so favorites,
+ * tags, cooks and edits written during the network round trip are kept and a recipe deleted
+ * meanwhile stays deleted. Never rewrites the (possibly multi-MB) source images. Returns the stored
+ * recipe with its images, or `recipe` with the new state when it is gone.
+ */
+async function persistSyncState(
+  recipe: WebSavedRecipe,
+  nextSync: (existing: WebSavedRecipe) => SavedRecipeSyncState
+): Promise<WebSavedRecipe> {
+  const stored = await patchStoredRecipe(recipe.id, (existing) => ({
+    ...existing,
+    sync: nextSync(existing)
+  }));
+
+  if (!stored) {
+    return { ...recipe, sync: nextSync(recipe) };
+  }
+
+  return (await hydrateImages(stored)) ?? stored;
 }
 
+/**
+ * Shares a saved recipe with the household (or updates its household copy). It sends the recipe
+ * as stored when called, not the caller's copy, which may predate an edit.
+ */
 export async function syncRecipeToHousehold(recipe: WebSavedRecipe): Promise<WebSavedRecipe> {
-  if (recipe.isStarter) {
-    return persistSyncState({
-      ...recipe,
-      sync: {
-        status: "local_only"
-      }
-    });
+  const db = await getDb();
+  const stored = (await db.get(STORE_NAME, recipe.id)) as WebSavedRecipe | undefined;
+
+  if (!stored) {
+    throw new Error("This saved recipe is no longer available.");
+  }
+
+  const current = toSavedRecipeListRecord(stored);
+
+  if (current.isStarter) {
+    return persistSyncState(current, () => ({ status: "local_only" }));
   }
 
   try {
     const household = await apiClient.getHousehold();
 
     if (!household.household) {
-      const nextRecipe: WebSavedRecipe = {
-        ...recipe,
-        sync: {
-          ...(recipe.sync || { status: "local_only" }),
-          status: "local_only"
-        }
-      };
-      return persistSyncState(nextRecipe);
+      return persistSyncState(current, (existing) => ({
+        ...(existing.sync || { status: "local_only" }),
+        status: "local_only"
+      }));
     }
 
-    const sharedRecipeId = recipe.sync?.sharedRecipeId;
-    const payload = buildHouseholdRecipePayload(recipe);
+    const sharedRecipeId = current.sync?.sharedRecipeId;
+    const payload = buildHouseholdRecipePayload(current);
 
     const response = sharedRecipeId
       ? await apiClient.updateSharedRecipe(sharedRecipeId, payload)
       : await apiClient.createSharedRecipe({
           ...payload,
-          sourceSavedRecipeId: recipe.id
+          sourceSavedRecipeId: current.id
         });
-    const nextRecipe: WebSavedRecipe = {
-      ...recipe,
-      sync: {
-        lastSyncedAt: response.recipe.updatedAt,
-        sharedRecipeId: response.recipe.id,
-        status: "synced"
-      }
-    };
 
-    return persistSyncState(nextRecipe);
+    return persistSyncState(current, (existing) => ({
+      lastSyncedAt: response.recipe.updatedAt,
+      sharedRecipeId: response.recipe.id,
+      // Edited while the request was out: the household copy is already behind again.
+      status: existing.updatedAt === current.updatedAt ? "synced" : "dirty"
+    }));
   } catch (error) {
-    const nextRecipe: WebSavedRecipe = {
-      ...recipe,
-      sync: {
-        ...(recipe.sync || { status: "local_only" }),
-        lastError: error instanceof Error ? error.message : "Sync error",
-        status: "sync_failed"
-      }
-    };
-
-    return persistSyncState(nextRecipe);
+    return persistSyncState(current, (existing) => ({
+      ...(existing.sync || { status: "local_only" }),
+      lastError: error instanceof Error ? error.message : "Sync error",
+      status: "sync_failed"
+    }));
   }
 }
 

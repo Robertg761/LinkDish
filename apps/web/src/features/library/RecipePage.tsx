@@ -32,6 +32,7 @@ import { buildRecipeImageUrl } from "../../lib/recipe-image";
 import { createShareCardBlob } from "../../lib/share-card";
 import { useDocumentTitle } from "../../lib/use-document-title";
 import { RAIL_MEDIA_QUERY, useMediaQuery } from "../../lib/use-media-query";
+import { holdAutoApplyUpdate, UNDO_UPDATE_HOLD_MS } from "../../platform/app-update";
 import { LazyCookMode, preloadCookMode } from "../cook-mode/LazyCookMode";
 import { useRecipeMenuExtras } from "../recipe-view/recipe-menu-extras";
 import { useRecipeScaling } from "../recipe-view/recipe-scaling";
@@ -41,6 +42,7 @@ import { RecipeEditorSheet } from "../recipe-view/RecipeEditorSheet";
 import { RecipeView } from "../recipe-view/RecipeView";
 import { useIngredientChecks } from "../recipe-view/use-ingredient-checks";
 import { AddRecipeToShoppingSheet } from "../shopping/AddRecipeToShoppingSheet";
+import { setShoppingAccount } from "../shopping/shopping-sync";
 import { useUpgradeSheet } from "../upgrade/UpgradeSheet";
 
 import {
@@ -224,11 +226,13 @@ type SharedState =
   | { status: "ready"; shared: SharedRecipe | null };
 
 const SharedRecipeRoute: React.FC<{ sharedId: string }> = ({ sharedId }) => {
-  const { isAuthenticated, loading: authLoading } = useAuth();
+  const { credentialsKey, isAuthenticated, loading: authLoading } = useAuth();
   const [state, setState] = useState<SharedState>({ status: "loading" });
   const [reloadToken, setReloadToken] = useState(0);
   const openedRef = useRef(false);
 
+  // Keyed on the credentials: waits for a cached Clerk user's session (instead of a 401) and
+  // loads again once Clerk signs in.
   useEffect(() => {
     if (authLoading) {
       return;
@@ -236,6 +240,10 @@ const SharedRecipeRoute: React.FC<{ sharedId: string }> = ({ sharedId }) => {
 
     if (!isAuthenticated) {
       setState({ status: "signed-out" });
+      return;
+    }
+
+    if (credentialsKey === null) {
       return;
     }
 
@@ -261,7 +269,7 @@ const SharedRecipeRoute: React.FC<{ sharedId: string }> = ({ sharedId }) => {
     return () => {
       cancelled = true;
     };
-  }, [authLoading, isAuthenticated, reloadToken, sharedId]);
+  }, [authLoading, credentialsKey, isAuthenticated, reloadToken, sharedId]);
 
   const shared = state.status === "ready" ? state.shared : null;
 
@@ -345,7 +353,7 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
   const shared = props.kind === "shared" ? props.shared : null;
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated, loading: authLoading, user } = useAuth();
   const { requestUpgradeSheet } = useUpgradeSheet();
   const { showToast } = useToast();
   const isDesktop = useMediaQuery(RAIL_MEDIA_QUERY);
@@ -353,7 +361,8 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
   const [cookOpen, setCookOpen] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
   const [shoppingOpen, setShoppingOpen] = useState(false);
-  const [shoppingCanSync, setShoppingCanSync] = useState(false);
+  /** Undefined when the household check could not answer: the sheet uses the cached mode. */
+  const [shoppingCanSync, setShoppingCanSync] = useState<boolean | undefined>(undefined);
   const [confirm, setConfirm] = useState<"delete-synced" | "unshare" | null>(null);
   const [busy, setBusy] = useState<"delete" | "duplicate" | "sync" | "share-card" | null>(null);
 
@@ -426,19 +435,22 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
   /* ----------------------------------- actions ----------------------------------- */
 
   const openShoppingSheet = useCallback(async () => {
-    setShoppingCanSync(false);
+    setShoppingCanSync(isAuthenticated ? undefined : false);
+    // Offline (or when the check fails) a household member's items must still be marked for the
+    // household list: the sheet then falls back to the shopping sync layer's (cached) mode.
+    setShoppingAccount({ isAuthenticated, loading: authLoading, userId: user?.id });
 
     if (isAuthenticated) {
       try {
         const householdResponse = await apiClient.getHousehold();
         setShoppingCanSync(Boolean(householdResponse.household));
       } catch {
-        setShoppingCanSync(false);
+        // Unknown: leave it to the sync layer.
       }
     }
 
     setShoppingOpen(true);
-  }, [isAuthenticated]);
+  }, [authLoading, isAuthenticated, user?.id]);
 
   const handleShare = async () => {
     const title = recipe.title;
@@ -543,15 +555,23 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
   };
 
   const handleSync = async () => {
-    if (!isSaved || !canSync) {
+    if (!isSaved || !isAuthenticated) {
+      return;
+    }
+
+    // Toast actions ("Sync now" after an edit, "Retry") keep the render they were created in, so
+    // decide from the recipe as stored now rather than this render's `record` and `canSync`.
+    const latest = await getSavedRecipeById(record.id).catch(() => undefined);
+
+    if (!latest || latest.isStarter || latest.sync?.status === "synced") {
       return;
     }
 
     setBusy("sync");
-    const wasAlreadyShared = Boolean(record.sync?.sharedRecipeId);
+    const wasAlreadyShared = Boolean(latest.sync?.sharedRecipeId);
 
     try {
-      const synced = await syncRecipeToHousehold(record);
+      const synced = await syncRecipeToHousehold(latest);
 
       if (synced.sync?.status === "synced") {
         if (!wasAlreadyShared) {
@@ -592,6 +612,8 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
     const snapshot = (await getSavedRecipeById(record.id).catch(() => undefined)) ?? record;
 
     await removeSavedRecipe(record.id);
+    // Undo lives in memory: a waiting app update must not reload the page on this navigation.
+    holdAutoApplyUpdate(UNDO_UPDATE_HOLD_MS);
     void navigate("/");
     showToast({
       action: {

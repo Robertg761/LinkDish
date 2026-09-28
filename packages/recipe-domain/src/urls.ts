@@ -173,6 +173,24 @@ const normalizeTitle = (title: string | null | undefined): string =>
     .trim();
 
 /**
+ * The site + normalized title under which {@link isLikelySameRecipe} treats two recipes with
+ * different links as the same one, or null without a title or a readable link. Equal keys mean
+ * "same recipe"; it lets callers index recipes instead of comparing every pair.
+ */
+export const recipeSiteTitleKey = (recipe: {
+  sourceUrl?: string | null | undefined;
+  title?: string | null | undefined;
+}): string | null => {
+  const title = normalizeTitle(recipe.title);
+  const host = parseUrl(recipe.sourceUrl ?? "")?.hostname.replace(
+    LEADING_WWW_OR_MOBILE_PATTERN,
+    ""
+  );
+
+  return title && host ? `${host}\u0000${title}` : null;
+};
+
+/**
  * Whether two recipes (or URLs) are probably the same one: the same page once tracking, www./m.,
  * AMP and trailing-slash differences are ignored, or the same YouTube video. When both sides
  * are recipes with titles and the URLs differ, identical normalized titles on the same site
@@ -190,18 +208,8 @@ export const isLikelySameRecipe = (left: RecipeLike, right: RecipeLike): boolean
     return false;
   }
 
-  const leftTitle = normalizeTitle(left.title);
-  const rightTitle = normalizeTitle(right.title);
-  const leftHost = parseUrl(leftUrl)?.hostname.replace(LEADING_WWW_OR_MOBILE_PATTERN, "");
-  const rightHost = parseUrl(rightUrl)?.hostname.replace(LEADING_WWW_OR_MOBILE_PATTERN, "");
-
-  return (
-    leftTitle.length > 0 &&
-    leftTitle === rightTitle &&
-    leftHost != null &&
-    leftHost.length > 0 &&
-    leftHost === rightHost
-  );
+  const leftKey = recipeSiteTitleKey(left);
+  return leftKey !== null && leftKey === recipeSiteTitleKey(right);
 };
 
 /**

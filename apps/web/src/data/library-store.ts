@@ -1,5 +1,6 @@
 import { useCallback, useMemo } from "react";
 
+import { trackWebEvent } from "../analytics/client";
 import {
   deleteSavedRecipe,
   duplicateSavedRecipe,
@@ -170,21 +171,40 @@ const setOrDelete = <Key extends WebSavedRecipeMetadataKey | "notes">(
   return next;
 };
 
+/** Reports a personal-metadata change once it is saved (a failed save reports nothing). */
+const reportWhenSaved = <Result>(
+  saving: Promise<Result>,
+  eventName: "recipe_favorited" | "recipe_rated" | "recipe_tagged",
+  properties: Record<string, number | boolean | null>
+): Promise<Result> =>
+  saving.then((result) => {
+    trackWebEvent({ eventName, properties, routeOrScreen: window.location.pathname });
+    return result;
+  });
+
 export const setFavorite = (id: string, favorite: boolean) =>
-  optimistic(
-    id,
-    (recipe) => setOrDelete(recipe, "favorite", favorite ? true : undefined),
-    () => setRecipeFavorite(id, favorite)
+  reportWhenSaved(
+    optimistic(
+      id,
+      (recipe) => setOrDelete(recipe, "favorite", favorite ? true : undefined),
+      () => setRecipeFavorite(id, favorite)
+    ),
+    "recipe_favorited",
+    { favorited: favorite }
   );
 
 export const toggleFavorite = (id: string) => setFavorite(id, !getCachedSavedRecipe(id)?.favorite);
 
 export const setTags = (id: string, tags: readonly string[]) => {
   const normalized = normalizeRecipeTags(tags);
-  return optimistic(
-    id,
-    (recipe) => setOrDelete(recipe, "tags", normalized.length ? normalized : undefined),
-    () => setRecipeTags(id, normalized)
+  return reportWhenSaved(
+    optimistic(
+      id,
+      (recipe) => setOrDelete(recipe, "tags", normalized.length ? normalized : undefined),
+      () => setRecipeTags(id, normalized)
+    ),
+    "recipe_tagged",
+    { tag_count: normalized.length }
   );
 };
 
@@ -207,10 +227,14 @@ export const removeFromCollection = (id: string, collectionId: string) =>
   );
 
 export const setRating = (id: string, rating: RecipeRating | null) =>
-  optimistic(
-    id,
-    (recipe) => setOrDelete(recipe, "rating", rating ?? undefined),
-    () => setRecipeRating(id, rating)
+  reportWhenSaved(
+    optimistic(
+      id,
+      (recipe) => setOrDelete(recipe, "rating", rating ?? undefined),
+      () => setRecipeRating(id, rating)
+    ),
+    "recipe_rated",
+    { rating }
   );
 
 export const setPreferredServings = (id: string, servings: number | null) =>

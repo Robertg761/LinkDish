@@ -194,15 +194,15 @@ export interface ImportSession {
 }
 
 export function useImportSession(): ImportSession {
-  const { isAuthenticated, loading: authLoading, user } = useAuth();
+  const { credentialsReady, isAuthenticated, user } = useAuth();
   const { requestUpgradeSheet } = useUpgradeSheet();
   const [phase, setPhase] = useState<ImportPhase>({ status: "idle" });
   const [quota, setQuota] = useState<QuotaStatus | null>(null);
   const activeRef = useRef<ActiveImport | null>(null);
   const lastRequestRef = useRef<{ request: ImportRequest; source: ImportEntrySource } | null>(null);
   const mountedRef = useRef(true);
-  const authRef = useRef({ isAuthenticated, loading: authLoading, user });
-  authRef.current = { isAuthenticated, loading: authLoading, user };
+  const authRef = useRef({ credentialsReady, isAuthenticated, user });
+  authRef.current = { credentialsReady, isAuthenticated, user };
   const authWaitersRef = useRef<Array<() => void>>([]);
   const upgradeRef = useRef(requestUpgradeSheet);
   upgradeRef.current = requestUpgradeSheet;
@@ -210,19 +210,22 @@ export function useImportSession(): ImportSession {
   const pendingStartRef = useRef<symbol | null>(null);
 
   useEffect(() => {
-    if (authLoading) {
+    if (!credentialsReady) {
       return;
     }
 
     const waiters = authWaitersRef.current;
     authWaitersRef.current = [];
     waiters.forEach((resolve) => resolve());
-  }, [authLoading]);
+  }, [credentialsReady]);
 
-  /** Resolves once auth has settled, so the request carries the right account. */
+  /**
+   * Resolves once the request would carry the right account: auth has settled and a cached Clerk
+   * user's session is usable (a share-sheet import at cold start must not run as anonymous).
+   */
   const whenAuthReady = useCallback(
     (): Promise<void> =>
-      authRef.current.loading
+      !authRef.current.credentialsReady
         ? new Promise((resolve) => {
             authWaitersRef.current.push(resolve);
           })

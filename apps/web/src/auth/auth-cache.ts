@@ -154,6 +154,24 @@ export function clearCachedAuthUser(): void {
 }
 
 /**
+ * Set while a sign-out still has to reach Clerk: the user signed out before Clerk had loaded (or
+ * Clerk's sign-out failed). Until Clerk confirms it, Clerk loading must not sign them back in.
+ */
+export const CLERK_SIGN_OUT_PENDING_KEY = "linkdish:web:clerk-sign-out:v1";
+
+export function markClerkSignOutPending(): void {
+  safeSetItem(CLERK_SIGN_OUT_PENDING_KEY, new Date().toISOString());
+}
+
+export function clearClerkSignOutPending(): void {
+  safeRemoveItem(CLERK_SIGN_OUT_PENDING_KEY);
+}
+
+export function isClerkSignOutPending(): boolean {
+  return safeGetItem(CLERK_SIGN_OUT_PENDING_KEY) !== null;
+}
+
+/**
  * Whether the last known signed-in user had an unlimited-saves plan. Used as a fallback by local
  * quota checks whose callers do not pass the plan explicitly.
  */

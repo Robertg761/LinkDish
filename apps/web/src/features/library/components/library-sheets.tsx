@@ -3,6 +3,7 @@ import React, { Suspense } from "react";
 import { lazyWithRetry } from "../../../platform/lazy";
 import { OptionalChunkBoundary } from "../../../platform/OptionalChunkBoundary";
 
+import type { ShoppingAccount } from "../../shopping/shopping-sync";
 import type { WebSavedRecipe } from "../saved-recipe-types";
 
 /*
@@ -68,9 +69,24 @@ const LIBRARY_SHOPPING_SCALING = {
   unitPreference: "primary" as const
 };
 
+/**
+ * Tells the shopping sync layer who is signed in (it loads with the shopping sheet anyway), so a
+ * sheet opened before the household check answers adds to this account's cached household mode
+ * instead of keeping the items on this device only.
+ */
+export const primeShoppingAccount = (account: ShoppingAccount): void => {
+  void import("../../shopping/shopping-sync").then(
+    (sync) => {
+      sync.setShoppingAccount(account);
+    },
+    () => undefined
+  );
+};
+
 interface LibraryShoppingSheetProps {
   recipe: WebSavedRecipe;
-  canSync: boolean;
+  /** Household sync; undefined (unknown yet) uses the shopping sync layer's household mode. */
+  canSync?: boolean | undefined;
   userId?: string | undefined;
   onAdded: (count: number) => void;
   onClose: () => void;

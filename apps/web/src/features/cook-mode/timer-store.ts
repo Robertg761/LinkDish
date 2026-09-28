@@ -1,6 +1,9 @@
 import { useSyncExternalStore } from "react";
 
+import { trackWebEvent } from "../../analytics/client";
+import { subscribeDataChanges } from "../../data/change-feed";
 import {
+  getCookSession,
   getCookSessions,
   getCookTimerRemainingMs,
   pauseCookTimer,
@@ -19,12 +22,16 @@ import {
   vibrateForTimer
 } from "./timer-alerts";
 
-import type { CookTimerState } from "../../data/cook-session-store";
+import type { CookSession, CookTimerState } from "../../data/cook-session-store";
 
 /**
  * Kitchen timers for the whole app. They are started from recipe steps (on the recipe page or in
  * cook mode), shown in the TimerDock above the tab bar, keep running when cook mode closes or you
  * navigate, and are saved in each recipe's cook session so a reload brings them back.
+ *
+ * Several tabs can be open: each writes only the timers it changed (never its whole list, which
+ * may be stale), picks up the other tabs' changes when they announce a write, and a finished
+ * timer is claimed in storage so only one tab chimes and notifies.
  */
 
 export interface KitchenTimer extends CookTimerState {
@@ -50,6 +57,8 @@ export interface StartTimerInput {
 /** Finished while the tab was closed for longer than this: shown as done, but not chimed. */
 const STALE_COMPLETION_MS = 60_000;
 const MAX_TIMEOUT_MS = 2_147_000_000;
+/** Serializes completion claims across tabs (Web Locks), so one tab announces each timer. */
+export const KITCHEN_TIMER_LOCK_NAME = "linkdish:kitchen-timers";
 
 type Listener = () => void;
 
@@ -59,6 +68,14 @@ let completionTimeout: ReturnType<typeof setTimeout> | null = null;
 let visibilityListening = false;
 let idCounter = 0;
 const listeners = new Set<Listener>();
+
+/** Bumped on every change this tab makes, so a read from storage can tell it is out of date. */
+let localEpoch = 0;
+/** Timer writes (and completion claims) queued by this tab that have not landed yet. */
+let pendingWrites = 0;
+let reloadWanted = false;
+let reloading = false;
+let unsubscribeRemote: (() => void) | null = null;
 
 const emit = () => {
   listeners.forEach((listener) => listener());
@@ -85,28 +102,60 @@ export const isTimerDone = (timer: KitchenTimer, now: number = Date.now()): bool
 
 const toStoredTimer = (timer: KitchenTimer): KitchenTimer => ({ ...timer });
 
-const persistRecipeTimers = (recipeId: string) => {
-  // Wait for saved timers to be restored first, and read the list when the write runs, so a
-  // timer started right after a reload never overwrites the ones still being restored.
-  void (hydration ?? Promise.resolve())
-    .then(() =>
-      queueCookSessionUpdate(recipeId, () => ({
-        timers: timers.filter((timer) => timer.recipeId === recipeId).map(toStoredTimer)
-      }))
-    )
-    .catch((error: unknown) => {
-      console.warn("Could not save kitchen timers.", error);
-    });
+/** Runs a timer write through the recipe's session queue, counting it as pending until it lands. */
+const trackWrite = <Result>(write: () => Promise<Result>): Promise<Result> => {
+  pendingWrites += 1;
+
+  return write().finally(() => {
+    pendingWrites -= 1;
+    reloadIfWanted();
+  });
 };
 
-const setTimers = (next: KitchenTimer[], changedRecipeIds: Iterable<string>) => {
+/**
+ * Saves the timers this tab changed: `upserted` replace (or join) the stored ones with the same
+ * id and `removedIds` leave; every other stored timer (another tab's, say) is kept as stored.
+ */
+const persistTimerChanges = (
+  recipeId: string,
+  change: { upserted?: readonly KitchenTimer[]; removedIds?: readonly string[] }
+) => {
+  const upserted = change.upserted ?? [];
+  const removed = new Set(change.removedIds ?? []);
+
+  // Saved timers are restored first, so the stored list this merges into is complete.
+  void trackWrite(() =>
+    (hydration ?? Promise.resolve()).then(() =>
+      queueCookSessionUpdate(recipeId, (session) => {
+        const replacements = new Map(upserted.map((timer) => [timer.id, toStoredTimer(timer)]));
+        const next: CookTimerState[] = session.timers
+          .filter((stored) => !removed.has(stored.id))
+          .map((stored) => replacements.get(stored.id) ?? stored);
+        const storedIds = new Set(session.timers.map((stored) => stored.id));
+
+        replacements.forEach((timer, id) => {
+          if (!storedIds.has(id)) {
+            next.push(timer);
+          }
+        });
+
+        return { timers: next };
+      })
+    )
+  ).catch((error: unknown) => {
+    console.warn("Could not save kitchen timers.", error);
+  });
+};
+
+const setTimers = (
+  next: KitchenTimer[],
+  change: { recipeId: string; upserted?: readonly KitchenTimer[]; removedIds?: readonly string[] }
+) => {
   timers = next;
+  localEpoch += 1;
   scheduleCompletionCheck();
   emit();
-
-  for (const recipeId of new Set(changedRecipeIds)) {
-    persistRecipeTimers(recipeId);
-  }
+  persistTimerChanges(change.recipeId, change);
 };
 
 const isKitchenTimer = (value: unknown): value is CookTimerState =>
@@ -115,30 +164,102 @@ const isKitchenTimer = (value: unknown): value is CookTimerState =>
   typeof (value as CookTimerState).id === "string" &&
   typeof (value as CookTimerState).durationMs === "number";
 
+const fromStoredTimer = (stored: CookTimerState, recipeId: string): KitchenTimer => {
+  const extra = stored as Partial<KitchenTimer>;
+
+  return {
+    ...stored,
+    recipeId,
+    recipeTitle: extra.recipeTitle || "Kitchen timer",
+    ...(extra.href ? { href: extra.href } : {}),
+    ...(extra.stepIndex != null ? { stepIndex: extra.stepIndex } : {}),
+    ...(extra.doneAt != null ? { doneAt: extra.doneAt } : {})
+  };
+};
+
+const storedTimersOf = (sessions: Map<string, CookSession>): KitchenTimer[] => {
+  const stored: KitchenTimer[] = [];
+
+  for (const session of sessions.values()) {
+    for (const timer of session.timers ?? []) {
+      if (isKitchenTimer(timer)) {
+        stored.push(fromStoredTimer(timer, session.recipeId));
+      }
+    }
+  }
+
+  return stored;
+};
+
+/**
+ * Another tab changed cook sessions: adopt the stored timers (in this tab's order, new ones last).
+ * Waits until this tab's own writes have landed and retries when this tab changed something
+ * while reading, so a local change is never dropped.
+ */
+function reloadIfWanted(): void {
+  if (!reloadWanted || reloading || pendingWrites > 0) {
+    return;
+  }
+
+  reloadWanted = false;
+  reloading = true;
+  const epoch = localEpoch;
+
+  void getCookSessions()
+    .then((sessions) => {
+      if (epoch !== localEpoch || pendingWrites > 0) {
+        reloadWanted = true;
+        return;
+      }
+
+      const stored = new Map(storedTimersOf(sessions).map((timer) => [timer.id, timer]));
+      const next: KitchenTimer[] = [];
+
+      for (const timer of timers) {
+        const current = stored.get(timer.id);
+
+        if (current) {
+          next.push(current);
+          stored.delete(timer.id);
+        }
+      }
+
+      stored.forEach((timer) => next.push(timer));
+      timers = next;
+      checkCompletions({ silentIfStale: true });
+
+      if (!timers.some((timer) => timer.doneAt != null)) {
+        stopTitleFlash();
+      }
+
+      scheduleCompletionCheck();
+      emit();
+    })
+    .catch((error: unknown) => {
+      console.warn("Could not refresh kitchen timers.", error);
+    })
+    .finally(() => {
+      reloading = false;
+      reloadIfWanted();
+    });
+}
+
+function listenForOtherTabs(): void {
+  unsubscribeRemote ??= subscribeDataChanges("cookSessions", (_change, source) => {
+    if (source === "remote") {
+      reloadWanted = true;
+      reloadIfWanted();
+    }
+  });
+}
+
 /** Loads timers saved in cook sessions (once per page load). Never rejects. */
 export const hydrateKitchenTimers = (): Promise<void> => {
+  listenForOtherTabs();
   hydration ??= getCookSessions()
     .then((sessions) => {
       const known = new Set(timers.map((timer) => timer.id));
-      const restored: KitchenTimer[] = [];
-
-      for (const session of sessions.values()) {
-        for (const stored of session.timers ?? []) {
-          if (!isKitchenTimer(stored) || known.has(stored.id)) {
-            continue;
-          }
-
-          const extra = stored as Partial<KitchenTimer>;
-          restored.push({
-            ...stored,
-            recipeId: session.recipeId,
-            recipeTitle: extra.recipeTitle || "Kitchen timer",
-            ...(extra.href ? { href: extra.href } : {}),
-            ...(extra.stepIndex != null ? { stepIndex: extra.stepIndex } : {}),
-            ...(extra.doneAt != null ? { doneAt: extra.doneAt } : {})
-          });
-        }
-      }
+      const restored = storedTimersOf(sessions).filter((timer) => !known.has(timer.id));
 
       if (restored.length > 0) {
         timers = [...timers, ...restored];
@@ -170,6 +291,56 @@ const announce = (timer: KitchenTimer) => {
   });
 };
 
+/** Runs `task` holding the kitchen-timer lock across tabs (directly where Web Locks are missing). */
+const withTimerLock = <Result>(task: () => Promise<Result>): Promise<Result> => {
+  const locks = typeof navigator !== "undefined" ? navigator.locks : undefined;
+
+  if (!locks?.request) {
+    return task();
+  }
+
+  return locks.request(KITCHEN_TIMER_LOCK_NAME, task) as Promise<Result>;
+};
+
+/**
+ * Records the finish in storage. True when this tab is the first to notice it (and so announces
+ * it); false when another tab already did, or the timer was dismissed there.
+ */
+const claimCompletion = (timer: KitchenTimer): Promise<boolean> =>
+  trackWrite(async () => {
+    await (hydration ?? Promise.resolve());
+
+    return withTimerLock(async () => {
+      const isClaimable = (session: CookSession | undefined) => {
+        const stored = session?.timers.find((entry) => entry.id === timer.id) as
+          | Partial<KitchenTimer>
+          | undefined;
+        return stored !== undefined && stored.doneAt == null;
+      };
+
+      if (!isClaimable(await getCookSession(timer.recipeId))) {
+        return false;
+      }
+
+      let claimed = false;
+
+      await queueCookSessionUpdate(timer.recipeId, (session) => {
+        if (!isClaimable(session)) {
+          return {};
+        }
+
+        claimed = true;
+        return {
+          timers: session.timers.map((entry) =>
+            entry.id === timer.id ? { ...entry, doneAt: timer.doneAt } : entry
+          )
+        };
+      });
+
+      return claimed;
+    });
+  });
+
 /** Marks finished timers as done and announces them. Returns true when something finished. */
 const checkCompletions = ({ silentIfStale = false } = {}): boolean => {
   const now = Date.now();
@@ -189,17 +360,27 @@ const checkCompletions = ({ silentIfStale = false } = {}): boolean => {
   }
 
   timers = next;
+  localEpoch += 1;
 
   for (const timer of finished) {
     const endedAt = timer.endsAt ?? now;
+    const fresh = !silentIfStale || now - endedAt <= STALE_COMPLETION_MS;
 
-    if (!silentIfStale || now - endedAt <= STALE_COMPLETION_MS) {
-      announce(timer);
-    }
-  }
+    void claimCompletion(timer).then(
+      (claimed) => {
+        if (claimed && fresh) {
+          announce(timer);
+        }
+      },
+      (error: unknown) => {
+        // Storage trouble: still tell the cook their timer is done.
+        console.warn("Could not save a finished kitchen timer.", error);
 
-  for (const recipeId of new Set(finished.map((timer) => timer.recipeId))) {
-    persistRecipeTimers(recipeId);
+        if (fresh) {
+          announce(timer);
+        }
+      }
+    );
   }
 
   return true;
@@ -267,7 +448,12 @@ const updateTimer = (id: string, update: (timer: KitchenTimer) => KitchenTimer |
     ? timers.map((timer) => (timer.id === id ? updated : timer))
     : timers.filter((timer) => timer.id !== id);
 
-  setTimers(next, [current.recipeId]);
+  setTimers(
+    next,
+    updated
+      ? { recipeId: current.recipeId, upserted: [updated] }
+      : { recipeId: current.recipeId, removedIds: [id] }
+  );
 };
 
 /** Starts a timer (asks for notification permission on the very first one). Returns its id. */
@@ -289,7 +475,15 @@ export const startKitchenTimer = (input: StartTimerInput): string => {
     ...(input.stepIndex != null ? { stepIndex: input.stepIndex } : {})
   };
 
-  setTimers([...timers, timer], [input.recipeId]);
+  setTimers([...timers, timer], { recipeId: input.recipeId, upserted: [timer] });
+  trackWebEvent({
+    eventName: "cook_timer_started",
+    properties: {
+      duration_seconds: Math.round(timer.durationMs / 1000),
+      from_step: input.stepIndex != null
+    },
+    routeOrScreen: window.location.pathname
+  });
   return timer.id;
 };
 
@@ -365,5 +559,11 @@ export const resetKitchenTimersForTests = (): void => {
   timers = [];
   hydration = null;
   idCounter = 0;
+  localEpoch = 0;
+  pendingWrites = 0;
+  reloadWanted = false;
+  reloading = false;
+  unsubscribeRemote?.();
+  unsubscribeRemote = null;
   emit();
 };

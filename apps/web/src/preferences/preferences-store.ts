@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
 
+import { trackWebEvent } from "../analytics/client";
 import { safeGetItem, safeSetItem } from "../platform/safe-storage";
 
 export type ThemePreference = "system" | "light" | "dark";
@@ -106,7 +107,8 @@ const emit = () => {
 export const getPreferences = (): Preferences => readPreferences();
 
 export const setPreferences = (patch: Partial<Preferences>): void => {
-  const next = { ...readPreferences(), ...patch };
+  const previous = readPreferences();
+  const next = { ...previous, ...patch };
   currentPreferences = next;
   // Persisting can fail (private mode); the in-memory value still applies this session.
   safeSetItem(PREFERENCES_STORAGE_KEY, JSON.stringify(next));
@@ -116,6 +118,23 @@ export const setPreferences = (patch: Partial<Preferences>): void => {
   }
 
   emit();
+
+  // Only choices the cook made here (another tab's changes arrive through the storage event).
+  if (next.theme !== previous.theme) {
+    trackWebEvent({
+      eventName: "theme_changed",
+      properties: { theme: next.theme },
+      routeOrScreen: window.location.pathname
+    });
+  }
+
+  if (next.units !== previous.units) {
+    trackWebEvent({
+      eventName: "units_changed",
+      properties: { units: next.units },
+      routeOrScreen: window.location.pathname
+    });
+  }
 };
 
 export const setPreference = <K extends keyof Preferences>(key: K, value: Preferences[K]): void => {

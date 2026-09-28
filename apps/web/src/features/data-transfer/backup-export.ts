@@ -255,9 +255,47 @@ export const buildCookbookMarkdown = (
  * Downloads
  * ---------------------------------------------------------------------------------------------- */
 
-/** Saves text as a file through a temporary object URL (nothing leaves the device). */
-export const downloadTextFile = (fileName: string, text: string, mimeType: string): void => {
-  const blob = new Blob([text], { type: mimeType });
+/**
+ * The backup as JSON text in pieces. The scans (by far the biggest part) go in one piece per
+ * recipe, so no single string ever holds all of them: browsers cap a string's length (about 2^29
+ * characters in V8), and one giant string would also cost its size again in memory. Joined, the
+ * pieces are exactly `JSON.stringify(backup)`.
+ */
+export const serializeBackup = (backup: WebLinkDishBackup): string[] => {
+  const extras = backup[WEB_BACKUP_EXTRAS_KEY];
+  const entries = Object.entries(extras.sourceImages ?? {});
+
+  if (entries.length === 0) {
+    return [JSON.stringify(backup)];
+  }
+
+  // Serialize everything else with a unique stand-in where the scans go, then split around it.
+  const marker = JSON.stringify(`linkdish-source-images-${crypto.randomUUID()}`);
+  const skeleton = JSON.stringify({
+    ...backup,
+    [WEB_BACKUP_EXTRAS_KEY]: { ...extras, sourceImages: JSON.parse(marker) as string }
+  });
+  const at = skeleton.indexOf(marker);
+  const parts = [skeleton.slice(0, at), "{"];
+
+  entries.forEach(([recipeId, images], index) => {
+    parts.push(`${index > 0 ? "," : ""}${JSON.stringify(recipeId)}:${JSON.stringify(images)}`);
+  });
+  parts.push("}", skeleton.slice(at + marker.length));
+
+  return parts;
+};
+
+/**
+ * Saves text (one string, or pieces joined in order) as a file through a temporary object URL
+ * (nothing leaves the device). Returns the file's size in bytes.
+ */
+export const downloadTextFile = (
+  fileName: string,
+  text: string | readonly string[],
+  mimeType: string
+): number => {
+  const blob = new Blob(typeof text === "string" ? [text] : [...text], { type: mimeType });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
@@ -269,4 +307,5 @@ export const downloadTextFile = (fileName: string, text: string, mimeType: strin
   link.remove();
   // Some browsers read the URL after click returns; give them a moment before releasing it.
   window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
+  return blob.size;
 };

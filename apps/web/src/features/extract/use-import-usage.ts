@@ -57,14 +57,15 @@ export function useImportUsage(
   /** Bumped after each import so the on-device counter is read again. */
   version: number
 ): ImportUsage | null {
-  const { isAuthenticated, loading, user } = useAuth();
+  const { credentialsKey, isAuthenticated, loading } = useAuth();
   const [serverQuota, setServerQuota] = useState<QuotaStatus | null>(null);
-  const userId = user?.id;
 
+  // Keyed on the credentials (which include the account): it waits for a cached Clerk user's
+  // session instead of asking anonymously, and asks again once Clerk signs in.
   useEffect(() => {
     setServerQuota(null);
 
-    if (loading || !isAuthenticated) {
+    if (credentialsKey === null || !isAuthenticated) {
       return;
     }
 
@@ -79,7 +80,7 @@ export function useImportUsage(
     );
 
     return () => controller.abort();
-  }, [isAuthenticated, loading, userId]);
+  }, [credentialsKey, isAuthenticated]);
 
   if (loading) {
     return null;

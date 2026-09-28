@@ -21,7 +21,8 @@ import {
   backupFileName,
   buildBackup,
   buildCookbookMarkdown,
-  cookbookFileName
+  cookbookFileName,
+  serializeBackup
 } from "./backup-export";
 import { WEB_BACKUP_EXTRAS_KEY } from "./backup-format";
 import { downloadBackup, downloadCookbookText, prepareImport, runImport } from "./data-transfer";
@@ -253,6 +254,36 @@ describe("backups", () => {
     });
   });
 
+  it("writes the backup in pieces that join to exactly its JSON", () => {
+    const image = { dataUrl: TINY_JPEG, mimeType: "image/jpeg" as const };
+    const { backup } = buildBackup(
+      {
+        recipes: [saved("one", { sourceImageCount: 1 }), saved('two "quoted"', {})],
+        collections: [],
+        mealPlan: []
+      },
+      {
+        exportedAt: "2026-09-28T09:00:00.000Z",
+        includeImages: true,
+        sourceImages: new Map([
+          ["one", [image]],
+          ['two "quoted"', [image, image]]
+        ])
+      }
+    );
+    const withoutImages = buildBackup(
+      { recipes: [saved("one")], collections: [], mealPlan: [] },
+      { exportedAt: "2026-09-28T09:00:00.000Z", includeImages: false }
+    ).backup;
+
+    const pieces = serializeBackup(backup);
+
+    expect(pieces.join("")).toBe(JSON.stringify(backup));
+    // One piece per recipe's scans.
+    expect(pieces.filter((piece) => piece.includes(TINY_JPEG))).toHaveLength(2);
+    expect(serializeBackup(withoutImages)).toEqual([JSON.stringify(withoutImages)]);
+  });
+
   it("names files by the local date", () => {
     const date = new Date(2026, 8, 5, 23, 30);
 
@@ -318,6 +349,37 @@ describe("backups", () => {
       routeOrScreen: "/settings",
       properties: { recipe_count: 1, include_images: true, format: "backup" }
     });
+  });
+
+  it("backs up more photos than fit in one string", async () => {
+    const downloads = captureDownloads();
+    const scanOf = (seed: string) => ({
+      dataUrl: `data:image/jpeg;base64,${seed.repeat(4_000)}`,
+      mimeType: "image/jpeg" as const
+    });
+    for (const id of ["a", "b", "c", "d"]) {
+      await putSavedRecipe(saved(id, { sourceImages: [scanOf(id), scanOf(id.toUpperCase())] }));
+    }
+    // Browsers cap a string's length (about 2^29 characters in V8); scaled down here, so a backup
+    // written as one JSON string fails the way a big photo collection does.
+    const STRING_LIMIT = 20_000;
+    const stringify = JSON.stringify.bind(JSON) as (...args: unknown[]) => string;
+    vi.spyOn(JSON, "stringify").mockImplementation((...args: unknown[]) => {
+      const text = stringify(...args);
+      if (text.length > STRING_LIMIT) {
+        throw new RangeError("Invalid string length");
+      }
+      return text;
+    });
+
+    const summary = await downloadBackup({ includeImages: true });
+
+    expect(summary).toMatchObject({ imageCount: 8, recipeCount: 4 });
+    const file = JSON.parse(await blobText(downloads[0]!.blob)) as WebLinkDishBackup;
+    expect(file.recipes.map((recipe) => recipe.id).sort()).toEqual(["a", "b", "c", "d"]);
+    expect(file[WEB_BACKUP_EXTRAS_KEY].sourceImages?.c).toEqual([scanOf("c"), scanOf("C")]);
+    expect(validateBackup(file).ok).toBe(true);
+    expect(summary.bytes).toBe(downloads[0]!.blob.size);
   });
 
   it("downloads the Markdown cookbook", async () => {
