@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import React from "react";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -78,6 +78,14 @@ describe("FirstRunOnboardingSheet", () => {
     expect(screen.getByTestId("current-path")).toHaveTextContent("/plan");
   });
 
+  it("opens on its own without a focus ring on a close button", async () => {
+    renderAt("/");
+
+    const dialog = await findSheet("Save recipes from anywhere");
+    await waitFor(() => expect(document.activeElement).toBe(dialog));
+    expect(within(dialog).queryByRole("button", { name: "Close" })).not.toBeInTheDocument();
+  });
+
   it("closes on Escape like every sheet", async () => {
     renderAt("/");
 
@@ -124,9 +132,15 @@ describe("FirstRunOnboardingSheet", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
     expect(await findSheet("Cook calmly, shop smarter")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    const next = screen.getByRole("button", { name: "Next" });
+    next.focus();
+    fireEvent.click(next);
     expect(await findSheet("Start with one recipe")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Skip" })).not.toBeInTheDocument();
+    // Next leaves the footer on the last frame; focus lands on the new frame's title, and the
+    // way out keeps its name.
+    expect(screen.queryByRole("button", { name: "Next" })).not.toBeInTheDocument();
+    expect(screen.getByText("Start with one recipe", { selector: "p" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Skip" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /Try a sample recipe/u }));
 

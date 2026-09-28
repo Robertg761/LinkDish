@@ -112,16 +112,36 @@ hr {
   border-top: 1px solid var(--color-border);
 }
 
+/* Touch screens can't drag a resize grip; it only drew a stray mark in rounded fields. */
+@media (pointer: coarse) {
+  textarea {
+    resize: none !important;
+  }
+}
+
 /* Desktop uses the side rail, so page content no longer needs to clear a tab bar. */
 @media (min-width: 1024px) {
   :root {
     --app-bottom-inset: 0px;
+    --app-fab-clearance: 0px;
   }
 }
 
-/* Recipe detail pages hide the phone tab bar (AppShell sets data-tabbar on <html>). */
+/* Recipe detail pages (and an import result) hide the phone tab bar: AppShell sets
+   data-tabbar on <html>. */
 :root[data-tabbar="hidden"] {
   --app-bottom-inset: env(safe-area-inset-bottom, 0px);
+  --app-fab-clearance: 0px;
+}
+
+/* While kitchen timers float at the bottom, pages (and toasts) keep that much room free, so the
+   last rows can always be scrolled clear of the dock. TimerDock publishes its height. */
+:root {
+  --timer-dock-reserve: 0px;
+}
+
+:root[data-timer-dock] {
+  --timer-dock-reserve: calc(var(--timer-dock-height, 0px) + 12px + var(--app-fab-clearance));
 }
 
 /* ------------------------------------------------------------------------ */

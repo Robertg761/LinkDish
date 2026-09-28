@@ -1,7 +1,7 @@
 .toast-region {
   position: fixed;
   right: 0;
-  bottom: calc(var(--app-bottom-inset) + 12px);
+  bottom: calc(var(--app-bottom-inset) + 12px + var(--timer-dock-reserve, 0px));
   left: 0;
   z-index: var(--z-toast);
   display: flex;
@@ -61,8 +61,32 @@
   cursor: pointer;
 }
 
+.toast-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .toast-action:hover {
   background: color-mix(in srgb, var(--color-on-inverse) 12%, transparent);
+}
+
+/* The Undo shortcut, only where there is a keyboard to press it on. */
+.toast-action-kbd {
+  display: none;
+  padding: 1px 5px;
+  border: 1px solid color-mix(in srgb, var(--color-on-inverse) 30%, transparent);
+  border-radius: 5px;
+  color: color-mix(in srgb, var(--color-on-inverse) 80%, transparent);
+  font-family: var(--font-family-sans);
+  font-size: 0.6875rem;
+  font-weight: 700;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .toast-action-kbd {
+    display: inline-block;
+  }
 }
 
 .toast-close {

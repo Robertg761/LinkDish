@@ -97,14 +97,35 @@ describe("Stepper", () => {
     fireEvent.click(screen.getByRole("button", { name: "Increase servings" }));
 
     expect(spinbutton).toHaveAttribute("aria-valuenow", "4");
-    expect(screen.getByRole("button", { name: "Increase servings" })).toBeDisabled();
+    const increase = screen.getByRole("button", { name: "Increase servings" });
+    // Unavailable at the bound, but still focusable, so keyboard focus never drops to the page.
+    expect(increase).toHaveAttribute("aria-disabled", "true");
+    expect(increase).not.toBeDisabled();
+    increase.focus();
+    fireEvent.click(increase);
+    expect(spinbutton).toHaveAttribute("aria-valuenow", "4");
+    expect(increase).toHaveFocus();
 
     fireEvent.keyDown(spinbutton, { key: "Home" });
     expect(spinbutton).toHaveAttribute("aria-valuenow", "1");
-    expect(screen.getByRole("button", { name: "Decrease servings" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Decrease servings" })).toHaveAttribute(
+      "aria-disabled",
+      "true"
+    );
 
     fireEvent.keyDown(spinbutton, { key: "ArrowUp" });
     expect(spinbutton).toHaveTextContent("2 servings");
+  });
+
+  it("announces the new value after a button press", () => {
+    const { container } = render(<Harness />);
+    const live = container.querySelector("[aria-live='polite']");
+
+    expect(live).toHaveTextContent("");
+    fireEvent.click(screen.getByRole("button", { name: "Increase servings" }));
+    expect(live).toHaveTextContent("3 servings");
+    fireEvent.click(screen.getByRole("button", { name: "Decrease servings" }));
+    expect(live).toHaveTextContent("2 servings");
   });
 });
 

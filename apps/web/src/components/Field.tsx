@@ -1,6 +1,7 @@
-import React, { useId } from "react";
+import React, { useCallback, useId, useRef } from "react";
 
 import { Icon } from "./Icon";
+import { useAutosizeTextarea } from "./use-autosize-textarea";
 
 import type { IconName } from "./Icon";
 
@@ -89,6 +90,13 @@ interface TextAreaFieldProps extends React.TextareaHTMLAttributes<HTMLTextAreaEl
   error?: string | undefined;
   hint?: React.ReactNode;
   textareaRef?: React.Ref<HTMLTextAreaElement> | undefined;
+  /**
+   * Grow with the text instead of scrolling inside a fixed box (no resize grip). With
+   * `singleLine`, it starts as tall as a text input and never takes a line break (a long title
+   * wraps instead of being cut off).
+   */
+  autoGrow?: boolean | undefined;
+  singleLine?: boolean | undefined;
 }
 
 export const TextAreaField: React.FC<TextAreaFieldProps> = ({
@@ -99,12 +107,32 @@ export const TextAreaField: React.FC<TextAreaFieldProps> = ({
   id,
   className = "",
   rows = 4,
+  autoGrow = false,
+  singleLine = false,
+  onChange,
+  onKeyDown,
   ...props
 }) => {
   const generatedId = useId();
   const inputId = id || `field-${generatedId}`;
   const errorId = `${inputId}-error`;
   const hintId = `${inputId}-hint`;
+  const innerRef = useRef<HTMLTextAreaElement | null>(null);
+  const setRef = useCallback(
+    (element: HTMLTextAreaElement | null) => {
+      innerRef.current = element;
+
+      if (typeof textareaRef === "function") {
+        textareaRef(element);
+      } else if (textareaRef) {
+        textareaRef.current = element;
+      }
+    },
+    [textareaRef]
+  );
+  const grows = autoGrow || singleLine;
+
+  useAutosizeTextarea(innerRef, String(props.value ?? ""), grows);
 
   return (
     <div className={`field-container ${className}`.trim()}>
@@ -114,12 +142,34 @@ export const TextAreaField: React.FC<TextAreaFieldProps> = ({
         </label>
       )}
       <textarea
-        ref={textareaRef}
+        ref={setRef}
         id={inputId}
-        rows={rows}
-        className={`field-input field-textarea${error ? " field-input-error" : ""}`}
+        rows={singleLine ? 1 : rows}
+        className={[
+          "field-input",
+          "field-textarea",
+          grows ? "is-auto-grow" : "",
+          singleLine ? "is-single-line" : "",
+          error ? "field-input-error" : ""
+        ]
+          .filter(Boolean)
+          .join(" ")}
         aria-invalid={!!error}
         aria-describedby={error ? errorId : hint ? hintId : undefined}
+        onChange={(event) => {
+          if (singleLine && /[\r\n]/u.test(event.target.value)) {
+            event.target.value = event.target.value.replace(/[\r\n]+/gu, " ");
+          }
+
+          onChange?.(event);
+        }}
+        onKeyDown={(event) => {
+          if (singleLine && event.key === "Enter") {
+            event.preventDefault();
+          }
+
+          onKeyDown?.(event);
+        }}
         {...props}
       />
       {error ? (

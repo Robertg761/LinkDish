@@ -1,9 +1,9 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import React from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import { IconButton } from "./IconButton";
-import { Menu } from "./Menu";
+import { Menu, MENU_SHEET_MEDIA_QUERY } from "./Menu";
 
 const renderMenu = (onEdit = vi.fn(), onDelete = vi.fn()) =>
   render(
@@ -74,6 +74,109 @@ describe("Menu", () => {
     fireEvent.pointerDown(document.body);
 
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("opened by a tap or click, focuses the menu itself so no option looks pre-selected", () => {
+    renderMenu();
+
+    fireEvent.click(screen.getByRole("button", { name: "More actions" }), { detail: 1 });
+
+    const menu = screen.getByRole("menu", { name: "Recipe actions" });
+    expect(menu).toHaveFocus();
+    expect(screen.getByRole("menuitem", { name: "Edit" })).not.toHaveFocus();
+
+    // Arrow keys still start from the top.
+    fireEvent.keyDown(menu, { key: "ArrowDown" });
+    expect(screen.getByRole("menuitem", { name: "Edit" })).toHaveFocus();
+  });
+
+  it("names groups from labelled separators", () => {
+    render(
+      <Menu
+        items={[
+          { id: "g-share", label: "Share & print", type: "separator" },
+          { id: "share", label: "Share", onSelect: vi.fn() },
+          { id: "print", label: "Print", onSelect: vi.fn() },
+          { id: "sep", type: "separator" },
+          { id: "delete", label: "Delete", onSelect: vi.fn(), tone: "danger" }
+        ]}
+        label="Recipe actions"
+        renderTrigger={(props) => (
+          <IconButton aria-label="More actions" icon="more-horizontal" {...props} />
+        )}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "More actions" }));
+
+    const group = screen.getByRole("group", { name: "Share & print" });
+    expect(
+      within(group)
+        .getAllByRole("menuitem")
+        .map((item) => item.textContent)
+    ).toEqual(["Share", "Print"]);
+    expect(screen.getAllByRole("separator")).toHaveLength(1);
+  });
+
+  it("becomes a bottom action sheet on touch phones when adaptive", () => {
+    vi.mocked(window.matchMedia).mockImplementation((query: string) => ({
+      matches: query === MENU_SHEET_MEDIA_QUERY,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn()
+    }));
+
+    try {
+      const onDelete = vi.fn();
+      render(
+        <Menu
+          items={[
+            { id: "edit", label: "Edit", onSelect: vi.fn() },
+            { id: "sep", type: "separator" },
+            { id: "delete", label: "Delete", onSelect: onDelete, tone: "danger" }
+          ]}
+          label="Recipe actions"
+          presentation="adaptive"
+          renderTrigger={(props) => (
+            <IconButton aria-label="More actions" icon="more-horizontal" {...props} />
+          )}
+          sheetTitle="Banana Bread"
+        />
+      );
+
+      const trigger = screen.getByRole("button", { name: "More actions" });
+      fireEvent.click(trigger, { detail: 1 });
+
+      const menu = screen.getByRole("menu", { name: "Recipe actions" });
+      expect(menu).toHaveClass("menu-in-sheet");
+      expect(menu.closest(".menu-sheet")).toHaveTextContent("Banana Bread");
+
+      // A tap on the backdrop's own area (not a pointerdown) closes it.
+      fireEvent.pointerDown(document.body);
+      expect(screen.getByRole("menu")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+      expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+      expect(trigger).toHaveFocus();
+
+      fireEvent.click(trigger, { detail: 1 });
+      fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+      expect(onDelete).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.mocked(window.matchMedia).mockImplementation((query: string) => ({
+        matches: false,
+        media: query,
+        onchange: null,
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        dispatchEvent: vi.fn()
+      }));
+    }
   });
 
   it("renders selectable options as checked radio and checkbox items", () => {

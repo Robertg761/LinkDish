@@ -20,7 +20,24 @@ export const ScrollManager: React.FC = () => {
   const positionsRef = useRef(new Map<string, number>());
   const currentKeyRef = useRef(location.key);
   const isFirstRenderRef = useRef(true);
+  // A redirect before anyone has clicked or typed (an unknown URL sent to the Cookbook) is part
+  // of the first page load, not a navigation: no focus ring around the heading.
+  const interactedRef = useRef(false);
   const [announcement, setAnnouncement] = useState("");
+
+  useEffect(() => {
+    const markInteracted = () => {
+      interactedRef.current = true;
+    };
+
+    window.addEventListener("pointerdown", markInteracted, true);
+    window.addEventListener("keydown", markInteracted, true);
+
+    return () => {
+      window.removeEventListener("pointerdown", markInteracted, true);
+      window.removeEventListener("keydown", markInteracted, true);
+    };
+  }, []);
 
   useEffect(() => {
     try {
@@ -63,6 +80,11 @@ export const ScrollManager: React.FC = () => {
     }
 
     if (location.hash) {
+      return;
+    }
+
+    if (navigationType === NavigationType.Replace && !interactedRef.current) {
+      window.scrollTo(0, 0);
       return;
     }
 

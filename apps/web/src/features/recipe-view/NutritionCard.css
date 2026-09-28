@@ -1,4 +1,6 @@
-.nutrition-card {
+/* Same inset and heading anatomy as "Your notes" above it (.recipe-panel's padding moves onto
+   the summary so the whole row stays tappable). */
+.recipe-panel.nutrition-card {
   padding: 0;
 }
 
@@ -6,11 +8,18 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  min-height: 60px;
-  padding: 10px 18px;
+  padding: 18px;
   cursor: pointer;
   list-style: none;
   -webkit-tap-highlight-color: transparent;
+}
+
+.nutrition-card-heading {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
 }
 
 .nutrition-card-summary::-webkit-details-marker {
@@ -24,7 +33,7 @@
 }
 
 .nutrition-card-peek {
-  margin-left: auto;
+  padding-left: 26px;
   color: var(--color-ink);
   font-size: var(--text-small);
   font-weight: 700;

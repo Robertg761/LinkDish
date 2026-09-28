@@ -1,6 +1,8 @@
-import React, { useCallback, useId, useMemo } from "react";
+import { inferRecipeTags } from "@linkdish/recipe-domain";
+import React, { useCallback, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { Icon } from "../../components/Icon";
+import { RAIL_MEDIA_QUERY, useMediaQuery } from "../../lib/use-media-query";
 import { startKitchenTimer, useKitchenTimers } from "../cook-mode/timer-store";
 
 import { IngredientList } from "./IngredientList";
@@ -54,10 +56,49 @@ export interface RecipeViewProps {
   warnings?: readonly string[] | undefined;
 }
 
+/** Top bar + the gaps above and below the sticky card. */
+const STICKY_CHROME_PX = 56 + 16 + 24;
+
+/**
+ * Desktop keeps the ingredients beside the method while scrolling, but only when the whole card
+ * fits in the window. A taller card simply scrolls with the page: an inner scroll box hid the
+ * last ingredients ("To serve") with nothing to say they were there.
+ */
+const useStickyWhenItFits = () => {
+  const ref = useRef<HTMLDivElement>(null);
+  const isWide = useMediaQuery(RAIL_MEDIA_QUERY);
+  const [fits, setFits] = useState(false);
+
+  useLayoutEffect(() => {
+    const element = ref.current;
+
+    if (!element || !isWide) {
+      return;
+    }
+
+    const measure = () => {
+      setFits(element.offsetHeight + STICKY_CHROME_PX <= window.innerHeight);
+    };
+
+    measure();
+    window.addEventListener("resize", measure);
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    observer?.observe(element);
+
+    return () => {
+      window.removeEventListener("resize", measure);
+      observer?.disconnect();
+    };
+  }, [isWide]);
+
+  return { ref, sticky: isWide && fits };
+};
+
 /**
  * The shared recipe layout used by the recipe page and the featured landing pages: hero, then
  * ingredients (with servings/units and tick-off) and the method. From 1024px the ingredients sit
- * in a sticky column beside the method; print gets a clean two-column sheet.
+ * in a column beside the method (sticky when the card fits the window); print gets a clean
+ * two-column sheet.
  */
 export const RecipeView: React.FC<RecipeViewProps> = ({
   recipe,
@@ -89,6 +130,14 @@ export const RecipeView: React.FC<RecipeViewProps> = ({
     [displayIngredient, recipe.ingredients]
   );
   const stepCount = useMemo(() => sortRecipeSteps(recipe.steps).length, [recipe.steps]);
+  // Without a photo the hero shows a cover whose art follows the course (read from the whole
+  // recipe: its category, title and keywords).
+  const hasPhoto = Boolean(recipe.image?.url);
+  const course = useMemo(
+    () => (hasPhoto ? null : (inferRecipeTags(recipe).course?.value ?? null)),
+    [hasPhoto, recipe]
+  );
+  const stickyIngredients = useStickyWhenItFits();
   const timers = useKitchenTimers();
   const sessionKey = timerContext?.sessionKey;
   const runningTimers = useMemo(() => {
@@ -138,6 +187,7 @@ export const RecipeView: React.FC<RecipeViewProps> = ({
     <article aria-labelledby={titleId} className="recipe-view print-target">
       <RecipeHero
         actions={heroActions}
+        course={course}
         eyebrow={heroEyebrow}
         lastCookedAt={lastCookedAt}
         onRate={onRate}
@@ -153,8 +203,11 @@ export const RecipeView: React.FC<RecipeViewProps> = ({
       {banner}
 
       <div className="recipe-view-body">
-        <section aria-labelledby={ingredientsHeadingId} className="recipe-view-ingredients">
-          <div className="recipe-panel recipe-view-ingredients-card">
+        <section
+          aria-labelledby={ingredientsHeadingId}
+          className={`recipe-view-ingredients${stickyIngredients.sticky ? " is-sticky" : ""}`}
+        >
+          <div className="recipe-panel recipe-view-ingredients-card" ref={stickyIngredients.ref}>
             <div className="recipe-section-header">
               <h2 className="recipe-section-title" id={ingredientsHeadingId}>
                 Ingredients

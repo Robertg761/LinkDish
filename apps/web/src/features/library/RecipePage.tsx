@@ -147,6 +147,7 @@ const RecipeNotFound: React.FC<{ shared?: boolean }> = ({ shared = false }) => (
           ? "This family recipe was removed or is no longer shared with you."
           : "It may have been deleted, or it was saved on another device."
       }
+      headingLevel={1}
       illustration="search"
       title={shared ? "Family recipe not found" : "Recipe not found"}
     />
@@ -205,6 +206,7 @@ const SavedRecipeRoute: React.FC<{ id: string }> = ({ id }) => {
       return (
         <RecipePageShell className="is-empty">
           <ErrorState
+            headingLevel={1}
             message="Your cookbook on this device couldn’t be opened. Your recipes are still there."
             onRetry={retry}
             title="This recipe didn’t load"
@@ -300,6 +302,7 @@ const SharedRecipeRoute: React.FC<{ sharedId: string }> = ({ sharedId }) => {
             </ButtonLink>
           }
           body="Family recipes live in your household. Sign in to open this one."
+          headingLevel={1}
           illustration="cookbook"
           title="Sign in to see this recipe"
         />
@@ -311,6 +314,7 @@ const SharedRecipeRoute: React.FC<{ sharedId: string }> = ({ sharedId }) => {
     return (
       <RecipePageShell className="is-empty">
         <ErrorState
+          headingLevel={1}
           message={getFriendlyErrorMessage(state.error, "household")}
           onRetry={() => setReloadToken((token) => token + 1)}
           title="This family recipe didn’t load"
@@ -733,7 +737,41 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
 
   /* ------------------------------------- menu ------------------------------------ */
 
+  // Grouped so the long menu scans at a glance: organise, share, edit, then Delete on its own.
   const menuItems: MenuEntry[] = [
+    ...(menuExtras.items.length > 0
+      ? [
+          { id: "group-organise", label: "Plan & organise", type: "separator" as const },
+          ...menuExtras.items
+        ]
+      : []),
+    { id: "group-share", label: "Share & print", type: "separator" },
+    { icon: "share-up", id: "share", label: "Share", onSelect: () => void handleShare() },
+    {
+      description: "A picture to post or send",
+      disabled: busy === "share-card",
+      icon: "image",
+      id: "share-card",
+      label: "Share card",
+      onSelect: () => void handleShareCard()
+    },
+    { icon: "printer", id: "print", label: "Print", onSelect: () => window.print() },
+    ...(canSync
+      ? [
+          {
+            disabled: busy === "sync",
+            icon: "cloud-upload" as const,
+            id: "sync",
+            label:
+              record.sync?.status === "dirty" || record.sync?.status === "sync_failed"
+                ? "Sync changes to household"
+                : "Share with household",
+            onSelect: () => void handleSync()
+          }
+        ]
+      : []),
+    // Without edit rights the group only holds "Save a copy", so it goes unnamed.
+    { id: "group-edit", label: canEdit ? "Edit" : undefined, type: "separator" },
     ...(canEdit
       ? [
           {
@@ -759,31 +797,6 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
           label: "Duplicate",
           onSelect: () => void handleDuplicate()
         },
-    { icon: "share-up", id: "share", label: "Share", onSelect: () => void handleShare() },
-    {
-      description: "A picture to post or send",
-      disabled: busy === "share-card",
-      icon: "image",
-      id: "share-card",
-      label: "Share card",
-      onSelect: () => void handleShareCard()
-    },
-    { icon: "printer", id: "print", label: "Print", onSelect: () => window.print() },
-    ...(canSync
-      ? [
-          {
-            disabled: busy === "sync",
-            icon: "cloud-upload" as const,
-            id: "sync",
-            label:
-              record.sync?.status === "dirty" || record.sync?.status === "sync_failed"
-                ? "Sync changes to household"
-                : "Share with household",
-            onSelect: () => void handleSync()
-          }
-        ]
-      : []),
-    ...menuExtras.items,
     ...(canEdit
       ? [
           { id: "danger-separator", type: "separator" as const },
@@ -803,6 +816,7 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
     <Menu
       items={menuItems}
       label="Recipe actions"
+      presentation="adaptive"
       renderTrigger={(triggerProps) => (
         <IconButton
           {...triggerProps}
@@ -811,6 +825,7 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
           variant={isDesktop ? "ghost" : "tonal"}
         />
       )}
+      sheetTitle={recipe.title}
     />
   );
 

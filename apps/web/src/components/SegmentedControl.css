@@ -47,8 +47,10 @@
   text-overflow: ellipsis;
 }
 
-.segmented-option:hover:not(:disabled):not(.is-selected) {
-  color: var(--color-ink);
+@media (hover: hover) {
+  .segmented-option:hover:not(:disabled):not(.is-selected) {
+    color: var(--color-ink);
+  }
 }
 
 .segmented-option.is-selected {

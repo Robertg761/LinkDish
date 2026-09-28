@@ -21,14 +21,16 @@ export const NutritionCard: React.FC<{ nutrition: Recipe["nutrition"] }> = ({ nu
   return (
     <details className="recipe-panel nutrition-card">
       <summary className="nutrition-card-summary">
-        <span className="recipe-section-title">
-          <Icon name="leaf" size={18} /> Nutrition
-        </span>
-        <span className="nutrition-card-peek num">
-          {calories
-            ? calories.value.replace(/\s*calories?$/iu, " cal")
-            : `${entries.length} values`}
-          <span className="nutrition-card-peek-hint"> per serving</span>
+        <span className="nutrition-card-heading">
+          <span className="recipe-section-title">
+            <Icon name="leaf" size={18} /> Nutrition
+          </span>
+          <span className="nutrition-card-peek num">
+            {calories
+              ? calories.value.replace(/\s*calories?$/iu, " cal")
+              : `${entries.length} values`}
+            <span className="nutrition-card-peek-hint"> per serving</span>
+          </span>
         </span>
         <Icon className="nutrition-card-chevron" name="chevron-down" size={20} />
       </summary>

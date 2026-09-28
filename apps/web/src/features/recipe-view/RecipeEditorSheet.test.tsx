@@ -55,14 +55,18 @@ const renderEditor = (overrides: Partial<React.ComponentProps<typeof RecipeEdito
 };
 
 describe("RecipeEditorSheet", () => {
-  it("fills the form from the recipe, with ## sections", () => {
+  it("fills the form from the recipe, with plain-language sections", () => {
     renderEditor();
     const dialog = screen.getByRole("dialog", { name: "Edit recipe" });
 
-    expect(within(dialog).getByLabelText("Title")).toHaveValue("Onion Soup");
+    // A long title wraps in a growing field instead of being cut off in a one-line input.
+    const title = within(dialog).getByLabelText("Title");
+    expect(title.tagName).toBe("TEXTAREA");
+    expect(title).toHaveValue("Onion Soup");
     expect(within(dialog).getByLabelText("Ingredients")).toHaveValue(
-      "## Soup\n2 cups stock\n1 onion"
+      "Soup:\n2 cups stock\n1 onion"
     );
+    expect(within(dialog).getByLabelText("Ingredients")).toHaveClass("is-auto-grow");
     expect(within(dialog).getByLabelText("Method")).toHaveValue("Chop the onion.\nSimmer.");
     expect(within(dialog).getByLabelText("Prep (min)")).toHaveValue("10");
     expect(within(dialog).getByLabelText("Source link")).toHaveValue("https://example.com/soup");

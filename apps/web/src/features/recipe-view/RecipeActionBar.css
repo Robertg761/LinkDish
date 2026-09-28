@@ -19,10 +19,44 @@
   animation: recipe-action-bar-in var(--duration-slow) var(--ease-out) both;
 }
 
+/* The one primary action takes the room that is left and never wraps ("Start / cooking"). */
 .recipe-action-bar > .btn {
+  --btn-padding-x: 18px;
+
   flex: 1 1 auto;
-  min-width: 0;
+  min-width: max-content;
   border-radius: 18px;
+  white-space: nowrap;
+}
+
+/* Icon actions share one size so the bar reads as a single row of equal targets. */
+.recipe-action-bar > .icon-btn {
+  --icon-btn-size: 48px;
+
+  flex: none;
+}
+
+@media (max-width: 379.98px) {
+  .recipe-action-bar {
+    right: 8px;
+    left: 8px;
+    gap: 4px;
+    padding: 6px;
+  }
+
+  .recipe-action-bar > .btn {
+    --btn-padding-x: 14px;
+  }
+
+  .recipe-action-bar > .icon-btn {
+    --icon-btn-size: 44px;
+  }
+}
+
+@media (max-width: 339.98px) {
+  .recipe-action-bar > .btn .btn-icon {
+    display: none;
+  }
 }
 
 .recipe-action-bar-spacer {

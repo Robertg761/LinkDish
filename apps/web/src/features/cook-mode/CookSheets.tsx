@@ -7,17 +7,11 @@ import { setPreference, usePreference } from "../../preferences/preferences-stor
 import { IngredientList } from "../recipe-view/IngredientList";
 import { RecipeScaleBar } from "../recipe-view/RecipeScaleBar";
 
+import { COOK_TEXT_SIZE_OPTIONS } from "./cook-text-size";
 import { isSpeechSupported } from "./use-step-speech";
 
-import type { CookTextSize } from "../../preferences/preferences-store";
 import type { RecipeScaling } from "../recipe-view/recipe-scaling";
 import type { IngredientChecks, IngredientGroup } from "../recipe-view/use-ingredient-checks";
-
-const TEXT_SIZE_OPTIONS: ReadonlyArray<{ value: CookTextSize; label: string }> = [
-  { label: "Comfortable", value: "md" },
-  { label: "Large", value: "lg" },
-  { label: "Huge", value: "xl" }
-];
 
 interface StepsSheetProps {
   open: boolean;
@@ -74,6 +68,8 @@ interface IngredientsSheetProps {
   scaling: RecipeScaling;
   checks: IngredientChecks;
   highlighted: ReadonlySet<string>;
+  /** Explains the highlighted lines, e.g. "Used in step 2". */
+  highlightLabel?: string | undefined;
 }
 
 /** Phones: the full, tickable ingredient list over cook mode. */
@@ -83,7 +79,8 @@ export const CookIngredientsSheet: React.FC<IngredientsSheetProps> = ({
   groups,
   scaling,
   checks,
-  highlighted
+  highlighted,
+  highlightLabel
 }) => (
   <Sheet
     className="cook-ingredients-sheet"
@@ -97,6 +94,7 @@ export const CookIngredientsSheet: React.FC<IngredientsSheetProps> = ({
       checked={checks.checked}
       displayIngredient={scaling.displayIngredient}
       groups={groups}
+      highlightLabel={highlightLabel}
       highlighted={highlighted}
       onToggle={checks.toggle}
     />
@@ -129,7 +127,7 @@ export const CookSettingsSheet: React.FC<SettingsSheetProps> = ({
           aria-label="Step text size"
           fullWidth
           onChange={(value) => setPreference("cookTextSize", value)}
-          options={TEXT_SIZE_OPTIONS}
+          options={COOK_TEXT_SIZE_OPTIONS}
           value={textSize}
         />
       </div>

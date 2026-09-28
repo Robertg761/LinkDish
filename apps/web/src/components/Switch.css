@@ -1,3 +1,7 @@
+/*
+ * The thumb stays light in both themes (so "on" and "off" read the same way everywhere) and the
+ * track keeps 3:1 against the surface and against the thumb when off (WCAG 1.4.11).
+ */
 .switch {
   position: relative;
   flex-shrink: 0;
@@ -25,18 +29,22 @@
   width: 24px;
   height: 24px;
   border-radius: 50%;
-  background: var(--color-surface-raised);
-  box-shadow: var(--shadow-xs);
+  background: var(--color-switch-thumb);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.28);
   transition: transform var(--duration-base) var(--ease-spring);
 }
 
 .switch.is-on {
-  background: var(--color-primary);
+  background: var(--color-switch-on);
 }
 
 .switch.is-on .switch-thumb {
-  background: var(--color-on-primary);
   transform: translateX(20px);
+}
+
+.switch:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
 }
 
 .switch:disabled {

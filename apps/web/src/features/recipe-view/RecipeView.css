@@ -131,17 +131,14 @@
     gap: 48px;
   }
 
-  .recipe-view-ingredients {
+  /* Sticky only when the whole card fits (RecipeView measures it); never an inner scroll. */
+  .recipe-view-ingredients.is-sticky {
     position: sticky;
     top: calc(var(--app-sticky-top, 0px) + var(--topbar-height) + 16px);
   }
 
   .recipe-view-ingredients-card {
-    max-height: calc(100vh - var(--topbar-height) - 40px);
     padding: 22px 20px 12px;
-    overflow-y: auto;
-    overscroll-behavior: contain;
-    scrollbar-width: thin;
   }
 
   .recipe-view-method {
@@ -218,10 +215,8 @@
   }
 
   .recipe-view-ingredients-card {
-    max-height: none;
     margin: 0;
     padding: 0;
-    overflow: visible;
   }
 
   .recipe-section-title {

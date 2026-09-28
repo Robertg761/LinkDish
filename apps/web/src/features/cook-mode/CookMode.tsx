@@ -22,10 +22,19 @@ import { groupRecipeIngredients, useIngredientChecks } from "../recipe-view/use-
 import { queueCookSessionReset, queueCookSessionUpdate } from "./cook-session-writer";
 import { CookFinish } from "./CookFinish";
 import { CookIngredientsSheet, CookSettingsSheet, CookStepsSheet } from "./CookSheets";
-import { startKitchenTimer, useKitchenTimers } from "./timer-store";
+import { setTimerDockHost } from "./timer-dock-host";
+import {
+  formatTimerClock,
+  getTimerRemainingMs,
+  pauseKitchenTimer,
+  resumeKitchenTimer,
+  startKitchenTimer,
+  useKitchenTimers
+} from "./timer-store";
 import { useStepSpeech } from "./use-step-speech";
 import { useScreenWakeLock } from "./use-wake-lock";
 
+import type { KitchenTimer } from "./timer-store";
 import type { RecipeRating } from "../library/saved-recipe-types";
 import type { RecipeScaling } from "../recipe-view/recipe-scaling";
 import type { IngredientGroup } from "../recipe-view/use-ingredient-checks";
@@ -40,6 +49,8 @@ const SYNTHETIC_CLICK_GUARD_MS = 500;
 const NAVIGATION_LOCK_MS = 240;
 const HINTS_STORAGE_KEY = "linkdish:web:cook-mode-hints-seen:v1";
 const SPLIT_LAYOUT_QUERY = "(min-width: 768px)";
+/** Keyboard hints only where there is likely a keyboard (not on a touch tablet). */
+const FINE_POINTER_QUERY = "(hover: hover) and (pointer: fine)";
 
 export interface CookModeProps {
   open: boolean;
@@ -151,8 +162,11 @@ export const CookMode: React.FC<CookModeProps> = ({
   const keepScreenAwake = usePreference("keepScreenAwake");
   const isSplit = useMediaQuery(SPLIT_LAYOUT_QUERY);
   const isWide = useMediaQuery(RAIL_MEDIA_QUERY);
+  const hasFinePointer = useMediaQuery(FINE_POINTER_QUERY);
   const timers = useKitchenTimers();
   const { showToast } = useToast();
+  const [now, setNow] = useState(() => Date.now());
+  const [stepAnnouncement, setStepAnnouncement] = useState("");
 
   const [stepIndex, setStepIndex] = useState(0);
   const [phase, setPhase] = useState<"cooking" | "resume" | "finish">("cooking");
@@ -166,6 +180,9 @@ export const CookMode: React.FC<CookModeProps> = ({
   const [ready, setReady] = useState(false);
 
   const dialogRef = useRef<HTMLDivElement>(null);
+  const nextButtonRef = useRef<HTMLButtonElement>(null);
+  const focusNextAfterRenderRef = useRef(false);
+  const announcedStepRef = useRef<string | null>(null);
   const initializedRef = useRef(false);
   const startedAtRef = useRef<number | null>(null);
   const reportedFinishRef = useRef(false);
@@ -196,18 +213,19 @@ export const CookMode: React.FC<CookModeProps> = ({
     const items = itemsByIndex.filter((item) => currentIngredientKeys.has(item.key));
     return items.length ? [{ items, key: "step", section: null }] : [];
   }, [currentIngredientKeys, itemsByIndex]);
-  const runningLabels = useMemo(
-    () =>
-      new Set(
-        timers
-          .filter(
-            (timer) =>
-              timer.recipeId === timerKey && timer.stepIndex === stepIndex && timer.doneAt == null
-          )
-          .map((timer) => timer.label)
-      ),
-    [stepIndex, timerKey, timers]
-  );
+  // This step's timers that are still counting (or paused), by chip label.
+  const stepTimers = useMemo(() => {
+    const byLabel = new Map<string, KitchenTimer>();
+
+    for (const timer of timers) {
+      if (timer.recipeId === timerKey && timer.stepIndex === stepIndex && timer.doneAt == null) {
+        byLabel.set(timer.label, timer);
+      }
+    }
+
+    return byLabel;
+  }, [stepIndex, timerKey, timers]);
+  const hasTickingStepTimer = [...stepTimers.values()].some((timer) => !timer.paused);
   const isLastStep = stepIndex >= stepCount - 1;
   const progress = phase === "finish" ? 1 : stepCount > 0 ? (stepIndex + 1) / stepCount : 0;
 
@@ -215,6 +233,60 @@ export const CookMode: React.FC<CookModeProps> = ({
   useModalFocusTrap({ active: open, containerRef: dialogRef });
   useScreenWakeLock(open && keepScreenAwake);
   useStepSpeech(open && readAloud && phase === "cooking", currentText || null);
+
+  // The step's timer chips count down with the dock (one clock, not "10 min · Running").
+  useEffect(() => {
+    if (!open || !hasTickingStepTimer) {
+      return;
+    }
+
+    // Tick on whole seconds, like the dock, so the chip and the dock always show the same time.
+    let timeoutId = 0;
+    const tick = () => {
+      const current = Date.now();
+      setNow(current);
+      timeoutId = window.setTimeout(tick, 1000 - (current % 1000) + 5);
+    };
+
+    tick();
+    return () => window.clearTimeout(timeoutId);
+  }, [hasTickingStepTimer, open]);
+
+  // One live region outside the (re-keyed) step card says where you are after each move; the
+  // card itself is replaced on every step, so a region inside it would never be announced.
+  useEffect(() => {
+    if (!open || !ready || phase === "resume") {
+      announcedStepRef.current = null;
+      return;
+    }
+
+    const key = phase === "finish" ? "finish" : String(stepIndex);
+
+    if (announcedStepRef.current === null) {
+      // The dialog's own name is read when it opens; start announcing from the first move.
+      announcedStepRef.current = key;
+      return;
+    }
+
+    if (announcedStepRef.current === key) {
+      return;
+    }
+
+    announcedStepRef.current = key;
+    setStepAnnouncement(
+      phase === "finish"
+        ? "All done. Rate it and log your cook."
+        : `Step ${stepIndex + 1} of ${stepCount}. ${currentText}`
+    );
+  }, [currentText, open, phase, ready, stepCount, stepIndex]);
+
+  // Coming back from the finish screen, keep keyboard focus on the footer's Next/Finish button.
+  useEffect(() => {
+    if (focusNextAfterRenderRef.current && phase === "cooking") {
+      focusNextAfterRenderRef.current = false;
+      nextButtonRef.current?.focus({ preventScroll: true });
+    }
+  }, [phase]);
 
   // Let fixed UI (the timer dock) know cook mode covers the screen.
   useEffect(() => {
@@ -498,8 +570,16 @@ export const CookMode: React.FC<CookModeProps> = ({
 
   const startStepTimer = (duration: ParsedStepDuration) => {
     const label = formatStepTimerLabel(duration);
+    const existing = stepTimers.get(label);
 
-    if (runningLabels.has(label)) {
+    // A running chip pauses (and resumes) its timer instead of starting a second one.
+    if (existing) {
+      if (existing.paused) {
+        resumeKitchenTimer(existing.id);
+      } else {
+        pauseKitchenTimer(existing.id);
+      }
+
       return;
     }
 
@@ -526,6 +606,10 @@ export const CookMode: React.FC<CookModeProps> = ({
       >
         <CookFinish
           onAddIngredientsToShoppingList={onAddIngredientsToShoppingList}
+          onBack={() => {
+            focusNextAfterRenderRef.current = true;
+            goPrevious();
+          }}
           onDone={endCook}
           onLogCook={onLogCook ? handleLogCook : undefined}
           onRate={onRate}
@@ -543,27 +627,36 @@ export const CookMode: React.FC<CookModeProps> = ({
           Step <span className="num">{stepIndex + 1}</span>
           <span className="cook-step-of"> of {stepCount}</span>
         </p>
-        <p aria-live="polite" className="cook-step-text">
-          {currentText}
-        </p>
+        <p className="cook-step-text">{currentText}</p>
         {currentDurations.length > 0 ? (
           <div aria-label="Step timers" className="cook-step-timers" role="group">
             {currentDurations.map((duration, index) => {
               const label = formatStepTimerLabel(duration);
-              const running = runningLabels.has(label);
+              const timer = stepTimers.get(label);
+              const paused = timer?.paused === true;
 
               return (
                 <button
-                  aria-label={running ? `${label} timer running` : `Start ${label} timer`}
-                  className={`cook-timer-button${running ? " is-running" : ""}`}
+                  aria-label={
+                    timer ? `${paused ? "Resume" : "Pause"} ${label} timer` : `Start ${label} timer`
+                  }
+                  className={`cook-timer-button${timer ? " is-running" : ""}${
+                    paused ? " is-paused" : ""
+                  }`}
                   key={`${label}-${index}`}
                   onClick={() => startStepTimer(duration)}
                   type="button"
                 >
-                  <Icon name={running ? "hourglass" : "timer"} size={20} strokeWidth={2.2} />
-                  <span className="num">{label}</span>
+                  <Icon
+                    name={timer ? (paused ? "play" : "pause") : "timer"}
+                    size={20}
+                    strokeWidth={2.2}
+                  />
+                  <span className="num">
+                    {timer ? formatTimerClock(getTimerRemainingMs(timer, now)) : label}
+                  </span>
                   <span className="cook-timer-button-state">
-                    {running ? "Running" : "Start timer"}
+                    {timer ? (paused ? "Paused" : "left") : "Start timer"}
                   </span>
                 </button>
               );
@@ -597,11 +690,10 @@ export const CookMode: React.FC<CookModeProps> = ({
         <IconButton aria-label="Close cooking mode" icon="x" onClick={onClose} variant="tonal" />
         <div className="cook-mode-heading">
           <p className="cook-mode-title">{recipe.title}</p>
-          <p className="cook-mode-subtitle num">
-            {phase === "finish"
-              ? "All done"
-              : `Step ${stepIndex + 1} of ${stepCount}${scaling.isModified && scaling.servingsLabel ? ` · ${scaling.servingsLabel}` : ""}`}
-          </p>
+          {/* The step count lives in the step itself; the header only notes a changed yield. */}
+          {phase !== "finish" && scaling.isModified && scaling.servingsLabel ? (
+            <p className="cook-mode-subtitle num">{scaling.servingsLabel}</p>
+          ) : null}
         </div>
         <div className="cook-mode-header-actions">
           <IconButton
@@ -660,6 +752,7 @@ export const CookMode: React.FC<CookModeProps> = ({
               className="cook-mode-panel-list"
               displayIngredient={scaling.displayIngredient}
               groups={groups}
+              highlightLabel={`Used in step ${stepIndex + 1}`}
               highlighted={phase === "cooking" ? currentIngredientKeys : undefined}
               onToggle={checks.toggle}
             />
@@ -728,20 +821,27 @@ export const CookMode: React.FC<CookModeProps> = ({
         </div>
       </div>
 
-      <footer className="cook-mode-footer">
-        {phase === "finish" || (phase === "cooking" && stepIndex > 0) ? (
-          <IconButton
-            aria-label="Previous step"
-            className="cook-mode-prev"
-            icon="arrow-left"
-            iconSize={24}
-            onClick={goPrevious}
-            size="lg"
-            variant="outline"
-          />
-        ) : (
-          <span aria-hidden="true" className="cook-mode-footer-spacer" />
-        )}
+      <p aria-atomic="true" aria-live="polite" className="sr-only">
+        {stepAnnouncement}
+      </p>
+
+      {/* The finish screen has its own actions (and "Back to steps"), so the footer steps aside. */}
+      <footer className="cook-mode-footer" hidden={phase === "finish"}>
+        {/* Always there, so the footer never jumps and focus never drops on step 1. */}
+        <IconButton
+          aria-disabled={phase !== "cooking" || stepIndex === 0 ? true : undefined}
+          aria-label="Previous step"
+          className="cook-mode-prev"
+          icon="arrow-left"
+          iconSize={24}
+          onClick={() => {
+            if (phase === "cooking" && stepIndex > 0) {
+              goPrevious();
+            }
+          }}
+          size="lg"
+          variant="outline"
+        />
 
         {!isSplit ? (
           <button
@@ -759,29 +859,31 @@ export const CookMode: React.FC<CookModeProps> = ({
               </span>
             ) : null}
           </button>
-        ) : (
+        ) : hasFinePointer ? (
           <span className="cook-mode-footer-hint">
             <kbd>←</kbd> <kbd>→</kbd> to move between steps
           </span>
+        ) : (
+          <span className="cook-mode-footer-hint">Swipe to move between steps</span>
         )}
 
-        {phase === "finish" ? (
-          <span aria-hidden="true" className="cook-mode-footer-spacer is-wide" />
-        ) : (
-          <Button
-            aria-label={isLastStep ? "Finish cooking" : "Next step"}
-            className="cook-mode-next"
-            disabled={phase !== "cooking"}
-            icon={isLastStep ? "check" : undefined}
-            onClick={goNext}
-            size="lg"
-            trailingIcon={isLastStep ? undefined : "arrow-right"}
-            variant={isLastStep ? "accent" : "primary"}
-          >
-            {isLastStep ? "Finish" : "Next"}
-          </Button>
-        )}
+        <Button
+          aria-label={isLastStep ? "Finish cooking" : "Next step"}
+          className="cook-mode-next"
+          disabled={phase !== "cooking"}
+          icon={isLastStep ? "check" : undefined}
+          onClick={goNext}
+          ref={nextButtonRef}
+          size="lg"
+          trailingIcon={isLastStep ? undefined : "arrow-right"}
+          variant={isLastStep ? "accent" : "primary"}
+        >
+          {isLastStep ? "Finish" : "Next"}
+        </Button>
       </footer>
+
+      {/* Kitchen timers move in here while cooking (inside the dialog's focus trap). */}
+      <div className="cook-mode-timer-slot" ref={setTimerDockHost} />
 
       <CookStepsSheet
         currentIndex={stepIndex}
@@ -797,6 +899,7 @@ export const CookMode: React.FC<CookModeProps> = ({
         <CookIngredientsSheet
           checks={checks}
           groups={groups}
+          highlightLabel={`Used in step ${stepIndex + 1}`}
           highlighted={phase === "cooking" ? currentIngredientKeys : new Set()}
           onClose={() => setIngredientsOpen(false)}
           open={ingredientsOpen}

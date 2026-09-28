@@ -23,6 +23,7 @@ import { OptionalChunkBoundary } from "../platform/OptionalChunkBoundary";
 import { getAppRouteMeta } from "./app-route-meta";
 import { BrandMark } from "./BrandMark";
 import { Icon } from "./Icon";
+import { usePageHidesTabBar } from "./tab-bar-visibility";
 
 import type { AppSection } from "./app-route-meta";
 import type { IconName } from "./Icon";
@@ -131,6 +132,20 @@ const TimerDock = lazyWithRetry(() =>
   import("../features/cook-mode/TimerDock").then((module) => ({ default: module.TimerDock }))
 );
 
+// The import queue count on Add reads IndexedDB, so it loads beside the Cookbook, not in the entry.
+const ImportQueueCount = lazyWithRetry(() =>
+  import("./ImportQueueCount").then((module) => ({ default: module.ImportQueueCount }))
+);
+
+/** The Add tab / rail button's queue count; renders nothing while the queue is empty. */
+const AddQueueBadge: React.FC<{ onDescribe: (description: string) => void }> = ({ onDescribe }) => (
+  <OptionalChunkBoundary name="Import queue count">
+    <Suspense fallback={null}>
+      <ImportQueueCount onDescribe={onDescribe} />
+    </Suspense>
+  </OptionalChunkBoundary>
+);
+
 const TopBarActionsContext = createContext<HTMLElement | null>(null);
 
 /**
@@ -160,8 +175,12 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
   const isRail = useMediaQuery(RAIL_MEDIA_QUERY);
   const addItem = NAV_ITEMS.find((item) => item.section === "add");
   const listItems = isRail ? NAV_ITEMS.filter((item) => item.section !== "add") : NAV_ITEMS;
-  // Recipe detail pages drop the phone tab bar; their action bar and Back cover navigation.
-  const hideTabBar = !isRail && routeMeta.hideTabBar === true;
+  // Recipe detail pages (and an import result on screen) drop the phone tab bar; their action
+  // bar and Back cover navigation.
+  const pageHidesTabBar = usePageHidesTabBar();
+  const hideTabBar = !isRail && (routeMeta.hideTabBar === true || pageHidesTabBar);
+  const [importQueueLabel, setImportQueueLabel] = useState("");
+  const addLabel = importQueueLabel ? `Add recipe (${importQueueLabel})` : "Add recipe";
 
   // Sheets, toasts and the timer dock are portaled outside the shell, so the inset they read
   // (--app-bottom-inset) is switched on the root element rather than on .app-shell.
@@ -249,7 +268,7 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
         <Link
           aria-current={active ? "page" : undefined}
           aria-keyshortcuts={isRail ? RAIL_SHORTCUTS[item.to]?.aria : undefined}
-          aria-label={item.ariaLabel}
+          aria-label={isAdd ? addLabel : item.ariaLabel}
           className={[
             "app-nav-link",
             isAdd ? "app-nav-link-add" : "",
@@ -263,6 +282,7 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
         >
           <span className="app-nav-icon" aria-hidden="true">
             <Icon name={item.icon} size={isAdd ? 26 : 22} strokeWidth={isAdd ? 2.4 : 2} />
+            {isAdd ? <AddQueueBadge onDescribe={setImportQueueLabel} /> : null}
           </span>
           <span className="app-nav-label">{item.label}</span>
           {isRail && RAIL_SHORTCUTS[item.to] ? (
@@ -303,13 +323,14 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
                 <Link
                   aria-current={routeMeta.section === "add" ? "page" : undefined}
                   aria-keyshortcuts="N"
-                  aria-label={addItem.ariaLabel}
+                  aria-label={addLabel}
                   className={`app-nav-add-button${routeMeta.section === "add" ? " is-active" : ""}`}
                   title="Add recipe (N)"
                   to={addItem.to}
                 >
                   <Icon name="plus" size={20} strokeWidth={2.4} />
                   Add recipe
+                  <AddQueueBadge onDescribe={setImportQueueLabel} />
                 </Link>
               ) : null}
 

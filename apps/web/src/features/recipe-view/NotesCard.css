@@ -64,7 +64,9 @@
   color: var(--color-ink);
   font: inherit;
   line-height: 1.5;
-  resize: vertical;
+  overflow: hidden;
+  resize: none;
+  field-sizing: content;
 }
 
 .notes-card-editor textarea:focus {

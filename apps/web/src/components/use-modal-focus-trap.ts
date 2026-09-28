@@ -16,6 +16,11 @@ interface ModalFocusTrapOptions {
   containerRef: RefObject<HTMLElement | null>;
   /** Called on Escape. Omit when the modal handles Escape itself. */
   onEscape?: (() => void) | undefined;
+  /**
+   * "first" (default): the first control, for modals opened by an action. "container": the
+   * dialog itself, for one that appears on its own (screen readers still read its name).
+   */
+  initialFocus?: "first" | "container" | undefined;
 }
 
 /**
@@ -26,10 +31,13 @@ interface ModalFocusTrapOptions {
 export const useModalFocusTrap = ({
   active,
   containerRef,
-  onEscape
+  onEscape,
+  initialFocus = "first"
 }: ModalFocusTrapOptions): void => {
   const onEscapeRef = useRef(onEscape);
   onEscapeRef.current = onEscape;
+  const initialFocusRef = useRef(initialFocus);
+  initialFocusRef.current = initialFocus;
 
   useEffect(() => {
     if (!active) {
@@ -45,10 +53,12 @@ export const useModalFocusTrap = ({
     const previouslyFocusedElement = document.activeElement;
     const getFocusableElements = () =>
       Array.from(container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(
-        (element) => !element.hasAttribute("hidden") && element.getAttribute("aria-hidden") !== "true"
+        (element) =>
+          !element.hasAttribute("hidden") && element.getAttribute("aria-hidden") !== "true"
       );
 
-    (getFocusableElements()[0] ?? container).focus();
+    const first = initialFocusRef.current === "container" ? null : getFocusableElements()[0];
+    (first ?? container).focus();
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {

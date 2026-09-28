@@ -28,6 +28,7 @@ export type LucideIconName =
   | "bookmark-check"
   | "bookmark-minus"
   | "bookmark-plus"
+  | "cake-slice"
   | "calendar"
   | "calendar-check"
   | "calendar-days"
@@ -51,11 +52,14 @@ export type LucideIconName =
   | "cloud-upload"
   | "collection"
   | "command"
+  | "cookie"
   | "cooking-pot"
   | "copy"
   | "credit-card"
   | "crown"
+  | "cup-soda"
   | "download"
+  | "egg-fried"
   | "external-link"
   | "eye"
   | "eye-off"
@@ -110,6 +114,7 @@ export type LucideIconName =
   | "refresh"
   | "rotate-ccw"
   | "salad"
+  | "sandwich"
   | "scale"
   | "scan"
   | "search"
@@ -150,6 +155,7 @@ export type LucideIconName =
   | "volume-2"
   | "volume-x"
   | "wand"
+  | "wheat"
   | "wifi-off"
   | "x"
   | "x-circle"
@@ -253,6 +259,17 @@ export const LUCIDE_ICON_NODES: Readonly<Record<LucideIconName, IconNode>> = {
         d: "M17 3a2 2 0 0 1 2 2v15a1 1 0 0 1-1.496.868l-4.512-2.578a2 2 0 0 0-1.984 0l-4.512 2.578A1 1 0 0 1 5 20V5a2 2 0 0 1 2-2z"
       }
     ]
+  ],
+  "cake-slice": [
+    ["path", { d: "M16 13H3" }],
+    ["path", { d: "M16 17H3" }],
+    [
+      "path",
+      {
+        d: "m7.2 7.9-3.388 2.5A2 2 0 0 0 3 12.01V20a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1v-8.654c0-2-2.44-6.026-6.44-8.026a1 1 0 0 0-1.082.057L10.4 5.6"
+      }
+    ],
+    ["circle", { cx: "9", cy: "7", r: "2" }]
   ],
   calendar: [
     ["path", { d: "M8 2v3" }],
@@ -374,6 +391,22 @@ export const LUCIDE_ICON_NODES: Readonly<Record<LucideIconName, IconNode>> = {
   command: [
     ["path", { d: "M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3" }]
   ],
+  cookie: [
+    ["path", { d: "M11 17h.01" }],
+    [
+      "path",
+      {
+        d: "M11.496 2c.324-.016.558.292.529.615a4 4 0 004.235 4.368.713.713 0 01.758.757 4 4 0 004.366 4.237c.323-.03.63.204.614.527a10 10 0 01-2.915 6.566A1 1 0 114.93 4.918 10 10 0 0111.496 2"
+      }
+    ],
+    ["path", { d: "M12 12h.01" }],
+    ["path", { d: "M16 16h.01" }],
+    ["path", { d: "M16 3h.01" }],
+    ["path", { d: "M21 4h.01" }],
+    ["path", { d: "M21 8h.01" }],
+    ["path", { d: "M7 14h.01" }],
+    ["path", { d: "M9 8h.01" }]
+  ],
   "cooking-pot": [
     ["path", { d: "M2 12h20" }],
     ["path", { d: "M20 12v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-8" }],
@@ -398,10 +431,25 @@ export const LUCIDE_ICON_NODES: Readonly<Record<LucideIconName, IconNode>> = {
     ],
     ["path", { d: "M5 21h14" }]
   ],
+  "cup-soda": [
+    ["path", { d: "m6 8 1.75 12.28a2 2 0 0 0 2 1.72h4.54a2 2 0 0 0 2-1.72L18 8" }],
+    ["path", { d: "M5 8h14" }],
+    ["path", { d: "M7 15a6.47 6.47 0 0 1 5 0 6.47 6.47 0 0 0 5 0" }],
+    ["path", { d: "m12 8 1-6h2" }]
+  ],
   download: [
     ["path", { d: "M12 15V3" }],
     ["path", { d: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" }],
     ["path", { d: "m7 10 5 5 5-5" }]
+  ],
+  "egg-fried": [
+    ["circle", { cx: "11.5", cy: "12.5", r: "3.5" }],
+    [
+      "path",
+      {
+        d: "M3 8c0-3.5 2.5-6 6.5-6 5 0 4.83 3 7.5 5s5 2 5 6c0 4.5-2.5 6.5-7 6.5-2.5 0-2.5 2.5-6 2.5s-7-2-7-5.5c0-3 1.5-3 1.5-5C3.5 10 3 9 3 8Z"
+      }
+    ]
   ],
   "external-link": [
     ["path", { d: "M15 3h6v6" }],
@@ -783,6 +831,13 @@ export const LUCIDE_ICON_NODES: Readonly<Record<LucideIconName, IconNode>> = {
     ["path", { d: "m13 12 4-4" }],
     ["path", { d: "M10.9 7.25A3.99 3.99 0 0 0 4 10c0 .73.2 1.41.54 2" }]
   ],
+  sandwich: [
+    ["path", { d: "m2.37 11.223 8.372-6.777a2 2 0 0 1 2.516 0l8.371 6.777" }],
+    ["path", { d: "M21 15a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1h-5.25" }],
+    ["path", { d: "M3 15a1 1 0 0 0-1 1v2a1 1 0 0 0 1 1h9" }],
+    ["path", { d: "m6.67 15 6.13 4.6a2 2 0 0 0 2.8-.4l3.15-4.2" }],
+    ["rect", { width: "20", height: "4", x: "2", y: "11", rx: "1" }]
+  ],
   scale: [
     ["path", { d: "M12 3v18" }],
     ["path", { d: "m19 8 3 8a5 5 0 0 1-6 0zV7" }],
@@ -1076,6 +1131,42 @@ export const LUCIDE_ICON_NODES: Readonly<Record<LucideIconName, IconNode>> = {
     ["path", { d: "M7 8H3" }],
     ["path", { d: "M21 16h-4" }],
     ["path", { d: "M11 3H9" }]
+  ],
+  wheat: [
+    ["path", { d: "M2 22 16 8" }],
+    [
+      "path",
+      { d: "M3.47 12.53 5 11l1.53 1.53a3.5 3.5 0 0 1 0 4.94L5 19l-1.53-1.53a3.5 3.5 0 0 1 0-4.94Z" }
+    ],
+    [
+      "path",
+      { d: "M7.47 8.53 9 7l1.53 1.53a3.5 3.5 0 0 1 0 4.94L9 15l-1.53-1.53a3.5 3.5 0 0 1 0-4.94Z" }
+    ],
+    [
+      "path",
+      {
+        d: "M11.47 4.53 13 3l1.53 1.53a3.5 3.5 0 0 1 0 4.94L13 11l-1.53-1.53a3.5 3.5 0 0 1 0-4.94Z"
+      }
+    ],
+    ["path", { d: "M20 2h2v2a4 4 0 0 1-4 4h-2V6a4 4 0 0 1 4-4Z" }],
+    [
+      "path",
+      {
+        d: "M11.47 17.47 13 19l-1.53 1.53a3.5 3.5 0 0 1-4.94 0L5 19l1.53-1.53a3.5 3.5 0 0 1 4.94 0Z"
+      }
+    ],
+    [
+      "path",
+      {
+        d: "M15.47 13.47 17 15l-1.53 1.53a3.5 3.5 0 0 1-4.94 0L9 15l1.53-1.53a3.5 3.5 0 0 1 4.94 0Z"
+      }
+    ],
+    [
+      "path",
+      {
+        d: "M19.47 9.47 21 11l-1.53 1.53a3.5 3.5 0 0 1-4.94 0L13 11l1.53-1.53a3.5 3.5 0 0 1 4.94 0Z"
+      }
+    ]
   ],
   "wifi-off": [
     ["path", { d: "M12 20h.01" }],

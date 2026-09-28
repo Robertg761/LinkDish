@@ -264,6 +264,8 @@ describe("RecipePage saved route", () => {
     renderAt("/recipes/missing");
 
     expect(await screen.findByText("Recipe not found")).toBeInTheDocument();
+    // The page's main heading, so route focus lands on it right away.
+    expect(screen.getByRole("heading", { level: 1, name: "Recipe not found" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Back to your cookbook" })).toHaveAttribute(
       "href",
       "/"
@@ -299,7 +301,10 @@ describe("RecipePage saved route", () => {
     });
 
     fireEvent.click(screen.getAllByRole("button", { name: "Start cooking" })[0]!);
-    fireEvent.click(await screen.findByRole("button", { name: "Show all ingredients" }));
+    // Cook mode is its own chunk; the first test to open it waits for the import.
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Show all ingredients" }, { timeout: 5_000 })
+    );
     const sheet = screen.getByRole("dialog", { name: "Ingredients" });
     expect(within(sheet).getByRole("checkbox", { name: "2 cups flour" })).toHaveAttribute(
       "aria-checked",
@@ -334,16 +339,24 @@ describe("RecipePage saved route", () => {
       .map((item) => item.textContent);
 
     expect(labels).toEqual([
-      "Edit recipe",
-      "Duplicate",
-      "Share",
-      "Share cardA picture to post or send",
-      "Print",
       "Add to meal plan…",
       "Add to collection…",
       "Edit tags…",
+      "Share",
+      "Share cardA picture to post or send",
+      "Print",
+      "Edit recipe",
+      "Duplicate",
       "Delete recipe"
     ]);
+    // Named groups, with Delete on its own after a separator.
+    expect(within(menu).getAllByRole("group")).toHaveLength(3);
+    expect(within(menu).getByRole("group", { name: "Plan & organise" })).toBeInTheDocument();
+    expect(within(menu).getByRole("group", { name: "Share & print" })).toBeInTheDocument();
+    expect(
+      within(within(menu).getByRole("group", { name: "Edit" })).getAllByRole("menuitem")
+    ).toHaveLength(2);
+    expect(within(menu).getAllByRole("separator")).toHaveLength(3);
   });
 
   it("duplicates into a new recipe and opens it", async () => {
@@ -644,7 +657,11 @@ describe("RecipePage saved route", () => {
     renderAt("/recipes/recipe_local?cook=1");
 
     expect(
-      await screen.findByRole("dialog", { name: "Cooking mode for Weeknight Chili" })
+      await screen.findByRole(
+        "dialog",
+        { name: "Cooking mode for Weeknight Chili" },
+        { timeout: 5_000 }
+      )
     ).toBeInTheDocument();
   });
 
@@ -654,9 +671,11 @@ describe("RecipePage saved route", () => {
     await screen.findByRole("heading", { level: 1, name: "Weeknight Chili" });
 
     fireEvent.click(screen.getByRole("button", { name: "Start cooking" }));
-    const cookMode = await screen.findByRole("dialog", {
-      name: "Cooking mode for Weeknight Chili"
-    });
+    const cookMode = await screen.findByRole(
+      "dialog",
+      { name: "Cooking mode for Weeknight Chili" },
+      { timeout: 5_000 }
+    );
     fireEvent.click(within(cookMode).getByRole("button", { name: "Next step" }));
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 300));
@@ -757,6 +776,9 @@ describe("RecipePage shared route", () => {
     const menu = openMenu();
     expect(within(menu).queryByRole("menuitem", { name: "Edit recipe" })).toBeNull();
     expect(within(menu).queryByRole("menuitem", { name: /Unshare/ })).toBeNull();
+    // "Save a copy" alone isn't an "Edit" group.
+    expect(within(menu).queryByRole("group", { name: "Edit" })).toBeNull();
+    expect(within(menu).getByRole("menuitem", { name: "Save a copy" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save a copy to my cookbook" })).toBeInTheDocument();
   });
 

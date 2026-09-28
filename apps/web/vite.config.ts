@@ -188,8 +188,14 @@ const createManualChunks = (bootModules: readonly string[]): Rollup.GetManualChu
 
 /** The page most visits start on; see preloadLandingRoute and app/routes.ts. */
 const LANDING_ROUTE_MODULE = "/src/features/library/LibraryPage.tsx";
-/** Lazy UI the shell loads on every visit (the kitchen timer dock), grouped with the landing page. */
-const BOOT_LAZY_MODULES = ["/src/features/cook-mode/TimerDock.tsx"];
+/**
+ * Lazy UI the shell loads on every visit (the kitchen timer dock, the import queue count on Add),
+ * grouped with the landing page.
+ */
+const BOOT_LAZY_MODULES = [
+  "/src/features/cook-mode/TimerDock.tsx",
+  "/src/components/ImportQueueCount.tsx"
+];
 
 export default defineConfig({
   test: {
@@ -315,14 +321,41 @@ export default defineConfig({
                 url.hostname === "linkdish-api.vercel.app"),
             handler: "CacheFirst",
             options: {
-              cacheName: "recipe-image-proxy",
+              // v2: only readable (CORS) responses. The v1 cache held opaque ones, which Chrome
+              // pads to ~7 MB each in the storage quota (a full cache "used" 1.4 GB).
+              cacheName: "recipe-images-v2",
               expiration: {
                 maxEntries: 200,
                 maxAgeSeconds: 60 * 60 * 24 * 30
               },
               cacheableResponse: {
-                statuses: [0, 200]
-              }
+                statuses: [200]
+              },
+              plugins: [
+                {
+                  // Once per worker: drop the old cache of opaque responses.
+                  handlerWillStart: async () => {
+                    const scope = globalThis as unknown as Record<string, unknown>;
+
+                    if (!scope.linkdishDroppedOpaqueImages) {
+                      scope.linkdishDroppedOpaqueImages = true;
+                      await caches.delete("recipe-image-proxy");
+                    }
+                  },
+                  // <img> requests are no-cors; ask the proxy (which sends CORS headers for the
+                  // app's origins) in cors mode, so the cached copy is a readable 200.
+                  requestWillFetch: ({ request }: { request: Request }) =>
+                    Promise.resolve(
+                      request.mode === "no-cors"
+                        ? new Request(request.url, { credentials: "omit", mode: "cors" })
+                        : request
+                    ),
+                  // An origin the proxy doesn't allow (a preview deploy): still show the image,
+                  // just don't cache it.
+                  handlerDidError: async ({ request }: { request: Request }) =>
+                    fetch(request.url, { credentials: "omit", mode: "no-cors" })
+                }
+              ]
             }
           },
           {

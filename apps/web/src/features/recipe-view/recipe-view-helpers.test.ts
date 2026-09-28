@@ -6,7 +6,12 @@ import {
   splitEditableIngredients
 } from "./recipe-editing";
 import { getRecipeSourceInfo, isImageImportSourceUrl } from "./recipe-source";
-import { formatCookedLine, formatRelativeDay, getRecipeMetaItems } from "./recipe-view-format";
+import {
+  formatCompactDuration,
+  formatCookedLine,
+  formatRelativeDay,
+  getRecipeMetaItems
+} from "./recipe-view-format";
 import { formatStepTimerLabel, getStepTimerSeconds } from "./step-timers";
 
 const NOW = new Date("2026-09-28T12:00:00").getTime();
@@ -30,7 +35,15 @@ describe("recipe editing text format", () => {
     ];
     const text = formatEditableIngredients(ingredients);
 
-    expect(text).toBe("## Dough\n2 cups flour\n1 tsp salt\n\n## Topping\nSugar");
+    expect(text).toBe("Dough:\n2 cups flour\n1 tsp salt\n\nTopping:\nSugar");
+    expect(splitEditableIngredients(text)).toEqual(ingredients);
+  });
+
+  it("keeps '## ' for a section name that has its own colon", () => {
+    const ingredients = [{ section: "Step 1: Dough", text: "2 cups flour" }];
+    const text = formatEditableIngredients(ingredients);
+
+    expect(text).toBe("## Step 1: Dough\n2 cups flour");
     expect(splitEditableIngredients(text)).toEqual(ingredients);
   });
 
@@ -88,17 +101,35 @@ describe("recipe view formatting", () => {
     expect(
       getRecipeMetaItems({ cookTimeMinutes: 70, prepTimeMinutes: 20 }, "Serves 18 · 1 loaf")
     ).toEqual([
-      { id: "total", label: "Total", value: "1 hr 30 min" },
+      { id: "total", label: "Total", spokenValue: "1 hr 30 min", value: "1h 30m" },
       { id: "prep", label: "Prep", value: "20 min" },
-      { id: "cook", label: "Cook", value: "1 hr 10 min" },
+      { id: "cook", label: "Cook", spokenValue: "1 hr 10 min", value: "1h 10m" },
       { id: "serves", label: "Serves", value: "18" }
     ]);
+    // The counted thing becomes the label, so the value is just the number.
     expect(
       getRecipeMetaItems({ cookTimeMinutes: null, prepTimeMinutes: 10 }, "24 cookies")
     ).toEqual([
       { id: "prep", label: "Prep", value: "10 min" },
-      { id: "serves", label: "Makes", value: "24 cookies" }
+      { id: "serves", label: "Cookies", spokenValue: "24 cookies", value: "24" }
     ]);
+    expect(getRecipeMetaItems({ cookTimeMinutes: 120, prepTimeMinutes: null }, "Makes 12")).toEqual(
+      [
+        { id: "cook", label: "Cook", value: "2 hr" },
+        { id: "serves", label: "Makes", value: "12" }
+      ]
+    );
+    expect(
+      getRecipeMetaItems({ cookTimeMinutes: null, prepTimeMinutes: null }, "9 small pancakes")
+    ).toEqual([{ id: "serves", label: "Makes", spokenValue: "9 small pancakes", value: "9" }]);
+  });
+
+  it("keeps stat-strip durations short enough for one line", () => {
+    expect(formatCompactDuration(45)).toBe("45 min");
+    expect(formatCompactDuration(120)).toBe("2 hr");
+    expect(formatCompactDuration(205)).toBe("3h 25m");
+    expect(formatCompactDuration(1440)).toBe("1 day");
+    expect(formatCompactDuration(1560)).toBe("1d 2h");
   });
 });
 

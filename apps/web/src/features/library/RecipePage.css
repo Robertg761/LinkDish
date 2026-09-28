@@ -24,10 +24,6 @@
   font-weight: 600;
 }
 
-.recipe-start-cooking.btn {
-  min-width: 0;
-}
-
 .recipe-favorite-button.is-pressed {
   color: var(--color-tomato);
 }

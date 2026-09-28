@@ -1,4 +1,4 @@
-import React, { useId, useRef } from "react";
+import React, { useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { Icon } from "./Icon";
@@ -31,6 +31,11 @@ interface SheetProps {
   className?: string | undefined;
   /** Rendered as a data attribute for tests and analytics hooks. */
   testId?: string | undefined;
+  /**
+   * Where focus goes on open: the first control (default), or the dialog itself — for a sheet
+   * that opens on its own (not from a tap), so it doesn't start with a ring around its × .
+   */
+  initialFocus?: "first" | "dialog" | undefined;
 }
 
 const DRAG_CLOSE_DISTANCE = 96;
@@ -53,9 +58,11 @@ export const Sheet: React.FC<SheetProps> = ({
   showHandle = true,
   hideCloseButton = false,
   className = "",
-  testId
+  testId,
+  initialFocus = "first"
 }) => {
   const titleId = useId();
+  const [scrolled, setScrolled] = useState(false);
   const descriptionId = useId();
   const panelRef = useRef<HTMLElement>(null);
   const dragStartRef = useRef<{ y: number; pointerId: number } | null>(null);
@@ -65,6 +72,7 @@ export const Sheet: React.FC<SheetProps> = ({
   useModalFocusTrap({
     active: open,
     containerRef: panelRef,
+    initialFocus: initialFocus === "dialog" ? "container" : "first",
     onEscape: () => {
       if (dismissibleRef.current) {
         onClose();
@@ -155,7 +163,15 @@ export const Sheet: React.FC<SheetProps> = ({
             <span className="sheet-handle" />
           </div>
         ) : null}
-        <header className={`sheet-header${hideTitle ? " sheet-header-hidden-title" : ""}`}>
+        <header
+          className={[
+            "sheet-header",
+            hideTitle ? "sheet-header-hidden-title" : "",
+            scrolled ? "is-scrolled" : ""
+          ]
+            .filter(Boolean)
+            .join(" ")}
+        >
           <div className="sheet-heading">
             <h2 className={hideTitle ? "sr-only" : "sheet-title"} id={titleId}>
               {title}
@@ -178,7 +194,18 @@ export const Sheet: React.FC<SheetProps> = ({
             </button>
           )}
         </header>
-        <div className="sheet-body">{children}</div>
+        <div
+          className="sheet-body"
+          onScroll={(event) => {
+            const next = event.currentTarget.scrollTop > 2;
+
+            if (next !== scrolled) {
+              setScrolled(next);
+            }
+          }}
+        >
+          {children}
+        </div>
         {footer ? <footer className="sheet-footer">{footer}</footer> : null}
       </section>
     </div>,

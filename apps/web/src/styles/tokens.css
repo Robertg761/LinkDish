@@ -112,6 +112,9 @@
   /* Space that page content must leave at the bottom so the phone tab bar never
      covers it. The shell sets it to 0 on desktop where the rail is used instead. */
   --app-bottom-inset: calc(var(--tabbar-height) + env(safe-area-inset-bottom, 0px));
+  /* How far the raised Add button pokes above the tab bar. Full-width floating UI (the timer
+     dock) adds it so it never touches the button; 0 where there is no tab bar. */
+  --app-fab-clearance: 24px;
 
   /* Border radii */
   --radius-xs: 8px;
@@ -169,16 +172,18 @@
   /* Tinted fill for chips, icon tiles and small controls on a surface. */
   --color-surface-tint: #efe7da;
 
-  /* Ink */
+  /* Ink. Every text color clears WCAG AA (4.5:1) on bg, canvas, surface, raised, sunken and
+     tint in both themes; ink-subtle is the quietest text allowed. */
   --color-ink: #1f211d;
-  --color-ink-muted: #6e685f;
-  --color-ink-subtle: #857d71;
+  --color-ink-muted: #625c53;
+  --color-ink-subtle: #6f675c;
   --color-ink-inverse: #fffdf8;
 
-  /* Lines */
+  /* Lines. border / border-subtle are decorative dividers; border-strong is the boundary of a
+     control (field outline, unchecked tick box, off switch) and keeps 3:1 on every surface. */
   --color-border: #ddd2c3;
   --color-border-subtle: #e8dfd2;
-  --color-border-strong: #bfb19d;
+  --color-border-strong: #8a7f6f;
 
   /* Brand */
   --color-primary: #29443b;
@@ -194,6 +199,8 @@
   --color-on-tomato: #fffdf8;
   --color-tomato-soft: #f3ddd3;
   --color-on-tomato-soft: #8e3b22;
+  /* Tomato for small text (eyebrows, labels): the fill color is 4.25:1 on bg. */
+  --color-tomato-ink: #a4462a;
 
   --color-butter: #e9bd5a;
   --color-butter-soft: #f7e9c8;
@@ -220,8 +227,11 @@
   --color-state-pressed: color-mix(in srgb, var(--color-ink) 9%, transparent);
   --color-selection: color-mix(in srgb, var(--color-butter) 55%, transparent);
   --color-scrim: rgba(31, 28, 24, 0.42);
-  --color-overlay: color-mix(in srgb, var(--color-canvas) 90%, transparent);
-  --color-placeholder: color-mix(in srgb, var(--color-ink-muted) 72%, transparent);
+  /* Frosted layers over content (cook footer, floating panels): opaque enough that big type
+     never ghosts through. The app's top bar and tab bar are solid (--color-bar). */
+  --color-overlay: color-mix(in srgb, var(--color-canvas) 96%, transparent);
+  /* Several fields have no visible label, so the placeholder is real text (≥ 4.5:1). */
+  --color-placeholder: var(--color-ink-subtle);
   --color-skeleton: #ebe3d6;
   --color-skeleton-shine: #f6f1e8;
 
@@ -234,6 +244,10 @@
   --color-image-placeholder: #e8e0d2;
   --color-monogram-bg: var(--color-primary-soft);
   --color-monogram-ink: var(--color-primary);
+
+  /* Switch: a light thumb in both themes on a track that keeps 3:1 against the surface. */
+  --color-switch-on: var(--color-primary);
+  --color-switch-thumb: #fffefb;
 
   /* Shadows */
   --shadow-color: 93, 86, 75;
@@ -251,7 +265,7 @@
   /* Legacy RGB triplets (prefer color-mix with semantic tokens in new CSS). */
   --color-accent-rgb: 41, 68, 59;
   --color-border-rgb: 221, 210, 195;
-  --color-muted-rgb: 110, 104, 95;
+  --color-muted-rgb: 98, 92, 83;
   --color-text-rgb: 31, 33, 29;
   --color-danger-text-rgb: 139, 46, 35;
   --color-shadow-rgb: var(--shadow-color);
@@ -260,9 +274,11 @@
 /* ------------------------------------------------------------------------ */
 /* Dark theme — warm charcoal, cream ink, lifted sage primary.               */
 /* Applied by the OS preference unless the person chose Light, or forced by */
-/* data-theme="dark". Both blocks must stay identical.                       */
+/* data-theme="dark". Both blocks must stay identical. Screens only: paper  */
+/* is white, so print always resolves the light palette (cream ink on white */
+/* paper printed an almost blank page).                                     */
 /* ------------------------------------------------------------------------ */
-@media (prefers-color-scheme: dark) {
+@media screen and (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
 
@@ -275,13 +291,13 @@
     --color-surface-tint: #34302b;
 
     --color-ink: #f3ece0;
-    --color-ink-muted: #b3aa9b;
-    --color-ink-subtle: #8f877a;
+    --color-ink-muted: #bcb3a5;
+    --color-ink-subtle: #a39b8e;
     --color-ink-inverse: #1a1816;
 
     --color-border: #3a3631;
     --color-border-subtle: #2f2c28;
-    --color-border-strong: #58524a;
+    --color-border-strong: #807a70;
 
     --color-primary: #a9cbb9;
     --color-primary-hover: #bdd9ca;
@@ -296,6 +312,7 @@
     --color-on-tomato: #2a120a;
     --color-tomato-soft: #3d2620;
     --color-on-tomato-soft: #f2b9a4;
+    --color-tomato-ink: #e8876b;
 
     --color-butter: #e9bd5a;
     --color-butter-soft: #3a3020;
@@ -318,7 +335,7 @@
     --color-state-pressed: color-mix(in srgb, var(--color-ink) 12%, transparent);
     --color-selection: color-mix(in srgb, var(--color-butter) 40%, transparent);
     --color-scrim: rgba(6, 5, 4, 0.62);
-    --color-overlay: color-mix(in srgb, var(--color-canvas) 90%, transparent);
+    --color-overlay: color-mix(in srgb, var(--color-canvas) 96%, transparent);
     --color-skeleton: #2b2824;
     --color-skeleton-shine: #36322d;
 
@@ -327,6 +344,8 @@
     --color-inverse-primary: #29443b;
 
     --color-image-placeholder: #2c2925;
+    --color-switch-on: #568470;
+    --color-switch-thumb: #f3ece0;
 
     --shadow-color: 0, 0, 0;
     --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.35);
@@ -339,91 +358,96 @@
 
     --color-accent-rgb: 169, 203, 185;
     --color-border-rgb: 58, 54, 49;
-    --color-muted-rgb: 179, 170, 155;
+    --color-muted-rgb: 188, 179, 165;
     --color-text-rgb: 243, 236, 224;
     --color-danger-text-rgb: 241, 154, 134;
   }
 }
 
-:root[data-theme="dark"] {
-  color-scheme: dark;
+@media screen {
+  :root[data-theme="dark"] {
+    color-scheme: dark;
 
-  --color-bg: #1a1816;
-  --color-canvas: #1f1d1a;
-  --color-surface: #24221e;
-  --color-surface-raised: #2c2925;
-  --color-surface-sunken: #151311;
-  --color-surface-subtle: #2a2723;
-  --color-surface-tint: #34302b;
+    --color-bg: #1a1816;
+    --color-canvas: #1f1d1a;
+    --color-surface: #24221e;
+    --color-surface-raised: #2c2925;
+    --color-surface-sunken: #151311;
+    --color-surface-subtle: #2a2723;
+    --color-surface-tint: #34302b;
 
-  --color-ink: #f3ece0;
-  --color-ink-muted: #b3aa9b;
-  --color-ink-subtle: #8f877a;
-  --color-ink-inverse: #1a1816;
+    --color-ink: #f3ece0;
+    --color-ink-muted: #bcb3a5;
+    --color-ink-subtle: #a39b8e;
+    --color-ink-inverse: #1a1816;
 
-  --color-border: #3a3631;
-  --color-border-subtle: #2f2c28;
-  --color-border-strong: #58524a;
+    --color-border: #3a3631;
+    --color-border-subtle: #2f2c28;
+    --color-border-strong: #807a70;
 
-  --color-primary: #a9cbb9;
-  --color-primary-hover: #bdd9ca;
-  --color-primary-pressed: #cfe3d7;
-  --color-on-primary: #13241d;
-  --color-primary-soft: #2a3a33;
-  --color-primary-soft-hover: #334740;
-  --color-on-primary-soft: #cfe3d7;
+    --color-primary: #a9cbb9;
+    --color-primary-hover: #bdd9ca;
+    --color-primary-pressed: #cfe3d7;
+    --color-on-primary: #13241d;
+    --color-primary-soft: #2a3a33;
+    --color-primary-soft-hover: #334740;
+    --color-on-primary-soft: #cfe3d7;
 
-  --color-tomato: #e0795a;
-  --color-tomato-hover: #ea8c6f;
-  --color-on-tomato: #2a120a;
-  --color-tomato-soft: #3d2620;
-  --color-on-tomato-soft: #f2b9a4;
+    --color-tomato: #e0795a;
+    --color-tomato-hover: #ea8c6f;
+    --color-on-tomato: #2a120a;
+    --color-tomato-soft: #3d2620;
+    --color-on-tomato-soft: #f2b9a4;
+    --color-tomato-ink: #e8876b;
 
-  --color-butter: #e9bd5a;
-  --color-butter-soft: #3a3020;
-  --color-on-butter: #2a200a;
-  --color-on-butter-soft: #f2d387;
+    --color-butter: #e9bd5a;
+    --color-butter-soft: #3a3020;
+    --color-on-butter: #2a200a;
+    --color-on-butter-soft: #f2d387;
 
-  --color-success: #8fd0a8;
-  --color-success-soft: #22352a;
-  --color-warning: #f0c76e;
-  --color-warning-soft: #3a3020;
-  --color-danger: #f19a86;
-  --color-danger-hover: #f6b2a2;
-  --color-on-danger: #2a100b;
-  --color-danger-soft: #432621;
-  --color-danger-soft-hover: #52302a;
-  --color-on-danger-soft: #f3c9bd;
+    --color-success: #8fd0a8;
+    --color-success-soft: #22352a;
+    --color-warning: #f0c76e;
+    --color-warning-soft: #3a3020;
+    --color-danger: #f19a86;
+    --color-danger-hover: #f6b2a2;
+    --color-on-danger: #2a100b;
+    --color-danger-soft: #432621;
+    --color-danger-soft-hover: #52302a;
+    --color-on-danger-soft: #f3c9bd;
 
-  --color-focus: #a9cbb9;
-  --color-state-hover: color-mix(in srgb, var(--color-ink) 7%, transparent);
-  --color-state-pressed: color-mix(in srgb, var(--color-ink) 12%, transparent);
-  --color-selection: color-mix(in srgb, var(--color-butter) 40%, transparent);
-  --color-scrim: rgba(6, 5, 4, 0.62);
-  --color-overlay: color-mix(in srgb, var(--color-canvas) 90%, transparent);
-  --color-skeleton: #2b2824;
-  --color-skeleton-shine: #36322d;
+    --color-focus: #a9cbb9;
+    --color-state-hover: color-mix(in srgb, var(--color-ink) 7%, transparent);
+    --color-state-pressed: color-mix(in srgb, var(--color-ink) 12%, transparent);
+    --color-selection: color-mix(in srgb, var(--color-butter) 40%, transparent);
+    --color-scrim: rgba(6, 5, 4, 0.62);
+    --color-overlay: color-mix(in srgb, var(--color-canvas) 96%, transparent);
+    --color-skeleton: #2b2824;
+    --color-skeleton-shine: #36322d;
 
-  --color-inverse-surface: #f3ece0;
-  --color-on-inverse: #1f211d;
-  --color-inverse-primary: #29443b;
+    --color-inverse-surface: #f3ece0;
+    --color-on-inverse: #1f211d;
+    --color-inverse-primary: #29443b;
 
-  --color-image-placeholder: #2c2925;
+    --color-image-placeholder: #2c2925;
+    --color-switch-on: #568470;
+    --color-switch-thumb: #f3ece0;
 
-  --shadow-color: 0, 0, 0;
-  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.35);
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 14px rgba(0, 0, 0, 0.28);
-  --shadow-md: 0 2px 4px rgba(0, 0, 0, 0.3), 0 12px 32px rgba(0, 0, 0, 0.38);
-  --shadow-lg: 0 2px 6px rgba(0, 0, 0, 0.35), 0 24px 64px rgba(0, 0, 0, 0.5);
-  --shadow-primary: 0 1px 2px rgba(0, 0, 0, 0.35), 0 6px 16px rgba(0, 0, 0, 0.3);
-  --shadow-tomato: 0 2px 4px rgba(0, 0, 0, 0.35), 0 10px 24px rgba(0, 0, 0, 0.35);
-  --shadow-nav: 0 -1px 0 var(--color-border), 0 -8px 28px rgba(0, 0, 0, 0.3);
+    --shadow-color: 0, 0, 0;
+    --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.35);
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 14px rgba(0, 0, 0, 0.28);
+    --shadow-md: 0 2px 4px rgba(0, 0, 0, 0.3), 0 12px 32px rgba(0, 0, 0, 0.38);
+    --shadow-lg: 0 2px 6px rgba(0, 0, 0, 0.35), 0 24px 64px rgba(0, 0, 0, 0.5);
+    --shadow-primary: 0 1px 2px rgba(0, 0, 0, 0.35), 0 6px 16px rgba(0, 0, 0, 0.3);
+    --shadow-tomato: 0 2px 4px rgba(0, 0, 0, 0.35), 0 10px 24px rgba(0, 0, 0, 0.35);
+    --shadow-nav: 0 -1px 0 var(--color-border), 0 -8px 28px rgba(0, 0, 0, 0.3);
 
-  --color-accent-rgb: 169, 203, 185;
-  --color-border-rgb: 58, 54, 49;
-  --color-muted-rgb: 179, 170, 155;
-  --color-text-rgb: 243, 236, 224;
-  --color-danger-text-rgb: 241, 154, 134;
+    --color-accent-rgb: 169, 203, 185;
+    --color-border-rgb: 58, 54, 49;
+    --color-muted-rgb: 188, 179, 165;
+    --color-text-rgb: 243, 236, 224;
+    --color-danger-text-rgb: 241, 154, 134;
+  }
 }
 
 /* ------------------------------------------------------------------------ */
@@ -449,6 +473,10 @@
   --color-danger-border: color-mix(in srgb, var(--color-danger) 26%, transparent);
 
   --color-topbar-border: color-mix(in srgb, var(--color-border) 78%, transparent);
+  --color-bar: var(--color-canvas);
+  /* Hairline between groups on raised surfaces (menus, sheet header/footer). border-subtle
+     all but vanishes on a raised dark surface; this reads in both themes. */
+  --color-divider: color-mix(in srgb, var(--color-ink) 13%, transparent);
   --color-scan-backdrop: var(--color-scrim);
   --color-editor-backdrop: var(--color-scrim);
 

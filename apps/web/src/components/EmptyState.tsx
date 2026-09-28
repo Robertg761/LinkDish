@@ -17,7 +17,8 @@ interface EmptyStateProps {
   actions?: React.ReactNode;
   /** Tighter spacing for use inside cards and sheets. */
   compact?: boolean | undefined;
-  headingLevel?: 2 | 3 | undefined;
+  /** 1 when the empty state is the whole page (e.g. "Recipe not found"). */
+  headingLevel?: 1 | 2 | 3 | undefined;
   className?: string | undefined;
 }
 
@@ -31,7 +32,7 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
   headingLevel = 2,
   className = ""
 }) => {
-  const Heading = headingLevel === 3 ? "h3" : "h2";
+  const Heading = headingLevel === 1 ? "h1" : headingLevel === 3 ? "h3" : "h2";
   const artwork = art ?? (illustration ? <Illustration name={illustration} /> : null);
 
   return (

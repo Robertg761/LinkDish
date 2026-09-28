@@ -86,13 +86,46 @@
   box-shadow: var(--shadow-xs);
 }
 
-.recipe-card-grid:hover {
-  box-shadow: var(--shadow-md);
-  transform: translateY(-2px);
+/*
+ * Hover stays inside the card's own box: the photo leans in and the edge firms up. (A lift with
+ * an outer shadow got cut off square by grids that skip off-screen paint with
+ * content-visibility.)
+ */
+.recipe-card-grid .recipe-image-img,
+.recipe-card-grid .recipe-cover-plate {
+  transition: transform var(--duration-slow) var(--ease-out);
+}
+
+@media (hover: hover) {
+  .recipe-card-grid:hover {
+    border-color: var(--color-border);
+  }
+
+  .recipe-card-grid:hover .recipe-image-img {
+    transform: scale(1.04);
+  }
+
+  .recipe-card-grid:hover .recipe-cover-plate {
+    transform: translate(-50%, -50%) scale(1.05);
+  }
+
+  .recipe-card-list:hover {
+    background: var(--color-state-hover);
+  }
 }
 
 .recipe-card-grid:active {
-  transform: translateY(0) scale(0.99);
+  transform: scale(0.99);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .recipe-card-grid:hover .recipe-image-img {
+    transform: none;
+  }
+
+  .recipe-card-grid:hover .recipe-cover-plate {
+    transform: translate(-50%, -50%);
+  }
 }
 
 .recipe-card-grid .recipe-card-media {
@@ -156,10 +189,6 @@
   min-height: 88px;
   padding: 8px;
   margin: 0 -8px;
-}
-
-.recipe-card-list:hover {
-  background: var(--color-state-hover);
 }
 
 .recipe-card-list .recipe-card-media {

@@ -2,14 +2,13 @@ import React from "react";
 
 import { Icon } from "../../components/Icon";
 import { RecipeImage } from "../../components/RecipeImage";
-import { getRecipeMonogram } from "../../lib/recipe-image";
 
 import { formatCookedLine, getRecipeMetaItems } from "./recipe-view-format";
 
 import type { RecipeSourceInfo } from "./recipe-source";
 import type { IconName } from "../../components/Icon";
 import type { RecipeRating } from "../library/saved-recipe-types";
-import type { Recipe } from "@linkdish/recipe-domain";
+import type { Recipe, RecipeCourse } from "@linkdish/recipe-domain";
 
 import "./RecipeHero.css";
 
@@ -131,12 +130,15 @@ interface RecipeHeroProps {
   /** Primary actions under the meta strip (desktop). */
   actions?: React.ReactNode;
   titleId?: string | undefined;
+  /** The recipe's course, for the no-photo cover's art. */
+  course?: RecipeCourse | null | undefined;
 }
 
 /**
  * Photo-forward recipe header. Phones: a full-bleed 16:10 photo with a rounded bottom edge, then
  * the title block. From 1024px: an editorial split with the text beside the photo. Without a
- * photo it becomes a warm typographic panel with a big italic initial.
+ * photo the same band holds a designed cover (a plate with a course mark), a little shorter, so
+ * the title never sits on top of artwork.
  */
 export const RecipeHero: React.FC<RecipeHeroProps> = ({
   recipe,
@@ -149,7 +151,8 @@ export const RecipeHero: React.FC<RecipeHeroProps> = ({
   lastCookedAt,
   eyebrow,
   actions,
-  titleId
+  titleId,
+  course
 }) => {
   const hasImage = Boolean(recipe.image?.url);
   const metaItems = getRecipeMetaItems(recipe, servingsLabel);
@@ -157,23 +160,18 @@ export const RecipeHero: React.FC<RecipeHeroProps> = ({
   const showRatingRow = Boolean(onRate) || (rating ?? 0) > 0 || cookedLine;
 
   return (
-    <header className={`recipe-hero ${hasImage ? "has-image" : "is-typographic"}`}>
-      {hasImage ? (
-        <div className="recipe-hero-media">
-          <RecipeImage
-            aspectRatio="auto"
-            className="recipe-hero-image"
-            image={recipe.image}
-            priority
-            sizes="(min-width: 1024px) 560px, (min-width: 768px) 720px, 100vw"
-            title={recipe.title}
-          />
-        </div>
-      ) : (
-        <span aria-hidden="true" className="recipe-hero-monogram">
-          {getRecipeMonogram(recipe.title)}
-        </span>
-      )}
+    <header className={`recipe-hero ${hasImage ? "has-image" : "has-cover"}`}>
+      <div className="recipe-hero-media">
+        <RecipeImage
+          aspectRatio="auto"
+          className="recipe-hero-image"
+          course={course}
+          image={recipe.image}
+          priority
+          sizes="(min-width: 1024px) 560px, (min-width: 768px) 720px, 100vw"
+          title={recipe.title}
+        />
+      </div>
 
       <div className="recipe-hero-content">
         <div className="recipe-hero-eyebrow">
@@ -192,10 +190,26 @@ export const RecipeHero: React.FC<RecipeHeroProps> = ({
             {metaItems.map((item) => (
               <div className={`recipe-hero-meta-item is-${item.id}`} key={item.id}>
                 <dt>
-                  <Icon name={META_ICONS[item.id] ?? "clock"} size={16} />
-                  {item.label}
+                  <Icon
+                    name={
+                      item.id === "serves" && item.label !== "Serves"
+                        ? "chef-hat"
+                        : (META_ICONS[item.id] ?? "clock")
+                    }
+                    size={16}
+                  />
+                  <span className="recipe-hero-meta-label">{item.label}</span>
                 </dt>
-                <dd className="num">{item.value}</dd>
+                <dd className="num">
+                  {item.spokenValue ? (
+                    <>
+                      <span aria-hidden="true">{item.value}</span>
+                      <span className="sr-only">{item.spokenValue}</span>
+                    </>
+                  ) : (
+                    item.value
+                  )}
+                </dd>
               </div>
             ))}
           </dl>

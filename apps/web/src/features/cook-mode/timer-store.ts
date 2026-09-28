@@ -86,6 +86,17 @@ const createTimerId = (): string => {
   return `timer-${Date.now().toString(36)}-${idCounter}-${Math.random().toString(36).slice(2, 7)}`;
 };
 
+/** "4:05", "12:30", "1:02:09" */
+export const formatTimerClock = (ms: number): string => {
+  const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const pad = (value: number) => String(value).padStart(2, "0");
+
+  return hours > 0 ? `${hours}:${pad(minutes)}:${pad(seconds)}` : `${minutes}:${pad(seconds)}`;
+};
+
 /** "Step 3" when the timer came from a step, otherwise its label. */
 export const getTimerContextLabel = (timer: Pick<KitchenTimer, "label" | "stepIndex">): string =>
   timer.stepIndex != null ? `Step ${timer.stepIndex + 1}` : timer.label;
