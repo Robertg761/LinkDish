@@ -127,6 +127,46 @@ describe("Vercel analytics adapter", () => {
     expect(mocks.writeAnalyticsEvents).not.toHaveBeenCalled();
   });
 
+  it("parses a sendBeacon batch sent as text/plain and keeps the CORS headers", async () => {
+    const analyticsApi = await import("./analytics.js");
+    /* What the web client's beacon posts: the JSON batch in a text/plain Blob. */
+    const beacon = new Request("https://api.linkdish.ca/analytics/events", {
+      body: new Blob([await request().text()], { type: "text/plain;charset=UTF-8" }),
+      headers: { origin: "https://app.linkdish.ca" },
+      method: "POST"
+    });
+    expect(beacon.headers.get("content-type")).toMatch(/^text\/plain;charset=utf-8$/iu);
+
+    const response = await analyticsApi.POST(beacon);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("access-control-allow-origin")).toBe("https://app.linkdish.ca");
+    expect(response.headers.get("access-control-allow-credentials")).toBe("true");
+    await expect(response.json()).resolves.toEqual({ accepted: 1, dropped: 0 });
+    expect(mocks.writeAnalyticsEvents).toHaveBeenCalledOnce();
+  });
+
+  it("answers 400 without writing when a text/plain body is not JSON", async () => {
+    const analyticsApi = await import("./analytics.js");
+    const response = await analyticsApi.POST(
+      new Request("https://api.linkdish.ca/analytics/events", {
+        body: "{not json",
+        headers: {
+          "content-type": "text/plain;charset=UTF-8",
+          origin: "https://app.linkdish.ca"
+        },
+        method: "POST"
+      })
+    );
+
+    expect(response.status).toBe(400);
+    expect(response.headers.get("access-control-allow-origin")).toBe("https://app.linkdish.ca");
+    await expect(response.json()).resolves.toMatchObject({
+      message: "Invalid analytics event batch."
+    });
+    expect(mocks.writeAnalyticsEvents).not.toHaveBeenCalled();
+  });
+
   it("allows credentialed web analytics preflights", async () => {
     const analyticsApi = await import("./analytics.js");
     const response = analyticsApi.OPTIONS(

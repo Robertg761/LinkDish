@@ -114,6 +114,13 @@ describe("analytics client", () => {
 
     expect(transport.beacon).toHaveBeenCalledTimes(2);
     expect(transport.send).toHaveBeenCalledTimes(1);
+
+    // The fetch fallback posts exactly the JSON batch the refused beacon carried.
+    const [beaconUrl, beaconBody] = transport.beacon.mock.calls[1]!;
+    const [sendUrl, sendBody] = transport.send.mock.calls[0]!;
+    expect(sendUrl).toBe(beaconUrl);
+    expect(sendBody).toBe(beaconBody);
+    expect(sentEvents(transport)).toMatchObject([{ eventName: "web_route_viewed" }]);
   });
 
   it("never throws for bad UTM values and trims them to the contract", () => {
