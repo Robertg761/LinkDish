@@ -1,28 +1,50 @@
-import React, { useState } from "react";
+import React, { Suspense, useCallback, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
-import { trackWebV2AnalyticsEvent } from "../../analytics/client";
 import { useAuth } from "../../auth/AuthProvider";
 import { Button } from "../../components/Button";
+import { Chip } from "../../components/Chip";
 import { Icon } from "../../components/Icon";
-import { RecipeImageWithFallback } from "../../components/RecipeImageWithFallback";
-import { requestSaveFeedback } from "../../lib/delight-events";
-import { buildRecipeImageUrl, getRecipeImageOrNull } from "../../lib/recipe-image";
-import { safeSetItem } from "../../platform/safe-storage";
-import { saveRecipe, forceSaveRecipe, syncRecipeToHousehold } from "../library/saved-recipe-store";
-import { CookMode } from "../recipes/CookMode";
-import { buildRecipeMetaLine } from "../recipes/recipe-meta";
-import { useUpgradeSheet } from "../upgrade/UpgradeSheet";
+import { IconButton } from "../../components/IconButton";
+import { Menu } from "../../components/Menu";
+import { Sheet } from "../../components/Sheet";
+import { useDocumentTitle } from "../../lib/use-document-title";
+import { RAIL_MEDIA_QUERY, useMediaQuery } from "../../lib/use-media-query";
+import { lazyWithRetry } from "../../platform/lazy";
+import { OptionalChunkBoundary } from "../../platform/OptionalChunkBoundary";
+import { LazyCookMode, preloadCookMode } from "../cook-mode/LazyCookMode";
+import { useRecipeScaling } from "../recipe-view/recipe-scaling";
+import { getRecipeSourceInfo } from "../recipe-view/recipe-source";
+import { RecipeActionBar } from "../recipe-view/RecipeActionBar";
+import { RecipeView } from "../recipe-view/RecipeView";
+import { useIngredientChecks } from "../recipe-view/use-ingredient-checks";
 
+import { getFriendlyImportNotes } from "./import-outcome";
+import { useSaveImport } from "./use-save-import";
+
+import type { HouseholdShareStatus } from "./use-save-import";
+import type { MenuEntry } from "../../components/Menu";
+import type { WebSavedRecipe } from "../library/saved-recipe-types";
 import type {
   ExtractRecipeImage,
-  FetchMode,
   ExtractionProvenance,
-  ExtractionStrategy
+  ExtractionStrategy,
+  FetchMode
 } from "@linkdish/api-contracts";
 import type { Recipe } from "@linkdish/recipe-domain";
+
 import "./ExtractResult.css";
 
-interface ExtractResultProps {
+const AddToPlanSheet = lazyWithRetry(() =>
+  import("../plan/AddToPlanSheet").then((module) => ({ default: module.AddToPlanSheet }))
+);
+const AddRecipeToShoppingSheet = lazyWithRetry(() =>
+  import("../shopping/AddRecipeToShoppingSheet").then((module) => ({
+    default: module.AddRecipeToShoppingSheet
+  }))
+);
+
+export interface ExtractResultProps {
   recipe: Recipe;
   sourceUrl: string;
   sourceImages?: ExtractRecipeImage[] | undefined;
@@ -32,382 +54,428 @@ interface ExtractResultProps {
     strategy: ExtractionStrategy;
     warnings: string[];
   };
+  /** From the API's diagnostics; used for gentle "worth a look" notes. */
+  confidenceScore?: number | undefined;
+  missingFields?: readonly string[] | undefined;
+  /** "Import another": back to an empty importer. */
   onReset: () => void;
+  /** Called after the recipe is written to the cookbook. */
+  onSaved?: ((recipe: WebSavedRecipe) => void) | undefined;
+  /** Called when the person throws an unsaved import away. */
+  onDiscard?: (() => void) | undefined;
+  /** Shown above the recipe (e.g. "This recipe was waiting for you"). */
+  notice?: React.ReactNode;
 }
 
-const prefersReducedMotion = () => {
-  try {
-    return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
-  } catch {
-    return false;
+type OpenSheet = "shopping" | "plan" | "leave" | null;
+
+const TEXT_IMPORT_URL_FRAGMENT = "linkdish.app/text-imports/";
+
+const HouseholdChip: React.FC<{ status: HouseholdShareStatus; onRetry: () => void }> = ({
+  status,
+  onRetry
+}) => {
+  if (status === "sharing") {
+    return (
+      <span className="extract-result-household is-busy" role="status">
+        <Icon className="extract-result-spin" name="loader" size={14} /> Sharing with your
+        household…
+      </span>
+    );
   }
+
+  if (status === "shared") {
+    return (
+      <span className="extract-result-household is-shared" role="status">
+        <Icon name="users" size={14} /> Shared with your household
+      </span>
+    );
+  }
+
+  if (status === "failed") {
+    return (
+      <button className="extract-result-household is-failed" onClick={onRetry} type="button">
+        <Icon name="cloud-off" size={14} /> Couldn’t share with your household · Retry
+      </button>
+    );
+  }
+
+  return null;
 };
 
-const parseSafeSourceUrl = (value: string): URL | null => {
-  try {
-    const parsed = new URL(value);
-    return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed : null;
-  } catch {
-    return null;
-  }
-};
-
+/**
+ * A freshly imported recipe, shown exactly like a saved one (scaling, units, tick-off, method,
+ * nutrition) with one primary action: Save to cookbook. Once saved, the next steps take over:
+ * start cooking, add to the shopping list or the plan, open it, or import another.
+ */
 export const ExtractResult: React.FC<ExtractResultProps> = ({
   recipe,
   sourceUrl,
   sourceImages,
   extraction,
-  onReset
+  confidenceScore,
+  missingFields,
+  onReset,
+  onSaved,
+  onDiscard,
+  notice
 }) => {
-  const { isAuthenticated, user } = useAuth();
-  const { requestUpgradeSheet } = useUpgradeSheet();
-  const [saveStatus, setSaveStatus] = useState<
-    "idle" | "saving" | "syncing" | "saved" | "error" | "duplicate_prompt"
-  >("idle");
-  const [errorMessage, setErrorMessage] = useState("");
-  const [syncWarning, setSyncWarning] = useState("");
-  const [saveFeedbackActive, setSaveFeedbackActive] = useState(false);
-  const [nutritionExpanded, setNutritionExpanded] = useState(true);
-  const [cookModeOpen, setCookModeOpen] = useState(false);
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const isDesktop = useMediaQuery(RAIL_MEDIA_QUERY);
+  const [cookOpen, setCookOpen] = useState(false);
+  const [openSheet, setOpenSheet] = useState<OpenSheet>(null);
+  const saveInput = useMemo(
+    () => ({ extraction, recipe, sourceImages, sourceUrl }),
+    [extraction, recipe, sourceImages, sourceUrl]
+  );
+  const saving = useSaveImport(saveInput, { onSaved });
+  const isSaved = saving.status === "saved";
+  const isBusy = saving.status === "saving";
+  const isTextImport = sourceUrl.includes(TEXT_IMPORT_URL_FRAGMENT);
+  const source = useMemo(
+    () =>
+      isTextImport
+        ? { href: null, kind: "unknown" as const, label: "From your text", shareUrl: null }
+        : getRecipeSourceInfo(sourceUrl),
+    [isTextImport, sourceUrl]
+  );
+  const scaling = useRecipeScaling(recipe);
+  // The cookbook id is known before saving, so ticks and timers carry over once it's saved.
+  const sessionKey = saving.recipeId ?? `import:${sourceUrl}`;
+  const checks = useIngredientChecks(saving.recipeId);
+  const recipeHref = isSaved && saving.recipeId ? `/recipes/${saving.recipeId}` : "/import";
+  const timerContext = useMemo(
+    () => ({ href: recipeHref, recipeTitle: recipe.title, sessionKey }),
+    [recipe.title, recipeHref, sessionKey]
+  );
+  const notes = useMemo(
+    () =>
+      getFriendlyImportNotes({
+        confidenceScore,
+        missingFields,
+        sourceKind: source.kind === "photos" ? "photos" : isTextImport ? "text" : "web",
+        strategy: extraction.strategy,
+        warnings: extraction.warnings
+      }),
+    [
+      confidenceScore,
+      extraction.strategy,
+      extraction.warnings,
+      isTextImport,
+      missingFields,
+      source.kind
+    ]
+  );
 
-  const isPremium = user?.billingPlan === "plus" || user?.billingPlan === "family";
-  const safeSourceUrl = parseSafeSourceUrl(sourceUrl);
-  const sourceHost = safeSourceUrl?.hostname.replace(/^www\./i, "") || "Unknown source";
-  const previewImageUrl = buildRecipeImageUrl(getRecipeImageOrNull(recipe.image), 1200);
-  const hasNutrition =
-    recipe.nutrition && Object.values(recipe.nutrition).some((v) => v != null && v !== "");
+  useDocumentTitle(recipe.title);
 
-  const playSaveFeedback = () => {
-    requestSaveFeedback();
+  const openRecipe = useCallback(() => {
+    if (saving.recipeId) {
+      void navigate(`/recipes/${saving.recipeId}`);
+    }
+  }, [navigate, saving.recipeId]);
 
-    if (prefersReducedMotion()) {
+  const requestImportAnother = () => {
+    if (isSaved) {
+      onReset();
       return;
     }
 
-    setSaveFeedbackActive(false);
-    requestAnimationFrame(() => {
-      setSaveFeedbackActive(true);
-    });
+    setOpenSheet("leave");
   };
 
-  const handleSave = async () => {
-    setSaveStatus("saving");
-    setErrorMessage("");
-    setSyncWarning("");
+  const saveAndLeave = async () => {
+    const saved = await saving.save();
 
-    try {
-      const res = await saveRecipe(
-        {
-          recipe,
-          sourceUrl,
-          sourceImages,
-          extraction
-        },
-        isPremium
-      );
-
-      if (res.success) {
-        trackWebV2AnalyticsEvent({
-          name: "recipe_saved",
-          routeOrScreen: "/",
-          properties: {
-            source_type: sourceImages?.length ? "image" : "url",
-            surface: "import_result"
-          }
-        });
-
-        if (isAuthenticated && res.recipe) {
-          setSaveStatus("syncing");
-          const syncedRecipe = await syncRecipeToHousehold(res.recipe);
-
-          if (syncedRecipe.sync?.status === "sync_failed") {
-            setSyncWarning(
-              "Saved in Library. Household sync failed, but you can retry from the Library."
-            );
-          }
-        }
-
-        setSaveStatus("saved");
-
-        // The recipe is already saved at this point, so nothing below may
-        // throw its way into the catch and report a success as a failure.
-        try {
-          playSaveFeedback();
-        } catch (feedbackError) {
-          console.warn("Save feedback failed:", feedbackError);
-        }
-
-        // Trigger local PWA install flag (best effort; storage may be blocked).
-        safeSetItem("linkdish:web:has-extracted-recipe", "true");
-      } else {
-        if (res.error === "limit_exceeded") {
-          setSaveStatus("error");
-          setErrorMessage(
-            "Your free cookbook is full - 15 recipes saved. Upgrade for unlimited saved recipes."
-          );
-          requestUpgradeSheet("save_limit");
-        } else if (res.error === "duplicate_prompt") {
-          setSaveStatus("duplicate_prompt");
-        }
-      }
-    } catch (err) {
-      console.error("Save error:", err);
-      setSaveStatus("error");
-      setErrorMessage("We could not save this recipe on this device. Please try again.");
+    if (saved) {
+      setOpenSheet(null);
+      onReset();
+    } else {
+      setOpenSheet(null);
     }
   };
 
-  const handleForceSave = async () => {
-    setSaveStatus("saving");
-    setErrorMessage("");
-    setSyncWarning("");
-
-    try {
-      const savedRecipe = await forceSaveRecipe({
-        recipe,
-        sourceUrl,
-        sourceImages,
-        extraction
-      });
-
-      trackWebV2AnalyticsEvent({
-        name: "recipe_saved",
-        routeOrScreen: "/",
-        properties: {
-          source_type: sourceImages?.length ? "image" : "url",
-          surface: "import_result"
-        }
-      });
-
-      if (isAuthenticated) {
-        setSaveStatus("syncing");
-        const syncedRecipe = await syncRecipeToHousehold(savedRecipe);
-
-        if (syncedRecipe.sync?.status === "sync_failed") {
-          setSyncWarning(
-            "Saved in Library. Household sync failed, but you can retry from the Library."
-          );
-        }
-      }
-
-      setSaveStatus("saved");
-
-      try {
-        playSaveFeedback();
-      } catch (feedbackError) {
-        console.warn("Save feedback failed:", feedbackError);
-      }
-    } catch (err) {
-      console.error("Force save error:", err);
-      setSaveStatus("error");
-      setErrorMessage("We could not replace the saved recipe. Please try again.");
-    }
+  const discard = () => {
+    setOpenSheet(null);
+    onDiscard?.();
+    onReset();
   };
 
-  // Group ingredients by section
-  const ingredientSections = React.useMemo(() => {
-    const sections: Record<string, typeof recipe.ingredients> = {};
-    const defaultSectionName = "Ingredients";
+  const closeSheet = () => setOpenSheet(null);
 
-    recipe.ingredients.forEach((ing) => {
-      const secName = ing.section ? ing.section.trim() : defaultSectionName;
-      if (!sections[secName]) {
-        sections[secName] = [];
-      }
-      sections[secName].push(ing);
-    });
+  /* ----------------------------------------- actions ---------------------------------------- */
 
-    return sections;
-  }, [recipe.ingredients]);
+  const saveButton = (
+    <Button
+      className="extract-result-save"
+      icon="bookmark-plus"
+      loading={isBusy}
+      onClick={() => void saving.save()}
+      size="lg"
+      variant="primary"
+    >
+      Save to cookbook
+    </Button>
+  );
+
+  const startCookingButton = (
+    <Button
+      className="extract-result-cook"
+      icon="chef-hat"
+      onClick={() => setCookOpen(true)}
+      onFocus={preloadCookMode}
+      onPointerEnter={preloadCookMode}
+      size="lg"
+      variant={isSaved ? "primary" : "secondary"}
+    >
+      Start cooking
+    </Button>
+  );
+
+  const moreItems: MenuEntry[] = [
+    { icon: "book-open", id: "open", label: "Open in cookbook", onSelect: openRecipe },
+    {
+      icon: "calendar-plus",
+      id: "plan",
+      label: "Add to meal plan…",
+      onSelect: () => setOpenSheet("plan")
+    },
+    { id: "separator", type: "separator" },
+    { icon: "plus", id: "another", label: "Import another", onSelect: onReset }
+  ];
+
+  const moreMenu = (
+    <Menu
+      align="end"
+      items={moreItems}
+      label="More for this recipe"
+      renderTrigger={(triggerProps) => (
+        <IconButton
+          {...triggerProps}
+          aria-label="More actions"
+          icon="more-horizontal"
+          size={isDesktop ? "md" : "lg"}
+          variant="tonal"
+        />
+      )}
+    />
+  );
+
+  const heroActions = isDesktop ? (
+    isSaved ? (
+      <>
+        {startCookingButton}
+        <Button
+          icon="shopping-basket"
+          onClick={() => setOpenSheet("shopping")}
+          size="lg"
+          variant="secondary"
+        >
+          Add to shopping list
+        </Button>
+        {moreMenu}
+      </>
+    ) : (
+      <>
+        {saveButton}
+        {startCookingButton}
+      </>
+    )
+  ) : undefined;
+
+  const eyebrow = isSaved ? (
+    <Chip icon="check" size="sm" variant="accent">
+      In your cookbook
+    </Chip>
+  ) : (
+    <Chip icon="sparkles" size="sm" variant="butter">
+      Just imported
+    </Chip>
+  );
+
+  /* ----------------------------------------- banner ----------------------------------------- */
+
+  const banner = (
+    <>
+      {notice}
+      {saving.status === "duplicate" ? (
+        <section aria-live="polite" className="extract-result-banner is-duplicate">
+          <span aria-hidden="true" className="extract-result-banner-icon">
+            <Icon name="bookmark-check" size={20} />
+          </span>
+          <div className="extract-result-banner-copy">
+            <p className="extract-result-banner-title">You saved this one before</p>
+            <p className="extract-result-banner-text">
+              Keep your copy, or replace it with this fresh import. Your notes and favorites stay.
+            </p>
+          </div>
+          <div className="extract-result-banner-actions">
+            <Button onClick={openRecipe} size="sm" variant="secondary">
+              Open my copy
+            </Button>
+            <Button
+              loading={isBusy}
+              onClick={() => void saving.replace()}
+              size="sm"
+              variant="tonal"
+            >
+              Replace it
+            </Button>
+          </div>
+        </section>
+      ) : null}
+      {saving.status === "error" || saving.status === "limit" ? (
+        <p className="extract-result-alert" role="alert">
+          <Icon name="alert-circle" size={18} />
+          {saving.error}
+        </p>
+      ) : null}
+      {isSaved ? (
+        <section aria-live="polite" className="extract-result-banner is-saved">
+          <span aria-hidden="true" className="extract-result-banner-icon">
+            <Icon name="check" size={20} strokeWidth={2.6} />
+          </span>
+          <div className="extract-result-banner-copy">
+            <p className="extract-result-banner-title">Saved to your cookbook</p>
+            <p className="extract-result-banner-text">
+              {saving.household === "none" || saving.household === "checking" ? (
+                "Cook it now, add it to your week or grab the groceries."
+              ) : (
+                <HouseholdChip onRetry={saving.retryShare} status={saving.household} />
+              )}
+            </p>
+          </div>
+          <div className="extract-result-banner-actions">
+            <Button icon="book-open" onClick={openRecipe} size="sm" variant="secondary">
+              Open recipe
+            </Button>
+            <Button icon="plus" onClick={onReset} size="sm" variant="ghost">
+              Import another
+            </Button>
+          </div>
+        </section>
+      ) : null}
+    </>
+  );
 
   return (
-    <div className="extract-result animate-fade-in">
-      {saveStatus === "syncing" && (
-        <div className="result-banner" role="status">
-          Saving locally and syncing to your household.
-        </div>
-      )}
+    <div
+      className={`extract-result page-enter${isDesktop ? " is-desktop" : ""}${
+        recipe.image?.url ? " has-hero-image" : ""
+      }`}
+    >
+      <div className="extract-result-toolbar">
+        <Button
+          className="extract-result-back"
+          icon="arrow-left"
+          onClick={requestImportAnother}
+          size="sm"
+          variant="ghost"
+        >
+          Import another
+        </Button>
+      </div>
 
-      {saveStatus === "error" && (
-        <div className="result-banner error-banner" role="alert">
-          {errorMessage}
-        </div>
-      )}
+      <RecipeView
+        banner={banner}
+        checks={checks}
+        heroActions={heroActions}
+        heroEyebrow={eyebrow}
+        recipe={recipe}
+        scaling={scaling}
+        source={source}
+        sourceImages={sourceImages}
+        timerContext={timerContext}
+        warnings={notes}
+      />
 
-      {syncWarning && (
-        <div className="result-banner warning-banner" role="status">
-          {syncWarning}
-        </div>
-      )}
+      {!isDesktop ? (
+        <RecipeActionBar label={isSaved ? "Recipe actions" : "Save this recipe"}>
+          {isSaved ? (
+            <>
+              {startCookingButton}
+              <IconButton
+                aria-label="Add to shopping list"
+                icon="shopping-basket"
+                onClick={() => setOpenSheet("shopping")}
+                size="lg"
+                variant="tonal"
+              />
+              {moreMenu}
+            </>
+          ) : (
+            <>
+              {saveButton}
+              <IconButton
+                aria-label="Start cooking"
+                icon="chef-hat"
+                onClick={() => setCookOpen(true)}
+                onPointerEnter={preloadCookMode}
+                size="lg"
+                variant="tonal"
+              />
+            </>
+          )}
+        </RecipeActionBar>
+      ) : null}
 
-      <article
-        aria-labelledby="extract-result-title"
-        className={`recipe-detail ${saveFeedbackActive ? "recipe-detail-save-pulse" : ""}`}
-        onAnimationEnd={() => setSaveFeedbackActive(false)}
+      <LazyCookMode
+        entryPoint="import_result"
+        onAddIngredientsToShoppingList={isSaved ? () => setOpenSheet("shopping") : undefined}
+        onClose={() => setCookOpen(false)}
+        open={cookOpen}
+        recipe={recipe}
+        recipeHref={recipeHref}
+        scaling={scaling}
+        sessionKey={sessionKey}
+      />
+
+      {saving.recipeId && (openSheet === "shopping" || openSheet === "plan") ? (
+        <OptionalChunkBoundary key={openSheet} name="Recipe organiser" onError={closeSheet}>
+          <Suspense fallback={null}>
+            {openSheet === "shopping" ? (
+              <AddRecipeToShoppingSheet
+                onClose={closeSheet}
+                recipe={recipe}
+                recipeId={saving.recipeId}
+                scaling={scaling.state}
+                userId={user?.id}
+              />
+            ) : (
+              <AddToPlanSheet
+                onClose={closeSheet}
+                open
+                recipeId={saving.recipeId}
+                recipeTitle={recipe.title}
+              />
+            )}
+          </Suspense>
+        </OptionalChunkBoundary>
+      ) : null}
+
+      <Sheet
+        description={`“${recipe.title}” isn’t in your cookbook yet.`}
+        footer={
+          <>
+            <Button onClick={discard} variant="ghost">
+              Discard
+            </Button>
+            <Button icon="bookmark-plus" loading={isBusy} onClick={() => void saveAndLeave()}>
+              Save it
+            </Button>
+          </>
+        }
+        onClose={closeSheet}
+        open={openSheet === "leave"}
+        size="sm"
+        title="Keep this recipe?"
       >
-        <header className="recipe-header">
-          {previewImageUrl ? (
-            <RecipeImageWithFallback
-              src={previewImageUrl}
-              imageClassName="extract-result-image"
-              fallback={null}
-            />
-          ) : null}
-          <h1 className="recipe-title" id="extract-result-title">
-            {recipe.title}
-          </h1>
-          <p className="recipe-metadata">{buildRecipeMetaLine(recipe)}</p>
-          <p className="recipe-source-line">
-            From{" "}
-            {safeSourceUrl ? (
-              <a
-                href={safeSourceUrl.href}
-                target="_blank"
-                rel="noreferrer"
-                className="recipe-source-link"
-              >
-                {sourceHost}
-              </a>
-            ) : (
-              sourceHost
-            )}
-          </p>
-          <div className="result-actions-top">
-            <Button variant="ghost" onClick={onReset}>
-              <Icon name="arrow-left" size={18} /> Import Another
-            </Button>
-            {saveStatus === "saved" ? (
-              <Button variant="outline" disabled>
-                <Icon name="bookmark-check" size={18} /> Saved in Library
-              </Button>
-            ) : saveStatus === "duplicate_prompt" ? (
-              <div className="duplicate-actions">
-                <span className="duplicate-msg">Recipe already exists. Overwrite?</span>
-                <Button variant="outline-danger" onClick={handleForceSave}>
-                  Yes, Overwrite
-                </Button>
-                <Button variant="ghost" onClick={() => setSaveStatus("idle")}>
-                  Cancel
-                </Button>
-              </div>
-            ) : (
-              <Button
-                variant="primary"
-                onClick={handleSave}
-                loading={saveStatus === "saving" || saveStatus === "syncing"}
-              >
-                <Icon name="bookmark-plus" size={18} /> Save Recipe
-              </Button>
-            )}
-          </div>
-        </header>
-
-        {sourceImages?.length ? (
-          <section className="recipe-section source-images-section">
-            <h2 className="section-title">Source Scan</h2>
-            <div className="source-image-grid">
-              {sourceImages.map((image, index) => (
-                <img
-                  alt={`Scanned recipe source ${index + 1}`}
-                  className="source-image-thumb"
-                  key={`${image.mimeType}-${index}`}
-                  src={image.dataUrl}
-                />
-              ))}
-            </div>
-          </section>
-        ) : null}
-
-        <section className="recipe-section recipe-ingredients-section">
-          <h2 className="section-title">Ingredients</h2>
-          {Object.entries(ingredientSections).map(([secName, ings]) => (
-            <div key={secName} className="ingredient-group">
-              {secName !== "Ingredients" && <h3 className="ingredient-group-title">{secName}</h3>}
-              <ul className="ingredients-list">
-                {ings.map((ing, idx) => (
-                  <li key={idx} className="ingredient-item">
-                    {ing.text}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
-        </section>
-
-        <section className="recipe-section recipe-steps-section">
-          <div className="recipe-section-header">
-            <h2 className="section-title">Method</h2>
-            <Button icon="chef-hat" onClick={() => setCookModeOpen(true)} size="sm" variant="tonal">
-              Cook mode
-            </Button>
-            <CookMode onClose={() => setCookModeOpen(false)} open={cookModeOpen} recipe={recipe} />
-          </div>
-          <ol className="steps-list">
-            {[...recipe.steps]
-              .sort((a, b) => a.index - b.index)
-              .map((step) => (
-                <li key={step.index} className="step-item">
-                  <span className="step-number">{step.index}</span>
-                  <p className="step-text">{step.text}</p>
-                </li>
-              ))}
-          </ol>
-        </section>
-
-        {hasNutrition && (
-          <section className="recipe-section recipe-nutrition-section">
-            <button
-              aria-controls="extract-nutrition-panel"
-              aria-expanded={nutritionExpanded}
-              className="nutrition-toggle"
-              onClick={() => setNutritionExpanded((expanded) => !expanded)}
-              type="button"
-            >
-              <span className="section-title">Nutrition</span>
-              <Icon name={nutritionExpanded ? "chevron-up" : "chevron-down"} size={20} />
-            </button>
-            <div
-              className="nutrition-grid"
-              hidden={!nutritionExpanded}
-              id="extract-nutrition-panel"
-            >
-              {(
-                [
-                  ["Calories", "calories"],
-                  ["Protein", "protein"],
-                  ["Carbohydrates", "carbohydrates"],
-                  ["Fat", "fat"],
-                  ["Fiber", "fiber"],
-                  ["Sugar", "sugar"],
-                  ["Sodium", "sodium"]
-                ] as const
-              )
-                .filter(
-                  ([, key]) => recipe.nutrition?.[key] != null && recipe.nutrition?.[key] !== ""
-                )
-                .map(([label, key]) => (
-                  <div key={key} className="nutrition-card">
-                    <span className="nutrition-card-label">{label}</span>
-                    <span className="nutrition-card-value">{recipe.nutrition?.[key]}</span>
-                  </div>
-                ))}
-            </div>
-          </section>
-        )}
-
-        {extraction.warnings.length > 0 && (
-          <section className="recipe-section recipe-warnings-section">
-            <h2 className="warnings-title">Extraction Notes</h2>
-            <ul className="warnings-list">
-              {extraction.warnings.map((warn, idx) => (
-                <li key={idx} className="warning-item">
-                  {warn}
-                </li>
-              ))}
-            </ul>
-          </section>
-        )}
-      </article>
+        <p className="extract-result-leave-copy">
+          Save it now and it’ll be waiting in your cookbook. Discard it and you can always import
+          the link again.
+        </p>
+      </Sheet>
     </div>
   );
 };

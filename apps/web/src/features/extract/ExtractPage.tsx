@@ -1,631 +1,635 @@
-import { wait } from "@linkdish/utils";
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { extractFirstUrl } from "@linkdish/recipe-domain";
+import React, { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 
 import { trackWebEvent, trackWebV2AnalyticsEvent } from "../../analytics/client";
-import { createWebAnalyticsId } from "../../analytics/session";
-import { apiClient, ExtractorApiError, type ExtractRecipeResponse } from "../../api/client";
-import { getApiErrorKind } from "../../api/errors";
+import { getFriendlyErrorMessage } from "../../api/error-message";
+import { isCachedUserPremium } from "../../auth/auth-cache";
 import { useAuth } from "../../auth/AuthProvider";
-import { Button, ButtonLink } from "../../components/Button";
-import { Card } from "../../components/Card";
-import { ErrorState } from "../../components/ErrorState";
+import { Icon } from "../../components/Icon";
 import { LoadingState } from "../../components/LoadingState";
-import { EXTRACTION_ERROR_LINES, pickFlavorLine } from "../../lib/flavor-copy";
-import { isOnline, addNetworkListeners } from "../../platform/detect-network";
-import { formatMonthlyQuotaCopy, hasMonthlyQuotaFields } from "../billing/quota-copy";
+import { SegmentedControl } from "../../components/SegmentedControl";
+import { useToast } from "../../components/Toast";
 import {
-  canStartWebImport,
-  canStartWebStrongExtraction,
-  getWebBillingTier,
-  spendWebImport,
-  spendWebStrongExtraction
-} from "../billing/web-billing";
+  enqueueImport,
+  removeImportQueueItem,
+  type ImportQueueItem
+} from "../../data/import-queue-store";
+import { useDocumentTitle } from "../../lib/use-document-title";
+import { RAIL_MEDIA_QUERY, useMediaQuery } from "../../lib/use-media-query";
+import { addNetworkListeners, isOnline } from "../../platform/detect-network";
+import { lazyWithRetry } from "../../platform/lazy";
+import { OptionalChunkBoundary } from "../../platform/OptionalChunkBoundary";
+import { ImportQueuePanel } from "../import-queue/ImportQueuePanel";
+import { useImportQueueRunner } from "../import-queue/use-import-queue-runner";
 import { InstallPrompt } from "../install/InstallPrompt";
+import { saveRecipe } from "../library/saved-recipe-store";
 import { useUpgradeSheet } from "../upgrade/UpgradeSheet";
 
-import { ExtractForm } from "./ExtractForm";
-import { ExtractionLoadingCopy } from "./ExtractionLoadingCopy";
-import { ExtractResult } from "./ExtractResult";
+import { ExtractionProgress } from "./ExtractionProgress";
+import { clearImportDraft, readImportDraft, writeImportDraft } from "./import-draft";
+import { createImageImportSourceUrl } from "./import-input";
+import { IMPORT_ANALYTICS_ROUTE } from "./import-shared";
+import { ImportLinkPanel } from "./ImportLinkPanel";
+import { DuplicateCard, ImportProblemCard, NeedsRetryCard, QueuedCard } from "./ImportOutcomeCards";
+import { ImportTextPanel } from "./ImportTextPanel";
+import { RecentImports } from "./RecentImports";
+import { SupportedSources } from "./SupportedSources";
+import { useImportSession } from "./use-import-session";
+import { formatImportUsage, useImportUsage } from "./use-import-usage";
+import { getImportSourceType } from "./use-save-import";
+
+import type { ImportDraft } from "./import-draft";
+import type { ImportActionId } from "./import-outcome";
+import type { ImportPhase } from "./use-import-session";
+import type { ImportUsage } from "./use-import-usage";
+import type { SegmentedOption } from "../../components/SegmentedControl";
+
 import "./ExtractPage.css";
 
-import type {
-  ExtractRecipeImage,
-  ExtractRecipeRequest,
-  QuotaStatus
-} from "@linkdish/api-contracts";
-import type { V2AnalyticsImportAttempt, V2AnalyticsImportProperties } from "@linkdish/utils";
+/*
+ * The result view (with the whole recipe layout) and the photo picker load on demand: the
+ * result starts downloading as soon as an import begins, the photos panel when the page is idle.
+ */
+const ExtractResult = lazyWithRetry(() =>
+  import("./ExtractResult").then((module) => ({ default: module.ExtractResult }))
+);
+const ImportPhotoPanel = lazyWithRetry(() =>
+  import("./ImportPhotoPanel").then((module) => ({ default: module.ImportPhotoPanel }))
+);
 
-type ExtractionState =
-  | "idle"
-  | "submitting_primary"
-  | "needs_retry"
-  | "submitting_fallback"
-  | "success"
-  | "failure";
-
-type ImportEntrySource = "in_app" | "share_sheet";
-type ImportAnalyticsProperties = V2AnalyticsImportProperties & {
-  source: ImportEntrySource;
-};
-type ActiveImport = {
-  correlationId: string;
-  properties: ImportAnalyticsProperties;
-  terminal: boolean;
-};
-
-const getSourceHost = (value: string): string | undefined => {
-  try {
-    return new URL(value).hostname.toLowerCase().replace(/^www\./u, "");
-  } catch {
-    return undefined;
-  }
-};
-
-const getUrlImportProperties = (
-  targetUrl: string,
-  attempt: V2AnalyticsImportAttempt,
-  source: ImportEntrySource
-): ImportAnalyticsProperties => {
-  const sourceHost = getSourceHost(targetUrl);
-
-  return {
-    attempt,
-    source,
-    source_type: source === "share_sheet" ? "share_target" : "url",
-    ...(sourceHost ? { source_host: sourceHost } : {})
-  };
-};
-
-const extractSharedUrl = (params: URLSearchParams): string | null => {
-  const urlParam = params.get("url")?.trim();
-  if (urlParam) {
-    return urlParam;
-  }
-
-  const textParam = params.get("text")?.trim();
-  const match = textParam?.match(/https?:\/\/[^\s<>"']+/iu);
-  return match?.[0] ?? null;
-};
-
-const getQuotaFromUnknown = (value: unknown): QuotaStatus | undefined => {
-  if (!value || typeof value !== "object" || !("quota" in value)) {
-    return undefined;
-  }
-
-  return (value as { quota?: QuotaStatus }).quota;
-};
-
-export const ExtractPage: React.FC = () => {
-  const { isAuthenticated, loading: authLoading, user } = useAuth();
-  const { requestUpgradeSheet } = useUpgradeSheet();
-  const [searchParams] = useSearchParams();
-  const [state, setState] = useState<ExtractionState>("idle");
-  const [url, setUrl] = useState("");
-  const [importSource, setImportSource] = useState<ImportEntrySource>("in_app");
-  const [sourceImages, setSourceImages] = useState<ExtractRecipeImage[] | undefined>();
-  const [response, setResponse] = useState<ExtractRecipeResponse | null>(null);
-  const [errorTitle, setErrorTitle] = useState("");
-  const [errorMessage, setErrorMessage] = useState("");
-  const [quotaExceeded, setQuotaExceeded] = useState(false);
-  const [offline, setOffline] = useState(!isOnline());
-  const [extractionErrorTitle] = useState(() => pickFlavorLine(EXTRACTION_ERROR_LINES));
-  const autoStartedShareTargetRef = useRef<string | null>(null);
-  const activeImportRef = useRef<ActiveImport | null>(null);
-  const sharedTargetUrl = useMemo(() => extractSharedUrl(searchParams), [searchParams]);
-
-  const abandonActiveImport = (reason: string) => {
-    const activeImport = activeImportRef.current;
-
-    if (!activeImport || activeImport.terminal) {
-      return;
-    }
-
-    activeImport.terminal = true;
-    trackWebV2AnalyticsEvent({
-      name: "import_abandoned",
-      correlationId: activeImport.correlationId,
-      routeOrScreen: "/",
-      properties: {
-        ...activeImport.properties,
-        abandonment_reason: reason
-      }
-    });
-  };
-
-  const beginImport = (properties: ImportAnalyticsProperties): ActiveImport => {
-    abandonActiveImport("superseded");
-    const activeImport = {
-      correlationId: createWebAnalyticsId(),
-      properties,
-      terminal: false
-    };
-    activeImportRef.current = activeImport;
-    return activeImport;
-  };
+/** True from the first time `value` is true (keeps a panel mounted once it has been opened). */
+const useLatch = (value: boolean): boolean => {
+  const [latched, setLatched] = useState(value);
 
   useEffect(() => {
-    return addNetworkListeners({
-      onOffline: () => setOffline(true),
-      onOnline: () => setOffline(false)
-    });
+    if (value) {
+      setLatched(true);
+    }
+  }, [value]);
+
+  return latched || value;
+};
+
+const preload = (component: { preload: () => Promise<unknown> }) => {
+  void component.preload().catch(() => undefined);
+};
+
+type ComposerMode = "link" | "text" | "photos";
+
+const MODE_OPTIONS: ReadonlyArray<SegmentedOption<ComposerMode>> = [
+  { icon: "link", label: "Link", value: "link" },
+  { icon: "file-text", label: "Paste text", value: "text" },
+  { icon: "camera", label: "Photos", value: "photos" }
+];
+
+interface ShareParams {
+  present: boolean;
+  url: string | null;
+  text: string | null;
+  tab: ComposerMode | null;
+}
+
+/** ?url= / ?text= from the share target (or links into the importer), plus ?tab=. */
+const readShareParams = (params: URLSearchParams): ShareParams => {
+  const urlParam = params.get("url")?.trim() ?? "";
+  const textParam = params.get("text")?.trim() ?? "";
+  const titleParam = params.get("title")?.trim() ?? "";
+  const tabParam = params.get("tab");
+  const url =
+    extractFirstUrl(urlParam) ?? extractFirstUrl(textParam) ?? extractFirstUrl(titleParam) ?? null;
+  const text = !url && textParam ? textParam : null;
+
+  return {
+    present: Boolean(urlParam || textParam || titleParam),
+    tab: tabParam === "text" || tabParam === "photos" || tabParam === "link" ? tabParam : null,
+    text,
+    url
+  };
+};
+
+const ImportUsageChip: React.FC<{ usage: ImportUsage }> = ({ usage }) => {
+  const low = usage.remaining <= 1;
+
+  return (
+    <p className={`extract-usage${usage.remaining === 0 ? " is-empty" : low ? " is-low" : ""}`}>
+      <Icon name="sparkles" size={14} />
+      <span className="num">{formatImportUsage(usage)}</span>
+      {usage.remaining === 0 ? (
+        <Link className="extract-usage-link" to="/pricing">
+          See plans
+        </Link>
+      ) : null}
+    </p>
+  );
+};
+
+/**
+ * /import — "Paste a link. Get cooking." Links, pasted text and photos go in; a staged,
+ * cancellable import runs; the recipe comes out ready to save and cook. Several links at once
+ * (or anything shared while offline) wait in the import queue.
+ */
+export const ExtractPage: React.FC = () => {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
+  const { isAuthenticated } = useAuth();
+  const { requestUpgradeSheet } = useUpgradeSheet();
+  const { showToast } = useToast();
+  const isDesktop = useMediaQuery(RAIL_MEDIA_QUERY);
+  const session = useImportSession();
+  const runner = useImportQueueRunner();
+  const { phase } = session;
+  const [initialShare] = useState(() => readShareParams(searchParams));
+  const [mode, setMode] = useState<ComposerMode>(
+    () => initialShare.tab ?? (initialShare.text ? "text" : "link")
+  );
+  const [text, setText] = useState(() => initialShare.text ?? "");
+  const [focusRequest, setFocusRequest] = useState(0);
+  const [offline, setOffline] = useState(() => !isOnline());
+  const [usageVersion, setUsageVersion] = useState(0);
+  const [restoredDraft, setRestoredDraft] = useState(false);
+  const photosOpened = useLatch(mode === "photos");
+  const usage = useImportUsage(session.quota, usageVersion);
+  const savedRef = useRef(false);
+  const phaseRef = useRef<ImportPhase>(phase);
+  phaseRef.current = phase;
+  const autoStartedRef = useRef(false);
+
+  useDocumentTitle(phase.status === "success" ? null : "Add a recipe");
+
+  useEffect(() => {
+    if (phase.status === "extracting" || phase.status === "success") {
+      preload(ExtractResult);
+    }
+  }, [phase.status]);
+
+  useEffect(() => {
+    const idle = window.requestIdleCallback;
+    const warm = () => preload(ImportPhotoPanel);
+
+    if (typeof idle === "function") {
+      const id = idle(warm, { timeout: 4000 });
+      return () => window.cancelIdleCallback?.(id);
+    }
+
+    const timer = window.setTimeout(warm, 2000);
+    return () => window.clearTimeout(timer);
   }, []);
 
-  // Calls backend with transient error retry (once after 750ms for 408/429/5xx)
-  const extractWithRetry = async (
-    request: ExtractRecipeRequest,
-    attempt: "primary" | "fallback",
-    isRetry = false
-  ): Promise<ExtractRecipeResponse> => {
-    try {
-      const nextRequest =
-        "images" in request
-          ? { ...request, attempt: "fallback" as const }
-          : { ...request, attempt };
-      return await apiClient.extractRecipe(nextRequest);
-    } catch (err) {
-      if (!isRetry && err instanceof ExtractorApiError) {
-        const status = err.statusCode;
-        if (status === 408 || status === 429 || (status >= 500 && status < 600)) {
-          // Wait 750ms and retry once
-          await wait(750);
-          return await extractWithRetry(request, attempt, true);
-        }
-      }
-      throw err;
-    }
-  };
-
-  const handleUrlSubmit = async (targetUrl: string, source: ImportEntrySource = "in_app") => {
-    if (authLoading) {
-      return;
-    }
-
-    const tier = getWebBillingTier(user);
-
-    if (!isOnline()) {
-      setState("failure");
-      setErrorTitle("You are offline");
-      setErrorMessage(
-        "Connect to the internet to extract a new recipe. Your saved recipes are still available in the Library."
-      );
-      setQuotaExceeded(false);
-      return;
-    }
-
-    if (!isAuthenticated) {
-      const importGate = canStartWebImport(tier);
-
-      if (!importGate.allowed) {
-        setState("failure");
-        setErrorTitle(importGate.title ?? "Recipe imports used");
-        setErrorMessage(
-          importGate.message ?? "Your LinkDish recipe import limit has been reached."
-        );
-        setQuotaExceeded(true);
-        requestUpgradeSheet("import_limit");
-        return;
-      }
-    }
-
-    setUrl(targetUrl);
-    setImportSource(source);
-    setSourceImages(undefined);
-    setState("submitting_primary");
-    setQuotaExceeded(false);
-    setErrorMessage("");
-    const importProperties = getUrlImportProperties(targetUrl, "primary", source);
-    const activeImport = beginImport(importProperties);
-    trackWebEvent({
-      correlationId: activeImport.correlationId,
-      eventName: "import_started",
-      routeOrScreen: "/",
-      properties: importProperties
-    });
-
-    try {
-      const res = await extractWithRetry(
-        {
-          url: targetUrl,
-          attempt: "primary",
-          correlationId: activeImport.correlationId
-        },
-        "primary"
-      );
-      handleResponse(res, "primary", importProperties, activeImport.correlationId);
-    } catch (err) {
-      handleError(err, importProperties, activeImport.correlationId);
-    }
-  };
-
-  const handleImagesSubmit = async (images: ExtractRecipeImage[]) => {
-    if (authLoading) {
-      return;
-    }
-
-    const tier = getWebBillingTier(user);
-
-    if (!isOnline()) {
-      setState("failure");
-      setErrorTitle("You are offline");
-      setErrorMessage("Connect to the internet to scan a new recipe.");
-      setQuotaExceeded(false);
-      return;
-    }
-
-    if (!isAuthenticated) {
-      const importGate = canStartWebImport(tier);
-      const strongGate = canStartWebStrongExtraction(tier);
-
-      if (!importGate.allowed || !strongGate.allowed) {
-        const gate = !importGate.allowed ? importGate : strongGate;
-        setState("failure");
-        setErrorTitle(gate.title ?? "Recipe imports used");
-        setErrorMessage(gate.message ?? "Your LinkDish recipe import limit has been reached.");
-        setQuotaExceeded(true);
-        requestUpgradeSheet("import_limit");
-        return;
-      }
-    }
-
-    const sourceUrl = `https://linkdish.app/image-imports/web-${Date.now()}-${crypto.randomUUID()}`;
-    setUrl(sourceUrl);
-    setImportSource("in_app");
-    setSourceImages(images);
-    setState("submitting_fallback");
-    setQuotaExceeded(false);
-    setErrorMessage("");
-    const importProperties: ImportAnalyticsProperties = {
-      attempt: "fallback",
-      source: "in_app",
-      source_type: "image"
-    };
-    const activeImport = beginImport(importProperties);
-    trackWebEvent({
-      correlationId: activeImport.correlationId,
-      eventName: "import_started",
-      routeOrScreen: "/",
-      properties: importProperties
-    });
-
-    try {
-      const res = await extractWithRetry(
-        {
-          attempt: "fallback",
-          images,
-          sourceUrl,
-          correlationId: activeImport.correlationId
-        },
-        "fallback"
-      );
-      handleResponse(res, "fallback", importProperties, activeImport.correlationId);
-    } catch (err) {
-      handleError(err, importProperties, activeImport.correlationId);
-    }
-  };
-
-  const handleFallbackSubmit = async () => {
-    if (authLoading) {
-      return;
-    }
-
-    const tier = getWebBillingTier(user);
-
-    if (!isOnline()) {
-      setState("failure");
-      setErrorTitle("You are offline");
-      setErrorMessage("Connect to the internet to retry extraction.");
-      setQuotaExceeded(false);
-      return;
-    }
-
-    if (!isAuthenticated) {
-      const strongGate = canStartWebStrongExtraction(tier);
-
-      if (!strongGate.allowed) {
-        setState("failure");
-        setErrorTitle(strongGate.title ?? "Recipe imports used");
-        setErrorMessage(
-          strongGate.message ?? "Your LinkDish recipe import limit has been reached."
-        );
-        setQuotaExceeded(true);
-        requestUpgradeSheet("import_limit");
-        return;
-      }
-    }
-
-    setState("submitting_fallback");
-    setErrorMessage("");
-    const importProperties = getUrlImportProperties(url, "fallback", importSource);
-    const existingImport = activeImportRef.current;
-    const activeImport =
-      existingImport && !existingImport.terminal ? existingImport : beginImport(importProperties);
-    activeImport.properties = importProperties;
-
-    try {
-      const res = await extractWithRetry(
-        { url, attempt: "fallback", correlationId: activeImport.correlationId },
-        "fallback"
-      );
-      handleResponse(res, "fallback", importProperties, activeImport.correlationId);
-    } catch (err) {
-      handleError(err, importProperties, activeImport.correlationId);
-    }
-  };
-
-  const handleResponse = (
-    res: ExtractRecipeResponse,
-    attempt: "primary" | "fallback",
-    importProperties: ImportAnalyticsProperties,
-    correlationId: string
-  ) => {
-    if (
-      activeImportRef.current?.correlationId !== correlationId ||
-      activeImportRef.current.terminal
-    ) {
-      return;
-    }
-
-    setResponse(res);
-    if (res.status === "success") {
-      trackWebV2AnalyticsEvent({
-        name: "import_succeeded",
-        correlationId,
-        routeOrScreen: "/",
-        properties: {
-          ...importProperties,
-          attempt,
-          fetch_mode: res.extraction.fetchMode,
-          provenance_count: res.extraction.provenance.length,
-          strategy: res.extraction.strategy,
-          warning_count: res.extraction.warnings.length
-        }
-      });
-
-      if (!isAuthenticated) {
-        spendWebImport(getWebBillingTier(user));
-
-        if (attempt === "fallback") {
-          spendWebStrongExtraction(getWebBillingTier(user));
-        }
-      }
-
-      const quota = getQuotaFromUnknown(res);
-      if (hasMonthlyQuotaFields(quota) && quota.remainingThisMonth === 1) {
-        requestUpgradeSheet("fourth_import_month");
-      }
-
-      setState("success");
-    } else if (res.status === "needs_retry") {
-      trackWebV2AnalyticsEvent({
-        name: "import_needs_retry",
-        correlationId,
-        routeOrScreen: "/",
-        properties: {
-          ...importProperties,
-          attempt,
-          retry_reason: res.reason
-        }
-      });
-      setState("needs_retry");
-    } else if (res.status === "failure") {
-      if (activeImportRef.current?.correlationId === correlationId) {
-        activeImportRef.current.terminal = true;
-      }
-      trackWebV2AnalyticsEvent({
-        name: "import_failed",
-        correlationId,
-        routeOrScreen: "/",
-        properties: {
-          ...importProperties,
-          attempt,
-          failure_reason: res.reason
-        }
-      });
-      setState("failure");
-      setErrorTitle(extractionErrorTitle);
-      setErrorMessage(formatMonthlyQuotaCopy(res.quota, res.userMessage));
-      if (res.reason === "quota_exceeded" || res.reason === "plan_limit") {
-        setQuotaExceeded(true);
-        requestUpgradeSheet("import_limit");
-      }
-    }
-
-    if (res.status === "success" && activeImportRef.current?.correlationId === correlationId) {
-      activeImportRef.current.terminal = true;
-    }
-  };
-
-  const handleError = (
-    err: unknown,
-    importProperties: ImportAnalyticsProperties,
-    correlationId: string
-  ) => {
-    if (
-      activeImportRef.current?.correlationId !== correlationId ||
-      activeImportRef.current.terminal
-    ) {
-      return;
-    }
-
-    activeImportRef.current.terminal = true;
-    // api-client v2 reports dropped connections and timeouts as ExtractorApiError (status 0).
-    const apiErrorKind = getApiErrorKind(err);
-    const isApiResponseError =
-      err instanceof ExtractorApiError && apiErrorKind !== "network" && apiErrorKind !== "timeout";
-    trackWebV2AnalyticsEvent({
-      name: "import_failed",
-      correlationId,
-      routeOrScreen: "/",
-      properties: {
-        ...importProperties,
-        failure_reason: isApiResponseError ? "api_error" : "network_error",
-        ...(isApiResponseError ? { status_code: err.statusCode } : {})
-      }
-    });
-    setState("failure");
-    setErrorTitle(extractionErrorTitle);
-
-    if (isApiResponseError) {
-      const quota = getQuotaFromUnknown(err.details);
-      setErrorMessage(
-        formatMonthlyQuotaCopy(quota, err.message || "The extraction server returned an error.")
-      );
-      if (err.statusCode === 403 || err.statusCode === 429) {
-        setQuotaExceeded(true);
-        requestUpgradeSheet("import_limit");
-      }
-    } else {
-      setErrorMessage(
-        "Could not connect to the LinkDish API. Please check your internet connection."
-      );
-    }
-  };
-
-  const handleReset = () => {
-    const activeImport = activeImportRef.current;
-
-    if (activeImport && !activeImport.terminal) {
-      activeImport.terminal = true;
-      trackWebV2AnalyticsEvent({
-        name: "import_cancelled",
-        correlationId: activeImport.correlationId,
-        routeOrScreen: "/",
-        properties: {
-          ...activeImport.properties,
-          cancellation_reason: "user_reset"
-        }
-      });
-    }
-
-    setState("idle");
-    setResponse(null);
-    setUrl("");
-    setSourceImages(undefined);
-    setErrorMessage("");
-    setImportSource("in_app");
-    setQuotaExceeded(false);
-  };
-
   useEffect(
-    () => () => {
-      abandonActiveImport("page_unmounted");
-    },
+    () =>
+      addNetworkListeners({
+        onOffline: () => setOffline(true),
+        onOnline: () => setOffline(false)
+      }),
     []
   );
 
+  // Share target (and links into the importer): start once, then clear the address bar so a
+  // reload never spends another import.
   useEffect(() => {
-    if (
-      !sharedTargetUrl ||
-      authLoading ||
-      state !== "idle" ||
-      autoStartedShareTargetRef.current === sharedTargetUrl
-    ) {
+    if (autoStartedRef.current || !initialShare.present) {
       return;
     }
 
-    autoStartedShareTargetRef.current = sharedTargetUrl;
-    void handleUrlSubmit(sharedTargetUrl, "share_sheet");
-  }, [authLoading, sharedTargetUrl, state]);
+    const timer = window.setTimeout(() => {
+      autoStartedRef.current = true;
+      void navigate({ pathname: "/import", search: "" }, { replace: true });
 
-  return (
-    <div className="extract-page container page-enter">
-      {offline && state === "idle" && (
-        <div className="offline-banner" role="status" aria-live="polite">
-          <span className="offline-icon">📡</span> You are offline. Saved recipes are still
-          available in your <Link to="/">Cookbook</Link>.
-        </div>
-      )}
+      if (initialShare.url) {
+        // A fresh page load is the OS share sheet (or a bookmarklet); in-app links carry a key.
+        const source = location.key === "default" ? "share_sheet" : "in_app";
+        void session.startUrl(initialShare.url, { source });
+      }
+    }, 0);
 
-      {state === "idle" && (
-        <>
-          <div className="hero-section">
-            <p className="hero-eyebrow">LINKDISH</p>
-            <h1 className="hero-title">
-              <span className="hero-title-line">Paste a link.</span>
-              <span className="hero-title-line hero-title-line-accent">Get cooking.</span>
-            </h1>
-          </div>
-          <ExtractForm
-            onSubmit={handleUrlSubmit}
-            onImagesSubmit={handleImagesSubmit}
-            loading={authLoading}
-          />
-          <InstallPrompt />
-        </>
-      )}
+    return () => window.clearTimeout(timer);
+    // Runs once, for the URL the page was opened with.
+  }, [initialShare, location.key, navigate, session.startUrl]);
 
-      {(state === "submitting_primary" || state === "submitting_fallback") && (
-        <LoadingState message={<ExtractionLoadingCopy />} />
-      )}
+  // An unsaved import from earlier in this session comes back instead of being lost.
+  useEffect(() => {
+    if (initialShare.url) {
+      return;
+    }
 
-      {state === "needs_retry" && response?.status === "needs_retry" && (
-        <Card className="needs-retry-card" variant="default">
-          <h2 className="retry-title">Deeper Extraction Recommended</h2>
-          <p className="retry-message">{response.userMessage}</p>
+    const draft = readImportDraft();
 
-          <div className="retry-diagnostics">
-            <p className="diagnostic-text">
-              Confidence Score:{" "}
-              <strong>{Math.round(response.diagnostics.confidenceScore * 100)}%</strong>
-            </p>
-            {response.diagnostics.missingFields.length > 0 && (
-              <p className="diagnostic-text">
-                Missing details: <strong>{response.diagnostics.missingFields.join(", ")}</strong>
-              </p>
-            )}
-          </div>
+    if (draft) {
+      setRestoredDraft(true);
+      session.restore({
+        attempt: draft.attempt,
+        correlationId: draft.correlationId,
+        request: draft.request,
+        response: draft.response,
+        status: "success"
+      });
+    }
+    // Only when the page first opens.
+  }, []);
 
-          <div className="retry-actions">
-            <Button variant="primary" onClick={handleFallbackSubmit} loading={authLoading}>
-              Try Deeper Extraction
-            </Button>
-            <Button variant="ghost" onClick={handleReset}>
-              Cancel & Start Over
-            </Button>
-          </div>
-        </Card>
-      )}
+  // Keep the unsaved result as a draft; bump the usage counter after each import.
+  useEffect(() => {
+    if (phase.status === "success") {
+      setUsageVersion((version) => version + 1);
 
-      {state === "success" && response?.status === "success" && (
+      if (!savedRef.current) {
+        writeImportDraft({
+          attempt: phase.attempt,
+          correlationId: phase.correlationId,
+          request: phase.request,
+          response: phase.response
+        });
+      }
+    } else {
+      savedRef.current = false;
+    }
+  }, [phase]);
+
+  // Closing the tab on an unsaved import asks first (in-app navigation keeps the draft).
+  const unsaved = phase.status === "success";
+  useEffect(() => {
+    if (!unsaved) {
+      return;
+    }
+
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!savedRef.current) {
+        event.preventDefault();
+      }
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [unsaved]);
+
+  // Leaving the Add tab with an unsaved import: offer to save it from wherever the cook goes.
+  const saveDraftFromToast = useCallback(
+    async (draft: ImportDraft) => {
+      const request = draft.request;
+      const input = {
+        extraction: {
+          fetchMode: draft.response.extraction.fetchMode,
+          provenance: draft.response.extraction.provenance,
+          strategy: draft.response.extraction.strategy,
+          warnings: draft.response.extraction.warnings
+        },
+        recipe: draft.response.recipe,
+        sourceImages:
+          request.kind === "images" && request.images.length ? request.images : undefined,
+        sourceUrl:
+          request.kind === "url"
+            ? request.url
+            : request.kind === "images"
+              ? request.sourceUrl
+              : (request.sourceUrl ?? draft.response.recipe.sourceUrl)
+      };
+
+      try {
+        const result = await saveRecipe(input, isCachedUserPremium());
+
+        if (result.error === "limit_exceeded") {
+          requestUpgradeSheet("save_limit");
+          showToast({ message: "Your free cookbook is full.", tone: "danger" });
+          return;
+        }
+
+        clearImportDraft();
+        const id = result.recipe?.id;
+
+        if (result.success) {
+          trackWebV2AnalyticsEvent({
+            name: "recipe_saved",
+            properties: { source_type: getImportSourceType(input), surface: "import_result" },
+            routeOrScreen: IMPORT_ANALYTICS_ROUTE
+          });
+        }
+
+        showToast({
+          ...(id
+            ? { action: { label: "Open", onClick: () => void navigate(`/recipes/${id}`) } }
+            : {}),
+          icon: "check-circle",
+          message: result.success
+            ? `Saved “${draft.response.recipe.title}” to your cookbook.`
+            : "That recipe is already in your cookbook.",
+          tone: "success"
+        });
+      } catch (error) {
+        showToast({ message: getFriendlyErrorMessage(error, "save"), tone: "danger" });
+      }
+    },
+    [navigate, requestUpgradeSheet, showToast]
+  );
+
+  useEffect(
+    () => () => {
+      const current = phaseRef.current;
+
+      if (current.status !== "success" || savedRef.current) {
+        return;
+      }
+
+      const draft = readImportDraft();
+
+      if (draft) {
+        showToast({
+          action: { label: "Save", onClick: () => void saveDraftFromToast(draft) },
+          duration: 9000,
+          icon: "bookmark-plus",
+          id: "import-unsaved",
+          message: `“${current.response.recipe.title}” isn’t saved yet.`
+        });
+      }
+    },
+    // Reads refs on unmount only.
+    []
+  );
+
+  /* ---------------------------------------- actions ----------------------------------------- */
+
+  const switchMode = useCallback((next: ComposerMode) => {
+    setMode(next);
+    setFocusRequest((request) => request + 1);
+  }, []);
+
+  const backTo = useCallback(
+    (next: ComposerMode) => {
+      session.reset();
+      clearImportDraft();
+      setRestoredDraft(false);
+      switchMode(next);
+    },
+    [session, switchMode]
+  );
+
+  const handleAction = (action: ImportActionId) => {
+    switch (action) {
+      case "retry":
+        session.retry();
+        return;
+      case "retry_ai":
+        if (phase.status === "needs_retry") {
+          void session.runFallback();
+        } else if (phase.status === "problem" && phase.request?.kind === "url") {
+          void session.startUrl(phase.request.url, {
+            attempt: "fallback",
+            skipDuplicateCheck: true
+          });
+        }
+        return;
+      case "paste_text":
+      case "edit_text":
+        backTo("text");
+        return;
+      case "scan_photo":
+      case "change_photos":
+        backTo("photos");
+        return;
+      case "another_link":
+        backTo("link");
+        return;
+      case "see_plans":
+        void navigate("/pricing");
+    }
+  };
+
+  const importMany = async (urls: string[]) => {
+    try {
+      const items = await Promise.all(urls.map((url) => enqueueImport({ source: "in_app", url })));
+
+      if (!isOnline()) {
+        trackWebEvent({
+          eventName: "import_queued_offline",
+          properties: { item_count: items.length, source: "in_app", source_type: "url" },
+          routeOrScreen: IMPORT_ANALYTICS_ROUTE
+        });
+      }
+
+      showToast({
+        icon: "list-checks",
+        message: isOnline()
+          ? `${items.length} recipes added to your import queue.`
+          : `You’re offline. ${items.length} recipes will import when you’re back.`,
+        tone: "success"
+      });
+    } catch (error) {
+      showToast({ message: getFriendlyErrorMessage(error, "save"), tone: "danger" });
+    }
+  };
+
+  const openQueueItem = (item: ImportQueueItem) => {
+    if (!item.url) {
+      return;
+    }
+
+    const url = item.url;
+    void removeImportQueueItem(item.id).catch(() => undefined);
+    void session.startUrl(url);
+  };
+
+  const startOver = () => {
+    session.reset();
+    clearImportDraft();
+    setRestoredDraft(false);
+  };
+
+  /* ----------------------------------------- render ----------------------------------------- */
+
+  if (phase.status === "success") {
+    const { request, response } = phase;
+    const sourceUrl =
+      request.kind === "url"
+        ? request.url
+        : request.kind === "images"
+          ? request.sourceUrl
+          : (request.sourceUrl ?? response.recipe.sourceUrl);
+
+    return (
+      <Suspense fallback={<LoadingState message="Plating your recipe…" variant="recipe" />}>
         <ExtractResult
-          recipe={response.recipe}
-          sourceUrl={url}
-          sourceImages={sourceImages}
+          confidenceScore={response.extraction.confidenceScore}
           extraction={{
             fetchMode: response.extraction.fetchMode,
             provenance: response.extraction.provenance,
             strategy: response.extraction.strategy,
             warnings: response.extraction.warnings
           }}
-          onReset={handleReset}
+          key={phase.correlationId}
+          missingFields={response.extraction.missingFields}
+          notice={
+            restoredDraft ? (
+              <p className="extract-restored" role="status">
+                <Icon name="bookmark-plus" size={18} />
+                This recipe was waiting for you. Save it so it doesn’t get away.
+              </p>
+            ) : null
+          }
+          onDiscard={() => clearImportDraft()}
+          onReset={startOver}
+          onSaved={() => {
+            savedRef.current = true;
+            clearImportDraft();
+            setRestoredDraft(false);
+          }}
+          recipe={response.recipe}
+          sourceImages={
+            request.kind === "images" && request.images.length ? request.images : undefined
+          }
+          sourceUrl={sourceUrl}
         />
-      )}
+      </Suspense>
+    );
+  }
 
-      {state === "failure" && (
-        <div className="failure-container animate-fade-in">
-          <ErrorState
-            title={errorTitle}
-            message={errorMessage}
-            onRetry={quotaExceeded ? undefined : handleReset}
-            retryLabel="Try another URL"
-          />
-          {quotaExceeded && (
-            <Card variant="subtle" className="quota-upgrade-card">
-              <h3>Need more imports?</h3>
-              <p>You have reached the import limit for your plan. Upgrade for higher quotas.</p>
-              <div className="upgrade-actions">
-                <ButtonLink to="/pricing" variant="primary">
-                  View Pricing Plans
-                </ButtonLink>
-                <Button variant="ghost" onClick={handleReset}>
-                  Back
-                </Button>
-              </div>
-            </Card>
-          )}
+  const focused = (content: React.ReactNode) => (
+    <div className="extract-page extract-page-focused page-enter">
+      <div className="extract-focused">{content}</div>
+    </div>
+  );
+
+  if (phase.status === "extracting") {
+    return focused(
+      <ExtractionProgress
+        attempt={phase.attempt}
+        auto={phase.auto}
+        onCancel={session.cancel}
+        onPasteInstead={() => {
+          session.cancel();
+          switchMode("text");
+        }}
+        request={phase.request}
+        startedAt={phase.startedAt}
+      />
+    );
+  }
+
+  if (phase.status === "needs_retry") {
+    return focused(
+      <NeedsRetryCard
+        metered={!isAuthenticated || usage !== null}
+        onAnotherLink={() => backTo("link")}
+        onPasteText={() => backTo("text")}
+        onRetryWithAi={() => void session.runFallback()}
+        response={phase.response}
+        url={phase.request.url}
+      />
+    );
+  }
+
+  if (phase.status === "problem") {
+    return focused(
+      <ImportProblemCard onAction={handleAction} onStartOver={startOver} problem={phase.problem} />
+    );
+  }
+
+  if (phase.status === "duplicate") {
+    return focused(
+      <DuplicateCard
+        existing={phase.existing}
+        onAnotherLink={() => backTo("link")}
+        onImportAgain={() => void session.startUrl(phase.request.url, { skipDuplicateCheck: true })}
+        onOpen={() => void navigate(`/recipes/${phase.existing.id}`)}
+      />
+    );
+  }
+
+  if (phase.status === "queued") {
+    return focused(
+      <>
+        <QueuedCard item={phase.item} onDone={startOver} />
+        <ImportQueuePanel onOpenItem={openQueueItem} runner={runner} />
+      </>
+    );
+  }
+
+  return (
+    <div className="extract-page page-enter">
+      {offline ? (
+        <p className="extract-offline" role="status">
+          <Icon name="wifi-off" size={18} />
+          You’re offline. Links you add will wait in your import queue.
+        </p>
+      ) : null}
+
+      <div className="extract-layout">
+        <div className="extract-main">
+          <header className="extract-hero">
+            <div className="extract-hero-top">
+              <p className="extract-eyebrow">Add a recipe</p>
+              {usage ? <ImportUsageChip usage={usage} /> : null}
+            </div>
+            <h1 className="extract-title">
+              Paste a link. <em className="extract-title-accent">Get cooking.</em>
+            </h1>
+            <p className="extract-lede">
+              From any recipe site, a video, a caption or a photo of the page. LinkDish keeps just
+              the recipe.
+            </p>
+          </header>
+
+          <div className="extract-composer">
+            <SegmentedControl
+              aria-label="How to add a recipe"
+              className="extract-modes"
+              fullWidth
+              onChange={switchMode}
+              options={MODE_OPTIONS}
+              value={mode}
+            />
+            <div className="extract-panel" hidden={mode !== "link"}>
+              <ImportLinkPanel
+                autoFocus={isDesktop && !initialShare.present && mode === "link"}
+                focusRequest={mode === "link" ? focusRequest : undefined}
+                onImport={(url) => void session.startUrl(url)}
+                onImportMany={(urls) => void importMany(urls)}
+                onPasteText={(pasted) => {
+                  setText(pasted);
+                  switchMode("text");
+                  showToast({
+                    icon: "file-text",
+                    message: "No link on your clipboard, so we put the text in Paste text."
+                  });
+                }}
+              />
+            </div>
+            <div className="extract-panel" hidden={mode !== "text"}>
+              <ImportTextPanel
+                focusRequest={mode === "text" ? focusRequest : undefined}
+                onChange={setText}
+                onImport={(value, options) => void session.startText(value, options)}
+                onImportLink={(url) => void session.startUrl(url)}
+                value={text}
+              />
+            </div>
+            <div className="extract-panel" hidden={mode !== "photos"}>
+              {photosOpened ? (
+                <OptionalChunkBoundary name="Photo import">
+                  <Suspense fallback={<LoadingState message="Getting the camera ready…" />}>
+                    <ImportPhotoPanel
+                      focusRequest={mode === "photos" ? focusRequest : undefined}
+                      onImport={(images) =>
+                        void session.startImages(images, createImageImportSourceUrl())
+                      }
+                    />
+                  </Suspense>
+                </OptionalChunkBoundary>
+              ) : null}
+            </div>
+          </div>
+
+          {/* Phones: the queue sits right under the field it was filled from. */}
+          {isDesktop ? null : <ImportQueuePanel onOpenItem={openQueueItem} runner={runner} />}
+
+          <SupportedSources />
         </div>
-      )}
+
+        <aside aria-label="Your imports" className="extract-aside">
+          {isDesktop ? <ImportQueuePanel onOpenItem={openQueueItem} runner={runner} /> : null}
+          <RecentImports />
+          <InstallPrompt />
+        </aside>
+      </div>
     </div>
   );
 };

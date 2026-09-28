@@ -21,14 +21,19 @@ export interface ImportQueueItem {
   error?: string | undefined;
   /** The saved recipe produced by a `done` import. */
   recipeId?: string | undefined;
+  /** Where the link came from (analytics): the share sheet or typed/pasted in the app. */
+  source?: ImportQueueSource | undefined;
   attempts: number;
   createdAt: string;
   updatedAt: string;
 }
 
+export type ImportQueueSource = "in_app" | "share_sheet";
+
 export interface ImportQueueInput {
   url?: string | undefined;
   text?: string | undefined;
+  source?: ImportQueueSource | undefined;
 }
 
 const MAX_TEXT_LENGTH = 20_000;
@@ -146,7 +151,8 @@ export async function enqueueImport(input: ImportQueueInput): Promise<ImportQueu
     status: "queued",
     updatedAt: now,
     ...(url ? { url } : {}),
-    ...(text ? { text } : {})
+    ...(text ? { text } : {}),
+    ...(input.source ? { source: input.source } : {})
   });
 }
 
