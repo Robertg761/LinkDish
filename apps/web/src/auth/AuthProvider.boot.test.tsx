@@ -20,6 +20,7 @@ import {
 } from "./clerk-bridge";
 
 const apiClientMocks = vi.hoisted(() => ({
+  deleteAccount: vi.fn(),
   getAuthConfig: vi.fn(),
   getSession: vi.fn(),
   logout: vi.fn(),
@@ -28,6 +29,7 @@ const apiClientMocks = vi.hoisted(() => ({
 
 vi.mock("../api/client", () => ({
   apiClient: {
+    deleteAccount: apiClientMocks.deleteAccount,
     getAuthConfig: apiClientMocks.getAuthConfig,
     getSession: apiClientMocks.getSession,
     logout: apiClientMocks.logout
@@ -131,6 +133,7 @@ describe("AuthProvider boot", () => {
     resetClerkBridgeForTests();
     seen.length = 0;
     vi.stubEnv("VITE_CLERK_PUBLISHABLE_KEY", "pk_test");
+    apiClientMocks.deleteAccount.mockReset();
     apiClientMocks.getAuthConfig.mockReset();
     apiClientMocks.getSession.mockReset();
     apiClientMocks.logout.mockReset().mockResolvedValue({ status: "logged_out" });
@@ -489,5 +492,69 @@ describe("AuthProvider boot", () => {
     expect(authText()).toBe("anonymous");
     expect(localStorage.getItem(AUTH_USER_CACHE_KEY)).toBeNull();
     expect(clerkMocks.auth.signOut).toHaveBeenCalled();
+  });
+
+  it("signs out once the account is deleted", async () => {
+    apiClientMocks.deleteAccount.mockResolvedValue({ status: "deleted" });
+    cacheConfig(clerkConfig);
+    cacheUser("clerk");
+    clerkMocks.auth.isSignedIn = true;
+    apiClientMocks.getAuthConfig.mockResolvedValue(clerkConfig);
+    apiClientMocks.getSession.mockResolvedValue({ authenticated: true, user });
+
+    renderAuth();
+    await waitFor(() => expect(apiClientMocks.getSession).toHaveBeenCalled());
+
+    await act(async () => {
+      await seen.at(-1)?.deleteAccount("cook@example.com");
+    });
+
+    expect(apiClientMocks.logout).toHaveBeenCalled();
+    expect(authText()).toBe("anonymous");
+  });
+
+  it("never signs out an account that signed in while another was being deleted", async () => {
+    let finishDelete: (value: unknown) => void = () => undefined;
+    apiClientMocks.deleteAccount.mockReturnValue(
+      new Promise((resolve) => {
+        finishDelete = resolve;
+      })
+    );
+    cacheConfig(clerkConfig);
+    cacheUser("clerk");
+    // The cached account is shown while Clerk loads.
+    clerkMocks.present = false;
+    apiClientMocks.getAuthConfig.mockResolvedValue(clerkConfig);
+    const nextUser = { billingPlan: "free" as const, email: "next@example.com", id: "user_2" };
+    apiClientMocks.getSession.mockResolvedValue({ authenticated: true, user: nextUser });
+
+    renderAuth();
+    expect(authText()).toBe("user:cook@example.com");
+
+    let deleted: Promise<void> | undefined;
+    act(() => {
+      deleted = seen.at(-1)?.deleteAccount("cook@example.com");
+    });
+    expect(apiClientMocks.deleteAccount).toHaveBeenCalledWith({
+      confirmEmail: "cook@example.com"
+    });
+
+    // Clerk loads with a different account than the cached one.
+    clerkMocks.present = true;
+    clerkMocks.auth.isSignedIn = true;
+    act(() => {
+      syncClerk();
+    });
+    await waitFor(() => expect(authText()).toBe("user:next@example.com"));
+
+    await act(async () => {
+      finishDelete({ status: "deleted" });
+      await deleted;
+    });
+
+    expect(authText()).toBe("user:next@example.com");
+    expect(apiClientMocks.logout).not.toHaveBeenCalled();
+    expect(clerkMocks.auth.signOut).not.toHaveBeenCalled();
+    expect(readCachedAuthUser()?.user.email).toBe("next@example.com");
   });
 });

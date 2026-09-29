@@ -357,6 +357,21 @@ describe("import queue runner", () => {
     });
   });
 
+  it("lets a claimed link go, spending nothing, when another account signed in before it started", async () => {
+    await enqueueImport({ url: "https://a.com/soup" });
+    let checks = 0;
+
+    await expect(
+      runImportQueue(
+        // Still the same account when the run picks the link, not by the time it would import it.
+        context({ isCurrent: () => (checks += 1) === 1, isAuthenticated: false, tier: "free" })
+      )
+    ).resolves.toEqual({ paused: null, processed: 0 });
+
+    expect(apiMocks.extractRecipe).not.toHaveBeenCalled();
+    expect(await statuses()).toEqual([["https://a.com/soup", "queued"]]);
+  });
+
   it("skips links that are already in the cookbook without spending an import", async () => {
     fakeIdb.seed(SAVED_RECIPES_STORE_NAME, [saved("existing", "https://www.a.com/soup")]);
     await enqueueImport({ url: "https://a.com/soup/?utm_source=x" });
@@ -808,6 +823,32 @@ describe("import queue runner", () => {
     expect((await getImportQueue())[0]?.status).toBe("done");
   });
 
+  it("doesn't use AI help by itself for an account that signed in since", async () => {
+    await enqueueImport({ url: "https://www.tiktok.com/@cook/video/1" });
+    let sameAccount = true;
+    apiMocks.extractRecipe.mockImplementationOnce(() => {
+      sameAccount = false;
+      return Promise.resolve({
+        diagnostics: { confidenceScore: 0.3, missingFields: ["ingredients"] },
+        reason: "unsupported_primary_extraction",
+        sourceType: "social",
+        status: "needs_retry",
+        suggestedAttempt: "fallback",
+        userMessage: "Needs help"
+      });
+    });
+
+    await expect(
+      runImportQueue(
+        context({ isCurrent: () => sameAccount, isAuthenticated: false, tier: "free" })
+      )
+    ).resolves.toEqual({ paused: null, processed: 0 });
+
+    // The link waits for a run of the account signed in now, and no signed-out AI help is spent.
+    expect(apiMocks.extractRecipe).toHaveBeenCalledOnce();
+    expect(await statuses()).toEqual([["https://www.tiktok.com/@cook/video/1", "queued"]]);
+  });
+
   it("asks for a hand when a free web page needs AI help", async () => {
     await enqueueImport({ url: "https://blog.com/stew" });
     apiMocks.extractRecipe.mockResolvedValue({
@@ -1172,6 +1213,7 @@ describe("import queue runner", () => {
       expect(apiMocks.extractRecipe).toHaveBeenCalledOnce();
       expect(readWebBillingUsage()).toMatchObject({ imports: 0, strongExtractions: 0 });
       expect(await statuses()).toEqual([["https://www.instagram.com/p/abc", "queued"]]);
+      expect(v2Events("import_abandoned")).toHaveLength(1);
     });
   });
 

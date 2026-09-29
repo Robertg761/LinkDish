@@ -157,18 +157,27 @@ const seed = async (records: WebSavedRecipe[]) => {
   fakeIdb.seed(SAVED_RECIPES_STORE_NAME, records);
 };
 
-const renderAt = (path: string) =>
-  render(
-    <ToastProvider>
-      <MemoryRouter initialEntries={[path]}>
-        <Routes>
-          <Route element={<RecipePage />} path="/recipes/:id" />
-          <Route element={<RecipePage />} path="/recipes/shared/:sharedId" />
-          <Route element={<div>Cookbook route</div>} path="/" />
-        </Routes>
-      </MemoryRouter>
-    </ToastProvider>
-  );
+const recipeTree = (path: string) => (
+  <ToastProvider>
+    <MemoryRouter initialEntries={[path]}>
+      <Routes>
+        <Route element={<RecipePage />} path="/recipes/:id" />
+        <Route element={<RecipePage />} path="/recipes/shared/:sharedId" />
+        <Route element={<div>Cookbook route</div>} path="/" />
+      </Routes>
+    </MemoryRouter>
+  </ToastProvider>
+);
+
+const renderAt = (path: string) => render(recipeTree(path));
+
+const deferred = <T,>() => {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((settle) => {
+    resolve = settle;
+  });
+  return { promise, resolve };
+};
 
 const openMenu = () => {
   fireEvent.click(screen.getByRole("button", { name: "More actions" }));
@@ -651,6 +660,31 @@ describe("RecipePage saved route", () => {
     await waitFor(() => expect(stored("recipe_local")?.sync?.status).toBe("synced"));
   });
 
+  it("doesn't report a household share to the account that signed in while it was out", async () => {
+    authMocks.user = { billingPlan: "family", email: "a@example.com", id: "user_1" };
+    const share = deferred<{ recipe: SharedRecipe }>();
+    apiMocks.getHousehold.mockResolvedValue({ household: { id: "household_1" } });
+    apiMocks.createSharedRecipe.mockReturnValue(share.promise);
+    await seed([savedRecipe()]);
+    const view = renderAt("/recipes/recipe_local");
+    await screen.findByRole("heading", { level: 1, name: "Weeknight Chili" });
+
+    fireEvent.click(within(openMenu()).getByRole("menuitem", { name: "Share with household" }));
+    await waitFor(() => expect(apiMocks.createSharedRecipe).toHaveBeenCalled());
+
+    authMocks.user = { billingPlan: "free", email: "b@example.com", id: "user_2" };
+    view.rerender(recipeTree("/recipes/recipe_local"));
+
+    await act(async () => {
+      share.resolve({ recipe: { ...sharedRecipe, id: "shared_new" } });
+      await share.promise;
+    });
+
+    // The device's copy still records the share; the toast was the last account's.
+    await waitFor(() => expect(stored("recipe_local")?.sync?.status).toBe("synced"));
+    expect(screen.queryByText("Synced to your household.")).not.toBeInTheDocument();
+  });
+
   it("explains a failed sync instead of failing silently", async () => {
     authMocks.user = { billingPlan: "family", email: "a@example.com", id: "user_1" };
     apiMocks.getHousehold.mockRejectedValue(new Error("offline"));
@@ -800,6 +834,63 @@ describe("RecipePage saved route", () => {
     ).not.toContain("local_only");
   });
 
+  it("doesn't open the shopping sheet on the last account's household answer", async () => {
+    authMocks.user = { billingPlan: "family", email: "a@example.com", id: "user_1" };
+    const householdCheck = deferred<{ household: { id: string } | null }>();
+    apiMocks.getHousehold.mockReturnValue(householdCheck.promise);
+    await seed([savedRecipe()]);
+    const view = renderAt("/recipes/recipe_local");
+    await screen.findByRole("heading", { level: 1, name: "Weeknight Chili" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Add to shopping list" }));
+    await waitFor(() => expect(apiMocks.getHousehold).toHaveBeenCalled());
+
+    // Clerk answers with a different account than the cached one.
+    authMocks.user = { billingPlan: "free", email: "b@example.com", id: "user_2" };
+    view.rerender(recipeTree("/recipes/recipe_local"));
+
+    await act(async () => {
+      householdCheck.resolve({ household: { id: "household_a" } });
+      await householdCheck.promise;
+    });
+
+    expect(screen.queryByRole("button", { name: /^Add \d+ items?$/u })).not.toBeInTheDocument();
+    expect(fakeIdb.records<WebShoppingItem>(SHOPPING_ITEMS_STORE_NAME)).toHaveLength(0);
+  });
+
+  it("closes a shopping sheet opened for the last account, so its household never decides the next one's", async () => {
+    authMocks.user = { billingPlan: "family", email: "a@example.com", id: "user_1" };
+    apiMocks.getHousehold.mockImplementation(() =>
+      Promise.resolve({
+        household: authMocks.user?.id === "user_1" ? { id: "household_a" } : null
+      })
+    );
+    apiMocks.upsertShoppingItems.mockReturnValue(new Promise(() => undefined));
+    await seed([savedRecipe()]);
+    const view = renderAt("/recipes/recipe_local");
+    await screen.findByRole("heading", { level: 1, name: "Weeknight Chili" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Add to shopping list" }));
+    expect(await screen.findByRole("button", { name: /^Add \d+ items?$/u })).toBeVisible();
+
+    // Clerk answers with a different account (with no household) than the cached one.
+    authMocks.user = { billingPlan: "free", email: "b@example.com", id: "user_2" };
+    view.rerender(recipeTree("/recipes/recipe_local"));
+
+    expect(screen.queryByRole("button", { name: /^Add \d+ items?$/u })).not.toBeInTheDocument();
+
+    // The next account's own sheet goes by its own household.
+    fireEvent.click(screen.getByRole("button", { name: "Add to shopping list" }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Add \d+ items?$/u }));
+
+    await waitFor(() =>
+      expect(fakeIdb.records<WebShoppingItem>(SHOPPING_ITEMS_STORE_NAME).length).toBeGreaterThan(0)
+    );
+    expect(
+      fakeIdb.records<WebShoppingItem>(SHOPPING_ITEMS_STORE_NAME).map((item) => item.sync.status)
+    ).not.toContain("dirty");
+  });
+
   it("opens the editor for ?edit=1 links", async () => {
     await seed([savedRecipe()]);
     renderAt("/recipes/recipe_local?edit=1");
@@ -921,6 +1012,70 @@ describe("RecipePage shared route", () => {
       "shared_1",
       expect.objectContaining({ notes: "Family favorite" })
     );
+  });
+
+  it("keeps a family edit that lands after an account switch from the next account", async () => {
+    const update = deferred<{ recipe: SharedRecipe }>();
+    apiMocks.updateSharedRecipe.mockReturnValue(update.promise);
+    const view = renderAt("/recipes/shared/shared_1");
+    await screen.findByRole("heading", { level: 1, name: "Family Chili" });
+
+    fireEvent.click(within(openMenu()).getByRole("menuitem", { name: "Edit recipe" }));
+    const editor = screen.getByRole("dialog", { name: "Edit family recipe" });
+    fireEvent.change(within(editor).getByLabelText("Title"), {
+      target: { value: "Family Chili Deluxe" }
+    });
+    fireEvent.click(within(editor).getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(apiMocks.updateSharedRecipe).toHaveBeenCalled());
+
+    // Another account signs straight in; its household has no such recipe.
+    authMocks.user = { billingPlan: "family", email: "other@example.com", id: "user_other" };
+    apiMocks.getSharedRecipes.mockResolvedValue({ recipes: [] });
+    view.rerender(recipeTree("/recipes/shared/shared_1"));
+    expect(await screen.findByText("Family recipe not found")).toBeInTheDocument();
+
+    await act(async () => {
+      update.resolve({
+        recipe: {
+          ...sharedRecipe,
+          recipe: { ...sharedRecipe.recipe, title: "Family Chili Deluxe" }
+        }
+      });
+      await update.promise;
+    });
+
+    expect(screen.getByText("Family recipe not found")).toBeInTheDocument();
+    expect(screen.queryByText("Family Chili Deluxe")).not.toBeInTheDocument();
+    expect(screen.queryByText("Family recipe updated.")).not.toBeInTheDocument();
+  });
+
+  it("doesn't finish unsharing for the account that signed in since", async () => {
+    const unshare = deferred<undefined>();
+    apiMocks.deleteSharedRecipe.mockReturnValue(unshare.promise);
+    const view = renderAt("/recipes/shared/shared_1");
+    await screen.findByRole("heading", { level: 1, name: "Family Chili" });
+
+    fireEvent.click(within(openMenu()).getByRole("menuitem", { name: "Unshare from household" }));
+    fireEvent.click(
+      within(screen.getByRole("dialog", { name: "Unshare recipe?" })).getByRole("button", {
+        name: "Unshare"
+      })
+    );
+    await waitFor(() => expect(apiMocks.deleteSharedRecipe).toHaveBeenCalledWith("shared_1"));
+
+    authMocks.user = { billingPlan: "family", email: "other@example.com", id: "user_other" };
+    apiMocks.getSharedRecipes.mockResolvedValue({ recipes: [] });
+    view.rerender(recipeTree("/recipes/shared/shared_1"));
+    expect(await screen.findByText("Family recipe not found")).toBeInTheDocument();
+
+    await act(async () => {
+      unshare.resolve(undefined);
+      await unshare.promise;
+    });
+
+    expect(screen.queryByText("“Family Chili” is no longer shared.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Cookbook route")).not.toBeInTheDocument();
+    expect(screen.getByText("Family recipe not found")).toBeInTheDocument();
   });
 
   it("hides edit and unshare for other household members", async () => {

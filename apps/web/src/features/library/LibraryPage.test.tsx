@@ -172,17 +172,26 @@ const LocationProbe: React.FC = () => {
   return <p data-testid="location">{`${location.pathname}${location.search}`}</p>;
 };
 
-const renderPage = () =>
-  render(
-    <ToastProvider>
-      <MemoryRouter initialEntries={["/"]}>
-        <Routes>
-          <Route element={<LibraryPage />} path="/" />
-          <Route element={<LocationProbe />} path="*" />
-        </Routes>
-      </MemoryRouter>
-    </ToastProvider>
-  );
+const libraryTree = () => (
+  <ToastProvider>
+    <MemoryRouter initialEntries={["/"]}>
+      <Routes>
+        <Route element={<LibraryPage />} path="/" />
+        <Route element={<LocationProbe />} path="*" />
+      </Routes>
+    </MemoryRouter>
+  </ToastProvider>
+);
+
+const renderPage = () => render(libraryTree());
+
+const deferred = <T,>() => {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((settle) => {
+    resolve = settle;
+  });
+  return { promise, resolve };
+};
 
 const cardFor = (title: string): HTMLElement => {
   const link = screen.getByRole("link", { name: title });
@@ -536,6 +545,35 @@ describe("LibraryPage", () => {
     expect(apiMocks.deleteSharedRecipe).toHaveBeenCalledWith("shared_9");
   });
 
+  it("closes a Delete everywhere confirmation when the account that opened it signs out", async () => {
+    authMocks.user = { billingPlan: "family", email: "owner@example.com", id: "user_owner" };
+    seedRecipes([
+      makeRecipe("chili", {
+        extra: { sync: { sharedRecipeId: "shared_9", status: "synced" } },
+        title: "Chili"
+      })
+    ]);
+
+    const view = renderPage();
+    await screen.findByText("Chili");
+    fireEvent.click(within(openCardMenu("Chili")).getByRole("menuitem", { name: "Delete" }));
+    expect(await screen.findByRole("dialog", { name: "Delete shared recipe?" })).toBeVisible();
+
+    // Signed out (say, from another tab): the household delete was for the account that left.
+    authMocks.user = null;
+    view.rerender(libraryTree());
+
+    expect(screen.queryByRole("dialog", { name: "Delete shared recipe?" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Delete everywhere" })).not.toBeInTheDocument();
+
+    // Nor does it come back when that account signs in again.
+    authMocks.user = { billingPlan: "family", email: "owner@example.com", id: "user_owner" };
+    view.rerender(libraryTree());
+    expect(screen.queryByRole("dialog", { name: "Delete shared recipe?" })).not.toBeInTheDocument();
+    expect(apiMocks.deleteSharedRecipe).not.toHaveBeenCalled();
+    expect(storedRecipe("chili")).toBeDefined();
+  });
+
   it("removes a synced recipe here once its household copy is gone, even if its scans can't be read", async () => {
     authMocks.user = { billingPlan: "family", email: "owner@example.com", id: "user_owner" };
     seedRecipes([
@@ -627,6 +665,84 @@ describe("LibraryPage", () => {
       "local_only"
     );
     resetShoppingSyncForTests();
+  });
+
+  describe("the shopping sheet when another account signs straight in", () => {
+    const addButton = /^Add \d+ items?$/u;
+    const openShoppingFor = (title: string) =>
+      fireEvent.click(
+        within(openCardMenu(title)).getByRole("menuitem", { name: "Add to shopping list" })
+      );
+
+    beforeEach(() => {
+      resetShoppingListStoreForTests();
+      resetShoppingSyncForTests();
+      apiMocks.upsertShoppingItems.mockReturnValue(new Promise(() => undefined));
+      seedRecipes([makeRecipe("soup", { ingredients: ["2 carrots"], title: "Tomato Soup" })]);
+    });
+
+    afterEach(() => {
+      resetShoppingSyncForTests();
+    });
+
+    it("closes the sheet the last account opened", async () => {
+      authMocks.user = { billingPlan: "family", email: "a@example.com", id: "user_a" };
+      apiMocks.getHousehold.mockResolvedValue({ household: { id: "household_a" } });
+
+      const view = renderPage();
+      await screen.findByRole("link", { name: "Tomato Soup" });
+      openShoppingFor("Tomato Soup");
+      expect(await screen.findByRole("button", { name: addButton })).toBeInTheDocument();
+
+      authMocks.user = { billingPlan: "free", email: "b@example.com", id: "user_b" };
+      view.rerender(libraryTree());
+
+      expect(screen.queryByRole("button", { name: addButton })).not.toBeInTheDocument();
+      expect(fakeIdb.records<WebShoppingItem>(SHOPPING_ITEMS_STORE_NAME)).toHaveLength(0);
+    });
+
+    it("never lets the last account's household answer decide where the next one's items go", async () => {
+      const checks = {
+        user_a: deferred<{ household: { id: string } | null }>(),
+        user_b: deferred<{ household: { id: string } | null }>()
+      };
+      apiMocks.getHousehold.mockImplementation(
+        () => checks[(authMocks.user?.id ?? "user_b") as keyof typeof checks].promise
+      );
+      authMocks.user = { billingPlan: "family", email: "a@example.com", id: "user_a" };
+
+      const view = renderPage();
+      await screen.findByRole("link", { name: "Tomato Soup" });
+      openShoppingFor("Tomato Soup");
+      await waitFor(() => expect(apiMocks.getHousehold).toHaveBeenCalled());
+
+      // B has no household; A's check for the same recipe is still out.
+      authMocks.user = { billingPlan: "free", email: "b@example.com", id: "user_b" };
+      view.rerender(libraryTree());
+      expect(screen.queryByRole("button", { name: addButton })).not.toBeInTheDocument();
+
+      openShoppingFor("Tomato Soup");
+      const add = await screen.findByRole("button", { name: addButton });
+
+      await act(async () => {
+        checks.user_b.resolve({ household: null });
+        await checks.user_b.promise;
+      });
+      await act(async () => {
+        checks.user_a.resolve({ household: { id: "household_a" } });
+        await checks.user_a.promise;
+      });
+
+      fireEvent.click(add);
+
+      await waitFor(() =>
+        expect(fakeIdb.records<WebShoppingItem>(SHOPPING_ITEMS_STORE_NAME)).toHaveLength(1)
+      );
+      expect(fakeIdb.records<WebShoppingItem>(SHOPPING_ITEMS_STORE_NAME)[0]?.sync.status).toBe(
+        "local_only"
+      );
+      expect(await screen.findByText("1 item added to your shopping list")).toBeInTheDocument();
+    });
   });
 
   it("duplicates a recipe and opens the copy", async () => {
@@ -1271,6 +1387,56 @@ describe("LibraryPage", () => {
     expect(apiMocks.deleteSharedRecipe).toHaveBeenCalledWith("shared_1");
   });
 
+  it("closes the last account's Remove from Family and drops what it answers", async () => {
+    authMocks.user = { billingPlan: "family", email: "owner@example.com", id: "user_owner" };
+    let finishRemoval: (value: unknown) => void = () => undefined;
+    apiMocks.deleteSharedRecipe.mockReturnValue(
+      new Promise((resolve) => {
+        finishRemoval = resolve;
+      })
+    );
+    apiMocks.getSharedRecipes.mockResolvedValueOnce({ recipes: [sharedRecipe()] });
+    apiMocks.getSharedRecipes.mockResolvedValueOnce({
+      recipes: [
+        sharedRecipe({
+          householdId: "household_2",
+          id: "shared_9",
+          ownerUserId: "user_next",
+          recipe: makeRecipe("stew", { title: "Next Stew" }).recipe
+        })
+      ]
+    });
+    seedRecipes([makeRecipe("soup", { title: "Tomato Soup" })]);
+
+    const view = renderPage();
+    await screen.findByText("Tomato Soup");
+    fireEvent.click(screen.getByRole("radio", { name: "Family" }));
+    await screen.findByRole("link", { name: "Family Chili" });
+
+    fireEvent.click(
+      within(openCardMenu("Family Chili")).getByRole("menuitem", { name: "Remove from Family" })
+    );
+    const dialog = await screen.findByRole("dialog", { name: "Remove from Family?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Remove" }));
+    await waitFor(() => expect(apiMocks.deleteSharedRecipe).toHaveBeenCalledWith("shared_1"));
+
+    // Another account signs straight in, with a household of its own.
+    authMocks.user = { billingPlan: "family", email: "next@example.com", id: "user_next" };
+    view.rerender(libraryTree());
+
+    expect(screen.queryByRole("dialog", { name: "Remove from Family?" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Remove “Family Chili”/u)).not.toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: "Next Stew" })).toBeInTheDocument();
+
+    await act(async () => {
+      finishRemoval({ deleted: true });
+      await Promise.resolve();
+    });
+
+    expect(screen.queryByText("Removed from your Family cookbook")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Next Stew" })).toBeInTheDocument();
+  });
+
   it("shares a personal recipe to Family and tracks the first share", async () => {
     authMocks.user = { billingPlan: "family", email: "owner@example.com", id: "user_owner" };
     apiMocks.getHousehold.mockResolvedValue({ household: { id: "household_1" } });
@@ -1294,6 +1460,33 @@ describe("LibraryPage", () => {
       routeOrScreen: "/"
     });
     expect(await within(cardFor("Tomato Soup")).findByText("Family")).toBeInTheDocument();
+  });
+
+  it("doesn't report a Family share to the account that signed in while it was out", async () => {
+    authMocks.user = { billingPlan: "family", email: "owner@example.com", id: "user_owner" };
+    const share = deferred<{ recipe: SharedRecipe }>();
+    apiMocks.getHousehold.mockResolvedValue({ household: { id: "household_1" } });
+    apiMocks.createSharedRecipe.mockReturnValue(share.promise);
+    seedRecipes([makeRecipe("soup", { title: "Tomato Soup" })]);
+
+    const view = renderPage();
+    await screen.findByText("Tomato Soup");
+    fireEvent.click(
+      within(openCardMenu("Tomato Soup")).getByRole("menuitem", { name: "Share to Family" })
+    );
+    await waitFor(() => expect(apiMocks.createSharedRecipe).toHaveBeenCalled());
+
+    authMocks.user = { billingPlan: "free", email: "next@example.com", id: "user_next" };
+    view.rerender(libraryTree());
+
+    await act(async () => {
+      share.resolve({ recipe: sharedRecipe({ id: "shared_new", updatedAt: iso(0) }) });
+      await share.promise;
+    });
+
+    // The device's copy still records the share; the toast was the last account's.
+    await waitFor(() => expect(storedRecipe("soup")?.sync?.sharedRecipeId).toBe("shared_new"));
+    expect(screen.queryByText("Shared with your Family cookbook")).not.toBeInTheDocument();
   });
 
   it("remembers search and filters for the trip to a recipe and back", async () => {

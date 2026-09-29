@@ -30,6 +30,10 @@ vi.mock("../../analytics/client", () => ({
 }));
 
 const authMocks = vi.hoisted(() => ({
+  /** A signed-in session whose credentials can't be read yet (a cached Clerk user). */
+  credentialsPending: false,
+  /** Which credentials requests carry ("clerk" once Clerk signs in late). */
+  credentialsSource: "session",
   isAuthenticated: true,
   refreshUser: vi.fn(),
   user: {
@@ -41,6 +45,9 @@ const authMocks = vi.hoisted(() => ({
 
 vi.mock("../../auth/AuthProvider", () => ({
   useAuth: () => ({
+    credentialsKey: authMocks.credentialsPending
+      ? null
+      : `${authMocks.credentialsSource}:${authMocks.isAuthenticated ? authMocks.user.id : ""}`,
     isAuthenticated: authMocks.isAuthenticated,
     refreshUser: authMocks.refreshUser,
     user: authMocks.isAuthenticated ? authMocks.user : null
@@ -87,18 +94,27 @@ const household: HouseholdDetails = {
   role: "owner"
 };
 
-const renderHouseholdPage = (entry = "/household") =>
-  render(
-    <ToastProvider>
-      <MemoryRouter initialEntries={[entry]}>
-        <Routes>
-          <Route path="/household" element={<HouseholdPage />} />
-          <Route path="/pricing" element={<h1>Pricing page</h1>} />
-          <Route path="/account" element={<h1>Account page</h1>} />
-        </Routes>
-      </MemoryRouter>
-    </ToastProvider>
-  );
+const householdTree = (entry = "/household") => (
+  <ToastProvider>
+    <MemoryRouter initialEntries={[entry]}>
+      <Routes>
+        <Route path="/household" element={<HouseholdPage />} />
+        <Route path="/pricing" element={<h1>Pricing page</h1>} />
+        <Route path="/account" element={<h1>Account page</h1>} />
+      </Routes>
+    </MemoryRouter>
+  </ToastProvider>
+);
+
+const renderHouseholdPage = (entry = "/household") => render(householdTree(entry));
+
+const deferred = <T,>() => {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((settle) => {
+    resolve = settle;
+  });
+  return { promise, resolve };
+};
 
 const originalShare = Object.getOwnPropertyDescriptor(navigator, "share");
 const originalClipboard = Object.getOwnPropertyDescriptor(navigator, "clipboard");
@@ -121,6 +137,8 @@ describe("HouseholdPage", () => {
     localStorage.clear();
     Object.values(apiMocks).forEach((mock) => mock.mockReset());
     apiMocks.getHousehold.mockResolvedValue({ household: null });
+    authMocks.credentialsPending = false;
+    authMocks.credentialsSource = "session";
     authMocks.isAuthenticated = true;
     authMocks.refreshUser.mockReset();
     authMocks.refreshUser.mockResolvedValue(undefined);
@@ -434,5 +452,273 @@ describe("HouseholdPage", () => {
       "href",
       "/shopping"
     );
+  });
+});
+
+describe("HouseholdPage account switches", () => {
+  const otherAccount = { billingPlan: "free" as const, email: "bo@example.com", id: "user_9" };
+
+  beforeEach(() => {
+    localStorage.clear();
+    Object.values(apiMocks).forEach((mock) => mock.mockReset());
+    authMocks.credentialsPending = false;
+    authMocks.credentialsSource = "session";
+    authMocks.isAuthenticated = true;
+    authMocks.refreshUser.mockReset();
+    authMocks.refreshUser.mockResolvedValue(undefined);
+    authMocks.user = { billingPlan: "family", email: "cook@example.com", id: "user_1" };
+    upgradeMocks.requestUpgradeSheet.mockReset();
+    upgradeMocks.requestUpgradeSheet.mockReturnValue(true);
+  });
+
+  const expectNoTraceOfTheLastHousehold = () => {
+    expect(screen.queryByText("Ana Lopez")).not.toBeInTheDocument();
+    expect(screen.queryByText("ana@example.com")).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "People" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Invite someone" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Remove Ana Lopez" })).not.toBeInTheDocument();
+  };
+
+  it("never shows the last account's household while the next one's loads", async () => {
+    const nextAnswer = deferred<{ household: HouseholdDetails | null }>();
+    apiMocks.getHousehold.mockResolvedValueOnce({ household });
+    apiMocks.getHousehold.mockReturnValueOnce(nextAnswer.promise);
+
+    const view = renderHouseholdPage();
+    expect(await screen.findByText("Ana Lopez")).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Invite someone" })).toBeVisible();
+
+    // Clerk answers with a different account than the cached one.
+    authMocks.user = otherAccount;
+    view.rerender(householdTree());
+
+    expectNoTraceOfTheLastHousehold();
+    expect(screen.getByRole("status", { name: "Loading household" })).toBeVisible();
+
+    await act(async () => {
+      nextAnswer.resolve({ household: null });
+      await nextAnswer.promise;
+    });
+
+    expect(await screen.findByRole("heading", { name: "How a household works" })).toBeVisible();
+    expectNoTraceOfTheLastHousehold();
+  });
+
+  it("drops a late answer for the account that was signed in before", async () => {
+    const lateAnswer = deferred<{ household: HouseholdDetails | null }>();
+    apiMocks.getHousehold.mockReturnValueOnce(lateAnswer.promise);
+    apiMocks.getHousehold.mockResolvedValueOnce({ household: null });
+
+    const view = renderHouseholdPage();
+    expect(screen.getByRole("status", { name: "Loading household" })).toBeVisible();
+
+    authMocks.user = otherAccount;
+    view.rerender(householdTree());
+    expect(await screen.findByRole("heading", { name: "How a household works" })).toBeVisible();
+
+    await act(async () => {
+      lateAnswer.resolve({ household });
+      await lateAnswer.promise;
+    });
+
+    expect(screen.getByRole("heading", { name: "How a household works" })).toBeVisible();
+    expectNoTraceOfTheLastHousehold();
+  });
+
+  it("keeps an answer that lands after signing out from the next account to sign in", async () => {
+    const lateAnswer = deferred<{ household: HouseholdDetails | null }>();
+    const nextAnswer = deferred<{ household: HouseholdDetails | null }>();
+    apiMocks.getHousehold.mockReturnValueOnce(lateAnswer.promise);
+    apiMocks.getHousehold.mockReturnValueOnce(nextAnswer.promise);
+
+    const view = renderHouseholdPage();
+
+    authMocks.isAuthenticated = false;
+    view.rerender(householdTree());
+    expect(screen.getByRole("link", { name: "Sign in to get started" })).toBeVisible();
+
+    await act(async () => {
+      lateAnswer.resolve({ household });
+      await lateAnswer.promise;
+    });
+
+    authMocks.isAuthenticated = true;
+    authMocks.user = otherAccount;
+    view.rerender(householdTree());
+
+    expectNoTraceOfTheLastHousehold();
+    expect(screen.getByRole("status", { name: "Loading household" })).toBeVisible();
+    expect(apiMocks.getHousehold).toHaveBeenCalledTimes(2);
+  });
+
+  it("closes the last account's owner controls and drops what their actions answer", async () => {
+    const removal = deferred<{ household: HouseholdDetails | null }>();
+    apiMocks.getHousehold.mockResolvedValueOnce({ household });
+    apiMocks.getHousehold.mockResolvedValueOnce({ household: null });
+    apiMocks.removeHouseholdMember.mockReturnValue(removal.promise);
+
+    const view = renderHouseholdPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Remove Ana Lopez" }));
+    const dialog = screen.getByRole("dialog", { name: "Remove Ana Lopez?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Remove" }));
+    await waitFor(() => {
+      expect(apiMocks.removeHouseholdMember).toHaveBeenCalledWith({ userId: "user_2" });
+    });
+
+    authMocks.user = otherAccount;
+    view.rerender(householdTree());
+
+    expect(screen.queryByRole("dialog", { name: "Remove Ana Lopez?" })).not.toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "How a household works" })).toBeVisible();
+
+    await act(async () => {
+      removal.resolve({
+        household: { ...household, activeMemberCount: 2, members: household.members.slice(0, 1) }
+      });
+      await removal.promise;
+    });
+
+    expect(screen.queryByText("Ana Lopez was removed")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "How a household works" })).toBeVisible();
+    expectNoTraceOfTheLastHousehold();
+  });
+
+  it("doesn't finish joining for an account that signed in since", async () => {
+    const joining = deferred<{ household: HouseholdDetails | null }>();
+    apiMocks.getHousehold.mockResolvedValue({ household: null });
+    apiMocks.acceptHouseholdInvite.mockReturnValue(joining.promise);
+    authMocks.user = { billingPlan: "free", email: "cook@example.com", id: "user_1" };
+
+    const view = renderHouseholdPage("/household?invite=AbCdEfGh1234");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Join household" }));
+    await waitFor(() => expect(apiMocks.acceptHouseholdInvite).toHaveBeenCalled());
+
+    authMocks.user = otherAccount;
+    view.rerender(householdTree("/household?invite=AbCdEfGh1234"));
+    expect(
+      await screen.findByRole("heading", { name: "Join the household you were invited to" })
+    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "Join household" })).not.toHaveAttribute("aria-busy");
+
+    await act(async () => {
+      joining.resolve({ household: { ...household, role: "member" } });
+      await joining.promise;
+    });
+
+    expect(authMocks.refreshUser).not.toHaveBeenCalled();
+    expect(screen.queryByText("Welcome to the household!")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Join the household you were invited to" })
+    ).toBeVisible();
+    expectNoTraceOfTheLastHousehold();
+  });
+
+  it("waits for the account's credentials, then loads once they're ready", async () => {
+    authMocks.credentialsPending = true;
+    apiMocks.getHousehold.mockResolvedValue({ household });
+
+    const view = renderHouseholdPage();
+
+    expect(screen.getByRole("status", { name: "Loading household" })).toBeVisible();
+    expect(apiMocks.getHousehold).not.toHaveBeenCalled();
+
+    authMocks.credentialsPending = false;
+    view.rerender(householdTree());
+
+    expect(await screen.findByText("Ana Lopez")).toBeVisible();
+    expect(apiMocks.getHousehold).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a no-household account's page, and a typed invite code, while the same account asks again", async () => {
+    const reload = deferred<{ household: HouseholdDetails | null }>();
+    authMocks.user = { billingPlan: "free", email: "cook@example.com", id: "user_1" };
+    apiMocks.getHousehold.mockResolvedValueOnce({ household: null });
+    apiMocks.getHousehold.mockReturnValueOnce(reload.promise);
+
+    const view = renderHouseholdPage();
+    const field = await screen.findByRole("textbox", { name: "Invite code or link" });
+    fireEvent.change(field, { target: { value: "AbCdEfGh1234" } });
+
+    // Clerk finished signing the same account in late: ask again without blanking the page.
+    authMocks.credentialsSource = "clerk";
+    view.rerender(householdTree());
+    await waitFor(() => expect(apiMocks.getHousehold).toHaveBeenCalledTimes(2));
+
+    expect(screen.queryByRole("status", { name: "Loading household" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Got an invite?" })).toBeVisible();
+    expect(screen.getByRole("textbox", { name: "Invite code or link" })).toHaveValue(
+      "AbCdEfGh1234"
+    );
+
+    await act(async () => {
+      reload.resolve({ household: null });
+      await reload.promise;
+    });
+
+    expect(screen.getByRole("textbox", { name: "Invite code or link" })).toHaveValue(
+      "AbCdEfGh1234"
+    );
+  });
+
+  it("keeps what the same account's page shows when asking again fails", async () => {
+    const reload = deferred<{ household: HouseholdDetails | null }>();
+    authMocks.user = { billingPlan: "free", email: "cook@example.com", id: "user_1" };
+    apiMocks.getHousehold.mockResolvedValueOnce({ household: null });
+    apiMocks.getHousehold.mockReturnValueOnce(
+      reload.promise.then(() => Promise.reject(new TypeError("Failed to fetch")))
+    );
+
+    const view = renderHouseholdPage();
+    const field = await screen.findByRole("textbox", { name: "Invite code or link" });
+    fireEvent.change(field, { target: { value: "AbCdEfGh1234" } });
+
+    authMocks.credentialsSource = "clerk";
+    view.rerender(householdTree());
+    await waitFor(() => expect(apiMocks.getHousehold).toHaveBeenCalledTimes(2));
+
+    await act(async () => {
+      reload.resolve({ household: null });
+      await reload.promise.catch(() => undefined);
+    });
+
+    await waitFor(() => expect(apiMocks.getHousehold).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText("We couldn't load your household")).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Invite code or link" })).toHaveValue(
+      "AbCdEfGh1234"
+    );
+  });
+
+  it("asks again when the same account's credentials change, and lets a newer action win", async () => {
+    const reload = deferred<{ household: HouseholdDetails | null }>();
+    authMocks.user = { billingPlan: "family", email: "ana@example.com", id: "user_2" };
+    apiMocks.getHousehold.mockResolvedValueOnce({ household: { ...household, role: "member" } });
+    apiMocks.getHousehold.mockReturnValueOnce(reload.promise);
+    apiMocks.leaveHousehold.mockResolvedValue({ household: null });
+
+    const view = renderHouseholdPage();
+    expect(await screen.findByText("Ana Lopez")).toBeVisible();
+
+    // Clerk finished signing the same account in late: ask again, keeping what's shown meanwhile.
+    authMocks.credentialsSource = "clerk";
+    view.rerender(householdTree());
+    await waitFor(() => expect(apiMocks.getHousehold).toHaveBeenCalledTimes(2));
+    expect(screen.getByText("Ana Lopez")).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "Leave household" }));
+    const dialog = screen.getByRole("dialog", { name: "Leave cook's household?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Leave household" }));
+    expect(await screen.findByRole("heading", { name: "How a household works" })).toBeVisible();
+
+    // The reload sent before leaving answers last; leaving is newer.
+    await act(async () => {
+      reload.resolve({ household: { ...household, role: "member" } });
+      await reload.promise;
+    });
+
+    expect(screen.getByRole("heading", { name: "How a household works" })).toBeVisible();
+    expect(screen.queryByRole("status", { name: "Loading household" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Ana Lopez")).not.toBeInTheDocument();
   });
 });

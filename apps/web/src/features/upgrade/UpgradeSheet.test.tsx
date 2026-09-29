@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import React from "react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -12,6 +12,7 @@ import {
 import { UpgradeSheetProvider, useUpgradeSheet } from "./UpgradeSheet";
 
 import type { UpgradeSheetTrigger } from "./UpgradeSheet";
+import type * as RevenueCatCheckoutModule from "../billing/revenuecat-web-sdk-checkout";
 
 const analyticsMocks = vi.hoisted(() => ({
   trackWebEvent: vi.fn(),
@@ -37,7 +38,8 @@ vi.mock("../../api/client", () => ({
 
 const authState = vi.hoisted(() => ({
   isAuthenticated: true,
-  plan: "free" as "free" | "plus" | "family"
+  plan: "free" as "free" | "plus" | "family",
+  userId: "user_1"
 }));
 
 vi.mock("../../auth/AuthProvider", () => ({
@@ -45,9 +47,37 @@ vi.mock("../../auth/AuthProvider", () => ({
     isAuthenticated: authState.isAuthenticated,
     refreshUser: vi.fn(),
     user: authState.isAuthenticated
-      ? { billingPlan: authState.plan, email: "cook@example.com", id: "user_1" }
+      ? { billingPlan: authState.plan, email: "cook@example.com", id: authState.userId }
       : null
   })
+}));
+
+/** The in-page checkout: off unless a test turns it on; it opens once `prepared` settles. */
+const inPageCheckout = vi.hoisted(() => ({
+  configured: false,
+  prepared: Promise.resolve(),
+  purchase: vi.fn()
+}));
+
+vi.mock("../billing/revenuecat-web-sdk-checkout", async (importOriginal) => ({
+  ...(await importOriginal<typeof RevenueCatCheckoutModule>()),
+  isRevenueCatWebSdkCheckoutConfigured: () => inPageCheckout.configured,
+  // Like the real one: loads the SDK and offerings, stops if the account changed, then opens.
+  startRevenueCatWebSdkCheckout: async ({
+    isCurrent,
+    user
+  }: {
+    isCurrent?: () => boolean;
+    user: { email: string };
+  }) => {
+    await inPageCheckout.prepared;
+
+    if (isCurrent && !isCurrent()) {
+      throw new Error("Another account signed in before checkout opened.");
+    }
+
+    inPageCheckout.purchase(user.email);
+  }
 }));
 
 const libraryMocks = vi.hoisted(() => ({
@@ -83,14 +113,23 @@ const TriggerButtons = () => {
   );
 };
 
-const renderUpgradeHarness = () =>
-  render(
-    <MemoryRouter>
-      <UpgradeSheetProvider>
-        <TriggerButtons />
-      </UpgradeSheetProvider>
-    </MemoryRouter>
-  );
+const upgradeHarness = () => (
+  <MemoryRouter>
+    <UpgradeSheetProvider>
+      <TriggerButtons />
+    </UpgradeSheetProvider>
+  </MemoryRouter>
+);
+
+const renderUpgradeHarness = () => render(upgradeHarness());
+
+const deferred = <T,>() => {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((settle) => {
+    resolve = settle;
+  });
+  return { promise, resolve };
+};
 
 const assign = vi.fn();
 
@@ -115,6 +154,10 @@ describe("UpgradeSheetProvider", () => {
     });
     authState.isAuthenticated = true;
     authState.plan = "free";
+    authState.userId = "user_1";
+    inPageCheckout.configured = false;
+    inPageCheckout.prepared = Promise.resolve();
+    inPageCheckout.purchase.mockReset();
     libraryMocks.recipes = cookbookOf(15);
     resetWebBillingAvailabilityForTests();
     resetCheckoutSessionForTests();
@@ -247,6 +290,113 @@ describe("UpgradeSheetProvider", () => {
       "/account?upgrade=family"
     );
     await waitFor(() => expect(apiMocks.getWebBillingAvailability).toHaveBeenCalled());
+  });
+
+  it("closes a sheet opened for one account when another signs in", async () => {
+    const view = renderUpgradeHarness();
+
+    fireEvent.click(screen.getByRole("button", { name: "import_limit" }));
+    expect(
+      await screen.findByRole("dialog", { name: "More room for the recipes worth keeping." })
+    ).toBeInTheDocument();
+
+    // Clerk answers with a different (free) account than the cached one.
+    authState.userId = "user_2";
+    view.rerender(upgradeHarness());
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    // The new account can still be offered a sheet of its own.
+    fireEvent.click(screen.getByRole("button", { name: "family_share_no_plan" }));
+    expect(
+      await screen.findByRole("dialog", { name: "Share the kitchen with Family." })
+    ).toBeInTheDocument();
+
+    authState.isAuthenticated = false;
+    view.rerender(upgradeHarness());
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    // Signing back in doesn't bring back a sheet that closed on the way out.
+    authState.isAuthenticated = true;
+    view.rerender(upgradeHarness());
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  describe("a checkout started from the sheet when another account signs in or out", () => {
+    const startFamilyCheckout = async () => {
+      fireEvent.click(screen.getByRole("button", { name: "family_share_no_plan" }));
+      const dialog = await screen.findByRole("dialog", { name: "Share the kitchen with Family." });
+      const upgrade = within(dialog).getByRole("button", { name: "Upgrade to Family" });
+      await waitFor(() => expect(upgrade).toBeEnabled());
+      fireEvent.click(upgrade);
+    };
+
+    it.each([
+      ["another account signs straight in", () => void (authState.userId = "user_2")],
+      ["the account signs out", () => void (authState.isAuthenticated = false)]
+    ])("never opens the hosted checkout when %s", async (_case, switchAccount) => {
+      const checkout = deferred<{ url: string }>();
+      apiMocks.createWebBillingCheckout.mockReturnValue(checkout.promise);
+      const view = renderUpgradeHarness();
+
+      await startFamilyCheckout();
+      await waitFor(() => expect(apiMocks.createWebBillingCheckout).toHaveBeenCalled());
+
+      // The sheet (and the checkout hook inside it) goes away with the account it was for.
+      switchAccount();
+      view.rerender(upgradeHarness());
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+      await act(async () => {
+        checkout.resolve({ url: "https://pay.rev.cat/user_1-checkout" });
+        await checkout.promise;
+      });
+
+      expect(assign).not.toHaveBeenCalled();
+      expect(sessionStorage.getItem(CHECKOUT_SESSION_STORAGE_KEY)).toBeNull();
+    });
+
+    it("never opens the in-page checkout for the account that signed in since", async () => {
+      const prepared = deferred<undefined>();
+      inPageCheckout.configured = true;
+      inPageCheckout.prepared = prepared.promise;
+      const view = renderUpgradeHarness();
+
+      await startFamilyCheckout();
+
+      authState.userId = "user_2";
+      view.rerender(upgradeHarness());
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+      await act(async () => {
+        prepared.resolve(undefined);
+        await prepared.promise;
+      });
+
+      expect(inPageCheckout.purchase).not.toHaveBeenCalled();
+      expect(analyticsMocks.trackWebV2AnalyticsEvent).not.toHaveBeenCalledWith(
+        expect.objectContaining({ name: "upgrade_purchased" })
+      );
+    });
+
+    it("still opens the checkout while the same account stays signed in", async () => {
+      const checkout = deferred<{ url: string }>();
+      apiMocks.createWebBillingCheckout.mockReturnValue(checkout.promise);
+      const view = renderUpgradeHarness();
+
+      await startFamilyCheckout();
+      await waitFor(() => expect(apiMocks.createWebBillingCheckout).toHaveBeenCalled());
+      view.rerender(upgradeHarness());
+
+      await act(async () => {
+        checkout.resolve({ url: "https://pay.rev.cat/user_1-checkout" });
+        await checkout.promise;
+      });
+
+      expect(assign).toHaveBeenCalledWith("https://pay.rev.cat/user_1-checkout");
+    });
   });
 
   it("stays quiet for paid plans", () => {

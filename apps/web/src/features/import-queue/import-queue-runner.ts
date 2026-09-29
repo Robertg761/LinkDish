@@ -421,6 +421,12 @@ export async function processImportQueueItem(
 
       if (!isCurrentAccount(context)) {
         // Someone else signed in (or out): AI help is theirs to spend, in their own run.
+        trackWebV2AnalyticsEvent({
+          correlationId,
+          name: "import_abandoned",
+          properties: { ...properties, abandonment_reason: "queue_stopped", attempt },
+          routeOrScreen: IMPORT_ANALYTICS_ROUTE
+        });
         await release();
         return { status: "stopped" };
       }

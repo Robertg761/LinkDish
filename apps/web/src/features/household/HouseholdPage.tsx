@@ -1,9 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
 import { trackWebEvent } from "../../analytics/client";
 import { apiClient } from "../../api/client";
 import { getFriendlyErrorMessage } from "../../api/error-message";
+import { getAccountScope, useIsCurrentAccount } from "../../auth/account-scope";
 import { useAuth } from "../../auth/AuthProvider";
 import { Badge } from "../../components/Badge";
 import { Button, ButtonLink } from "../../components/Button";
@@ -41,9 +42,32 @@ type LoadState = "loading" | "ready" | "error";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u;
 
+interface HouseholdViewProps {
+  /** The account this view belongs to (null signed out); it never changes for a view. */
+  account: string | null;
+  isCurrentAccount: (account: string | null) => boolean;
+}
+
 export const HouseholdPage: React.FC = () => {
   useDocumentTitle("Household");
-  const { isAuthenticated, user, refreshUser } = useAuth();
+  const { isAuthenticated, user } = useAuth();
+  const account = getAccountScope(isAuthenticated, user);
+  const isCurrentAccount = useIsCurrentAccount(account);
+
+  // One view per account: when another account signs in (or out) directly, the last one's
+  // household, members, invites, owner controls, dialogs and busy actions go with its view, even
+  // for the first render, and what its requests answer later lands nowhere.
+  return (
+    <HouseholdView
+      account={account}
+      isCurrentAccount={isCurrentAccount}
+      key={account === null ? "signed-out" : `account:${account}`}
+    />
+  );
+};
+
+const HouseholdView: React.FC<HouseholdViewProps> = ({ account, isCurrentAccount }) => {
+  const { credentialsKey, isAuthenticated, user, refreshUser } = useAuth();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { requestUpgradeSheet } = useUpgradeSheet();
@@ -61,6 +85,10 @@ export const HouseholdPage: React.FC = () => {
   const [inviteToCancel, setInviteToCancel] = useState<{ email: string; id: string } | null>(null);
   const [memberToRemove, setMemberToRemove] = useState<HouseholdMember | null>(null);
   const [confirmLeave, setConfirmLeave] = useState(false);
+  /** Bumped by every load and every action's answer, so only the newest one lands. */
+  const answerRef = useRef(0);
+  /** An answer (a load's or an action's) is on the page: asking again keeps it meanwhile. */
+  const shownRef = useRef(false);
 
   const plan = getWebBillingTier(user);
   const isOwner = household?.role === "owner";
@@ -84,27 +112,47 @@ export const HouseholdPage: React.FC = () => {
   );
 
   const loadHousehold = useCallback(async () => {
-    setLoadState("loading");
-    setLoadError("");
+    const load = ++answerRef.current;
+    /** A newer load or action answered since, or another account signed in: drop this one. */
+    const stale = () => load !== answerRef.current || !isCurrentAccount(account);
+    // Asking again once this account's page is shown (its credentials changed) keeps the page,
+    // and what's typed into it, until the answer lands: only a first load (or a retry after
+    // an error) shows the skeleton.
+    if (!shownRef.current) {
+      setLoadState("loading");
+      setLoadError("");
+    }
 
     try {
       const response = await apiClient.getHousehold();
+
+      if (stale()) {
+        return;
+      }
+
+      shownRef.current = true;
       setHousehold(response.household);
       setLoadState("ready");
     } catch (error) {
+      // The page already shows this account's answer: keep it rather than an error in its place.
+      if (stale() || shownRef.current) {
+        return;
+      }
+
       setLoadError(getFriendlyErrorMessage(error, "household"));
       setLoadState("error");
     }
-  }, []);
+  }, [account, isCurrentAccount]);
 
+  // Keyed on the credentials (which include the account): it waits while a signed-in session's
+  // credentials can't be read yet instead of asking without them, and asks again when they change.
   useEffect(() => {
-    if (!isAuthenticated) {
-      setHousehold(null);
+    if (account === null || credentialsKey === null) {
       return;
     }
 
     void loadHousehold();
-  }, [isAuthenticated, loadHousehold, user?.id]);
+  }, [account, credentialsKey, loadHousehold]);
 
   useEffect(() => {
     if (isAuthenticated && loadState === "ready") {
@@ -126,7 +174,18 @@ export const HouseholdPage: React.FC = () => {
     setActionError("");
 
     try {
-      setHousehold(await action());
+      const next = await action();
+
+      // Another account signed in meanwhile: the answer (and its toast) was for the last one.
+      if (!isCurrentAccount(account)) {
+        return false;
+      }
+
+      // Newer than any load still out, which is dropped when it answers.
+      answerRef.current += 1;
+      shownRef.current = true;
+      setHousehold(next);
+      setLoadState("ready");
 
       if (options.refreshAccount) {
         await refreshUser();
@@ -138,7 +197,10 @@ export const HouseholdPage: React.FC = () => {
 
       return true;
     } catch (error) {
-      setActionError(getFriendlyErrorMessage(error, "household"));
+      if (isCurrentAccount(account)) {
+        setActionError(getFriendlyErrorMessage(error, "household"));
+      }
+
       return false;
     } finally {
       setBusyAction(null);

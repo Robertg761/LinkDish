@@ -50,6 +50,10 @@ const getFallbackText = (recipe: SharedRecipe) =>
   [recipe.recipe.title, getSharedRecipeOwnerLabel(recipe)].join(" ");
 
 export interface FamilyCookbookProps {
+  /** The account the Family cookbook on screen belongs to. */
+  account: string | null;
+  /** Whether an account is still the one signed in (checked when a removal answers). */
+  isCurrentAccount: (account: string | null) => boolean;
   shared: SharedRecipesState;
   engine: SearchEngine | null;
   /** The (deferred) search text, trimmed. */
@@ -72,6 +76,8 @@ export interface FamilyCookbookProps {
  * since most visits never open it.
  */
 export const FamilyCookbook: React.FC<FamilyCookbookProps> = ({
+  account,
+  isCurrentAccount,
   shared,
   engine,
   searchText,
@@ -137,16 +143,27 @@ export const FamilyCookbook: React.FC<FamilyCookbookProps> = ({
       return;
     }
 
+    const removingFor = account;
     setRemoving(true);
 
     try {
       await apiClient.deleteSharedRecipe(recipe.id);
+      // Gone from the household either way (this only ever drops that one recipe).
       shared.removeLocal(recipe.id);
+
+      // Another account signed in meanwhile: the confirmation and its toast were the last one's.
+      if (!isCurrentAccount(removingFor)) {
+        return;
+      }
+
       setPendingUnshare(null);
       showToast({ icon: "users", message: "Removed from your Family cookbook" });
     } catch (error) {
       console.error("Unshare failed:", error);
-      showToast({ message: "This family recipe could not be removed.", tone: "danger" });
+
+      if (isCurrentAccount(removingFor)) {
+        showToast({ message: "This family recipe could not be removed.", tone: "danger" });
+      }
     } finally {
       setRemoving(false);
     }

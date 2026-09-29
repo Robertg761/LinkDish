@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import React from "react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -76,17 +76,18 @@ const LocationProbe = () => {
   return <p data-testid="location">{`${location.pathname}${location.search}`}</p>;
 };
 
-const renderAccount = (entry = "/account") =>
-  render(
-    <ToastProvider>
-      <MemoryRouter initialEntries={[entry]}>
-        <Routes>
-          <Route path="/account" element={<AccountPage />} />
-          <Route path="*" element={<LocationProbe />} />
-        </Routes>
-      </MemoryRouter>
-    </ToastProvider>
-  );
+const accountTree = (entry = "/account") => (
+  <ToastProvider>
+    <MemoryRouter initialEntries={[entry]}>
+      <Routes>
+        <Route path="/account" element={<AccountPage />} />
+        <Route path="*" element={<LocationProbe />} />
+      </Routes>
+    </MemoryRouter>
+  </ToastProvider>
+);
+
+const renderAccount = (entry = "/account") => render(accountTree(entry));
 
 const resetAuth = () => {
   authMocks.clerkEnabled = true;
@@ -427,5 +428,100 @@ describe("AccountPage account deletion", () => {
     expect(screen.getByRole("textbox", { name: /confirm your email/i })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Keep my account" }));
     expect(screen.queryByRole("textbox", { name: /confirm your email/i })).not.toBeInTheDocument();
+  });
+});
+
+describe("AccountPage account switches", () => {
+  const firstAccount = {
+    avatarEmoji: null,
+    billingPlan: "free" as const,
+    displayName: null,
+    email: "first@example.com",
+    id: "user_1"
+  };
+  const nextAccount = {
+    avatarEmoji: null,
+    billingPlan: "free" as const,
+    displayName: null,
+    email: "next@example.com",
+    id: "user_2"
+  };
+
+  beforeEach(() => {
+    resetAuth();
+    authMocks.refreshUser.mockResolvedValue(undefined);
+    authMocks.user = firstAccount;
+    libraryMocks.recipes = [];
+    apiMocks.updateAccountProfile.mockReset();
+  });
+
+  it("closes the last account's profile editor and drops its draft", () => {
+    const view = renderAccount();
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit profile" }));
+    const sheet = screen.getByRole("dialog", { name: "Edit profile" });
+    fireEvent.change(within(sheet).getByRole("textbox", { name: /display name/i }), {
+      target: { value: "First's secret name" }
+    });
+
+    // Clerk answers with a different account than the cached one.
+    authMocks.user = nextAccount;
+    view.rerender(accountTree());
+
+    expect(screen.queryByRole("dialog", { name: "Edit profile" })).not.toBeInTheDocument();
+    expect(screen.queryByDisplayValue("First's secret name")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit profile" }));
+    expect(
+      within(screen.getByRole("dialog", { name: "Edit profile" })).getByRole("textbox", {
+        name: /display name/i
+      })
+    ).toHaveValue("");
+  });
+
+  it("doesn't report a profile save to an account that signed in since", async () => {
+    let finishSave: (value: unknown) => void = () => undefined;
+    apiMocks.updateAccountProfile.mockReturnValue(
+      new Promise((resolve) => {
+        finishSave = resolve;
+      })
+    );
+    const view = renderAccount();
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit profile" }));
+    const sheet = screen.getByRole("dialog", { name: "Edit profile" });
+    fireEvent.change(within(sheet).getByRole("textbox", { name: /display name/i }), {
+      target: { value: "First" }
+    });
+    fireEvent.click(within(sheet).getByRole("button", { name: "Save profile" }));
+    await waitFor(() => expect(apiMocks.updateAccountProfile).toHaveBeenCalled());
+
+    authMocks.user = nextAccount;
+    view.rerender(accountTree());
+
+    await act(async () => {
+      finishSave({ user: firstAccount });
+      await Promise.resolve();
+    });
+
+    expect(authMocks.refreshUser).not.toHaveBeenCalled();
+    expect(screen.queryByText("Profile saved")).not.toBeInTheDocument();
+    expect(screen.getByText("next@example.com")).toBeVisible();
+  });
+
+  it("closes the last account's delete confirmation", () => {
+    const view = renderAccount();
+
+    fireEvent.click(screen.getByRole("button", { name: /delete account/i }));
+    fireEvent.change(screen.getByRole("textbox", { name: /confirm your email/i }), {
+      target: { value: "first@example.com" }
+    });
+
+    authMocks.user = nextAccount;
+    view.rerender(accountTree());
+
+    expect(screen.queryByRole("textbox", { name: /confirm your email/i })).not.toBeInTheDocument();
+    expect(screen.queryByDisplayValue("first@example.com")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /delete account/i })).toBeVisible();
   });
 });

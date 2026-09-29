@@ -60,7 +60,7 @@ const prefersReducedMotion = (): boolean =>
 
 export const PricingPage: React.FC = () => {
   useDocumentTitle("Plans");
-  const { isAuthenticated, refreshUser, user } = useAuth();
+  const { credentialsKey, isAuthenticated, refreshUser, user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedPlanParam = searchParams.get("upgrade");
   const requestedPlan: PaidBillingPlan | null = isPaidPlan(requestedPlanParam)
@@ -78,7 +78,7 @@ export const PricingPage: React.FC = () => {
   const availabilityView = useWebBillingAvailability();
   const { availability } = availabilityView;
   const checkout = useWebCheckout({ trigger: "pricing" });
-  const householdSummary = useHouseholdSummary(isAuthenticated, user?.id);
+  const householdSummary = useHouseholdSummary(isAuthenticated, user?.id, credentialsKey);
   const household = householdSummary.household;
   const accountPlan = getWebBillingTier(user);
   const currentPlan: WebBillingTier =
