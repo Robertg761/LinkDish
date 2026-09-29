@@ -229,3 +229,122 @@ describe("requests bound to an account", () => {
     expect(apiClientMocks.sent).toHaveLength(1);
   });
 });
+
+describe("requests bound to an account, carrying a Clerk token", () => {
+  beforeEach(() => {
+    apiClientMocks.sent = [];
+    vi.resetModules();
+  });
+
+  const clerkToken = (sid: string) =>
+    `${btoa('{"alg":"RS256"}')}.${btoa(JSON.stringify({ sid, sub: "clerk_user" })).replace(/=+$/u, "")}.sig`;
+
+  const setUp = async (options: { clerkSession: string | null; token: string }) => {
+    const client = await import("./client");
+    const scope = await import("../auth/account-scope");
+    const bridge = await import("../auth/clerk-bridge");
+    let tokenRequests = 0;
+    client.registerAuthTokenProvider(() => {
+      tokenRequests += 1;
+      return Promise.resolve(options.token);
+    });
+    bridge.publishClerkState({
+      isLoaded: options.clerkSession !== null,
+      isSignedIn: options.clerkSession !== null,
+      sessionId: options.clerkSession,
+      signInReady: true
+    });
+    /** Waits until the request has its token in hand, and a few turns more for its checks. */
+    const tokenInHand = async () => {
+      await vi.waitFor(() => expect(tokenRequests).toBeGreaterThan(0));
+
+      for (let turn = 0; turn < 10; turn += 1) {
+        await Promise.resolve();
+      }
+    };
+    return { ...client, ...scope, ...bridge, tokenInHand };
+  };
+
+  it("goes out at once with the session its account was confirmed under", async () => {
+    const { apiClient, asAccount, publishCurrentAccount } = await setUp({
+      clerkSession: "sess_a",
+      token: clerkToken("sess_a")
+    });
+    publishCurrentAccount("user_a", "sess_a");
+
+    await expect(asAccount("user_a", () => apiClient.leaveHousehold())).resolves.toEqual({
+      household: null
+    });
+    expect(apiClientMocks.sent).toHaveLength(1);
+  });
+
+  it("isn't sent with another account's token when Clerk settles after a cached account was shown", async () => {
+    // A cached account is shown while Clerk loads, and the request is made then.
+    const {
+      apiClient,
+      asAccount,
+      isAccountChangedError,
+      publishClerkState,
+      publishCurrentAccount,
+      tokenInHand
+    } = await setUp({ clerkSession: null, token: clerkToken("sess_b") });
+    publishCurrentAccount("user_a");
+
+    const leaving = asAccount("user_a", () => apiClient.leaveHousehold());
+    // Clerk settles on another account's session, and the request gets that session's token
+    // while the cached account is still shown (its session not checked yet).
+    publishClerkState({ isLoaded: true, isSignedIn: true, sessionId: "sess_b", signInReady: true });
+    await tokenInHand();
+    expect(apiClientMocks.sent).toEqual([]);
+
+    // The session turns out to be another account's.
+    publishCurrentAccount("user_b", "sess_b");
+
+    expect(isAccountChangedError(await leaving.catch((caught: unknown) => caught))).toBe(true);
+    expect(apiClientMocks.sent).toEqual([]);
+  });
+
+  it("goes out once the settled session is confirmed as the cached account's own", async () => {
+    const { apiClient, asAccount, publishClerkState, publishCurrentAccount, tokenInHand } =
+      await setUp({ clerkSession: null, token: clerkToken("sess_a2") });
+    publishCurrentAccount("user_a");
+
+    const leaving = asAccount("user_a", () => apiClient.leaveHousehold());
+    publishClerkState({
+      isLoaded: true,
+      isSignedIn: true,
+      sessionId: "sess_a2",
+      signInReady: true
+    });
+    await tokenInHand();
+    expect(apiClientMocks.sent).toEqual([]);
+
+    publishCurrentAccount("user_a", "sess_a2");
+
+    await expect(leaving).resolves.toEqual({ household: null });
+    expect(apiClientMocks.sent).toHaveLength(1);
+  });
+
+  it("gives up, sending nothing, if the session is never confirmed", async () => {
+    vi.useFakeTimers();
+
+    try {
+      const { ACCOUNT_CONFIRMATION_WAIT_MS } = await import("./request-binding");
+      const { apiClient, asAccount, isAccountChangedError, publishCurrentAccount } = await setUp({
+        clerkSession: "sess_b",
+        token: clerkToken("sess_b")
+      });
+      publishCurrentAccount("user_a");
+
+      const leaving = asAccount("user_a", () => apiClient.leaveHousehold()).catch(
+        (caught: unknown) => caught
+      );
+      await vi.advanceTimersByTimeAsync(ACCOUNT_CONFIRMATION_WAIT_MS);
+
+      expect(isAccountChangedError(await leaving)).toBe(true);
+      expect(apiClientMocks.sent).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

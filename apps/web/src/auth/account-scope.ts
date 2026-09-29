@@ -14,6 +14,9 @@ export const getAccountScope = (
 ): string | null => (isAuthenticated ? (user?.id ?? "") : null);
 
 let currentAccount: string | null = null;
+/** The Clerk session `currentAccount` was confirmed under (null: none, or not through Clerk). */
+let confirmedClerkSession: string | null = null;
+const accountListeners = new Set<() => void>();
 
 /**
  * The account signed in now (see {@link getAccountScope}), as the auth provider last rendered it:
@@ -22,10 +25,47 @@ let currentAccount: string | null = null;
  */
 export const getCurrentAccount = (): string | null => currentAccount;
 
-/** Called by the auth provider whenever the signed-in account changes. */
-export const publishCurrentAccount = (account: string | null): void => {
+/**
+ * Called by the auth provider whenever the signed-in account changes, with the Clerk session the
+ * API confirmed that account for (null while a cached account waits for Clerk, or without Clerk).
+ */
+export const publishCurrentAccount = (
+  account: string | null,
+  clerkSession: string | null = null
+): void => {
   currentAccount = account;
+  confirmedClerkSession = clerkSession;
+  accountListeners.forEach((listener) => listener());
 };
+
+/**
+ * Resolves true once `account` is the one signed in and confirmed under Clerk session
+ * `clerkSession`; false as soon as another account is shown, or when `timeoutMs` runs out first.
+ * Right after Clerk settles, a cached account is still being checked against its session.
+ */
+export const whenAccountConfirmed = (
+  account: string | null,
+  clerkSession: string,
+  timeoutMs: number
+): Promise<boolean> =>
+  new Promise((resolve) => {
+    const settle = (confirmed: boolean) => {
+      clearTimeout(timer);
+      accountListeners.delete(check);
+      resolve(confirmed);
+    };
+    const check = () => {
+      if (currentAccount !== account) {
+        settle(false);
+      } else if (confirmedClerkSession === clerkSession) {
+        settle(true);
+      }
+    };
+    const timer = setTimeout(() => settle(false), timeoutMs);
+
+    accountListeners.add(check);
+    check();
+  });
 
 /**
  * A stable check for async work that must land only on the account it started for: pass the

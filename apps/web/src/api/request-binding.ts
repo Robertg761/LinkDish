@@ -6,7 +6,9 @@
  * credentials are in hand and, if another account (or Clerk session) is signed in by then, sends
  * nothing and rejects with {@link AccountChangedError}.
  */
-import { getCurrentAccount } from "../auth/account-scope";
+import { getTokenSessionId } from "@linkdish/utils/src/token-session";
+
+import { getCurrentAccount, whenAccountConfirmed } from "../auth/account-scope";
 import { getClerkBridgeSnapshot } from "../auth/clerk-bridge";
 
 export interface RequestBinding {
@@ -58,9 +60,42 @@ export const getRequestBinding = (): RequestBinding | null => binding;
 
 /**
  * Whether a request bound to `bound` may still go out: its account is the one signed in, and
- * Clerk hasn't switched away from the session it was made under. A request made while Clerk was
- * still loading (no session yet) may go out under the session Clerk then settles on.
+ * Clerk hasn't switched away from the session it was made under.
  */
 export const isBindingCurrent = (bound: RequestBinding): boolean =>
   getCurrentAccount() === bound.account &&
   (bound.clerkSessionId === null || signedInClerkSession() === bound.clerkSessionId);
+
+/** How long a bound request waits for its account to be confirmed under the session it carries. */
+export const ACCOUNT_CONFIRMATION_WAIT_MS = 10_000;
+
+/**
+ * Checks the credentials a bound request is about to carry (its headers, token in hand) and
+ * rejects with {@link AccountChangedError} unless they are its account's. A Clerk token must be
+ * for the session that account was confirmed under. A request made while a cached account was
+ * shown and Clerk still loading waits (briefly) for that check, so it never goes out with the
+ * token of another account Clerk settled on.
+ */
+export async function assertBoundCredentials(
+  bound: RequestBinding,
+  headers: Record<string, string>
+): Promise<void> {
+  if (!isBindingCurrent(bound)) {
+    throw new AccountChangedError();
+  }
+
+  const tokenSession = getTokenSessionId(/^Bearer (.+)$/u.exec(headers.authorization ?? "")?.[1]);
+
+  // No Clerk token (signed out, or a legacy session): the account check above is all there is.
+  if (tokenSession === null || bound.account === null) {
+    return;
+  }
+
+  if (
+    (bound.clerkSessionId !== null && tokenSession !== bound.clerkSessionId) ||
+    !(await whenAccountConfirmed(bound.account, tokenSession, ACCOUNT_CONFIRMATION_WAIT_MS)) ||
+    !isBindingCurrent(bound)
+  ) {
+    throw new AccountChangedError();
+  }
+}

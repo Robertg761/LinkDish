@@ -360,3 +360,5 @@ export type V2AnalyticsEmitter = <EventName extends V2AnalyticsEventName>(
 ) => void;
 
 export const noopV2AnalyticsEmitter: V2AnalyticsEmitter = () => undefined;
+
+export { getTokenSessionId } from "./token-session.js";

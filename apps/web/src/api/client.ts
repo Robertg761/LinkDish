@@ -5,6 +5,7 @@ import { apiBaseUrl } from "./base-url";
 import { ExtractorApiError, toWebApiError } from "./errors";
 import {
   AccountChangedError,
+  assertBoundCredentials,
   getRequestBinding,
   isBindingCurrent,
   type RequestBinding
@@ -86,7 +87,7 @@ const loadRealClient = (): Promise<ExtractorApiClient> => {
 
 /**
  * A client for one request bound to an account (see ./request-binding): it checks the account
- * before loading, and again once the request's credentials are in hand, right before sending.
+ * before loading, and its credentials once they are in hand, right before sending.
  */
 const loadBoundClient = async (bound: RequestBinding): Promise<ExtractorApiClient> => {
   if (!isBindingCurrent(bound)) {
@@ -99,11 +100,7 @@ const loadBoundClient = async (bound: RequestBinding): Promise<ExtractorApiClien
     baseUrl: apiBaseUrl,
     getHeaders: async () => {
       const headers = await buildApiRequestHeaders();
-
-      if (!isBindingCurrent(bound)) {
-        throw new AccountChangedError();
-      }
-
+      await assertBoundCredentials(bound, headers);
       return headers;
     }
   });

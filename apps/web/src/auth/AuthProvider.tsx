@@ -271,6 +271,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const resolveRunRef = useRef(0);
   /** The Clerk session the signed-in user was last resolved for (null: none yet). */
   const resolvedClerkSessionRef = useRef<string | null>(null);
+  /** The same, as state: published with the account, in the same render as the user. */
+  const [resolvedClerkSession, setResolvedClerkSession] = useState<string | null>(null);
   transportRef.current = transport;
   configRef.current = config;
   userRef.current = user;
@@ -433,6 +435,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         if (source === "clerk" && result.kind === "user") {
           resolvedClerkSessionRef.current = clerkSessionId;
+          setResolvedClerkSession(clerkSessionId);
         }
       }
 
@@ -674,11 +677,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     [logout]
   );
 
-  // Work that outlives its component (a toast's action) checks the account through this.
+  // Work that outlives its component (a toast's action) checks the account through this, and an
+  // account-bound request the Clerk session the account was confirmed under.
   const accountScope = getAccountScope(!!user, user);
+  const confirmedClerkSession = user ? resolvedClerkSession : null;
   useLayoutEffect(() => {
-    publishCurrentAccount(accountScope);
-  }, [accountScope]);
+    publishCurrentAccount(accountScope, confirmedClerkSession);
+  }, [accountScope, confirmedClerkSession]);
 
   const value = useMemo<AuthContextType>(
     () => ({

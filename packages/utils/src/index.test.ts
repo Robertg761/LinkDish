@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { decodeHtmlEntities, defuseTagOpeners, toTrimmedOrNull } from "./index.js";
+import {
+  decodeHtmlEntities,
+  defuseTagOpeners,
+  getTokenSessionId,
+  toTrimmedOrNull
+} from "./index.js";
 
 // String.prototype.isWellFormed is ES2024; this package targets ES2022, so detect lone
 // surrogates directly.
@@ -200,5 +205,32 @@ describe("defuseTagOpeners", () => {
     for (const input of [`${"<".repeat(100_000)}a`, "<a".repeat(50_000), "<".repeat(100_000)]) {
       expect(fastestMilliseconds(input)).toBeLessThan(50);
     }
+  });
+});
+
+describe("getTokenSessionId", () => {
+  const base64Url = (value: string) =>
+    Buffer.from(value, "utf8")
+      .toString("base64")
+      .replace(/\+/gu, "-")
+      .replace(/\//gu, "_")
+      .replace(/=+$/u, "");
+  const jwt = (claims: Record<string, unknown>) =>
+    `${base64Url('{"alg":"RS256"}')}.${base64Url(JSON.stringify(claims))}.signature`;
+
+  it("reads the Clerk session a token was issued for", () => {
+    expect(getTokenSessionId(jwt({ sid: "sess_2abc", sub: "user_1" }))).toBe("sess_2abc");
+    // base64url characters and non-ASCII claims decode too.
+    expect(getTokenSessionId(jwt({ name: "Zoë ~~~ ???", sid: "sess_-_" }))).toBe("sess_-_");
+  });
+
+  it("is null for anything that isn't a token with a session", () => {
+    expect(getTokenSessionId(null)).toBeNull();
+    expect(getTokenSessionId("")).toBeNull();
+    expect(getTokenSessionId("legacy-session-token")).toBeNull();
+    expect(getTokenSessionId(jwt({ sub: "user_1" }))).toBeNull();
+    expect(getTokenSessionId(jwt({ sid: 42 }))).toBeNull();
+    expect(getTokenSessionId("a.not*base64.c")).toBeNull();
+    expect(getTokenSessionId(`${base64Url("{}")}.${base64Url("not json")}.x`)).toBeNull();
   });
 });
