@@ -4,6 +4,7 @@ import { trackWebV2AnalyticsEvent } from "../../analytics/client";
 import { apiClient } from "../../api/client";
 import { getFriendlyErrorMessage } from "../../api/error-message";
 import { isExtractorApiError } from "../../api/errors";
+import { asAccount } from "../../api/request-binding";
 import { getAccountScope, useIsCurrentAccount } from "../../auth/account-scope";
 import { useAuth } from "../../auth/AuthProvider";
 
@@ -154,7 +155,10 @@ export function useWebCheckout({
         }
 
         rememberPendingCheckout({ period, plan, trigger });
-        const response = await apiClient.createWebBillingCheckout({ period, plan });
+        // Only as this account: never a checkout for another account Clerk switches to meanwhile.
+        const response = await asAccount(startedFor, () =>
+          apiClient.createWebBillingCheckout({ period, plan })
+        );
         return redirect(startedFor, response.url);
       } catch (failure) {
         clearPendingCheckout();
@@ -193,7 +197,9 @@ export function useWebCheckout({
       }
 
       rememberPendingCheckout({ period: "lifetime", plan: "plus", trigger: "founding" });
-      const response = await apiClient.createWebBillingCheckout({ offer: "founding" });
+      const response = await asAccount(startedFor, () =>
+        apiClient.createWebBillingCheckout({ offer: "founding" })
+      );
       return redirect(startedFor, response.url);
     } catch (failure) {
       clearPendingCheckout();
@@ -206,7 +212,7 @@ export function useWebCheckout({
     begin(startedFor, "portal");
 
     try {
-      const response = await apiClient.createWebBillingPortal();
+      const response = await asAccount(startedFor, () => apiClient.createWebBillingPortal());
       // Never open one account's billing (its payment details and invoices) for another.
       return redirect(startedFor, response.url);
     } catch (failure) {

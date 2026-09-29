@@ -12,6 +12,7 @@ import { useNavigate } from "react-router-dom";
 import { trackWebEvent } from "../../analytics/client";
 import { apiClient } from "../../api/client";
 import { getFriendlyErrorMessage } from "../../api/error-message";
+import { asAccount } from "../../api/request-binding";
 import { getAccountScope, useIsCurrentAccount } from "../../auth/account-scope";
 import { useAuth } from "../../auth/AuthProvider";
 import { ErrorState } from "../../components/ErrorState";
@@ -494,7 +495,7 @@ export const LibraryPage: React.FC = () => {
 
     try {
       try {
-        await apiClient.deleteSharedRecipe(sharedRecipeId);
+        await asAccount(deletingFor, () => apiClient.deleteSharedRecipe(sharedRecipeId));
       } catch (error) {
         if (!isSharedRecipeNotFoundError(error)) {
           console.error("Could not delete from server:", error);

@@ -13,6 +13,8 @@ import { useEffect, useSyncExternalStore } from "react";
 
 import { apiClient } from "../../api/client";
 import { isExtractorApiError } from "../../api/errors";
+import { asAccount, isAccountChangedError } from "../../api/request-binding";
+import { getCurrentAccount } from "../../auth/account-scope";
 import { isDeepEqual } from "../../data/reconcile";
 import { getLinkDishWebDb, SHOPPING_ITEMS_STORE_NAME } from "../../storage/linkdish-db";
 
@@ -1691,6 +1693,14 @@ export async function syncShoppingItems(options: {
       throw new ShoppingSyncCancelledError();
     }
   };
+  // Every request goes out only as the account signed in now (see asAccount): one Clerk switches
+  // to meanwhile never gets this household's items, nor this household its list. Its first
+  // statement must be the API call, which is what gets bound.
+  const syncingFor = getCurrentAccount();
+  const asSyncingAccount = <Result>(request: () => Promise<Result>): Promise<Result> =>
+    asAccount(syncingFor, request).catch((error: unknown) => {
+      throw isAccountChangedError(error) ? new ShoppingSyncCancelledError() : error;
+    });
   const isPending = (item: WebShoppingItem) =>
     needsPush(item) &&
     !belongsToOtherHousehold(item, { householdId }) &&
@@ -1731,7 +1741,7 @@ export async function syncShoppingItems(options: {
 
   const refusedUpserts = await sendIsolatingOtherHouseholdItems(payload, async (batch) => {
     ensureCurrent();
-    const result = await apiClient.upsertShoppingItems({ items: batch });
+    const result = await asSyncingAccount(() => apiClient.upsertShoppingItems({ items: batch }));
     await handleUpsertShoppingSyncResult(result, { householdId });
   });
 
@@ -1740,14 +1750,14 @@ export async function syncShoppingItems(options: {
     .map((item) => ({ id: item.id, updatedAt: item.updatedAt }));
   const refusedDeletions = await sendIsolatingOtherHouseholdItems(deletions, async (batch) => {
     ensureCurrent();
-    const result = await apiClient.deleteShoppingItems({ items: batch });
+    const result = await asSyncingAccount(() => apiClient.deleteShoppingItems({ items: batch }));
     await handleDeleteShoppingSyncResult(result);
   });
 
   await setAsideShoppingItems(new Set([...refusedUpserts, ...refusedDeletions]), householdId);
 
   ensureCurrent();
-  const items = await pullShoppingItemsFromApi({ householdId });
+  const items = await asSyncingAccount(() => pullShoppingItemsFromApi({ householdId }));
   await pruneStaleShoppingRecords({ householdId });
   return items;
 }

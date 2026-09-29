@@ -3,11 +3,19 @@ import { getStableClientId } from "../platform/stable-client-id";
 
 import { apiBaseUrl } from "./base-url";
 import { ExtractorApiError, toWebApiError } from "./errors";
+import {
+  AccountChangedError,
+  getRequestBinding,
+  isBindingCurrent,
+  type RequestBinding
+} from "./request-binding";
 
+import type * as ApiClientModuleNamespace from "@linkdish/api-client";
 import type { ExtractorApiClient } from "@linkdish/api-client";
 
 export { apiBaseUrl, ExtractorApiError };
 export { isExtractorApiError } from "./errors";
+export { AccountChangedError, asAccount, isAccountChangedError } from "./request-binding";
 
 let getAuthTokenFn: (() => Promise<string | null> | string | null) | null = null;
 
@@ -40,15 +48,32 @@ export async function buildApiRequestHeaders(): Promise<Record<string, string>> 
  * synchronous throws.
  */
 
+type ApiClientModule = typeof ApiClientModuleNamespace;
+
+let apiModulePromise: Promise<ApiClientModule> | null = null;
 let realClientPromise: Promise<ExtractorApiClient> | null = null;
+
+const loadApiModule = (): Promise<ApiClientModule> => {
+  if (!apiModulePromise) {
+    const loading = import("@linkdish/api-client");
+    apiModulePromise = loading;
+    // A failed chunk load (flaky network, new deploy) must not poison every later request.
+    loading.catch(() => {
+      if (apiModulePromise === loading) {
+        apiModulePromise = null;
+      }
+    });
+  }
+
+  return apiModulePromise;
+};
 
 const loadRealClient = (): Promise<ExtractorApiClient> => {
   if (!realClientPromise) {
-    const loading = import("@linkdish/api-client").then(({ createExtractorApiClient }) =>
+    const loading = loadApiModule().then(({ createExtractorApiClient }) =>
       createExtractorApiClient({ baseUrl: apiBaseUrl, getHeaders: buildApiRequestHeaders })
     );
     realClientPromise = loading;
-    // A failed chunk load (flaky network, new deploy) must not poison every later request.
     loading.catch(() => {
       if (realClientPromise === loading) {
         realClientPromise = null;
@@ -57,6 +82,31 @@ const loadRealClient = (): Promise<ExtractorApiClient> => {
   }
 
   return realClientPromise;
+};
+
+/**
+ * A client for one request bound to an account (see ./request-binding): it checks the account
+ * before loading, and again once the request's credentials are in hand, right before sending.
+ */
+const loadBoundClient = async (bound: RequestBinding): Promise<ExtractorApiClient> => {
+  if (!isBindingCurrent(bound)) {
+    throw new AccountChangedError();
+  }
+
+  const { createExtractorApiClient } = await loadApiModule();
+
+  return createExtractorApiClient({
+    baseUrl: apiBaseUrl,
+    getHeaders: async () => {
+      const headers = await buildApiRequestHeaders();
+
+      if (!isBindingCurrent(bound)) {
+        throw new AccountChangedError();
+      }
+
+      return headers;
+    }
+  });
 };
 
 /** Starts downloading the API client early (e.g. at boot). Never rejects. */
@@ -109,8 +159,11 @@ const createLazyApiClient = (): ExtractorApiClient => {
 
   for (const method of API_METHODS) {
     client[method] = async (...args: unknown[]) => {
+      // Read before anything is awaited: `asAccount` binds only the call made inside it.
+      const bound = getRequestBinding();
+
       try {
-        const real = await loadRealClient();
+        const real = bound ? await loadBoundClient(bound) : await loadRealClient();
         return await (real[method] as unknown as AnyApiMethod).apply(real, args);
       } catch (error) {
         throw toWebApiError(error);

@@ -3,6 +3,8 @@
 import { createStarterRecipeSeedRecords } from "@linkdish/recipe-domain/src/samples";
 
 import { apiClient } from "../../api/client";
+import { asAccount, isAccountChangedError } from "../../api/request-binding";
+import { getCurrentAccount } from "../../auth/account-scope";
 import { isCachedUserPremium } from "../../auth/auth-cache";
 import { emitDataChange } from "../../data/change-feed";
 import { safeGetItem, safeSetItem } from "../../platform/safe-storage";
@@ -1070,6 +1072,8 @@ export async function syncRecipeToHousehold(
   options: { isCurrent?: (() => boolean) | undefined } = {}
 ): Promise<WebSavedRecipe> {
   const accountChanged = () => options.isCurrent?.() === false;
+  // The share is sent only as the account signed in now (see asAccount).
+  const sharingFor = getCurrentAccount();
   const db = await getDb();
   const stored = (await db.get(STORE_NAME, recipe.id)) as WebSavedRecipe | undefined;
 
@@ -1104,12 +1108,14 @@ export async function syncRecipeToHousehold(
     const sharedRecipeId = current.sync?.sharedRecipeId;
     const payload = buildHouseholdRecipePayload(current);
 
-    const response = sharedRecipeId
-      ? await apiClient.updateSharedRecipe(sharedRecipeId, payload)
-      : await apiClient.createSharedRecipe({
-          ...payload,
-          sourceSavedRecipeId: current.id
-        });
+    const response = await asAccount(sharingFor, () =>
+      sharedRecipeId
+        ? apiClient.updateSharedRecipe(sharedRecipeId, payload)
+        : apiClient.createSharedRecipe({
+            ...payload,
+            sourceSavedRecipeId: current.id
+          })
+    );
 
     // Someone else signed in (or out) while it was out: the share is in the last account's
     // household, which the account now signed in can't see or update, so it isn't recorded here.
@@ -1124,8 +1130,9 @@ export async function syncRecipeToHousehold(
       status: existing.updatedAt === current.updatedAt ? "synced" : "dirty"
     }));
   } catch (error) {
-    // Failed as another account (or signed out): not this recipe's failure to record.
-    if (accountChanged()) {
+    // Failed as another account (or signed out), or not sent because one signed in: not this
+    // recipe's failure to record.
+    if (accountChanged() || isAccountChangedError(error)) {
       return recipe;
     }
 

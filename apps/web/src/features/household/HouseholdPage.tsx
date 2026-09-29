@@ -4,6 +4,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { trackWebEvent } from "../../analytics/client";
 import { apiClient } from "../../api/client";
 import { getFriendlyErrorMessage } from "../../api/error-message";
+import { asAccount } from "../../api/request-binding";
 import { getAccountScope, useIsCurrentAccount } from "../../auth/account-scope";
 import { useAuth } from "../../auth/AuthProvider";
 import { Badge } from "../../components/Badge";
@@ -174,7 +175,9 @@ const HouseholdView: React.FC<HouseholdViewProps> = ({ account, isCurrentAccount
     setActionError("");
 
     try {
-      const next = await action();
+      // Sent only as this account: if Clerk switches to another before the request goes out, it
+      // must not join, leave or change that account's household.
+      const next = await asAccount(account, action);
 
       // Another account signed in meanwhile: the answer (and its toast) was for the last one.
       if (!isCurrentAccount(account)) {

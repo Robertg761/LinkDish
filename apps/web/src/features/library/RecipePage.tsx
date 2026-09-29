@@ -5,6 +5,7 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { trackWebEvent } from "../../analytics/client";
 import { apiClient, isExtractorApiError } from "../../api/client";
 import { getFriendlyErrorMessage } from "../../api/error-message";
+import { asAccount } from "../../api/request-binding";
 import { getAccountScope, useIsCurrentAccount } from "../../auth/account-scope";
 import { useAuth } from "../../auth/AuthProvider";
 import { AppTopBarActions } from "../../components/AppShell";
@@ -756,7 +757,7 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
 
     try {
       if (shared) {
-        await apiClient.deleteSharedRecipe(shared.id);
+        await asAccount(deletingFor, () => apiClient.deleteSharedRecipe(shared.id));
 
         // Another account signed in meanwhile: the family recipe (and its toast) was the last one's.
         if (!isCurrentAccount(deletingFor)) {
@@ -774,7 +775,7 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
       if (isAuthenticated && sharedRecipeId) {
         // Like the cookbook: remove the household copy first so it isn't left orphaned.
         try {
-          await apiClient.deleteSharedRecipe(sharedRecipeId);
+          await asAccount(deletingFor, () => apiClient.deleteSharedRecipe(sharedRecipeId));
         } catch (error) {
           if (!isNotFoundError(error)) {
             throw error;
@@ -830,10 +831,12 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
   const handleSaveEdits = async (values: RecipeEditorValues) => {
     if (shared && props.kind === "shared") {
       const editedFor = account;
-      const response = await apiClient.updateSharedRecipe(shared.id, {
-        notes: values.notes,
-        recipe: values.recipe
-      });
+      const response = await asAccount(editedFor, () =>
+        apiClient.updateSharedRecipe(shared.id, {
+          notes: values.notes,
+          recipe: values.recipe
+        })
+      );
 
       // Another account signed in meanwhile: the edited recipe is the last one's household's.
       if (!isCurrentAccount(editedFor)) {

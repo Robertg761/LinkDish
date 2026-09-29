@@ -2,6 +2,7 @@ import React, { useCallback, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { apiClient } from "../../../api/client";
+import { asAccount } from "../../../api/request-binding";
 import { ConfirmationDialog } from "../../../components/ConfirmationDialog";
 import { EmptyState } from "../../../components/EmptyState";
 import { ErrorState } from "../../../components/ErrorState";
@@ -147,7 +148,7 @@ export const FamilyCookbook: React.FC<FamilyCookbookProps> = ({
     setRemoving(true);
 
     try {
-      await apiClient.deleteSharedRecipe(recipe.id);
+      await asAccount(removingFor, () => apiClient.deleteSharedRecipe(recipe.id));
       // Gone from the household either way (this only ever drops that one recipe).
       shared.removeLocal(recipe.id);
 

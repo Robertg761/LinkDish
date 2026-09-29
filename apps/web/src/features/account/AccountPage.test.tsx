@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ExtractorApiError } from "../../api/errors";
+import { getRequestBinding } from "../../api/request-binding";
 import { ToastProvider } from "../../components/Toast";
 
 import { AccountPage, getPostSignInDestination } from "./AccountPage";
@@ -327,6 +328,11 @@ describe("AccountPage signed in", () => {
   });
 
   it("edits the profile in a sheet", async () => {
+    let sentFor: string | null | undefined;
+    apiMocks.updateAccountProfile.mockImplementation(() => {
+      sentFor = getRequestBinding()?.account;
+      return Promise.resolve({ user: authMocks.user });
+    });
     renderAccount();
 
     fireEvent.click(screen.getByRole("button", { name: "Edit profile" }));
@@ -344,6 +350,8 @@ describe("AccountPage signed in", () => {
         displayName: "Sam R."
       });
     });
+    // Sent only as this account, never onto one Clerk switches to before it goes out.
+    expect(sentFor).toBe(authMocks.user?.id);
     expect(authMocks.refreshUser).toHaveBeenCalled();
     expect(await screen.findByText("Profile saved")).toBeVisible();
   });

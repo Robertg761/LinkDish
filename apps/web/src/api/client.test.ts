@@ -3,7 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const apiClientMocks = vi.hoisted(() => ({
   capturedOptions: null as { getHeaders: () => Promise<Record<string, string>> } | null,
   createCalls: 0,
-  getSession: vi.fn()
+  getSession: vi.fn(),
+  /** The headers of each leaveHousehold request that went out. */
+  sent: [] as Array<Record<string, string>>
 }));
 
 vi.mock("@linkdish/api-client", () => {
@@ -11,7 +13,14 @@ vi.mock("@linkdish/api-client", () => {
     createExtractorApiClient: (options: { getHeaders: () => Promise<Record<string, string>> }) => {
       apiClientMocks.capturedOptions = options;
       apiClientMocks.createCalls += 1;
-      return { getSession: apiClientMocks.getSession };
+      return {
+        getSession: apiClientMocks.getSession,
+        // Like the real client: credentials first, then the request goes out with them.
+        leaveHousehold: async () => {
+          apiClientMocks.sent.push(await options.getHeaders());
+          return { household: null };
+        }
+      };
     },
     ExtractorApiError: class ExtractorApiError extends Error {
       public constructor(
@@ -123,5 +132,100 @@ describe("lazy api client", () => {
     const request = apiClient.getSession();
 
     await expect(request).rejects.toThrow("Invalid input");
+  });
+});
+
+describe("requests bound to an account", () => {
+  beforeEach(() => {
+    apiClientMocks.sent = [];
+    vi.resetModules();
+  });
+
+  /** account A signed in through Clerk session A, and a token provider that waits to answer. */
+  const signedInAsA = async () => {
+    const client = await import("./client");
+    const { publishCurrentAccount } = await import("../auth/account-scope");
+    const { publishClerkState } = await import("../auth/clerk-bridge");
+    let answerToken: ((token: string) => void) | null = null;
+    client.registerAuthTokenProvider(
+      () =>
+        new Promise<string>((resolve) => {
+          answerToken = resolve;
+        })
+    );
+    publishCurrentAccount("user_a");
+    publishClerkState({ isLoaded: true, isSignedIn: true, sessionId: "sess_a", signInReady: true });
+
+    return {
+      ...client,
+      /** Waits until the request asks for its token, then answers with `token`. */
+      answerToken: async (token: string) => {
+        await vi.waitFor(() => expect(answerToken).not.toBeNull());
+        answerToken?.(token);
+      },
+      switchToB: () => {
+        publishClerkState({
+          isLoaded: true,
+          isSignedIn: true,
+          sessionId: "sess_b",
+          signInReady: true
+        });
+      },
+      publishCurrentAccount
+    };
+  };
+
+  it("sends nothing when Clerk switches to another account before the token is in hand", async () => {
+    const { answerToken, apiClient, asAccount, isAccountChangedError, switchToB } =
+      await signedInAsA();
+
+    const leaving = asAccount("user_a", () => apiClient.leaveHousehold());
+
+    // Clerk switches to B while A's request is on its way (the token it then gets is B's).
+    switchToB();
+    await answerToken("token_b");
+
+    const error: unknown = await leaving.catch((caught: unknown) => caught);
+    expect(isAccountChangedError(error)).toBe(true);
+    expect(apiClientMocks.sent).toEqual([]);
+  });
+
+  it("sends nothing once another account is shown as signed in", async () => {
+    const { answerToken, apiClient, asAccount, isAccountChangedError, publishCurrentAccount } =
+      await signedInAsA();
+
+    const leaving = asAccount("user_a", () => apiClient.leaveHousehold());
+    publishCurrentAccount(null);
+    await answerToken("token_a");
+
+    expect(isAccountChangedError(await leaving.catch((caught: unknown) => caught))).toBe(true);
+    expect(apiClientMocks.sent).toEqual([]);
+    // Refused up front, before loading anything, while the account is still gone.
+    await expect(asAccount("user_a", () => apiClient.leaveHousehold())).rejects.toThrow(
+      "Another account signed in"
+    );
+  });
+
+  it("goes out as the account it was made for when nothing changed", async () => {
+    const { answerToken, apiClient, asAccount } = await signedInAsA();
+
+    const leaving = asAccount("user_a", () => apiClient.leaveHousehold());
+    await answerToken("token_a");
+
+    await expect(leaving).resolves.toEqual({ household: null });
+    expect(apiClientMocks.sent).toEqual([
+      expect.objectContaining({ authorization: "Bearer token_a" })
+    ]);
+  });
+
+  it("leaves requests made outside asAccount alone", async () => {
+    const { answerToken, apiClient, switchToB } = await signedInAsA();
+
+    const leaving = apiClient.leaveHousehold();
+    switchToB();
+    await answerToken("token_b");
+
+    await expect(leaving).resolves.toEqual({ household: null });
+    expect(apiClientMocks.sent).toHaveLength(1);
   });
 });

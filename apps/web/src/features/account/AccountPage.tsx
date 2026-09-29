@@ -4,6 +4,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { apiClient } from "../../api/client";
 import { getFriendlyErrorMessage } from "../../api/error-message";
 import { isExtractorApiError } from "../../api/errors";
+import { asAccount } from "../../api/request-binding";
 import { getAccountScope, useIsCurrentAccount } from "../../auth/account-scope";
 import { useAuth } from "../../auth/AuthProvider";
 import { Badge } from "../../components/Badge";
@@ -396,10 +397,13 @@ const ProfileSheet: React.FC<ProfileSheetProps> = ({ user, open, onClose, isCurr
     setError("");
 
     try {
-      await apiClient.updateAccountProfile({
-        avatarEmoji: avatarEmoji.trim() || null,
-        displayName: displayName.trim() || null
-      });
+      // Sent only as this account: never onto another account Clerk switches to meanwhile.
+      await asAccount(savedFor, () =>
+        apiClient.updateAccountProfile({
+          avatarEmoji: avatarEmoji.trim() || null,
+          displayName: displayName.trim() || null
+        })
+      );
 
       // Another account signed in meanwhile: the saved profile (and its toast) was the last one's.
       if (!isCurrentAccount(savedFor)) {

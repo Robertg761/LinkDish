@@ -12,6 +12,7 @@ import React, {
 import { trackWebEvent } from "../analytics/client";
 import { apiClient, registerAuthTokenProvider } from "../api/client";
 import { isExtractorApiError } from "../api/errors";
+import { asAccount } from "../api/request-binding";
 
 import { getAccountScope, publishCurrentAccount } from "./account-scope";
 import {
@@ -659,7 +660,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const deleteAccount = useCallback(
     async (email: string) => {
       const deleting = userRef.current?.id;
-      await apiClient.deleteAccount({ confirmEmail: email });
+      // Sent only as the account being deleted, never as one Clerk switches to meanwhile.
+      await asAccount(deleting ?? null, () => apiClient.deleteAccount({ confirmEmail: email }));
 
       // Another account signed in (or out) while the deletion was on its way: signing out now
       // would sign out that account, not the deleted one.

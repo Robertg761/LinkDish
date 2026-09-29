@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ExtractorApiError } from "../../api/errors";
+import { getRequestBinding } from "../../api/request-binding";
 import { ToastProvider } from "../../components/Toast";
 
 import { HouseholdPage } from "./HouseholdPage";
@@ -288,7 +289,11 @@ describe("HouseholdPage", () => {
   it("asks members to confirm before leaving", async () => {
     authMocks.user = { billingPlan: "family", email: "ana@example.com", id: "user_2" };
     apiMocks.getHousehold.mockResolvedValue({ household: { ...household, role: "member" } });
-    apiMocks.leaveHousehold.mockResolvedValue({ household: null });
+    let sentFor: string | null | undefined;
+    apiMocks.leaveHousehold.mockImplementation(() => {
+      sentFor = getRequestBinding()?.account;
+      return Promise.resolve({ household: null });
+    });
 
     renderHouseholdPage();
 
@@ -300,6 +305,8 @@ describe("HouseholdPage", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Leave household" }));
 
     await waitFor(() => expect(apiMocks.leaveHousehold).toHaveBeenCalled());
+    // Sent only as this account, never as one Clerk switches to before it goes out.
+    expect(sentFor).toBe("user_2");
     expect(authMocks.refreshUser).toHaveBeenCalled();
     expect(await screen.findByRole("heading", { name: "How a household works" })).toBeVisible();
   });
