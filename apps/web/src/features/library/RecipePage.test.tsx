@@ -218,17 +218,20 @@ describe("RecipePage saved route", () => {
     renderAt("/recipes/recipe_local");
 
     expect(await screen.findByRole("heading", { level: 1, name: "Weeknight Chili" })).toBeVisible();
-    expect(document.title).toBe("Weeknight Chili · LinkDish");
     expect(
       screen.getByRole("link", { name: "Open the original recipe on example.com" })
     ).toHaveAttribute("href", "https://www.example.com/chili");
     expect(screen.getByRole("button", { name: "Start cooking" })).toBeInTheDocument();
     expect(screen.queryByText(/Back to Cookbook/i)).not.toBeInTheDocument();
-    expect(analyticsMocks.trackWebEvent).toHaveBeenCalledWith({
-      eventName: "recipe_opened",
-      properties: { surface: "recipe_detail" },
-      routeOrScreen: "/recipes/:id"
-    });
+    // The title and the open are set from effects, which can run just after the heading appears.
+    await waitFor(() => expect(document.title).toBe("Weeknight Chili · LinkDish"));
+    await waitFor(() =>
+      expect(analyticsMocks.trackWebEvent).toHaveBeenCalledWith({
+        eventName: "recipe_opened",
+        properties: { surface: "recipe_detail" },
+        routeOrScreen: "/recipes/:id"
+      })
+    );
     await waitFor(() => expect(stored("recipe_local")?.lastOpenedAt).toBeDefined());
   });
 
@@ -1008,11 +1011,14 @@ describe("RecipePage shared route", () => {
     renderAt("/recipes/shared/shared_1");
 
     expect(await screen.findByRole("heading", { level: 1, name: "Family Chili" })).toBeVisible();
-    expect(analyticsMocks.trackWebEvent).toHaveBeenCalledWith({
-      eventName: "recipe_opened",
-      properties: { surface: "shared_link" },
-      routeOrScreen: "/recipes/shared/:id"
-    });
+    // Tracked from an effect, which can run just after the heading first appears.
+    await waitFor(() =>
+      expect(analyticsMocks.trackWebEvent).toHaveBeenCalledWith({
+        eventName: "recipe_opened",
+        properties: { surface: "shared_link" },
+        routeOrScreen: "/recipes/shared/:id"
+      })
+    );
     expect(screen.getByText("Shared by Robert")).toBeInTheDocument();
     expect(
       screen.getByRole("link", { name: "Open the original recipe on family.example.com" })
