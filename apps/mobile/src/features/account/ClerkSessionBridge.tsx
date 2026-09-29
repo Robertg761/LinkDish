@@ -13,8 +13,8 @@ export const ClerkSessionBridge = ({ children }: PropsWithChildren) => {
       isLoaded,
       isSignedIn: Boolean(isSignedIn),
       sessionId: activeSessionId,
-      signOut: async () => {
-        await signOut();
+      signOut: async (sessionId?: string) => {
+        await signOut(sessionId ? { sessionId } : undefined);
       }
     }),
     [activeSessionId, getToken, isLoaded, isSignedIn, signOut]

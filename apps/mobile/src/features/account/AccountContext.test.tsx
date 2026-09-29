@@ -860,6 +860,59 @@ describe("AccountContext", () => {
     expect(latestAccount?.isSignedIn).toBe(true);
   });
 
+  it("signs out only the deleted account's Clerk session, even once Clerk is on another", async () => {
+    let finishDelete: (value: unknown) => void = () => undefined;
+    const deleteAccount = vi.fn().mockReturnValue(
+      new Promise((resolve) => {
+        finishDelete = resolve;
+      })
+    );
+    mocks.createExtractorApiClient.mockReturnValue(
+      createMockClient({
+        deleteAccount,
+        getAuthConfig: vi.fn().mockResolvedValue({
+          authMode: "clerk_beta",
+          clerkEnabled: true,
+          emailCodeEnabled: true
+        }),
+        getSession: vi.fn().mockResolvedValue({
+          authenticated: true,
+          expiresAt: "2026-08-09T10:00:00.000Z",
+          user: { email: "first@example.com", id: "user_first" }
+        })
+      })
+    );
+    clerkSessionState.getToken.mockResolvedValue("first-token");
+    clerkSessionState.isSignedIn = true;
+    clerkSessionState.sessionId = "sess_first";
+
+    await act(async () => {
+      create(
+        <AccountProvider>
+          <Probe />
+        </AccountProvider>
+      );
+      await flushAsyncWork();
+    });
+
+    let deleting: Promise<void> | undefined;
+    await act(async () => {
+      deleting = latestAccount?.deleteAccount("first@example.com");
+      await flushAsyncWork();
+    });
+
+    // Clerk has already switched to another account's session, but nothing has rendered it yet
+    // when the delete answers.
+    clerkSessionState.sessionId = "sess_next";
+    await act(async () => {
+      finishDelete({ status: "deleted" });
+      await deleting;
+    });
+
+    expect(clerkSessionState.signOut).toHaveBeenCalledTimes(1);
+    expect(clerkSessionState.signOut).toHaveBeenCalledWith("sess_first");
+  });
+
   it("clears the local session token even when server logout fails", async () => {
     const logout = vi.fn().mockRejectedValue(new Error("Network request failed"));
     const client = createMockClient({

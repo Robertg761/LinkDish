@@ -9,7 +9,8 @@ interface ClerkSessionContextValue {
    * session with `isSignedIn` staying true; this changes when it does.
    */
   sessionId: string | null;
-  signOut: () => Promise<void>;
+  /** Ends Clerk session `sessionId` only, when given; otherwise Clerk's active session. */
+  signOut: (sessionId?: string) => Promise<void>;
 }
 
 const noopContext: ClerkSessionContextValue = {

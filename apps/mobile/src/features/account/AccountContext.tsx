@@ -325,6 +325,8 @@ export const AccountProvider = ({ children }: PropsWithChildren) => {
         setIsAccountBusy(true);
 
         const deletingFor = accountUser.id;
+        // The Clerk session the account was loaded under (null: not through Clerk).
+        const deletingSession = userClerkSessionIdRef.current;
 
         try {
           await createClientWithHeaders(getAuthHeadersFor(deletingFor)).deleteAccount({
@@ -337,8 +339,10 @@ export const AccountProvider = ({ children }: PropsWithChildren) => {
             return;
           }
 
-          if (clerkSession.isSignedIn) {
-            await clerkSession.signOut();
+          // Only the deleted account's session ends: Clerk may already be on another account's
+          // before this render knows it.
+          if (deletingSession) {
+            await clerkSession.signOut(deletingSession);
           }
           preferLegacySessionRef.current = false;
           await applySessionToken(null);
