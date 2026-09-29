@@ -15,6 +15,7 @@ import { AppState } from "react-native";
 import { trackMobileEvent } from "../../analytics/client";
 import { mobileEnv } from "../../config/env";
 import { createDebouncedWriter } from "../../lib/debouncedWriter";
+import { isAccountChangedError } from "../account/account-changed-error";
 import { useAccount } from "../account/AccountContext";
 
 import {
@@ -155,6 +156,13 @@ class ShoppingSyncCancelledError extends Error {
   }
 }
 
+/**
+ * The pass stopped before a request went out because Clerk already carries another account's
+ * session, which isn't loaded here yet. The next pass waits for it: the refresh that runs when
+ * the signed-in account changes starts it.
+ */
+class ShoppingSyncAccountChangedError extends ShoppingSyncCancelledError {}
+
 /** The last household check that answered: the account's household (null: none), and when. */
 interface HouseholdCheck {
   checkedAt: number;
@@ -182,7 +190,7 @@ interface SyncLoopState {
 }
 
 export const ShoppingListProvider = ({ children }: PropsWithChildren) => {
-  const { getAuthHeaders, isSignedIn, user } = useAccount();
+  const { getAuthHeaders, getAuthHeadersFor, isSignedIn, user } = useAccount();
   const [checkedHousehold, setCheckedHousehold] = useState<HouseholdCheck | null>(null);
   const [hasLoadedShoppingItems, setHasLoadedShoppingItems] = useState(false);
   const [isRefreshingShoppingList, setIsRefreshingShoppingList] = useState(false);
@@ -195,20 +203,30 @@ export const ShoppingListProvider = ({ children }: PropsWithChildren) => {
   const syncPassGuardRef = useRef<(() => void) | null>(null);
   const syncLoopRef = useRef<SyncLoopState>({ loop: null, pending: false, pendingPull: false });
   const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const client = useMemo(
-    () =>
-      createExtractorApiClient({
-        baseUrl: mobileEnv.apiBaseUrl,
-        getHeaders: async () => {
-          const headers = await getAuthHeaders();
-          // Credentials can take a moment (a token refresh). A sync pass whose account signed
-          // out meanwhile must not send its request with the next account's.
-          syncPassGuardRef.current?.();
-          return headers;
+  const client = useMemo(() => {
+    // Sent only as the account this render is for (see getAuthHeadersFor): a pass holds this
+    // client from its start, so an account Clerk switches to meanwhile never gets its household's
+    // changes, even before that account is loaded here. Stopped, it is the pass's cancellation.
+    const headersFor = user ? getAuthHeadersFor(user.id) : getAuthHeaders;
+
+    return createExtractorApiClient({
+      baseUrl: mobileEnv.apiBaseUrl,
+      getHeaders: async () => {
+        let headers: Record<string, string>;
+
+        try {
+          headers = await headersFor();
+        } catch (error) {
+          throw isAccountChangedError(error) ? new ShoppingSyncAccountChangedError() : error;
         }
-      }),
-    [getAuthHeaders]
-  );
+
+        // Credentials can take a moment (a token refresh). A sync pass whose account signed
+        // out meanwhile must not send its request with the next account's.
+        syncPassGuardRef.current?.();
+        return headers;
+      }
+    });
+  }, [getAuthHeaders, getAuthHeadersFor, user]);
   /**
    * The household the list syncs with and shows: the signed-in account's, once a check for that
    * account has answered. A check that fails (offline) keeps the last answer.
@@ -556,6 +574,12 @@ export const ShoppingListProvider = ({ children }: PropsWithChildren) => {
             } catch (error) {
               if (!(error instanceof ShoppingSyncCancelledError)) {
                 throw error;
+              }
+
+              // Nothing was sent. Clerk is on another account's session: this account's changes
+              // wait, and the next pass runs once that account is loaded (its refresh starts it).
+              if (error instanceof ShoppingSyncAccountChangedError) {
+                continue;
               }
 
               // It ran for an account that is no longer signed in: sync the one that is.

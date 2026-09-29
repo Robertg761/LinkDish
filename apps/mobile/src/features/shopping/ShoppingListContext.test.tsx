@@ -3,8 +3,11 @@ import React from "react";
 import { act, create } from "react-test-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { AccountChangedError } from "../account/account-changed-error";
+
 const accountState = vi.hoisted(() => ({
   getAuthHeaders: vi.fn(),
+  getAuthHeadersFor: vi.fn(),
   isSignedIn: false,
   user: null as { email: string; id: string } | null
 }));
@@ -135,6 +138,10 @@ describe("ShoppingListProvider storage recovery", () => {
     latestShoppingList = null;
     appStateMocks.listeners = [];
     accountState.getAuthHeaders.mockReset();
+    accountState.getAuthHeadersFor.mockReset();
+    accountState.getAuthHeadersFor.mockImplementation(
+      () => () => accountState.getAuthHeaders() as Promise<Record<string, string>>
+    );
     accountState.getAuthHeaders.mockResolvedValue({});
     accountState.isSignedIn = false;
     accountState.user = null;
@@ -246,6 +253,10 @@ describe("ShoppingListProvider household sync", () => {
     latestShoppingList = null;
     appStateMocks.listeners = [];
     accountState.getAuthHeaders.mockReset();
+    accountState.getAuthHeadersFor.mockReset();
+    accountState.getAuthHeadersFor.mockImplementation(
+      () => () => accountState.getAuthHeaders() as Promise<Record<string, string>>
+    );
     accountState.getAuthHeaders.mockResolvedValue({});
     accountState.isSignedIn = true;
     accountState.user = { email: "cook@example.com", id: "user_1" };
@@ -577,6 +588,10 @@ describe("ShoppingListProvider across accounts on one device", () => {
     latestShoppingList = null;
     appStateMocks.listeners = [];
     accountState.getAuthHeaders.mockReset();
+    accountState.getAuthHeadersFor.mockReset();
+    accountState.getAuthHeadersFor.mockImplementation(
+      () => () => accountState.getAuthHeaders() as Promise<Record<string, string>>
+    );
     accountState.getAuthHeaders.mockResolvedValue({});
     accountState.isSignedIn = true;
     accountState.user = firstCook;
@@ -626,6 +641,45 @@ describe("ShoppingListProvider across accounts on one device", () => {
     server.session.householdId = householdId;
     await switchAccount(renderer, user);
   };
+
+  it("sends nothing, and waits, once Clerk carries another account's session", async () => {
+    const server = createHouseholdServer([{ householdId: "household_1", item: milk }]);
+    // Like the real client, each request asks for credentials right before it goes out.
+    apiMocks.createExtractorApiClient.mockImplementation(
+      ({ getHeaders }: { getHeaders: () => Promise<Record<string, string>> }) => ({
+        ...server.client,
+        upsertShoppingItems: async (input: { items: ShoppingItem[] }) => {
+          await getHeaders();
+          return server.client.upsertShoppingItems(input);
+        }
+      })
+    );
+    const firstCookHeaders = vi.fn(() => Promise.resolve({}));
+    accountState.getAuthHeadersFor.mockImplementation((userId: string) =>
+      userId === "user_1" ? () => firstCookHeaders() : () => Promise.reject(new Error("unused"))
+    );
+    await renderProvider();
+
+    // Clerk has switched to another account, not loaded here yet: the credentials the first
+    // cook's push would get are that account's, so none are handed over.
+    firstCookHeaders.mockImplementation(() => Promise.reject(new AccountChangedError()));
+    await act(async () => {
+      latestShoppingList!.addItems([{ text: "limes" }]);
+      await vi.advanceTimersByTimeAsync(SHOPPING_SYNC_DEBOUNCE_MS);
+      await flushAsyncWork();
+    });
+
+    expect(householdItems(server, "household_1")).toEqual([["milk", null, false]]);
+    expect(latestShoppingList?.shoppingError).toBeNull();
+    // Kept to send once this account is signed in again, and not tried over and over meanwhile.
+    expect(listSummary()).toContainEqual(["limes", false, "dirty"]);
+    const attempts = firstCookHeaders.mock.calls.length;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(SHOPPING_SYNC_DEBOUNCE_MS * 4);
+      await flushAsyncWork();
+    });
+    expect(firstCookHeaders.mock.calls.length).toBe(attempts);
+  });
 
   it("never sends the last account's unsent change to the next account's household", async () => {
     const server = createHouseholdServer([
