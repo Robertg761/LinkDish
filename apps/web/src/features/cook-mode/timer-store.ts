@@ -274,24 +274,35 @@ function listenForOtherTabs(): void {
   });
 }
 
-/** Loads timers saved in cook sessions (once per page load). Never rejects. */
+/**
+ * Loads timers saved in cook sessions (once per page load, once it has worked: a failed read is
+ * tried again by the next call, e.g. a timer started or the page shown again). Never rejects.
+ */
 export const hydrateKitchenTimers = (): Promise<void> => {
   listenForOtherTabs();
-  hydration ??= getCookSessions()
-    .then((sessions) => {
-      const known = new Set(timers.map((timer) => timer.id));
-      const restored = storedTimersOf(sessions).filter((timer) => !known.has(timer.id));
 
-      if (restored.length > 0) {
-        timers = [...timers, ...restored];
-        checkCompletions({ silentIfStale: true });
-        scheduleCompletionCheck();
-        emit();
-      }
-    })
-    .catch((error: unknown) => {
-      console.warn("Could not restore kitchen timers.", error);
-    });
+  if (!hydration) {
+    const attempt: Promise<void> = getCookSessions()
+      .then((sessions) => {
+        const known = new Set(timers.map((timer) => timer.id));
+        const restored = storedTimersOf(sessions).filter((timer) => !known.has(timer.id));
+
+        if (restored.length > 0) {
+          timers = [...timers, ...restored];
+          checkCompletions({ silentIfStale: true });
+          scheduleCompletionCheck();
+          emit();
+        }
+      })
+      .catch((error: unknown) => {
+        console.warn("Could not restore kitchen timers.", error);
+
+        if (hydration === attempt) {
+          hydration = null;
+        }
+      });
+    hydration = attempt;
+  }
 
   ensureVisibilityListener();
   return hydration;
@@ -452,9 +463,18 @@ function ensureVisibilityListener(): void {
   }
 
   visibilityListening = true;
-  // Background tabs throttle timeouts; catch up as soon as the page is visible again.
+  // Background tabs throttle timeouts; catch up as soon as the page is visible again (and read
+  // the saved timers, if that failed so far).
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible" && checkCompletions()) {
+    if (document.visibilityState !== "visible") {
+      return;
+    }
+
+    if (!hydration) {
+      void hydrateKitchenTimers();
+    }
+
+    if (checkCompletions()) {
       emit();
       scheduleCompletionCheck();
     }

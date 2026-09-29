@@ -217,6 +217,60 @@ describe("kitchen timers", () => {
     ]);
   });
 
+  it("reads saved timers again once storage works after a failed first read", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    startKitchenTimer({
+      durationMs: 300_000,
+      href: "/recipes/r1",
+      label: "5 min",
+      recipeId: "r1",
+      recipeTitle: "Pancakes"
+    });
+    await flushAsync();
+    await flushCookSessionWrites();
+
+    // A later page load whose first read of the saved timers fails.
+    resetKitchenTimersForTests();
+    resetCookSessionStoreForTests();
+    resetLinkDishWebDbForTests();
+    fakeIdb.failNextOpen(new DOMException("Storage is unavailable.", "UnknownError"));
+    const firstRead = hydrateKitchenTimers();
+    await flushAsync();
+    await firstRead;
+    expect(getKitchenTimers()).toHaveLength(0);
+
+    // Storage works again: the next caller (the dock shown again, a new timer) reads them.
+    const nextRead = hydrateKitchenTimers();
+    await flushAsync();
+    await nextRead;
+    expect(getKitchenTimers()).toEqual([
+      expect.objectContaining({ label: "5 min", recipeId: "r1" })
+    ]);
+  });
+
+  it("reads saved timers again when the page is shown after a failed first read", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    startKitchenTimer({ durationMs: 300_000, label: "5 min", recipeId: "r1", recipeTitle: "Stew" });
+    await flushAsync();
+    await flushCookSessionWrites();
+    resetKitchenTimersForTests();
+    resetCookSessionStoreForTests();
+    resetLinkDishWebDbForTests();
+    fakeIdb.failNextOpen(new DOMException("Storage is unavailable.", "UnknownError"));
+    const firstRead = hydrateKitchenTimers();
+    await flushAsync();
+    await firstRead;
+    expect(getKitchenTimers()).toHaveLength(0);
+
+    document.dispatchEvent(new Event("visibilitychange"));
+    await flushAsync();
+    await flushAsync();
+
+    expect(getKitchenTimers()).toEqual([
+      expect.objectContaining({ label: "5 min", recipeId: "r1" })
+    ]);
+  });
+
   describe("when this tab's stored timers change or can't be saved", () => {
     beforeEach(async () => {
       // Open the database up front (its upgrade waits on timers, which are fake here).
