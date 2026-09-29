@@ -446,13 +446,21 @@ export const AccountProvider = ({ children }: PropsWithChildren) => {
         setAccountError(null);
         setIsAccountBusy(true);
 
+        const updatedFor = accountUser.id;
+
         try {
           const response =
             await createClientWithHeaders(getAuthHeaders).updateAccountProfile(profile);
-          setUser({
-            ...response.user,
-            billingPlan: response.user.billingPlan ?? accountUser.billingPlan
-          });
+          // Only onto the account that saved it: if another account signed in (or out) meanwhile,
+          // this is the last one's profile and must never be shown as the one signed in now.
+          setUser((current) =>
+            current?.id === updatedFor && response.user.id === updatedFor
+              ? {
+                  ...response.user,
+                  billingPlan: response.user.billingPlan ?? current.billingPlan
+                }
+              : current
+          );
         } catch (error) {
           setAccountError(getAccountErrorMessage(error));
           throw error;
