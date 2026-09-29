@@ -669,8 +669,8 @@ export function useImportSession(): ImportSession {
   };
 
   // The public actions are stable and always run the latest implementation.
-  const implRef = useRef({ checkLocalAllowance, runAttempt, showProblem, start });
-  implRef.current = { checkLocalAllowance, runAttempt, showProblem, start };
+  const implRef = useRef({ checkLocalAllowance, runAttempt, showProblem, start, stillStartedBy });
+  implRef.current = { checkLocalAllowance, runAttempt, showProblem, start, stillStartedBy };
 
   const startUrl = useCallback(
     (url: string, options: StartUrlOptions = {}) =>
@@ -724,8 +724,15 @@ export function useImportSession(): ImportSession {
       return;
     }
 
-    if (current && !current.terminal && current.request === last.request) {
-      // Same correlation id, so the API can reuse the page it already fetched.
+    // Same correlation id, so the API can reuse the page it already fetched. Only for the account
+    // that started it: AI help after another account signed in (or out) is that account's own
+    // import, sent with its credentials and charged to it, so it starts afresh.
+    if (
+      current &&
+      !current.terminal &&
+      current.request === last.request &&
+      impl.stillStartedBy(current)
+    ) {
       await impl.runAttempt(current, "fallback");
       return;
     }

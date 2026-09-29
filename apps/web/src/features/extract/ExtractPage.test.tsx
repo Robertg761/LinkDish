@@ -651,6 +651,36 @@ describe("ExtractPage", () => {
     expect(upgradeMocks.requestUpgradeSheet).not.toHaveBeenCalled();
   });
 
+  it("starts AI help afresh for an account that signed in after the first attempt", async () => {
+    authMocks.user = null;
+    apiMocks.extractRecipe.mockResolvedValueOnce(needsRetry()).mockResolvedValueOnce(success());
+    renderPage();
+    pasteLink("https://example.com/recipe");
+    expect(await screen.findByRole("heading", { name: "We found part of a recipe" })).toBeVisible();
+
+    // The cook signs in before asking for AI help.
+    act(() => {
+      authMocks.user = { billingPlan: "free", email: "cook@example.com", id: "user_1" };
+      authMocks.version += 1;
+      authMocks.listeners.forEach((listener) => listener());
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Try with AI help" }));
+    await screen.findByRole("heading", { level: 1, name: "Weeknight Rice" });
+
+    // A new import for the signed-in account (the API meters it), not the signed-out one's.
+    const [primary, fallback] = apiMocks.extractRecipe.mock.calls.map(([request]) => request);
+    expect(fallback).toMatchObject({ attempt: "fallback" });
+    expect(fallback?.correlationId).not.toBe(primary?.correlationId);
+    expect(startedEvents()).toHaveLength(2);
+    // So the device's signed-out allowance isn't spent on it too.
+    const usage = JSON.parse(localStorage.getItem("linkdish:web:billing-usage:v2") ?? "{}") as {
+      imports?: number;
+      strongExtractions?: number;
+    };
+    expect(usage.imports ?? 0).toBe(0);
+    expect(usage.strongExtractions ?? 0).toBe(0);
+  });
+
   it("stops at the on-device allowance for signed-out cooks without calling the API", async () => {
     authMocks.user = null;
     localStorage.setItem(
