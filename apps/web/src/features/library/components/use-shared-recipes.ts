@@ -48,6 +48,8 @@ export interface SharedRecipesState {
   removeLocal: (id: string) => void;
 }
 
+const NO_RECIPES: SharedRecipe[] = [];
+
 /** Remembers the last list per account so returning to the Cookbook shows it instantly. */
 let cache: { userId: string; recipes: SharedRecipe[] } | null = null;
 /**
@@ -91,6 +93,9 @@ export function useSharedRecipes(
   credentialsKey: string | null
 ): SharedRecipesState {
   const cached = isAuthenticated && userId && cache?.userId === userId ? cache.recipes : null;
+  /** The account the state below belongs to (null signed out). */
+  const account = isAuthenticated ? (userId ?? "") : null;
+  const [owner, setOwner] = useState<string | null>(account);
   const [recipes, setRecipes] = useState<SharedRecipe[]>(cached ?? []);
   const [status, setStatus] = useState<SharedRecipesState["status"]>(
     cached ? "ready" : isAuthenticated ? "loading" : "idle"
@@ -105,6 +110,7 @@ export function useSharedRecipes(
     if (!isAuthenticated) {
       // Keep the same (empty) list when there is nothing to clear: a new array would render the
       // whole Cookbook again right after its first paint.
+      setOwner(null);
       setRecipes((current) => (current.length === 0 ? current : []));
       setStatus("idle");
       setError(null);
@@ -128,6 +134,7 @@ export function useSharedRecipes(
         cache = { recipes: list, userId };
       }
 
+      setOwner(account);
       setRecipes(list);
       setStatus("ready");
       setError(null);
@@ -144,28 +151,39 @@ export function useSharedRecipes(
         console.error("Failed to load shared recipes:", err);
       }
 
+      setOwner(account);
       setRecipes([]);
       setStatus("error");
       setAccessBlocked(blocked);
       setError(blocked ? FAMILY_ACCESS_MESSAGE : FAMILY_LOAD_ERROR_MESSAGE);
     }
-  }, [credentialsKey, isAuthenticated, userId]);
+  }, [account, credentialsKey, isAuthenticated, userId]);
 
   useEffect(() => {
     void reload();
   }, [reload]);
 
   const removeLocal = useCallback((id: string) => {
-    setRecipes((current) => {
-      const next = current.filter((recipe) => recipe.id !== id);
+    setRecipes((current) => current.filter((recipe) => recipe.id !== id));
 
-      if (cache) {
-        cache = { ...cache, recipes: next };
-      }
-
-      return next;
-    });
+    // Filter the cache's own list: it may belong to a different account than the one shown.
+    if (cache) {
+      cache = { ...cache, recipes: cache.recipes.filter((recipe) => recipe.id !== id) };
+    }
   }, []);
+
+  if (owner !== account) {
+    // Another account signed straight in: never show the last one's Family recipes (or its lock
+    // or error) while this one's list loads. Its own cached list shows at once when there is one.
+    return {
+      accessBlocked: false,
+      error: null,
+      recipes: cached ?? NO_RECIPES,
+      reload,
+      removeLocal,
+      status: cached ? "ready" : account === null ? "idle" : "loading"
+    };
+  }
 
   return { accessBlocked, error, recipes, reload, removeLocal, status };
 }

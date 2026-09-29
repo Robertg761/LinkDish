@@ -65,14 +65,17 @@ export function useImportUsageState(
   version: number
 ): ImportUsageState {
   const { credentialsKey, isAuthenticated, loading } = useAuth();
-  const [serverQuota, setServerQuota] = useState<QuotaStatus | null>(null);
-  const [settled, setSettled] = useState(false);
+  /** The server's answer and the credentials it was asked with. */
+  const [server, setServer] = useState<{
+    key: string | null;
+    quota: QuotaStatus | null;
+    settled: boolean;
+  }>({ key: null, quota: null, settled: false });
 
   // Keyed on the credentials (which include the account): it waits for a cached Clerk user's
   // session instead of asking anonymously, and asks again once Clerk signs in.
   useEffect(() => {
-    setServerQuota(null);
-    setSettled(false);
+    setServer({ key: credentialsKey, quota: null, settled: false });
 
     if (credentialsKey === null || !isAuthenticated) {
       return;
@@ -82,13 +85,16 @@ export function useImportUsageState(
     apiClient.getBillingUsage({ signal: controller.signal }).then(
       (response) => {
         if (!controller.signal.aborted) {
-          setServerQuota(response.billingEnabled ? response.quota : null);
-          setSettled(true);
+          setServer({
+            key: credentialsKey,
+            quota: response.billingEnabled ? response.quota : null,
+            settled: true
+          });
         }
       },
       () => {
         if (!controller.signal.aborted) {
-          setSettled(true);
+          setServer({ key: credentialsKey, quota: null, settled: true });
         }
       }
     );
@@ -114,9 +120,12 @@ export function useImportUsageState(
     };
   }
 
+  // Never show another account's quota for the render before this account's request starts.
+  const current = server.key === credentialsKey ? server : { quota: null, settled: false };
+
   return {
-    pending: !latestQuota && !settled,
-    usage: toImportUsage(latestQuota ?? serverQuota)
+    pending: !latestQuota && !current.settled,
+    usage: toImportUsage(latestQuota ?? current.quota)
   };
 }
 

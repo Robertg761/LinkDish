@@ -229,7 +229,19 @@ type SharedState =
 
 const SharedRecipeRoute: React.FC<{ sharedId: string }> = ({ sharedId }) => {
   const { credentialsKey, isAuthenticated, loading: authLoading } = useAuth();
-  const [state, setState] = useState<SharedState>({ status: "loading" });
+  const [loaded, setLoaded] = useState<{ key: string | null; state: SharedState }>({
+    key: null,
+    state: { status: "loading" }
+  });
+  const setState = useCallback(
+    (next: SharedState) => setLoaded({ key: credentialsKey, state: next }),
+    [credentialsKey]
+  );
+  // A signed-in account only ever sees the answer to its own credentials' request.
+  const state: SharedState =
+    loaded.key === credentialsKey || loaded.state.status === "signed-out"
+      ? loaded.state
+      : { status: "loading" };
   const [reloadToken, setReloadToken] = useState(0);
   const openedRef = useRef(false);
 
@@ -271,7 +283,7 @@ const SharedRecipeRoute: React.FC<{ sharedId: string }> = ({ sharedId }) => {
     return () => {
       cancelled = true;
     };
-  }, [authLoading, credentialsKey, isAuthenticated, reloadToken, sharedId]);
+  }, [authLoading, credentialsKey, isAuthenticated, reloadToken, setState, sharedId]);
 
   const shared = state.status === "ready" ? state.shared : null;
 
