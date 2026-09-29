@@ -81,6 +81,11 @@ export interface CachedAuthConfig {
 }
 
 export interface CachedAuthUser {
+  /**
+   * The Clerk session the API confirmed this user for. Shown at boot only while Clerk is still
+   * on that session: another session may be another account's.
+   */
+  clerkSessionId?: string | undefined;
   savedAt: string;
   source: CachedAuthUserSource;
   user: AccountUser;
@@ -141,11 +146,27 @@ export function readCachedAuthUser(): CachedAuthUser | null {
     return null;
   }
 
-  return { savedAt, source, user };
+  const clerkSessionId = (value as { clerkSessionId?: unknown }).clerkSessionId;
+
+  return {
+    ...(typeof clerkSessionId === "string" && clerkSessionId ? { clerkSessionId } : {}),
+    savedAt,
+    source,
+    user
+  };
 }
 
-export function writeCachedAuthUser(user: AccountUser, source: CachedAuthUserSource): void {
-  const entry: CachedAuthUser = { savedAt: new Date().toISOString(), source, user };
+export function writeCachedAuthUser(
+  user: AccountUser,
+  source: CachedAuthUserSource,
+  clerkSessionId?: string | null
+): void {
+  const entry: CachedAuthUser = {
+    ...(clerkSessionId ? { clerkSessionId } : {}),
+    savedAt: new Date().toISOString(),
+    source,
+    user
+  };
   safeSetItem(AUTH_USER_CACHE_KEY, JSON.stringify(entry));
 }
 

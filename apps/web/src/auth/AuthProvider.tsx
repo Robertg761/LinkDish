@@ -201,6 +201,8 @@ const finishPendingClerkSignOut = (): Promise<void> => {
 };
 
 interface InitialAuthState {
+  /** The Clerk session a cached Clerk user was confirmed for (null: none known). */
+  clerkSessionId: string | null;
   config: AuthConfigResponse | null;
   loading: boolean;
   user: AccountUser | null;
@@ -228,6 +230,7 @@ const readInitialAuthState = (clerkAvailable: boolean): InitialAuthState => {
       : false;
 
   return {
+    clerkSessionId: usable?.source === "clerk" ? (usable.clerkSessionId ?? null) : null,
     config,
     loading: !usable && !knownAnonymous,
     user: usable?.user ?? null,
@@ -269,24 +272,42 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const configRef = useRef(config);
   const userRef = useRef(user);
   const resolveRunRef = useRef(0);
-  /** The Clerk session the signed-in user was last resolved for (null: none yet). */
-  const resolvedClerkSessionRef = useRef<string | null>(null);
+  /**
+   * The Clerk session the signed-in user was last resolved for (null: none yet). A cached user
+   * starts with the session it was confirmed for, so it keeps showing only while Clerk is on it.
+   */
+  const resolvedClerkSessionRef = useRef<string | null>(initial.clerkSessionId);
   /** The same, as state: published with the account, in the same render as the user. */
-  const [resolvedClerkSession, setResolvedClerkSession] = useState<string | null>(null);
+  const [resolvedClerkSession, setResolvedClerkSession] = useState<string | null>(
+    initial.clerkSessionId
+  );
   transportRef.current = transport;
   configRef.current = config;
   userRef.current = user;
 
-  const setUser = useCallback((next: AccountUser | null, source?: CachedAuthUserSource) => {
-    userRef.current = next;
-    setUserState(next);
+  const setUser = useCallback(
+    (next: AccountUser | null, source?: CachedAuthUserSource, clerkSessionId?: string | null) => {
+      userRef.current = next;
+      setUserState(next);
 
-    if (next && source) {
-      writeCachedAuthUser(next, source);
-    } else if (!next) {
-      clearCachedAuthUser();
-    }
-  }, []);
+      if (next && source) {
+        writeCachedAuthUser(next, source, clerkSessionId);
+      } else if (!next) {
+        clearCachedAuthUser();
+      }
+    },
+    []
+  );
+
+  /** A user the API confirmed for Clerk session `clerkSessionId`. */
+  const setClerkUser = useCallback(
+    (next: AccountUser, clerkSessionId: string | null) => {
+      resolvedClerkSessionRef.current = clerkSessionId;
+      setResolvedClerkSession(clerkSessionId);
+      setUser(next, "clerk", clerkSessionId);
+    },
+    [setUser]
+  );
 
   /** Token bridge for every API request (registered once, reads the latest auth state). */
   const getSessionToken = useCallback(async (): Promise<string | null> => {
@@ -325,9 +346,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [getSessionToken]);
 
   const applySession = useCallback(
-    (result: SessionResult, source: CachedAuthUserSource) => {
+    (result: SessionResult, source: CachedAuthUserSource, clerkSessionId: string | null = null) => {
       if (result.kind === "user") {
-        setUser(result.user, source);
+        if (source === "clerk") {
+          setClerkUser(result.user, clerkSessionId);
+        } else {
+          setUser(result.user, source);
+        }
       } else if (result.kind === "signed_out") {
         setUser(null);
       } else {
@@ -335,7 +360,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         console.warn("Failed to fetch session:", result.error);
       }
     },
-    [setUser]
+    [setClerkUser, setUser]
   );
 
   // Load (or revalidate) the auth config once. A cached config renders instantly.
@@ -431,12 +456,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const result = await fetchSession();
 
       if (isCurrent()) {
-        applySession(result, source);
-
-        if (source === "clerk" && result.kind === "user") {
-          resolvedClerkSessionRef.current = clerkSessionId;
-          setResolvedClerkSession(clerkSessionId);
-        }
+        applySession(result, source, clerkSessionId);
       }
 
       finish();
@@ -483,14 +503,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (clerkSignedIn) {
         removeLegacySessionToken();
 
-        // Clerk switched straight to another session (another account, as far as anyone here can
-        // tell) while requests already carry its token: let the last account go at once instead
-        // of showing it, and acting for it, until the new one is resolved.
-        if (
-          userRef.current &&
-          resolvedClerkSessionRef.current !== null &&
-          resolvedClerkSessionRef.current !== clerkSessionId
-        ) {
+        // Clerk is on a session the shown user wasn't confirmed for: switched straight to another
+        // account's, or (a cold boot) settled on one the cached user wasn't cached for. Requests
+        // already carry its token, so that user goes at once instead of being shown, and acted
+        // for, until the API says whose session it is.
+        if (userRef.current && resolvedClerkSessionRef.current !== clerkSessionId) {
           setUser(null);
         }
 
@@ -536,9 +553,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   ]);
 
   const refreshUser = useCallback(async () => {
+    const clerkNow = getClerkBridgeSnapshot();
     const source: CachedAuthUserSource =
-      transportRef.current !== "legacy" && getClerkBridgeSnapshot().isSignedIn ? "clerk" : "legacy";
-    applySession(await fetchSession(), source);
+      transportRef.current !== "legacy" && clerkNow.isSignedIn ? "clerk" : "legacy";
+    const run = resolveRunRef.current;
+    const result = await fetchSession();
+
+    // Clerk switched sessions (or signed in or out) while it was out: the answer may be the last
+    // account's, and the new session's own resolution decides who is signed in.
+    if (
+      run !== resolveRunRef.current ||
+      getClerkBridgeSnapshot().sessionId !== clerkNow.sessionId
+    ) {
+      return;
+    }
+
+    applySession(result, source, clerkNow.sessionId);
   }, [applySession]);
 
   const requestLoginCode = useCallback(async (email: string) => {
@@ -593,7 +623,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const result = await fetchSession();
 
         if (result.kind === "user") {
-          setUser(result.user, "clerk");
+          setClerkUser(result.user, getClerkBridgeSnapshot().sessionId);
           return;
         }
 

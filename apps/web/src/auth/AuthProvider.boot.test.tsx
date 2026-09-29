@@ -89,10 +89,16 @@ const cacheConfig = (config: object) => {
   );
 };
 
-const cacheUser = (source: "clerk" | "legacy") => {
+/** A cached user; a Clerk one confirmed for `clerkSessionId` (the mock's session unless given). */
+const cacheUser = (source: "clerk" | "legacy", clerkSessionId: string | null = "sess_1") => {
   localStorage.setItem(
     AUTH_USER_CACHE_KEY,
-    JSON.stringify({ savedAt: "2026-09-01T00:00:00.000Z", source, user })
+    JSON.stringify({
+      ...(source === "clerk" && clerkSessionId ? { clerkSessionId } : {}),
+      savedAt: "2026-09-01T00:00:00.000Z",
+      source,
+      user
+    })
   );
 };
 
@@ -175,6 +181,52 @@ describe("AuthProvider boot", () => {
     expect(readCachedAuthUser()?.user.email).toBe("cook@example.com");
   });
 
+  it("doesn't show a cached user once Clerk settles on a session it wasn't confirmed for", async () => {
+    // Cached for another session (another account signed in since, in another tab); the API
+    // can't be reached to say whose session this one is.
+    cacheConfig(clerkConfig);
+    cacheUser("clerk", "sess_other");
+    clerkMocks.auth.isSignedIn = true;
+    apiClientMocks.getAuthConfig.mockRejectedValue(new TypeError("Failed to fetch"));
+    apiClientMocks.getSession.mockRejectedValue(new TypeError("Failed to fetch"));
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    renderAuth();
+
+    await waitFor(() => expect(apiClientMocks.getSession).toHaveBeenCalled());
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(authText()).not.toBe("user:cook@example.com");
+    expect(getCurrentAccount()).toBeNull();
+    expect(readCachedAuthUser()).toBeNull();
+  });
+
+  it("keeps showing a cached user whose session Clerk is still on", async () => {
+    cacheConfig(clerkConfig);
+    cacheUser("clerk", "sess_1");
+    clerkMocks.auth.isSignedIn = true;
+    apiClientMocks.getAuthConfig.mockResolvedValue(clerkConfig);
+    let answer: (value: unknown) => void = () => undefined;
+    apiClientMocks.getSession.mockReturnValue(
+      new Promise((resolve) => {
+        answer = resolve;
+      })
+    );
+
+    renderAuth();
+    await waitFor(() => expect(apiClientMocks.getSession).toHaveBeenCalled());
+    // Still shown while it is checked again, and published as confirmed for that session.
+    expect(authText()).toBe("user:cook@example.com");
+    expect(getCurrentAccount()).toBe("user_1");
+
+    await act(async () => {
+      answer({ authenticated: true, user });
+      await Promise.resolve();
+    });
+    expect(readCachedAuthUser()).toMatchObject({ clerkSessionId: "sess_1", source: "clerk" });
+  });
+
   it("signs out only on a definitive answer (401)", async () => {
     cacheConfig(legacyConfig);
     cacheUser("legacy");
@@ -189,6 +241,45 @@ describe("AuthProvider boot", () => {
 
     await waitFor(() => expect(authText()).toBe("anonymous"));
     expect(localStorage.getItem(AUTH_USER_CACHE_KEY)).toBeNull();
+  });
+
+  it("drops a refresh that answers for the account Clerk switched away from", async () => {
+    cacheConfig(clerkConfig);
+    clerkMocks.auth.isSignedIn = true;
+    apiClientMocks.getAuthConfig.mockResolvedValue(clerkConfig);
+    apiClientMocks.getSession.mockResolvedValue({ authenticated: true, user });
+
+    renderAuth();
+    await waitFor(() => expect(authText()).toBe("user:cook@example.com"));
+
+    // The first account refreshes; its answer is slow.
+    let answerRefresh: (value: unknown) => void = () => undefined;
+    apiClientMocks.getSession.mockReturnValueOnce(
+      new Promise((resolve) => {
+        answerRefresh = resolve;
+      })
+    );
+    let refreshing: Promise<void> | undefined;
+    act(() => {
+      refreshing = seen.at(-1)?.refreshUser();
+    });
+
+    // Clerk switches to another account, whose own session answers first.
+    const next = { billingPlan: "free" as const, email: "next@example.com", id: "user_2" };
+    apiClientMocks.getSession.mockResolvedValue({ authenticated: true, user: next });
+    clerkMocks.auth.sessionId = "sess_2";
+    act(() => {
+      syncClerk();
+    });
+    await waitFor(() => expect(authText()).toBe("user:next@example.com"));
+
+    await act(async () => {
+      answerRefresh({ authenticated: true, user });
+      await refreshing;
+    });
+
+    expect(authText()).toBe("user:next@example.com");
+    expect(getCurrentAccount()).toBe("user_2");
   });
 
   it("lets the last account go as soon as Clerk switches straight to another account's session", async () => {
