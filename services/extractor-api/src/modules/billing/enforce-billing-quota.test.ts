@@ -188,58 +188,31 @@ describe("reserved quota", () => {
     expect(fallback.allowed).toBe(false);
   });
 
-  it("reserves through one Upstash script, and refuses when it reports a full allowance", async () => {
-    vi.resetModules();
-    const bodies: unknown[] = [];
-    vi.stubGlobal(
-      "fetch",
-      vi.fn((input: string, init?: { body?: string }) => {
-        if (init?.body) {
-          bodies.push(JSON.parse(init.body));
-          return Promise.resolve(new Response(JSON.stringify({ result: 0 })));
-        }
+  it("never keeps counting a hold whose request died, once it lapses", async () => {
+    const { authorizeExtractionRequest, QUOTA_HOLD_TTL_MS } = await importBillingModule({
+      FREE_LIFETIME_IMPORT_LIMIT: "1"
+    });
+    const headers = { "x-linkdish-client-id": "crashed-user" };
+    const address = identity("203.0.113.86");
 
-        return Promise.resolve(
-          new Response(JSON.stringify({ result: input.includes("/get/") ? "0" : null }))
-        );
-      })
-    );
-    for (const [key, value] of Object.entries({
-      BILLING_ENFORCEMENT_ENABLED: "true",
-      FREE_LIFETIME_IMPORT_LIMIT: "3",
-      UPSTASH_REDIS_REST_TOKEN: "token",
-      UPSTASH_REDIS_REST_URL: "https://upstash.test"
-    })) {
-      vi.stubEnv(key, value);
-    }
-    const { authorizeExtractionRequest } = await import("./enforce-billing.js");
+    // Held, and never settled: the function timed out or the process died.
+    const crashed = await authorizeExtractionRequest(headers, "primary", address);
+    expect(crashed.allowed).toBe(true);
+    expect((await authorizeExtractionRequest(headers, "primary", address)).allowed).toBe(false);
 
-    const authorization = await authorizeExtractionRequest(
-      { "x-linkdish-client-id": "upstash-user" },
-      "primary",
-      identity("203.0.113.84")
-    );
+    const startedAt = Date.now();
+    vi.spyOn(Date, "now").mockReturnValue(startedAt + QUOTA_HOLD_TTL_MS + 1);
 
-    expect(authorization.allowed).toBe(false);
-    expect(bodies).toHaveLength(1);
-    expect(bodies[0]).toEqual([
-      "EVAL",
-      expect.stringContaining("linkdish_reserve_quota_v2"),
-      "2",
-      expect.stringContaining("linkdish:quota-reservation:"),
-      expect.stringContaining(":lifetime:imports:"),
-      "3600",
-      "1",
-      "1",
-      "3",
-      "0"
-    ]);
+    const later = await authorizeExtractionRequest(headers, "primary", address);
+    expect(later.allowed).toBe(true);
+    const committed = await later.commitUsageWithQuota?.(success);
+    expect(committed?.quota).toMatchObject({ limit: 1, remaining: 0 });
   });
 
-  it("tries a failed release again with the same reservation, so it goes back once", async () => {
+  /** Upstash as a fetch double: `answer` decides each script's result (reads find nothing). */
+  const stubUpstash = async (answer: (command: string[]) => Response | undefined) => {
     vi.resetModules();
     const scripts: string[][] = [];
-    let releaseFailures = 1;
     vi.stubGlobal(
       "fetch",
       vi.fn((input: string, init?: { body?: string }) => {
@@ -251,13 +224,7 @@ describe("reserved quota", () => {
 
         const command = JSON.parse(init.body) as string[];
         scripts.push(command);
-
-        if (command[1]?.includes("linkdish_release_quota") && releaseFailures > 0) {
-          releaseFailures -= 1;
-          return Promise.resolve(new Response("Service Unavailable", { status: 503 }));
-        }
-
-        return Promise.resolve(new Response(JSON.stringify({ result: 1 })));
+        return Promise.resolve(answer(command) ?? new Response(JSON.stringify({ result: 1 })));
       })
     );
     for (const [key, value] of Object.entries({
@@ -269,9 +236,80 @@ describe("reserved quota", () => {
       vi.stubEnv(key, value);
     }
     vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const { authorizeExtractionRequest } = await import("./enforce-billing.js");
+    const billing = await import("./enforce-billing.js");
+    return { billing, scripts };
+  };
 
-    const authorization = await authorizeExtractionRequest(
+  const named = (scripts: string[][], name: string) =>
+    scripts.filter((command) => command[1]?.includes(name));
+  /** A script's first ARGV (the reservation token), after its KEYS. */
+  const tokenOf = (command: string[] | undefined) =>
+    command ? command[3 + Number(command[2])] : undefined;
+
+  it("holds through one Upstash script, and refuses when it reports a full allowance", async () => {
+    const { billing, scripts } = await stubUpstash(
+      () => new Response(JSON.stringify({ result: 0 }))
+    );
+
+    const authorization = await billing.authorizeExtractionRequest(
+      { "x-linkdish-client-id": "upstash-user" },
+      "primary",
+      identity("203.0.113.84")
+    );
+
+    expect(authorization.allowed).toBe(false);
+    expect(scripts).toHaveLength(1);
+    expect(scripts[0]).toEqual([
+      "EVAL",
+      expect.stringContaining("linkdish_reserve_quota_v3"),
+      "2",
+      expect.stringContaining(":lifetime:imports:"),
+      expect.stringMatching(/:lifetime:imports:.*:pending$/u),
+      expect.any(String),
+      expect.any(String),
+      expect.any(String),
+      "1200",
+      "1",
+      "1",
+      "3"
+    ]);
+  });
+
+  it("commits a successful import's hold once, and lets a failed one's go", async () => {
+    const { billing, scripts } = await stubUpstash(() => undefined);
+    const headers = { "x-linkdish-client-id": "settle-user" };
+
+    const imported = await billing.authorizeExtractionRequest(
+      headers,
+      "primary",
+      identity("203.0.113.87")
+    );
+    await imported.commitUsage(success);
+    await imported.commitUsage(success);
+    const failed = await billing.authorizeExtractionRequest(
+      headers,
+      "primary",
+      identity("203.0.113.87")
+    );
+    await failed.commitUsage(failure);
+
+    const reserves = named(scripts, "linkdish_reserve_quota");
+    expect(named(scripts, "linkdish_commit_quota").map(tokenOf)).toEqual([tokenOf(reserves[0])]);
+    expect(named(scripts, "linkdish_release_quota").map(tokenOf)).toEqual([tokenOf(reserves[1])]);
+  });
+
+  it("tries a failed release again with the same reservation", async () => {
+    let releaseFailures = 1;
+    const { billing, scripts } = await stubUpstash((command) => {
+      if (command[1]?.includes("linkdish_release_quota") && releaseFailures > 0) {
+        releaseFailures -= 1;
+        return new Response("Service Unavailable", { status: 503 });
+      }
+
+      return undefined;
+    });
+
+    const authorization = await billing.authorizeExtractionRequest(
       { "x-linkdish-client-id": "retry-user" },
       "primary",
       identity("203.0.113.85")
@@ -280,12 +318,32 @@ describe("reserved quota", () => {
     await authorization.commitUsage(failure);
     await authorization.releaseUsage?.();
 
-    const reserve = scripts.find((command) => command[1]?.includes("linkdish_reserve_quota"));
-    const releases = scripts.filter((command) => command[1]?.includes("linkdish_release_quota"));
-    // The blip is retried; once a release goes through, nothing more is given back.
-    expect(releases).toHaveLength(2);
-    expect(releases.map((command) => command[3])).toEqual([reserve?.[3], reserve?.[3]]);
-    expect(reserve?.[3]).toContain("linkdish:quota-reservation:");
+    const reserve = named(scripts, "linkdish_reserve_quota")[0];
+    // The blip is retried; once a release goes through, the reservation is settled.
+    expect(named(scripts, "linkdish_release_quota").map(tokenOf)).toEqual([
+      tokenOf(reserve),
+      tokenOf(reserve)
+    ]);
+  });
+
+  it("returns a successful import even when its allowance can't be read afterwards", async () => {
+    const { billing } = await stubUpstash(() => undefined);
+    const authorization = await billing.authorizeExtractionRequest(
+      { "x-linkdish-client-id": "read-failure-user" },
+      "primary",
+      identity("203.0.113.88")
+    );
+    vi.mocked(fetch).mockImplementation((_input, init) =>
+      Promise.resolve(
+        init?.body
+          ? new Response(JSON.stringify({ result: 1 }))
+          : new Response("Service Unavailable", { status: 503 })
+      )
+    );
+
+    await expect(authorization.commitUsageWithQuota?.(success)).resolves.toMatchObject({
+      quota: null
+    });
   });
 });
 

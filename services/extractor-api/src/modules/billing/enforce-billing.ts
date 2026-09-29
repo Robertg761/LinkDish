@@ -356,14 +356,19 @@ const readUsage = async (
 };
 
 /*
- * Admission is a reservation: the allowance a request needs is counted, atomically, before the
- * extraction starts, and given back if it doesn't succeed. Reading the counts and counting only
- * after a success let parallel requests with one import left all pass the check (and all count).
+ * Admission is a hold, kept apart from committed usage until the import succeeds. The allowance
+ * a request needs is held, atomically, before the extraction starts: each counter gets an entry
+ * for the request in its pending set (reservation tokens, scored by when the hold lapses), and a
+ * gate counts committed and held imports together. A success commits the hold (the counter goes
+ * up, the entry goes); anything else lets it go; and a hold whose request died (a timeout, a
+ * crash) lapses by itself and is swept by the next reservation, so it never stays counted.
+ * Reading the counts and counting only after a success let parallel requests with one import
+ * left all pass the check.
  *
  * Each quota kind the request needs is a gate, open while any of its counters is under its
  * limit (a grandfathered free account has a lifetime and a monthly counter, and may use either);
- * the reservation passes only when every gate is open, and then counts every counter, as a
- * committed import always has.
+ * the reservation passes only when every gate is open, and then holds (and a success counts)
+ * every counter, as a committed import always has.
  */
 interface QuotaCounter {
   key: string;
@@ -403,28 +408,40 @@ const getQuotaGate = (
   ];
 };
 
-/*
- * KEYS: the reservation's token key, then every counter, gate by gate. ARGV: the token's expiry,
- * the gate count, then per gate its counter count and, per counter, its limit and expiry (0:
- * none). Returns 1, counts every counter and records the token when every gate has a counter
- * under its limit; otherwise returns 0 and counts nothing.
+/**
+ * How long a hold lasts when its request never settles it: far longer than any extraction runs.
+ * A success settled after that (it can't be, in practice) goes uncounted rather than counted twice.
  */
-const reserveQuotaScript = `-- linkdish_reserve_quota_v2
-local argi = 3
-local keyi = 2
-local counters = {}
-for gate = 1, tonumber(ARGV[2]) do
+export const QUOTA_HOLD_TTL_MS = 10 * 60 * 1_000;
+
+const pendingKeyOf = (counterKey: string): string => `${counterKey}:pending`;
+
+/*
+ * KEYS: each counter's key and its pending set, counter by counter, gate by gate. ARGV: the
+ * token, now and when the hold lapses (ms), the pending sets' expiry (s), the gate count, then
+ * per gate its counter count and per counter its limit. Sweeps lapsed holds; when every gate has
+ * a counter whose committed and held imports are under its limit, holds every counter for the
+ * token and returns 1; otherwise holds nothing and returns 0.
+ */
+const reserveQuotaScript = `-- linkdish_reserve_quota_v3
+local now = tonumber(ARGV[2])
+local argi = 6
+local keyi = 1
+local pending = {}
+for gate = 1, tonumber(ARGV[5]) do
   local count = tonumber(ARGV[argi])
   argi = argi + 1
   local open = false
   for counter = 1, count do
     local key = KEYS[keyi]
+    local pendingKey = KEYS[keyi + 1]
     local limit = tonumber(ARGV[argi])
-    local ttl = tonumber(ARGV[argi + 1])
-    keyi = keyi + 1
-    argi = argi + 2
-    table.insert(counters, { key, ttl })
-    if (tonumber(redis.call('GET', key)) or 0) < limit then
+    keyi = keyi + 2
+    argi = argi + 1
+    redis.call('ZREMRANGEBYSCORE', pendingKey, '-inf', now)
+    table.insert(pending, pendingKey)
+    local used = (tonumber(redis.call('GET', key)) or 0) + redis.call('ZCARD', pendingKey)
+    if used < limit then
       open = true
     end
   end
@@ -432,39 +449,42 @@ for gate = 1, tonumber(ARGV[2]) do
     return 0
   end
 end
-for _, counter in ipairs(counters) do
-  redis.call('INCR', counter[1])
-  if counter[2] > 0 then
-    redis.call('EXPIRE', counter[1], counter[2], 'NX')
-  end
+for _, pendingKey in ipairs(pending) do
+  redis.call('ZADD', pendingKey, tonumber(ARGV[3]), ARGV[1])
+  redis.call('EXPIRE', pendingKey, tonumber(ARGV[4]))
 end
-redis.call('SET', KEYS[1], '1', 'EX', tonumber(ARGV[1]))
 return 1`;
 
 /*
- * KEYS: the reservation's token key, then its counters. Gives back one count on each counter
- * (never below zero, never recreating an expired one), once: only while the token is there, and
- * it goes with the first release, so a retry after a release whose answer was lost does nothing.
+ * KEYS: each counter's key and its pending set. ARGV: the token, then per counter its expiry (s,
+ * 0: none). Counts each counter whose hold for the token is still there, and takes the hold:
+ * once, so a retry after a commit whose answer was lost counts nothing more.
  */
-const releaseQuotaScript = `-- linkdish_release_quota_v2
-if redis.call('DEL', KEYS[1]) == 0 then
-  return 0
-end
-for i = 2, #KEYS do
-  local value = tonumber(redis.call('GET', KEYS[i]))
-  if value and value > 0 then
-    redis.call('DECR', KEYS[i])
+const commitQuotaScript = `-- linkdish_commit_quota_v1
+local counted = 0
+for i = 1, #KEYS, 2 do
+  if redis.call('ZREM', KEYS[i + 1], ARGV[1]) == 1 then
+    redis.call('INCR', KEYS[i])
+    local ttl = tonumber(ARGV[(i + 1) / 2 + 1])
+    if ttl > 0 then
+      redis.call('EXPIRE', KEYS[i], ttl, 'NX')
+    end
+    counted = counted + 1
   end
+end
+return counted`;
+
+/* KEYS: pending sets. ARGV: the token. Lets its holds go (again: nothing happens). */
+const releaseQuotaScript = `-- linkdish_release_quota_v3
+for _, pendingKey in ipairs(KEYS) do
+  redis.call('ZREM', pendingKey, ARGV[1])
 end
 return 1`;
 
-/** How long a reservation can be given back: far longer than any extraction runs. */
-const QUOTA_RESERVATION_TTL_SECONDS = 60 * 60;
-
-/** A reservation: the gates it counted, and (in Upstash) the token that lets it go back once. */
+/** A reservation: the gates it holds, under its token. */
 interface QuotaReservation {
   gates: QuotaGate[];
-  tokenKey: string;
+  token: string;
 }
 
 const evalWithUpstash = async (
@@ -498,11 +518,33 @@ const evalWithUpstash = async (
   return body.result;
 };
 
-/* The in-process equivalent of reserveQuotaScript (one process: nothing runs in between). */
-const reserveInMemory = (gates: QuotaGate[]): boolean => {
+/* In-process holds, per counter: token → when it lapses (ms). */
+const inMemoryHolds = createBoundedExpiringMap<Map<string, number>>({
+  maxEntries: maxInMemoryQuotaEntries
+});
+
+/** A counter's holds that haven't lapsed (lapsed ones are dropped). */
+const liveHolds = (key: string, now: number): Map<string, number> => {
+  const holds = inMemoryHolds.get(key, now) ?? new Map<string, number>();
+
+  for (const [token, lapsesAt] of holds) {
+    if (lapsesAt <= now) {
+      holds.delete(token);
+    }
+  }
+
+  return holds;
+};
+
+/* The in-process equivalents of the scripts above (one process: nothing runs in between). */
+const reserveInMemory = ({ gates, token }: QuotaReservation): boolean => {
   const now = Date.now();
   const allOpen = gates.every((gate) =>
-    gate.some((counter) => (inMemoryQuotaCounts.get(counter.key, now) ?? 0) < counter.limit)
+    gate.some(
+      (counter) =>
+        (inMemoryQuotaCounts.get(counter.key, now) ?? 0) + liveHolds(counter.key, now).size <
+        counter.limit
+    )
   );
 
   if (!allOpen) {
@@ -510,27 +552,21 @@ const reserveInMemory = (gates: QuotaGate[]): boolean => {
   }
 
   gates.flat().forEach((counter) => {
-    const current = inMemoryQuotaCounts.get(counter.key, now);
-    inMemoryQuotaCounts.set(
-      counter.key,
-      (current ?? 0) + 1,
-      counter.ttlSeconds === null ? null : now + counter.ttlSeconds * 1_000,
-      now
-    );
+    const holds = liveHolds(counter.key, now);
+    holds.set(token, now + QUOTA_HOLD_TTL_MS);
+    inMemoryHolds.set(counter.key, holds, now + QUOTA_HOLD_TTL_MS, now);
   });
   return true;
 };
 
-const releaseInMemory = (gates: QuotaGate[]): void => {
+const commitInMemory = ({ gates, token }: QuotaReservation): void => {
   const now = Date.now();
 
   gates.flat().forEach((counter) => {
-    const current = inMemoryQuotaCounts.get(counter.key, now);
-
-    if (current !== undefined && current > 0) {
+    if (liveHolds(counter.key, now).delete(token)) {
       inMemoryQuotaCounts.set(
         counter.key,
-        current - 1,
+        (inMemoryQuotaCounts.get(counter.key, now) ?? 0) + 1,
         counter.ttlSeconds === null ? null : now + counter.ttlSeconds * 1_000,
         now
       );
@@ -538,59 +574,93 @@ const releaseInMemory = (gates: QuotaGate[]): void => {
   });
 };
 
+const releaseInMemory = ({ gates, token }: QuotaReservation): void => {
+  const now = Date.now();
+  gates.flat().forEach((counter) => liveHolds(counter.key, now).delete(token));
+};
+
 const isUpstashConfigured = (): boolean =>
   Boolean(extractorApiEnv.UPSTASH_REDIS_REST_URL && extractorApiEnv.UPSTASH_REDIS_REST_TOKEN);
 
-/** Counts the request against every gate at once, or (a gate is full) counts nothing. */
+const counterKeysOf = ({ gates }: QuotaReservation): string[] =>
+  gates.flat().flatMap((counter) => [counter.key, pendingKeyOf(counter.key)]);
+
+/** Holds the request against every gate at once, or (a gate is full) holds nothing. */
 const reserveUsage = async (gates: QuotaGate[]): Promise<QuotaReservation | null> => {
-  const reservation: QuotaReservation = {
-    gates,
-    tokenKey: `linkdish:quota-reservation:${quotaAccountingVersion}:${randomUUID()}`
-  };
+  const reservation: QuotaReservation = { gates, token: randomUUID() };
 
   if (!isUpstashConfigured()) {
-    return reserveInMemory(gates) ? reservation : null;
+    return reserveInMemory(reservation) ? reservation : null;
   }
 
+  const now = Date.now();
   const args = [
-    String(QUOTA_RESERVATION_TTL_SECONDS),
+    reservation.token,
+    String(now),
+    String(now + QUOTA_HOLD_TTL_MS),
+    String(Math.ceil((QUOTA_HOLD_TTL_MS * 2) / 1_000)),
     String(gates.length),
     ...gates.flatMap((gate) => [
       String(gate.length),
-      ...gate.flatMap((counter) => [String(counter.limit), String(counter.ttlSeconds ?? 0)])
+      ...gate.map((counter) => String(counter.limit))
     ])
   ];
-  const result = await evalWithUpstash(
-    reserveQuotaScript,
-    [reservation.tokenKey, ...gates.flat().map((counter) => counter.key)],
-    args
-  );
+  const result = await evalWithUpstash(reserveQuotaScript, counterKeysOf(reservation), args);
 
   return Number(result) === 1 ? reservation : null;
 };
 
-/** Gives back what reserveUsage counted, for a request that didn't import anything. */
-const releaseUsage = async (reservation: QuotaReservation): Promise<void> => {
+/** Counts a held import that succeeded. */
+const commitReservation = async (reservation: QuotaReservation): Promise<void> => {
   if (!isUpstashConfigured()) {
-    releaseInMemory(reservation.gates);
+    commitInMemory(reservation);
+    return;
+  }
+
+  await evalWithUpstash(commitQuotaScript, counterKeysOf(reservation), [
+    reservation.token,
+    ...reservation.gates.flat().map((counter) => String(counter.ttlSeconds ?? 0))
+  ]);
+};
+
+/** Lets the holds of a request that didn't import anything go. */
+const releaseReservation = async (reservation: QuotaReservation): Promise<void> => {
+  if (!isUpstashConfigured()) {
+    releaseInMemory(reservation);
     return;
   }
 
   await evalWithUpstash(
     releaseQuotaScript,
-    [reservation.tokenKey, ...reservation.gates.flat().map((counter) => counter.key)],
-    []
+    reservation.gates.flat().map((counter) => pendingKeyOf(counter.key)),
+    [reservation.token]
   );
 };
 
-/** Tries a release again after a failure (a blip reaching Upstash), waiting longer each time. */
-const QUOTA_RELEASE_ATTEMPTS = 3;
-const QUOTA_RELEASE_RETRY_MS = 100;
+/**
+ * Settling a hold (commit or release) is tried again after a failure (a blip reaching Upstash),
+ * waiting longer each time: both are safe to repeat. Resolves whether one went through.
+ */
+const QUOTA_SETTLE_ATTEMPTS = 3;
+const QUOTA_SETTLE_RETRY_MS = 100;
 
-const wait = (ms: number) =>
-  new Promise<void>((resolve) => {
-    setTimeout(resolve, ms);
-  });
+const settleWithRetries = async (step: () => Promise<void>): Promise<boolean> => {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await step();
+      return true;
+    } catch (error) {
+      if (attempt >= QUOTA_SETTLE_ATTEMPTS) {
+        console.error(error);
+        return false;
+      }
+
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, QUOTA_SETTLE_RETRY_MS * 2 ** (attempt - 1));
+      });
+    }
+  }
+};
 
 /* The allowance that runs out first (a fallback import needs both imports and strong extractions). */
 const getMostConstrainingQuota = (entries: QuotaUsageEntry[]): QuotaStatus | null =>
@@ -818,41 +888,28 @@ export const authorizeExtractionRequest = async (
     }
 
     /**
-     * A success keeps the reservation; anything else gives it back, once. A release that fails
-     * is tried again (it is safe to: see releaseQuotaScript), and the reservation only counts as
-     * given back once a release went through, so a later call can still try.
+     * Settled once: a success commits the hold, anything else lets it go. A step that fails is
+     * tried again (see settleWithRetries); one that never goes through leaves the hold to lapse
+     * (so the import goes uncounted, never counted twice), and a later call may still try.
      */
-    let kept = false;
-    let givenBack = false;
-    let releasing: Promise<void> | null = null;
-    const giveBack = (): Promise<void> => {
-      if (kept || givenBack) {
+    let settled = false;
+    let settling: Promise<void> | null = null;
+    const settle = (step: () => Promise<void>): Promise<void> => {
+      if (settled) {
         return Promise.resolve();
       }
 
-      releasing ??= (async () => {
+      settling ??= (async () => {
         try {
-          for (let attempt = 1; ; attempt += 1) {
-            try {
-              await releaseUsage(reservation);
-              givenBack = true;
-              return;
-            } catch (error) {
-              if (attempt >= QUOTA_RELEASE_ATTEMPTS) {
-                console.error(error);
-                return;
-              }
-
-              await wait(QUOTA_RELEASE_RETRY_MS * 2 ** (attempt - 1));
-            }
-          }
+          settled = await settleWithRetries(step);
         } finally {
-          releasing = null;
+          settling = null;
         }
       })();
 
-      return releasing;
+      return settling;
     };
+    const giveBack = () => settle(() => releaseReservation(reservation));
 
     const commitUsageWithQuota = async (
       response: ExtractRecipeResponse
@@ -862,13 +919,22 @@ export const authorizeExtractionRequest = async (
         return { logContext, quota: null };
       }
 
-      kept = true;
-      // Counted when it was reserved: read the allowance that leaves.
-      const committedEntries = await Promise.all(
-        requiredQuotaKinds.map((requiredQuotaKind) =>
-          readUsage(plan, quotaIdentityKey, requiredQuotaKind)
-        )
-      );
+      await settle(() => commitReservation(reservation));
+
+      // What's left is only reported: failing to read it never fails the import.
+      let committedEntries: QuotaUsageEntry[];
+
+      try {
+        committedEntries = await Promise.all(
+          requiredQuotaKinds.map((requiredQuotaKind) =>
+            readUsage(plan, quotaIdentityKey, requiredQuotaKind)
+          )
+        );
+      } catch (error) {
+        console.error(error);
+        return { logContext, quota: null };
+      }
+
       const committedPrimaryUsage =
         committedEntries.find((entry) => entry.quotaKind === quotaKind) ?? committedEntries[0];
 
