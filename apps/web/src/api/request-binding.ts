@@ -71,10 +71,12 @@ export const ACCOUNT_CONFIRMATION_WAIT_MS = 10_000;
 
 /**
  * Checks the credentials a bound request is about to carry (its headers, token in hand) and
- * rejects with {@link AccountChangedError} unless they are its account's. A Clerk token must be
- * for the session that account was confirmed under. A request made while a cached account was
- * shown and Clerk still loading waits (briefly) for that check, so it never goes out with the
- * token of another account Clerk settled on.
+ * rejects with {@link AccountChangedError} unless they are its account's. A request made signed
+ * out carries none: credentials then are an account that signed in since (and may still be being
+ * looked up), which it must not act for or be charged to. A Clerk token must be for the session
+ * the request's account was confirmed under. A request made while a cached account was shown and
+ * Clerk still loading waits (briefly) for that check, so it never goes out with the token of
+ * another account Clerk settled on.
  */
 export async function assertBoundCredentials(
   bound: RequestBinding,
@@ -84,10 +86,18 @@ export async function assertBoundCredentials(
     throw new AccountChangedError();
   }
 
+  if (bound.account === null) {
+    if (headers.authorization) {
+      throw new AccountChangedError();
+    }
+
+    return;
+  }
+
   const tokenSession = getTokenSessionId(/^Bearer (.+)$/u.exec(headers.authorization ?? "")?.[1]);
 
-  // No Clerk token (signed out, or a legacy session): the account check above is all there is.
-  if (tokenSession === null || bound.account === null) {
+  // No Clerk token (a legacy session): the account check above is all there is.
+  if (tokenSession === null) {
     return;
   }
 

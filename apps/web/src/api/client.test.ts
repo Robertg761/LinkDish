@@ -239,7 +239,7 @@ describe("requests bound to an account, carrying a Clerk token", () => {
   const clerkToken = (sid: string) =>
     `${btoa('{"alg":"RS256"}')}.${btoa(JSON.stringify({ sid, sub: "clerk_user" })).replace(/=+$/u, "")}.sig`;
 
-  const setUp = async (options: { clerkSession: string | null; token: string }) => {
+  const setUp = async (options: { clerkSession: string | null; token: string | null }) => {
     const client = await import("./client");
     const scope = await import("../auth/account-scope");
     const bridge = await import("../auth/clerk-bridge");
@@ -322,6 +322,31 @@ describe("requests bound to an account, carrying a Clerk token", () => {
     publishCurrentAccount("user_a", "sess_a2");
 
     await expect(leaving).resolves.toEqual({ household: null });
+    expect(apiClientMocks.sent).toHaveLength(1);
+  });
+
+  it("isn't sent with the token of an account that signs in while a signed-out request waits", async () => {
+    // Made signed out (an import, say); Clerk signs in before the token is read, while auth is
+    // still looking the account up (nobody is shown as signed in yet).
+    const { apiClient, asAccount, isAccountChangedError, publishClerkState, tokenInHand } =
+      await setUp({ clerkSession: null, token: clerkToken("sess_b") });
+
+    const leaving = asAccount(null, () => apiClient.leaveHousehold()).catch(
+      (caught: unknown) => caught
+    );
+    publishClerkState({ isLoaded: true, isSignedIn: true, sessionId: "sess_b", signInReady: true });
+    await tokenInHand();
+
+    expect(isAccountChangedError(await leaving)).toBe(true);
+    expect(apiClientMocks.sent).toEqual([]);
+  });
+
+  it("goes out signed out when it was made signed out and nobody signed in", async () => {
+    const { apiClient, asAccount } = await setUp({ clerkSession: null, token: null });
+
+    await expect(asAccount(null, () => apiClient.leaveHousehold())).resolves.toEqual({
+      household: null
+    });
     expect(apiClientMocks.sent).toHaveLength(1);
   });
 
