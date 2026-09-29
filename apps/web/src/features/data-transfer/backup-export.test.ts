@@ -351,6 +351,30 @@ describe("backups", () => {
     });
   });
 
+  it("won't save a backup too big for LinkDish to restore", async () => {
+    const downloads = captureDownloads();
+    await putSavedRecipe(
+      saved("mine", { sourceImages: [{ dataUrl: TINY_JPEG, mimeType: "image/jpeg" }] })
+    );
+
+    // With the restore limit set just below this backup's size.
+    await expect(downloadBackup({ includeImages: true, maxBytes: 64 })).rejects.toMatchObject({
+      code: "backup_too_large",
+      message: expect.stringContaining("Turn off scanned photos") as unknown as string
+    });
+    expect(downloads).toHaveLength(0);
+    expect(readLastBackupAt()).toBeNull();
+    expect(analytics.trackWebEvent).not.toHaveBeenCalledWith(
+      expect.objectContaining({ eventName: "library_exported" })
+    );
+
+    // The same cookbook without photos fits and is saved.
+    await expect(downloadBackup({ includeImages: false })).resolves.toMatchObject({
+      recipeCount: 1
+    });
+    expect(downloads).toHaveLength(1);
+  });
+
   it("backs up more photos than fit in one string", async () => {
     const downloads = captureDownloads();
     const scanOf = (seed: string) => ({

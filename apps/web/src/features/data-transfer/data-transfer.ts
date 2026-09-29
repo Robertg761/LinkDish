@@ -20,6 +20,7 @@ import {
 import { DataTransferError } from "./errors";
 import { selectExportRecipes } from "./export-selection";
 import { loadExportSnapshot } from "./export-snapshot";
+import { MAX_IMPORT_FILE_BYTES } from "./import-formats";
 import { analyzeImport, buildImportPlan } from "./import-plan";
 import { parseImportFile, readFileBytes } from "./import-sources";
 import { commitImport } from "./import-writer";
@@ -56,6 +57,8 @@ export interface ExportSummary {
 export async function downloadBackup(options: {
   includeImages: boolean;
   now?: Date | undefined;
+  /** The largest backup LinkDish can restore; tests pass a smaller one. */
+  maxBytes?: number | undefined;
 }): Promise<ExportSummary> {
   const now = options.now ?? new Date();
   // One transaction: the recipes, their scans, collections and meal plan of one moment.
@@ -68,8 +71,19 @@ export async function downloadBackup(options: {
     sourceImages
   });
   const fileName = backupFileName(now);
-  // In pieces: a backup with many photos is too big for one string.
-  const bytes = downloadTextFile(fileName, serializeBackup(built.backup), "application/json");
+  // In pieces: a backup with many photos is too big for one string. A backup bigger than
+  // LinkDish can open again is not saved at all: it would look fine and fail on restore.
+  const bytes = downloadTextFile(
+    fileName,
+    serializeBackup(built.backup),
+    "application/json",
+    options.maxBytes ?? MAX_IMPORT_FILE_BYTES
+  );
+
+  if (bytes === null) {
+    throw new DataTransferError(options.includeImages ? "backup_too_large" : "export_failed");
+  }
+
   recordBackupDownloaded(now);
   trackWebEvent({
     eventName: "library_exported",

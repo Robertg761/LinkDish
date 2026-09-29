@@ -16,7 +16,8 @@ export type DataTransferErrorCode =
   | "storage_full"
   | "storage_unavailable"
   | "write_failed"
-  | "export_failed";
+  | "export_failed"
+  | "backup_too_large";
 
 const DEFAULT_MESSAGES: Record<DataTransferErrorCode, string> = {
   empty_file: "That file is empty. Choose a LinkDish backup or a recipe export.",
@@ -37,7 +38,9 @@ const DEFAULT_MESSAGES: Record<DataTransferErrorCode, string> = {
     "LinkDish can't reach its storage on this device right now. Close other LinkDish tabs and try again.",
   write_failed:
     "We couldn't save the recipes on this device. Nothing was changed — please try again.",
-  export_failed: "We couldn't put your backup together. Please try again."
+  export_failed: "We couldn't put your backup together. Please try again.",
+  backup_too_large:
+    "With scanned photos this backup would be over 300 MB, too big for LinkDish to restore. Turn off scanned photos and download it again."
 };
 
 export class DataTransferError extends Error {

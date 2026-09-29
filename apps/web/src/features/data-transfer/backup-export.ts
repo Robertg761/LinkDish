@@ -293,9 +293,16 @@ export const serializeBackup = (backup: WebLinkDishBackup): string[] => {
 export const downloadTextFile = (
   fileName: string,
   text: string | readonly string[],
-  mimeType: string
-): number => {
+  mimeType: string,
+  /** Refuse (return null, download nothing) when the file would be bigger than this. */
+  maxBytes: number = Number.POSITIVE_INFINITY
+): number | null => {
   const blob = new Blob(typeof text === "string" ? [text] : [...text], { type: mimeType });
+
+  if (blob.size > maxBytes) {
+    return null;
+  }
+
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
