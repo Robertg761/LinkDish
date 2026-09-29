@@ -4,7 +4,11 @@ import {
   AUTH_CONFIG_CACHE_KEY,
   AUTH_USER_CACHE_KEY,
   clearCachedAuthUser,
+  clearClerkSignOutPending,
+  CLERK_SIGN_OUT_PENDING_KEY,
   isCachedUserPremium,
+  isClerkSignOutPending,
+  markClerkSignOutPending,
   readCachedAuthConfig,
   readCachedAuthUser,
   writeCachedAuthConfig,
@@ -51,6 +55,26 @@ describe("auth cache", () => {
       JSON.stringify({ config: { authMode: "magic" }, savedAt: "2026-09-01" })
     );
     expect(readCachedAuthConfig()).toBeNull();
+  });
+
+  it("keeps a pending Clerk sign-out to the session it was made for", () => {
+    expect(isClerkSignOutPending()).toBe(false);
+
+    markClerkSignOutPending("sess_1");
+    expect(isClerkSignOutPending("sess_1")).toBe(true);
+    expect(isClerkSignOutPending("sess_2")).toBe(false);
+    // Clerk's session isn't known yet: the sign-out still counts.
+    expect(isClerkSignOutPending(null)).toBe(true);
+
+    markClerkSignOutPending(null);
+    expect(isClerkSignOutPending("sess_2")).toBe(true);
+
+    // Earlier builds stored a bare timestamp, for whichever session Clerk had.
+    localStorage.setItem(CLERK_SIGN_OUT_PENDING_KEY, "2026-09-28T00:00:00.000Z");
+    expect(isClerkSignOutPending("sess_2")).toBe(true);
+
+    clearClerkSignOutPending();
+    expect(isClerkSignOutPending(null)).toBe(false);
   });
 
   it("survives blocked storage", () => {

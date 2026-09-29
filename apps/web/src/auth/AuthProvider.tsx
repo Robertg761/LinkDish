@@ -22,6 +22,7 @@ import {
   markClerkSignOutPending,
   readCachedAuthConfig,
   readCachedAuthUser,
+  readClerkSignOutPending,
   writeCachedAuthConfig,
   writeCachedAuthUser,
   type CachedAuthUserSource
@@ -173,7 +174,8 @@ let clerkSignOutInFlight: Promise<void> | null = null;
 /**
  * Ends a Clerk session the user already signed out of here (see `markClerkSignOutPending`). Does
  * nothing until Clerk has loaded; safe to call repeatedly. The intent is kept if Clerk refuses, so
- * the next load tries again.
+ * the next load tries again. A sign-out made for another session than Clerk's active one is
+ * dropped instead: Clerk switched to that account since, and it stays signed in.
  */
 const finishPendingClerkSignOut = (): Promise<void> => {
   const snapshot = getClerkBridgeSnapshot();
@@ -183,13 +185,17 @@ const finishPendingClerkSignOut = (): Promise<void> => {
     return Promise.resolve();
   }
 
-  if (!snapshot.isSignedIn) {
+  if (!snapshot.isSignedIn || !isClerkSignOutPending(snapshot.sessionId)) {
+    // No session left to end, or the sign-out was for one Clerk has switched away from.
     clearClerkSignOutPending();
     return Promise.resolve();
   }
 
+  // Only that session ends, even if Clerk switches to another one before this runs.
+  const sessionId = readClerkSignOutPending()?.clerkSessionId ?? snapshot.sessionId ?? undefined;
+
   clerkSignOutInFlight ??= controls
-    .signOut()
+    .signOut(sessionId)
     .then(clearClerkSignOutPending, (error: unknown) => {
       console.warn("Clerk sign-out failed:", error);
     })
@@ -311,7 +317,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   /** Token bridge for every API request (registered once, reads the latest auth state). */
   const getSessionToken = useCallback(async (): Promise<string | null> => {
-    const signingOut = isClerkSignOutPending();
+    // Clerk's session is unknown until it loads: any sign-out still on its way counts until then.
+    const signingOut = isClerkSignOutPending(getClerkBridgeSnapshot().sessionId);
 
     if (transportRef.current !== "legacy" && !signingOut && isClerkSessionPending()) {
       // A Clerk session may exist and Clerk is still loading: wait for its token instead of
@@ -486,7 +493,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return;
       }
 
-      if (clerkSignedIn && isClerkSignOutPending()) {
+      if (clerkSignedIn && isClerkSignOutPending(clerkSessionId)) {
         // Signed out here before Clerk had loaded: finish that sign-out instead of signing back in.
         void finishPendingClerkSignOut();
 
@@ -501,6 +508,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       if (clerkSignedIn) {
+        // A sign-out still on its way was for a session Clerk has switched away from: that
+        // account's sign-out doesn't carry over to this one.
+        clearClerkSignOutPending();
         removeLegacySessionToken();
 
         // Clerk is on a session the shown user wasn't confirmed for: switched straight to another
@@ -662,9 +672,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // sign-out on record until Clerk confirms it, so Clerk loading later (on this visit or the
     // next) cannot sign the user back in; requests stop carrying the Clerk token right away.
     const endClerkSession = mayHaveClerkSession();
+    // The Clerk session being signed out of. A session Clerk switches to meanwhile is another
+    // account's and stays signed in. Before Clerk has loaded its session isn't known, so the
+    // sign-out ends whichever session it loads with.
+    const clerkNow = getClerkBridgeSnapshot();
+    const signingOutOf = clerkNow.isLoaded ? clerkNow.sessionId : null;
 
     if (endClerkSession) {
-      markClerkSignOutPending();
+      markClerkSignOutPending(signingOutOf);
     }
 
     try {
@@ -675,7 +690,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     // Clear legacy token
     removeLegacySessionToken();
-    setUser(null);
+
+    const clerkAfter = getClerkBridgeSnapshot();
+    const switchedAccount =
+      endClerkSession &&
+      signingOutOf !== null &&
+      clerkAfter.isLoaded &&
+      clerkAfter.isSignedIn &&
+      clerkAfter.sessionId !== signingOutOf;
+
+    if (!switchedAccount) {
+      setUser(null);
+    }
 
     if (endClerkSession) {
       requestClerk("session_hint");

@@ -135,7 +135,9 @@ describe("ClerkBridge", () => {
     });
 
     await controls?.signOut();
-    expect(clerk.auth.signOut).toHaveBeenCalled();
+    expect(clerk.auth.signOut).toHaveBeenLastCalledWith(undefined);
+    await controls?.signOut("sess_1");
+    expect(clerk.auth.signOut).toHaveBeenLastCalledWith({ sessionId: "sess_1" });
 
     unmount();
     expect(getClerkControls()).toBeNull();

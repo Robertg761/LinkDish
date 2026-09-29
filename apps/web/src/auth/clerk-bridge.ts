@@ -59,7 +59,8 @@ export interface ClerkRedirectParams {
 /** Clerk actions, registered by the mounted bridge. */
 export interface ClerkBridgeControls {
   getToken: () => Promise<string | null>;
-  signOut: () => Promise<void>;
+  /** Ends Clerk session `sessionId` only, when given; otherwise Clerk's active session. */
+  signOut: (sessionId?: string) => Promise<void>;
   authenticateWithRedirect: (params: ClerkRedirectParams) => Promise<void>;
 }
 

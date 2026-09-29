@@ -46,8 +46,8 @@ const ClerkStatePublisher: React.FC = () => {
           return null;
         }
       },
-      signOut: async () => {
-        await authRef.current.signOut();
+      signOut: async (sessionId?: string) => {
+        await authRef.current.signOut(sessionId ? { sessionId } : undefined);
       }
     });
 

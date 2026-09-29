@@ -622,6 +622,98 @@ describe("AuthProvider boot", () => {
     expect(localStorage.getItem(CLERK_SIGN_OUT_PENDING_KEY)).toBeNull();
   });
 
+  it("never signs out the account Clerk switches to while a sign-out is on its way", async () => {
+    cacheConfig(clerkConfig);
+    cacheUser("clerk");
+    clerkMocks.auth.isSignedIn = true;
+    apiClientMocks.getAuthConfig.mockResolvedValue(clerkConfig);
+    apiClientMocks.getSession.mockResolvedValue({ authenticated: true, user });
+
+    renderAuth();
+    await waitFor(() => expect(apiClientMocks.getSession).toHaveBeenCalled());
+
+    // The first account signs out; the API takes its time to answer.
+    let answerLogout: (value: unknown) => void = () => undefined;
+    apiClientMocks.logout.mockReturnValue(
+      new Promise((resolve) => {
+        answerLogout = resolve;
+      })
+    );
+    let loggingOut: Promise<void> | undefined;
+    act(() => {
+      loggingOut = seen.at(-1)?.logout();
+    });
+
+    // Meanwhile Clerk switches straight to another account's session.
+    const next = { billingPlan: "free" as const, email: "next@example.com", id: "user_2" };
+    apiClientMocks.getSession.mockResolvedValue({ authenticated: true, user: next });
+    clerkMocks.auth.sessionId = "sess_2";
+    act(() => {
+      syncClerk();
+    });
+    await waitFor(() => expect(authText()).toBe("user:next@example.com"));
+    // The new account's requests carry its token, not the signed-out one's lack of it.
+    await expect(registeredTokenProvider()()).resolves.toBe("clerk_jwt");
+
+    await act(async () => {
+      answerLogout({ status: "logged_out" });
+      await loggingOut;
+    });
+
+    expect(clerkMocks.auth.signOut).not.toHaveBeenCalled();
+    expect(authText()).toBe("user:next@example.com");
+    expect(getCurrentAccount()).toBe("user_2");
+    expect(readCachedAuthUser()?.user.email).toBe("next@example.com");
+    expect(localStorage.getItem(CLERK_SIGN_OUT_PENDING_KEY)).toBeNull();
+  });
+
+  it("doesn't finish an earlier sign-out on another account's session", async () => {
+    // Signed out of sess_1 before Clerk could confirm it; another account signed in since.
+    setClerkSessionCookie("1790000000");
+    cacheConfig(clerkConfig);
+    localStorage.setItem(
+      CLERK_SIGN_OUT_PENDING_KEY,
+      JSON.stringify({ at: "2026-09-28T00:00:00.000Z", clerkSessionId: "sess_1" })
+    );
+    clerkMocks.auth.isSignedIn = true;
+    clerkMocks.auth.sessionId = "sess_2";
+    const next = { billingPlan: "free" as const, email: "next@example.com", id: "user_2" };
+    apiClientMocks.getAuthConfig.mockResolvedValue(clerkConfig);
+    apiClientMocks.getSession.mockResolvedValue({ authenticated: true, user: next });
+
+    renderAuth();
+
+    await waitFor(() => expect(authText()).toBe("user:next@example.com"));
+    expect(clerkMocks.auth.signOut).not.toHaveBeenCalled();
+    expect(localStorage.getItem(CLERK_SIGN_OUT_PENDING_KEY)).toBeNull();
+  });
+
+  it("finishes an earlier sign-out on the session it was made for", async () => {
+    setClerkSessionCookie("1790000000");
+    cacheConfig(clerkConfig);
+    localStorage.setItem(
+      CLERK_SIGN_OUT_PENDING_KEY,
+      JSON.stringify({ at: "2026-09-28T00:00:00.000Z", clerkSessionId: "sess_1" })
+    );
+    clerkMocks.auth.isSignedIn = true;
+    clerkMocks.auth.signOut.mockImplementation(() => {
+      clerkMocks.auth.isSignedIn = false;
+      syncClerk();
+      return Promise.resolve();
+    });
+    apiClientMocks.getAuthConfig.mockResolvedValue(clerkConfig);
+    apiClientMocks.getSession.mockResolvedValue({ authenticated: true, user });
+
+    renderAuth();
+
+    await waitFor(() => expect(clerkMocks.auth.signOut).toHaveBeenCalledTimes(1));
+    // Only that session is ended, never whichever one Clerk is on by the time it runs.
+    expect(clerkMocks.auth.signOut).toHaveBeenCalledWith("sess_1");
+    await waitFor(() => expect(authText()).toBe("anonymous"));
+    expect(apiClientMocks.getSession).not.toHaveBeenCalled();
+    expect(localStorage.getItem(CLERK_SIGN_OUT_PENDING_KEY)).toBeNull();
+  });
+
   it("clears the cached user on logout", async () => {
     cacheConfig(clerkConfig);
     cacheUser("clerk");

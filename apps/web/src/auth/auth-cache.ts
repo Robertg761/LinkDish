@@ -180,16 +180,57 @@ export function clearCachedAuthUser(): void {
  */
 export const CLERK_SIGN_OUT_PENDING_KEY = "linkdish:web:clerk-sign-out:v1";
 
-export function markClerkSignOutPending(): void {
-  safeSetItem(CLERK_SIGN_OUT_PENDING_KEY, new Date().toISOString());
+/** A sign-out still to reach Clerk, for Clerk session `clerkSessionId` (null: whichever it has). */
+export interface PendingClerkSignOut {
+  clerkSessionId: string | null;
+}
+
+export function markClerkSignOutPending(clerkSessionId: string | null = null): void {
+  safeSetItem(
+    CLERK_SIGN_OUT_PENDING_KEY,
+    JSON.stringify({ at: new Date().toISOString(), ...(clerkSessionId ? { clerkSessionId } : {}) })
+  );
 }
 
 export function clearClerkSignOutPending(): void {
   safeRemoveItem(CLERK_SIGN_OUT_PENDING_KEY);
 }
 
-export function isClerkSignOutPending(): boolean {
-  return safeGetItem(CLERK_SIGN_OUT_PENDING_KEY) !== null;
+export function readClerkSignOutPending(): PendingClerkSignOut | null {
+  const raw = safeGetItem(CLERK_SIGN_OUT_PENDING_KEY);
+
+  if (raw === null) {
+    return null;
+  }
+
+  // Earlier builds stored only a timestamp: that sign-out was for whichever session Clerk had.
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    const clerkSessionId =
+      parsed && typeof parsed === "object" && "clerkSessionId" in parsed
+        ? parsed.clerkSessionId
+        : null;
+
+    return { clerkSessionId: typeof clerkSessionId === "string" ? clerkSessionId : null };
+  } catch {
+    return { clerkSessionId: null };
+  }
+}
+
+/**
+ * Whether a sign-out is still to reach Clerk for Clerk session `clerkSessionId` (null: the session
+ * is not known yet, so any pending sign-out counts). One made for another session does not count:
+ * Clerk has switched away from that session since.
+ */
+export function isClerkSignOutPending(clerkSessionId: string | null = null): boolean {
+  const pending = readClerkSignOutPending();
+
+  return (
+    pending !== null &&
+    (pending.clerkSessionId === null ||
+      clerkSessionId === null ||
+      pending.clerkSessionId === clerkSessionId)
+  );
 }
 
 /**
