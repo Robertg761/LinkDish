@@ -4,6 +4,8 @@ import { trackWebEvent, trackWebV2AnalyticsEvent } from "../../analytics/client"
 import { createWebAnalyticsId } from "../../analytics/session";
 import { apiClient } from "../../api/client";
 import { isExtractorApiError } from "../../api/errors";
+import { asAccount, isAccountChangedError } from "../../api/request-binding";
+import { getCurrentAccount } from "../../auth/account-scope";
 import { useAuth } from "../../auth/AuthProvider";
 import { enqueueImport, type ImportQueueItem } from "../../data/import-queue-store";
 import { getSavedRecipesSnapshot, loadSavedRecipes } from "../../data/library-store";
@@ -97,7 +99,13 @@ interface ActiveImport {
   controller: AbortController;
   terminal: boolean;
   /** Who started it: its allowance and quota belong to them, whoever is signed in by the end. */
-  startedBy: { credentialsKey: string | null; isAuthenticated: boolean; tier: WebBillingTier };
+  startedBy: {
+    /** The signed-in account (see getAccountScope): its requests go out only as it. */
+    account: string | null;
+    credentialsKey: string | null;
+    isAuthenticated: boolean;
+    tier: WebBillingTier;
+  };
 }
 
 const TRANSIENT_RETRY_DELAY_MS = 750;
@@ -288,6 +296,7 @@ export function useImportSession(): ImportSession {
         properties,
         request,
         startedBy: {
+          account: getCurrentAccount(),
           credentialsKey: authRef.current.credentialsKey,
           isAuthenticated: authRef.current.isAuthenticated,
           tier: getWebBillingTier(authRef.current.user)
@@ -309,7 +318,7 @@ export function useImportSession(): ImportSession {
 
   const isCurrent = (active: ActiveImport) => activeRef.current === active && !active.terminal;
 
-  const callExtract = (
+  const sendExtract = (
     request: ImportRequest,
     attempt: ImportAttempt,
     active: ActiveImport
@@ -345,6 +354,17 @@ export function useImportSession(): ImportSession {
       options
     );
   };
+
+  /**
+   * Sent only as the account that started the import (see asAccount): if another one signs in
+   * before it goes out, nothing is sent (or charged to it) and the import stops.
+   */
+  const callExtract = (
+    request: ImportRequest,
+    attempt: ImportAttempt,
+    active: ActiveImport
+  ): Promise<ExtractRecipeResponse> =>
+    asAccount(active.startedBy.account, () => sendExtract(request, attempt, active));
 
   /** One silent retry for transient server trouble; never for photo uploads. */
   const extractOnce = async (
@@ -536,6 +556,17 @@ export function useImportSession(): ImportSession {
 
   const handleError = (active: ActiveImport, error: unknown, attempt: ImportAttempt) => {
     if (!isCurrent(active) || active.controller.signal.aborted) {
+      return;
+    }
+
+    if (isAccountChangedError(error)) {
+      // Not sent: another account signed in first, so nothing was imported or charged. The cook
+      // can start it again as the account signed in now.
+      endActive("import_abandoned", "account_changed", { abort: false });
+      showProblem(
+        active.request,
+        describeImportError(error, { kind: importKindOf(active.request), plan: tierNow() })
+      );
       return;
     }
 

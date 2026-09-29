@@ -2,6 +2,8 @@ import { trackWebEvent, trackWebV2AnalyticsEvent } from "../../analytics/client"
 import { createWebAnalyticsId } from "../../analytics/session";
 import { apiClient } from "../../api/client";
 import { getFriendlyErrorMessage } from "../../api/error-message";
+import { asAccount, isAccountChangedError } from "../../api/request-binding";
+import { getCurrentAccount } from "../../auth/account-scope";
 import {
   claimNextQueuedImport,
   holdImportForSave,
@@ -368,6 +370,11 @@ export async function processImportQueueItem(
   }
 
   const correlationId = createWebAnalyticsId();
+  // Its requests go out only as the account this run is for (see asAccount): if another signs in
+  // before one is sent, nothing is sent or charged to it, and the item waits for that account's run.
+  const runningFor = getCurrentAccount();
+  const extractAs = (attemptNow: "primary" | "fallback") =>
+    asAccount(runningFor, () => extract(item, attemptNow, correlationId, signal));
   let properties = propertiesFor(item);
   let attempt: "primary" | "fallback" = item.url ? "primary" : "fallback";
   let terminal = false;
@@ -394,7 +401,7 @@ export async function processImportQueueItem(
   });
 
   try {
-    let response = await extract(item, attempt, correlationId, signal);
+    let response = await extractAs(attempt);
 
     if (response.status === "needs_retry") {
       trackWebV2AnalyticsEvent({
@@ -435,7 +442,7 @@ export async function processImportQueueItem(
 
       attempt = "fallback";
       properties = { ...properties, attempt };
-      response = await extract(item, attempt, correlationId, signal);
+      response = await extractAs(attempt);
     }
 
     if (response.status === "success") {
@@ -515,7 +522,7 @@ export async function processImportQueueItem(
     await fail({ failure_reason: response.reason }, problem.title);
     return { message: problem.title, status: "failed" };
   } catch (error) {
-    if (signal.aborted) {
+    if (signal.aborted || isAccountChangedError(error)) {
       if (!terminal) {
         trackWebV2AnalyticsEvent({
           correlationId,

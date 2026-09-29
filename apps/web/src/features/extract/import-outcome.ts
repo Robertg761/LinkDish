@@ -1,5 +1,6 @@
 import { getFriendlyErrorMessage, getServerErrorMessage, isOffline } from "../../api/error-message";
 import { getApiErrorKind, isExtractorApiError } from "../../api/errors";
+import { isAccountChangedError } from "../../api/request-binding";
 import { formatMonthlyQuotaCopy, hasMonthlyQuotaFields } from "../billing/quota-copy";
 
 import type { IconName } from "../../components/Icon";
@@ -68,6 +69,7 @@ export type ImportProblemKind =
   | "ai_failed"
   | "too_large"
   | "invalid"
+  | "account_changed"
   | "server";
 
 export interface ImportProblem {
@@ -320,6 +322,18 @@ export const describeImportError = (
       kind: "offline",
       message: "Connect to the internet and try again. Your saved recipes are still here.",
       title: "You're offline"
+    };
+  }
+
+  if (isAccountChangedError(error)) {
+    return {
+      ...base,
+      actions: ["retry"],
+      icon: "user",
+      kind: "account_changed",
+      message:
+        "Another account signed in before this import was sent, so nothing was imported or counted. Try again to import it for the account signed in now.",
+      title: "Your account changed"
     };
   }
 

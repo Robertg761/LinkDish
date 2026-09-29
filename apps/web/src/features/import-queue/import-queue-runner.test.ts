@@ -2,6 +2,8 @@ import { extractRecipeTextRequestSchema } from "@linkdish/api-contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { trackWebEvent, trackWebV2AnalyticsEvent } from "../../analytics/client";
+import { AccountChangedError, getRequestBinding } from "../../api/request-binding";
+import { publishCurrentAccount } from "../../auth/account-scope";
 import { resetDataChangeFeedForTests, setDataChannelFactoryForTests } from "../../data/change-feed";
 import {
   enqueueImport,
@@ -801,6 +803,26 @@ describe("import queue runner", () => {
 
     await expect(runImportQueue(context())).resolves.toEqual({ paused: "offline", processed: 0 });
     expect((await getImportQueue())[0]).toMatchObject({ attempts: 1, status: "queued" });
+  });
+
+  it("sends an import only as the account the run is for, and lets it wait when one signs in first", async () => {
+    publishCurrentAccount("user_1");
+    await enqueueImport({ url: "https://a.com/soup" });
+    let sentFor: string | null | undefined;
+    apiMocks.extractRecipe.mockImplementation(() => {
+      sentFor = getRequestBinding()?.account;
+      // As the client does when another account signed in before the request's token was in hand.
+      return Promise.reject(new AccountChangedError());
+    });
+
+    await expect(runImportQueue(context())).resolves.toMatchObject({ processed: 0 });
+
+    expect(sentFor).toBe("user_1");
+    // Nothing was sent or charged: the link waits for a run as the account signed in now.
+    expect((await getImportQueue())[0]).toMatchObject({ status: "queued" });
+    expect(v2Events("import_abandoned")).toHaveLength(1);
+    expect(v2Events("import_failed")).toHaveLength(0);
+    publishCurrentAccount(null);
   });
 
   it("uses AI help by itself for social posts, on one correlation id", async () => {

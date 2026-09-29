@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-rou
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { trackWebEvent, trackWebV2AnalyticsEvent } from "../../analytics/client";
+import { AccountChangedError, getRequestBinding } from "../../api/request-binding";
 import { publishCurrentAccount } from "../../auth/account-scope";
 import { ToastProvider } from "../../components/Toast";
 import { resetDataChangeFeedForTests, setDataChannelFactoryForTests } from "../../data/change-feed";
@@ -679,6 +680,24 @@ describe("ExtractPage", () => {
     };
     expect(usage.imports ?? 0).toBe(0);
     expect(usage.strongExtractions ?? 0).toBe(0);
+  });
+
+  it("stops an import that another account signed in ahead of, sending and charging nothing", async () => {
+    let sentFor: string | null | undefined;
+    apiMocks.extractRecipe.mockImplementation(() => {
+      sentFor = getRequestBinding()?.account;
+      // As the client does when another account signed in before the request's token was in hand.
+      return Promise.reject(new AccountChangedError());
+    });
+    renderPage();
+    pasteLink("https://example.com/recipe");
+
+    expect(await screen.findByRole("heading", { name: "Your account changed" })).toBeVisible();
+    expect(sentFor).toBe("user_1");
+    expect(v2Events("import_abandoned")[0]?.[0].properties).toMatchObject({
+      abandonment_reason: "account_changed"
+    });
+    expect(v2Events("import_failed")).toHaveLength(0);
   });
 
   it("stops at the on-device allowance for signed-out cooks without calling the API", async () => {
