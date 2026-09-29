@@ -115,6 +115,8 @@ export const AccountProvider = ({ children }: PropsWithChildren) => {
   /** The Clerk session `user` was loaded for (null: not loaded through Clerk). */
   const [userClerkSessionId, setUserClerkSessionId] = useState<string | null>(null);
   const clerkSessionId = clerkSession.isSignedIn ? clerkSession.sessionId : null;
+  const clerkSessionIdRef = useRef(clerkSessionId);
+  clerkSessionIdRef.current = clerkSessionId;
   // Clerk switched straight to another session (or ended it) while `user` is the last one's, and
   // requests already carry the new session's token: nobody is shown (or acted for) as signed in
   // until the new session's account is loaded.
@@ -295,7 +297,14 @@ export const AccountProvider = ({ children }: PropsWithChildren) => {
       return;
     }
 
+    const loadingFor = clerkSessionId;
     void loadAccountSession().catch((error: unknown) => {
+      // Clerk moved on to another session meanwhile, whose own load decides who is signed in:
+      // this failure must not sign that account out.
+      if (clerkSessionIdRef.current !== loadingFor) {
+        return;
+      }
+
       console.warn("Failed to load the LinkDish account for the new session.", error);
       setAccountError(getAccountErrorMessage(error));
       setUser(null);

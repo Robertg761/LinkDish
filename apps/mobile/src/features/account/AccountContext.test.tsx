@@ -487,6 +487,77 @@ describe("AccountContext", () => {
     await expect(headersForFirst()).rejects.toMatchObject({ name: "AccountChangedError" });
   });
 
+  it("doesn't let a failed load for a session Clerk left sign out the account after it", async () => {
+    const getSession = vi.fn().mockResolvedValue({
+      authenticated: true,
+      expiresAt: "2026-08-09T10:00:00.000Z",
+      user: { email: "first@example.com", id: "user_first" }
+    });
+    mocks.createExtractorApiClient.mockReturnValue(
+      createMockClient({
+        getAuthConfig: vi.fn().mockResolvedValue({
+          authMode: "clerk_beta",
+          clerkEnabled: true,
+          emailCodeEnabled: true
+        }),
+        getSession
+      })
+    );
+    clerkSessionState.getToken.mockResolvedValue("first-token");
+    clerkSessionState.isSignedIn = true;
+    clerkSessionState.sessionId = "sess_first";
+    let renderer: ReturnType<typeof create>;
+    const rerender = async () => {
+      await act(async () => {
+        renderer!.update(
+          <AccountProvider>
+            <Probe />
+          </AccountProvider>
+        );
+        await flushAsyncWork();
+      });
+    };
+
+    await act(async () => {
+      renderer = create(
+        <AccountProvider>
+          <Probe />
+        </AccountProvider>
+      );
+      await flushAsyncWork();
+    });
+
+    // Clerk switches to a second session, whose account is slow to load...
+    let failSecond: (error: unknown) => void = () => undefined;
+    getSession.mockReturnValueOnce(
+      new Promise((_resolve, reject) => {
+        failSecond = reject;
+      })
+    );
+    clerkSessionState.sessionId = "sess_second";
+    await rerender();
+
+    // ...and on to a third, whose account loads.
+    getSession.mockResolvedValue({
+      authenticated: true,
+      expiresAt: "2026-08-09T10:00:00.000Z",
+      user: { email: "third@example.com", id: "user_third" }
+    });
+    clerkSessionState.sessionId = "sess_third";
+    await rerender();
+    expect(latestAccount?.user?.id).toBe("user_third");
+
+    // The second session's load fails only now.
+    await act(async () => {
+      failSecond(new Error("Network request failed"));
+      await flushAsyncWork();
+    });
+
+    expect(latestAccount?.user?.id).toBe("user_third");
+    expect(latestAccount?.isSignedIn).toBe(true);
+    expect(latestAccount?.accountError).toBeNull();
+  });
+
   it("keeps a stored session token when startup session refresh fails", async () => {
     const getSession = vi.fn().mockRejectedValue(new Error("Network request failed"));
     const client = createMockClient({
