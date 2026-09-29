@@ -81,6 +81,26 @@ describe("zip reader", () => {
     expect(listZipEntries(padded).map((entry) => entry.name)).toEqual(["a.txt"]);
   });
 
+  it("isn't fooled by the signature in padding after the end-of-directory record", async () => {
+    const zip = await buildZip([
+      { name: "a.txt", data: utf8Bytes("A") },
+      { name: "b.txt", data: utf8Bytes("B") }
+    ]);
+    // Uncounted trailing bytes (so no record ends exactly at the end) that hold the signature
+    // followed by more than a record's worth of junk.
+    const padding = new Uint8Array([
+      ...utf8Bytes("pad PK"),
+      0x05,
+      0x06,
+      ...utf8Bytes("y".repeat(40))
+    ]);
+    const padded = new Uint8Array(zip.length + padding.length);
+    padded.set(zip);
+    padded.set(padding, zip.length);
+
+    expect(listZipEntries(padded).map((entry) => entry.name)).toEqual(["a.txt", "b.txt"]);
+  });
+
   it("recognizes gzip data and unpacks it", async () => {
     const gz = await compressBytes(utf8Bytes("hello"), "gzip");
 

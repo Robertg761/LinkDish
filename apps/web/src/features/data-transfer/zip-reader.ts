@@ -12,6 +12,7 @@ const END_OF_CENTRAL_DIRECTORY_SIGNATURE = 0x06054b50;
 const ZIP64_END_OF_CENTRAL_DIRECTORY_SIGNATURE = 0x06064b50;
 const ZIP64_LOCATOR_SIGNATURE = 0x07064b50;
 const END_OF_CENTRAL_DIRECTORY_SIZE = 22;
+const ZIP64_LOCATOR_SIZE = 20;
 const MAX_COMMENT_LENGTH = 0xffff;
 const ZIP64_EXTRA_FIELD_ID = 0x0001;
 const UINT16_MAX = 0xffff;
@@ -91,26 +92,66 @@ export const isGzipData = (data: ArrayBuffer | Uint8Array): boolean => {
   return bytes.length >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b;
 };
 
+/**
+ * Whether the end-of-directory record at `offset` describes a directory that can be there: one
+ * disk, a comment that fits, and a directory before the record that starts with a directory
+ * entry (or, for ZIP64, a locator right before it). Bytes that merely contain the signature, in
+ * an archive comment or trailing padding, fail this.
+ */
+const isPlausibleEndRecord = (view: DataView, offset: number): boolean => {
+  const commentLength = view.getUint16(offset + 20, true);
+  const entriesOnDisk = view.getUint16(offset + 8, true);
+  const entryCount = view.getUint16(offset + 10, true);
+  const directorySize = view.getUint32(offset + 12, true);
+  const directoryOffset = view.getUint32(offset + 16, true);
+
+  if (
+    offset + END_OF_CENTRAL_DIRECTORY_SIZE + commentLength > view.byteLength ||
+    entriesOnDisk !== entryCount
+  ) {
+    return false;
+  }
+
+  if (entryCount === UINT16_MAX || directorySize === UINT32_MAX || directoryOffset === UINT32_MAX) {
+    const locator = offset - ZIP64_LOCATOR_SIZE;
+    return locator >= 0 && view.getUint32(locator, true) === ZIP64_LOCATOR_SIGNATURE;
+  }
+
+  if (view.getUint16(offset + 4, true) !== 0 || view.getUint16(offset + 6, true) !== 0) {
+    return false;
+  }
+
+  if (directoryOffset + directorySize > offset) {
+    return false;
+  }
+
+  return entryCount === 0 || view.getUint32(directoryOffset, true) === CENTRAL_DIRECTORY_SIGNATURE;
+};
+
 const findEndOfCentralDirectory = (view: DataView): number => {
   const last = view.byteLength - END_OF_CENTRAL_DIRECTORY_SIZE;
   const first = Math.max(0, last - MAX_COMMENT_LENGTH);
   let fallback: number | null = null;
 
   for (let offset = last; offset >= first; offset -= 1) {
-    if (view.getUint32(offset, true) !== END_OF_CENTRAL_DIRECTORY_SIGNATURE) {
+    // The signature can also turn up in an archive comment or trailing bytes: only a record
+    // that describes a real directory counts.
+    if (
+      view.getUint32(offset, true) !== END_OF_CENTRAL_DIRECTORY_SIGNATURE ||
+      !isPlausibleEndRecord(view, offset)
+    ) {
       continue;
     }
 
-    // The real record's comment runs exactly to the end of the file. The signature can also turn
-    // up inside that comment, which would read comment bytes as the directory.
+    // The real record's comment runs exactly to the end of the file.
     const commentLength = view.getUint16(offset + 20, true);
 
     if (offset + END_OF_CENTRAL_DIRECTORY_SIZE + commentLength === view.byteLength) {
       return offset;
     }
 
-    // Some tools leave bytes after the record that it doesn't count: use the last signature
-    // when no record fits exactly.
+    // Some tools leave bytes after the record that it doesn't count: use the last plausible
+    // record when none fits exactly.
     fallback ??= offset;
   }
 
@@ -199,7 +240,7 @@ export const listZipEntries = (
   let directoryOffset = readUint32(view, eocd + 16);
 
   if (entryCount === UINT16_MAX || directoryOffset === UINT32_MAX) {
-    const locator = eocd - 20;
+    const locator = eocd - ZIP64_LOCATOR_SIZE;
 
     if (locator >= 0 && readUint32(view, locator) === ZIP64_LOCATOR_SIGNATURE) {
       const zip64Record = readUint64(view, locator + 8);
