@@ -117,6 +117,20 @@ const SettingsRow: React.FC<{
   </div>
 );
 
+/**
+ * The section a URL fragment names. Fragments come from links anyone can write: one that isn't
+ * valid percent-encoding (e.g. "#%") names no section rather than breaking the page.
+ */
+const readHashTarget = (hash: string): string => {
+  const raw = hash.replace(/^#/u, "");
+
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+};
+
 export const SettingsPage: React.FC = () => {
   const preferences = usePreferences();
   const { hash } = useLocation();
@@ -124,7 +138,7 @@ export const SettingsPage: React.FC = () => {
 
   // /settings#your-data (and the other section names) jump straight to that section.
   useEffect(() => {
-    const target = decodeURIComponent(hash.replace(/^#/u, ""));
+    const target = readHashTarget(hash);
 
     if (isSettingsSectionId(target)) {
       const frame = window.requestAnimationFrame(() => scrollToSettingsSection(target));

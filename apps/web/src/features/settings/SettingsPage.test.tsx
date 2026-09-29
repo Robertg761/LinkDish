@@ -401,4 +401,14 @@ describe("SettingsPage", { timeout: 20_000 }, () => {
     expect(scrollIntoView.mock.contexts[0]).toHaveAttribute("id", "settings-your-data");
     expect(screen.getByRole("heading", { name: "Your data" })).toHaveFocus();
   });
+
+  it("opens normally from a link whose fragment isn't valid percent-encoding", async () => {
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+
+    await renderPage("/settings#%");
+
+    expect(screen.getByRole("heading", { name: "Your data" })).toBeInTheDocument();
+    expect(scrollIntoView).not.toHaveBeenCalled();
+  });
 });
