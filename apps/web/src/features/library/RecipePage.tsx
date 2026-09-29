@@ -58,7 +58,8 @@ import {
   saveSharedRecipeCopy,
   sharedRecipeToWebSavedRecipe,
   syncRecipeToHousehold,
-  updateSavedRecipe
+  updateSavedRecipe,
+  withOwnSharedLink
 } from "./saved-recipe-store";
 
 import type { WebSavedRecipe } from "./saved-recipe-types";
@@ -172,7 +173,13 @@ const SavedRecipeRoute: React.FC<{ id: string; isCurrentAccount: IsCurrentAccoun
   isCurrentAccount
 }) => {
   const { recipes, retry, status } = useSavedRecipes();
-  const recipe = useMemo(() => recipes.find((entry) => entry.id === id), [id, recipes]);
+  const { isAuthenticated, user } = useAuth();
+  const account = getAccountScope(isAuthenticated, user);
+  // As this account sees it: another account's Family link on it reads as not shared.
+  const recipe = useMemo(() => {
+    const found = recipes.find((entry) => entry.id === id);
+    return found ? withOwnSharedLink(found, account) : undefined;
+  }, [account, id, recipes]);
   const [sourceImages, setSourceImages] = useState<ExtractRecipeImage[] | undefined>();
   const openedRef = useRef<string | null>(null);
   const imageCount = recipe?.sourceImageCount ?? 0;
@@ -861,7 +868,10 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
     }
 
     // A save that changed nothing leaves a synced recipe synced: there is nothing to sync then.
-    if (updated.sync?.sharedRecipeId && updated.sync.status !== "synced" && isAuthenticated) {
+    // Only this account's own Family link is its to sync.
+    const ownUpdated = withOwnSharedLink(updated, account);
+
+    if (ownUpdated.sync?.sharedRecipeId && ownUpdated.sync.status !== "synced" && isAuthenticated) {
       showToast({
         action: { label: "Sync now", onClick: () => void handleSync() },
         message: "Saved here. Sync to update your household’s copy."

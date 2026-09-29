@@ -31,6 +31,12 @@ export interface SavedRecipeRecord {
   recipe: SuccessfulExtractionState["recipe"];
   savedAt: string;
   sharedAt?: string | undefined;
+  /**
+   * The account that shared it (whose Family copy `sharedRecipeId` is). The cookbook on this
+   * device is whoever signs in's, but a Family link is only that account's. Missing on links made
+   * before it was recorded.
+   */
+  sharedByUserId?: string | undefined;
   sharedRecipeId?: string | undefined;
   sourceImages?: RecipeSourceImage[] | undefined;
   strategy: SuccessfulExtractionState["strategy"];
@@ -75,6 +81,7 @@ export const normalizeSavedRecipeRecord = (value: unknown): SavedRecipeRecord | 
     };
     savedAt?: unknown;
     sharedAt?: unknown;
+    sharedByUserId?: unknown;
     sharedRecipeId?: unknown;
     timesCooked?: unknown;
   };
@@ -104,6 +111,12 @@ export const normalizeSavedRecipeRecord = (value: unknown): SavedRecipeRecord | 
     typeof candidate.sharedAt === "string" && candidate.sharedAt.trim().length > 0
       ? candidate.sharedAt
       : undefined;
+  const sharedByUserId =
+    sharedRecipeId &&
+    typeof candidate.sharedByUserId === "string" &&
+    candidate.sharedByUserId.trim().length > 0
+      ? candidate.sharedByUserId
+      : undefined;
   const timesCooked =
     typeof candidate.timesCooked === "number" &&
     Number.isFinite(candidate.timesCooked) &&
@@ -123,6 +136,7 @@ export const normalizeSavedRecipeRecord = (value: unknown): SavedRecipeRecord | 
       image: normalizeRecipeImage((record.recipe as { image?: unknown }).image)
     },
     sharedAt,
+    sharedByUserId,
     sharedRecipeId,
     sourceImages: normalizeSourceImages((record as { sourceImages?: unknown }).sourceImages),
     timesCooked
@@ -379,6 +393,7 @@ export const cloneSavedRecipeRecord = (
     },
     savedAt: clonedAt,
     sharedAt: undefined,
+    sharedByUserId: undefined,
     sharedRecipeId: undefined,
     sourceImages: sourceRecord.sourceImages?.map((image) => ({ ...image })),
     timesCooked: 0,
@@ -418,6 +433,7 @@ export const sharedRecipeToSavedRecipeRecord = (sharedRecipe: SharedRecipe): Sav
   recipe: sharedRecipe.recipe,
   savedAt: sharedRecipe.createdAt,
   sharedAt: sharedRecipe.updatedAt,
+  sharedByUserId: sharedRecipe.ownerUserId,
   sharedRecipeId: sharedRecipe.id,
   strategy: sharedRecipe.strategy,
   timesCooked: 0,
@@ -496,6 +512,7 @@ export const markSavedRecipeShared = (
       ? {
           ...entry,
           sharedAt: sharedRecipe.updatedAt,
+          sharedByUserId: sharedRecipe.ownerUserId,
           sharedRecipeId: sharedRecipe.id
         }
       : entry
@@ -510,10 +527,47 @@ export const markSavedRecipeUnshared = (
       ? {
           ...entry,
           sharedAt: undefined,
+          sharedByUserId: undefined,
           sharedRecipeId: undefined
         }
       : entry
   );
+
+/**
+ * The Family copy `record` links to, when that link is `userId`'s to use: it shared it, or
+ * (a link from before sharers were recorded) that account's Family list has the copy as its own,
+ * or its list isn't loaded yet. Another account's link on this device is not this one's to
+ * update or unshare.
+ */
+export const getOwnSharedRecipeId = (
+  record: Pick<SavedRecipeRecord, "sharedByUserId" | "sharedRecipeId">,
+  userId: string | null | undefined,
+  familyRecipes: readonly Pick<SharedRecipe, "id" | "ownerUserId">[] | null
+): string | undefined => {
+  if (!record.sharedRecipeId || !userId) {
+    return undefined;
+  }
+
+  if (record.sharedByUserId) {
+    return record.sharedByUserId === userId ? record.sharedRecipeId : undefined;
+  }
+
+  const copy = familyRecipes?.find((entry) => entry.id === record.sharedRecipeId);
+  return familyRecipes === null || copy?.ownerUserId === userId ? record.sharedRecipeId : undefined;
+};
+
+/**
+ * `record` as signed-in `userId` sees it: another account's Family link on it reads as not
+ * shared. Signed out, it reads as stored (nothing can be shared or unshared then).
+ */
+export const withOwnSharedLink = <Entry extends SavedRecipeRecord>(
+  record: Entry,
+  userId: string | null | undefined,
+  familyRecipes: readonly Pick<SharedRecipe, "id" | "ownerUserId">[] | null
+): Entry =>
+  !userId || !record.sharedRecipeId || getOwnSharedRecipeId(record, userId, familyRecipes)
+    ? record
+    : { ...record, sharedAt: undefined, sharedByUserId: undefined, sharedRecipeId: undefined };
 
 const textListOf = <T>(value: unknown, read: (entry: T) => unknown): string[] =>
   Array.isArray(value)

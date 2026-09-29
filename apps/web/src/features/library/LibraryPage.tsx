@@ -95,7 +95,8 @@ import {
   LOCAL_LIMIT_FREE,
   restoreSavedRecipe,
   SavedRecipeLimitError,
-  syncRecipeToHousehold
+  syncRecipeToHousehold,
+  withOwnSharedLink
 } from "./saved-recipe-store";
 
 import type { TextHighlighter } from "./components/HighlightedText";
@@ -235,7 +236,12 @@ export const LibraryPage: React.FC = () => {
   const searchText = deferredQuery.trim();
   const searching = searchText.length > 0;
   const engine = useSearchEngine(query.trim().length > 0);
-  const recipes = library.recipes;
+  // The cookbook as this account sees it: another account's Family link on a recipe reads as not
+  // shared (it can't update, unshare or delete that account's copy).
+  const recipes = useMemo(
+    () => library.recipes.map((recipe) => withOwnSharedLink(recipe, account)),
+    [account, library.recipes]
+  );
   const billingTier = getWebBillingTier(user);
   const isPremiumUser = isAuthenticated ? billingTier !== "free" : undefined;
   const canUseSharedRecipeBook = isAuthenticated && !shared.accessBlocked;

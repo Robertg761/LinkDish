@@ -545,6 +545,25 @@ describe("LibraryPage", () => {
     expect(apiMocks.deleteSharedRecipe).toHaveBeenCalledWith("shared_9");
   });
 
+  it("deletes just this device's copy of a recipe another account shared to its Family", async () => {
+    authMocks.user = { billingPlan: "family", email: "owner@example.com", id: "user_owner" };
+    seedRecipes([
+      makeRecipe("chili", {
+        extra: { sync: { sharedBy: "user_other", sharedRecipeId: "shared_9", status: "synced" } },
+        title: "Chili"
+      })
+    ]);
+
+    renderPage();
+    await screen.findByText("Chili");
+    fireEvent.click(within(openCardMenu("Chili")).getByRole("menuitem", { name: "Delete" }));
+
+    // Not this account's Family copy: no "delete everywhere", and nothing sent for it.
+    expect(await screen.findByText("Deleted “Chili”")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Delete shared recipe?" })).not.toBeInTheDocument();
+    expect(apiMocks.deleteSharedRecipe).not.toHaveBeenCalled();
+  });
+
   it("closes a Delete everywhere confirmation when the account that opened it signs out", async () => {
     authMocks.user = { billingPlan: "family", email: "owner@example.com", id: "user_owner" };
     seedRecipes([

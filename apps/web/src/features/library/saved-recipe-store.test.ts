@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 
+import { publishCurrentAccount } from "../../auth/account-scope";
 import { resetDataChangeFeedForTests, subscribeDataChanges } from "../../data/change-feed";
 import {
   RECIPE_SOURCE_IMAGES_STORE_NAME,
@@ -37,9 +38,11 @@ import {
   setRecipePreferredServings,
   setRecipeRating,
   setRecipeTags,
+  getOwnSharedRecipeId,
   syncRecipeToHousehold,
   updateRecipeNotes,
-  updateSavedRecipe
+  updateSavedRecipe,
+  withOwnSharedLink
 } from "./saved-recipe-store";
 
 import type { WebSavedRecipe } from "./saved-recipe-types";
@@ -910,6 +913,68 @@ describe("saved-recipe-store v4 behaviour", () => {
     expect(synced.sourceImages).toEqual([scan(1)]);
     expect(fakeIdb.record(SAVED_RECIPES_STORE_NAME, saved!.id)).not.toHaveProperty("sourceImages");
     expect(await getSavedRecipeSourceImages(saved!.id)).toEqual([scan(1)]);
+  });
+
+  describe("with a Family link another account made on this device", () => {
+    afterEach(() => {
+      publishCurrentAccount(null);
+    });
+
+    it("shares the account's own copy instead of updating the other account's", async () => {
+      const { recipe: saved } = await saveRecipe(createSaveInput(1), true);
+      fakeIdb.seed(SAVED_RECIPES_STORE_NAME, [
+        { ...saved, sync: { sharedBy: "user_a", sharedRecipeId: "a_copy", status: "synced" } }
+      ]);
+      publishCurrentAccount("user_b");
+      apiMocks.getHousehold.mockResolvedValue({ household: { id: "house_b" } });
+      apiMocks.createSharedRecipe.mockResolvedValue({
+        recipe: { id: "b_copy", ownerUserId: "user_b", updatedAt: "2026-09-04T00:00:00.000Z" }
+      });
+
+      const synced = await syncRecipeToHousehold((await getSavedRecipeById(saved!.id))!);
+
+      expect(apiMocks.updateSharedRecipe).not.toHaveBeenCalled();
+      expect(apiMocks.createSharedRecipe).toHaveBeenCalledOnce();
+      expect(synced.sync).toMatchObject({
+        sharedBy: "user_b",
+        sharedRecipeId: "b_copy",
+        status: "synced"
+      });
+    });
+
+    it("updates the account's own link as before", async () => {
+      const { recipe: saved } = await saveRecipe(createSaveInput(1), true);
+      fakeIdb.seed(SAVED_RECIPES_STORE_NAME, [
+        { ...saved, sync: { sharedBy: "user_a", sharedRecipeId: "a_copy", status: "dirty" } }
+      ]);
+      publishCurrentAccount("user_a");
+      apiMocks.getHousehold.mockResolvedValue({ household: { id: "house_a" } });
+      apiMocks.updateSharedRecipe.mockResolvedValue({
+        recipe: { id: "a_copy", ownerUserId: "user_a", updatedAt: "2026-09-04T00:00:00.000Z" }
+      });
+
+      await syncRecipeToHousehold((await getSavedRecipeById(saved!.id))!);
+
+      expect(apiMocks.updateSharedRecipe).toHaveBeenCalledWith("a_copy", expect.anything());
+      expect(apiMocks.createSharedRecipe).not.toHaveBeenCalled();
+    });
+
+    it("reads as not shared to another signed-in account", () => {
+      const linked = { sync: { sharedBy: "user_a", sharedRecipeId: "a_copy", status: "synced" } };
+      const legacy = { sync: { sharedRecipeId: "old_copy", status: "synced" } };
+
+      expect(getOwnSharedRecipeId(linked as WebSavedRecipe, "user_a")).toBe("a_copy");
+      expect(getOwnSharedRecipeId(linked as WebSavedRecipe, "user_b")).toBeUndefined();
+      expect(getOwnSharedRecipeId(linked as WebSavedRecipe, null)).toBeUndefined();
+      // Links made before the sharer was recorded stay usable, as before.
+      expect(getOwnSharedRecipeId(legacy as WebSavedRecipe, "user_b")).toBe("old_copy");
+      expect(withOwnSharedLink(linked as WebSavedRecipe, "user_b").sync).toEqual({
+        status: "local_only"
+      });
+      expect(withOwnSharedLink(linked as WebSavedRecipe, "user_a")).toBe(linked);
+      // Signed out, nothing can be shared or unshared: it reads as stored.
+      expect(withOwnSharedLink(linked as WebSavedRecipe, null)).toBe(linked);
+    });
   });
 
   /** A household sync whose create call waits until `release` is called. */

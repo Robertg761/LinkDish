@@ -44,6 +44,12 @@ export interface WebSavedRecipe {
   sync?: {
     status: "local_only" | "synced" | "dirty" | "sync_failed";
     sharedRecipeId?: string;
+    /**
+     * The account that shared it (whose Family copy `sharedRecipeId` is): the cookbook on this
+     * device is whoever signs in's, but a Family link is only that account's. Missing on links
+     * made before it was recorded.
+     */
+    sharedBy?: string;
     lastSyncedAt?: string;
     lastError?: string;
   };

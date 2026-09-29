@@ -73,15 +73,24 @@ const authMocks = vi.hoisted(() => ({
   user: null as { billingPlan?: string; email: string; id: string } | null
 }));
 
-vi.mock("../../auth/AuthProvider", () => ({
-  useAuth: () => ({
-    credentialsKey: `session:${authMocks.user?.id ?? ""}`,
-    credentialsReady: true,
-    isAuthenticated: Boolean(authMocks.user),
-    loading: false,
-    user: authMocks.user
-  })
-}));
+vi.mock("../../auth/AuthProvider", async () => {
+  const { publishCurrentAccount } = await import("../../auth/account-scope");
+
+  return {
+    useAuth: () => {
+      // As the real provider does: work that outlives a render reads the account from here.
+      publishCurrentAccount(authMocks.user ? authMocks.user.id : null);
+
+      return {
+        credentialsKey: `session:${authMocks.user?.id ?? ""}`,
+        credentialsReady: true,
+        isAuthenticated: Boolean(authMocks.user),
+        loading: false,
+        user: authMocks.user
+      };
+    }
+  };
+});
 
 const upgradeMocks = vi.hoisted(() => ({ requestUpgradeSheet: vi.fn() }));
 

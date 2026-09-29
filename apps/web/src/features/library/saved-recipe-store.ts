@@ -965,6 +965,7 @@ export function sharedRecipeToWebSavedRecipe(sharedRecipe: SharedRecipe): WebSav
     timesCooked: 0,
     sync: {
       lastSyncedAt: sharedRecipe.updatedAt,
+      sharedBy: sharedRecipe.ownerUserId,
       sharedRecipeId: sharedRecipe.id,
       status: "synced"
     },
@@ -1059,6 +1060,42 @@ async function persistSyncState(
 }
 
 /**
+ * The Family copy `recipe` links to, when that link is `account`'s own: it shared it, or the link
+ * is from before sharers were recorded. Another account's link on this device's cookbook is not
+ * this account's to update, unshare or delete.
+ */
+export const getOwnSharedRecipeId = (
+  recipe: Pick<WebSavedRecipe, "sync">,
+  account: string | null
+): string | undefined => {
+  const sharedRecipeId = recipe.sync?.sharedRecipeId;
+  const sharedBy = recipe.sync?.sharedBy;
+
+  return sharedRecipeId && account && (sharedBy === undefined || sharedBy === account)
+    ? sharedRecipeId
+    : undefined;
+};
+
+/** `recipe`'s sync state as `account` sees it (none when it is another account's link). */
+const ownSyncOf = (
+  recipe: Pick<WebSavedRecipe, "sync">,
+  account: string | null
+): WebSavedRecipe["sync"] =>
+  !recipe.sync?.sharedRecipeId || getOwnSharedRecipeId(recipe, account) ? recipe.sync : undefined;
+
+/**
+ * `recipe` as signed-in `account` sees it: another account's Family link on it reads as not
+ * shared. Signed out, it reads as stored (nothing can be shared or unshared then).
+ */
+export const withOwnSharedLink = <Recipe extends Pick<WebSavedRecipe, "sync">>(
+  recipe: Recipe,
+  account: string | null
+): Recipe =>
+  account === null || !recipe.sync?.sharedRecipeId || getOwnSharedRecipeId(recipe, account)
+    ? recipe
+    : { ...recipe, sync: { status: "local_only" } };
+
+/**
  * Shares a saved recipe with the household (or updates its household copy). It sends the recipe
  * as stored when called, not the caller's copy, which may predate an edit.
  *
@@ -1100,12 +1137,13 @@ export async function syncRecipeToHousehold(
 
     if (!household.household) {
       return persistSyncState(current, (existing) => ({
-        ...(existing.sync || { status: "local_only" }),
+        ...(ownSyncOf(existing, sharingFor) ?? { status: "local_only" }),
         status: "local_only"
       }));
     }
 
-    const sharedRecipeId = current.sync?.sharedRecipeId;
+    // Another account's link on this recipe isn't this one's to update: it shares its own copy.
+    const sharedRecipeId = getOwnSharedRecipeId(current, sharingFor);
     const payload = buildHouseholdRecipePayload(current);
 
     const response = await asAccount(sharingFor, () =>
@@ -1125,6 +1163,7 @@ export async function syncRecipeToHousehold(
 
     return persistSyncState(current, (existing) => ({
       lastSyncedAt: response.recipe.updatedAt,
+      sharedBy: response.recipe.ownerUserId,
       sharedRecipeId: response.recipe.id,
       // Edited while the request was out: the household copy is already behind again.
       status: existing.updatedAt === current.updatedAt ? "synced" : "dirty"
@@ -1137,7 +1176,7 @@ export async function syncRecipeToHousehold(
     }
 
     return persistSyncState(current, (existing) => ({
-      ...(existing.sync || { status: "local_only" }),
+      ...(ownSyncOf(existing, sharingFor) ?? { status: "local_only" }),
       lastError: error instanceof Error ? error.message : "Sync error",
       status: "sync_failed"
     }));

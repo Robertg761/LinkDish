@@ -33,7 +33,9 @@ import {
   incrementSavedRecipeTimesCooked,
   isDataUrlSourceImage,
   markSavedRecipeShared,
+  getOwnSharedRecipeId,
   markSavedRecipeUnshared,
+  withOwnSharedLink,
   readSavedRecipeRecords,
   removeSavedRecipeRecord,
   serializeSavedRecipeRecords,
@@ -275,6 +277,7 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
   const latestRef = useRef({
     canUseSharedRecipeBook,
     client,
+    hasLoadedSharedRecipes,
     isSignedIn,
     sharedRecipes,
     shareMode,
@@ -284,12 +287,25 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
   latestRef.current = {
     canUseSharedRecipeBook,
     client,
+    hasLoadedSharedRecipes,
     isSignedIn,
     sharedRecipes,
     shareMode,
     tier,
     userId: user?.id
   };
+
+  /**
+   * The Family copy `record` links to, when that link is the signed-in account's own (see
+   * getOwnSharedRecipeId): the cookbook is this device's, but a link belongs to who shared it.
+   */
+  const ownSharedRecipeId = useCallback(
+    (record: Pick<SavedRecipeRecord, "sharedByUserId" | "sharedRecipeId">) => {
+      const { hasLoadedSharedRecipes: loaded, sharedRecipes: family, userId } = latestRef.current;
+      return getOwnSharedRecipeId(record, userId, loaded ? family : null);
+    },
+    []
+  );
 
   /** Every cookbook change goes through here; the ref is always the latest list. */
   const commitSavedRecipes = useCallback(
@@ -612,9 +628,13 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
         };
       }
 
+      // Another account's link on this recipe isn't this one's to update: this account shares
+      // its own copy.
+      const ownId = ownSharedRecipeId(record);
+
       try {
-        if (record.sharedRecipeId) {
-          const response = await apiClient.updateSharedRecipe(record.sharedRecipeId, {
+        if (ownId) {
+          const response = await apiClient.updateSharedRecipe(ownId, {
             fetchMode: record.fetchMode,
             notes: record.notes ?? null,
             provenance: record.provenance as Parameters<
@@ -685,7 +705,7 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
         };
       }
     },
-    [commitSavedRecipes, upsertSharedRecipe]
+    [commitSavedRecipes, ownSharedRecipeId, upsertSharedRecipe]
   );
 
   const savePersonalRecipe = useCallback(
@@ -712,6 +732,7 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
         favorite: existingRecord?.favorite,
         id: recordId,
         sharedAt: existingRecord?.sharedAt,
+        sharedByUserId: existingRecord?.sharedByUserId,
         sharedRecipeId: existingRecord?.sharedRecipeId,
         sourceImages: persistRecipeSourceImages(recordId, createdRecord.sourceImages),
         timesCooked: existingRecord?.timesCooked ?? createdRecord.timesCooked
@@ -752,6 +773,7 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
             ...nextRecord,
             favorite: latestRecord.favorite,
             sharedAt: latestRecord.sharedAt,
+            sharedByUserId: latestRecord.sharedByUserId,
             sharedRecipeId: latestRecord.sharedRecipeId,
             timesCooked: latestRecord.timesCooked
           }
@@ -833,12 +855,18 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
       }
 
       setSharedRecipes((current) => current.filter((recipe) => recipe.ownerUserId !== userId));
+      // Only this account's links: another account's on this device stay that account's.
       commitSavedRecipes((current) =>
-        current.map((entry) => ({
-          ...entry,
-          sharedAt: undefined,
-          sharedRecipeId: undefined
-        }))
+        current.map((entry) =>
+          getOwnSharedRecipeId(entry, userId, currentShared)
+            ? {
+                ...entry,
+                sharedAt: undefined,
+                sharedByUserId: undefined,
+                sharedRecipeId: undefined
+              }
+            : entry
+        )
       );
       setSharedRecipeError(null);
 
@@ -867,12 +895,14 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
       const { client: apiClient, isSignedIn: signedIn, userId: startedFor } = latestRef.current;
       const switched = () => latestRef.current.userId !== startedFor;
 
-      if (!record.sharedRecipeId || !signedIn) {
+      const ownId = ownSharedRecipeId(record);
+
+      if (!ownId || !signedIn) {
         return;
       }
 
       try {
-        const response = await apiClient.updateSharedRecipe(record.sharedRecipeId, {
+        const response = await apiClient.updateSharedRecipe(ownId, {
           fetchMode: record.fetchMode,
           notes: record.notes ?? null,
           provenance: record.provenance as Parameters<
@@ -899,7 +929,7 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
         }
       }
     },
-    [commitSavedRecipes, upsertSharedRecipe]
+    [commitSavedRecipes, ownSharedRecipeId, upsertSharedRecipe]
   );
 
   const cloneRecipe = useCallback(
@@ -1260,8 +1290,10 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
     async (id: string): Promise<SaveRecipeResult> => {
       const sourceRecord = getSavedRecipeRecordById(savedRecipesRef.current, id);
 
-      if (!sourceRecord?.sharedRecipeId) {
-        commitSavedRecipes((current) => markSavedRecipeUnshared(current, id));
+      const ownId = sourceRecord ? ownSharedRecipeId(sourceRecord) : undefined;
+
+      // Not shared by this account (another account's link stays that account's): nothing to do.
+      if (!ownId) {
         return {
           allowed: true,
           saved: true
@@ -1271,13 +1303,13 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
       const startedFor = latestRef.current.userId;
 
       try {
-        await latestRef.current.client.deleteSharedRecipe(sourceRecord.sharedRecipeId);
+        await latestRef.current.client.deleteSharedRecipe(ownId);
 
         if (latestRef.current.userId !== startedFor) {
           return SWITCHED_ACCOUNT_RESULT;
         }
 
-        removeSharedRecipeFromState(sourceRecord.sharedRecipeId);
+        removeSharedRecipeFromState(ownId);
         commitSavedRecipes((current) => markSavedRecipeUnshared(current, id));
         setSharedRecipeError(null);
 
@@ -1300,7 +1332,7 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
         };
       }
     },
-    [commitSavedRecipes, removeSharedRecipeFromState]
+    [commitSavedRecipes, ownSharedRecipeId, removeSharedRecipeFromState]
   );
 
   const updateRecipe = useCallback(
@@ -1373,13 +1405,19 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
       computeSaveLimitStatus({ canUseSharedRecipeBook, savedRecipes, tier }, options),
     [canUseSharedRecipeBook, savedRecipes, tier]
   );
+  // The cookbook as the signed-in account sees it: another account's Family link on a recipe
+  // reads as not shared (it can't update or unshare that account's copy).
+  const visibleSavedRecipes = useMemo(() => {
+    const family = hasLoadedSharedRecipes ? sharedRecipes : null;
+    return savedRecipes.map((record) => withOwnSharedLink(record, user?.id, family));
+  }, [hasLoadedSharedRecipes, savedRecipes, sharedRecipes, user?.id]);
   const getSavedRecipeById = useCallback(
-    (id: string) => getSavedRecipeRecordById(savedRecipes, id),
-    [savedRecipes]
+    (id: string) => getSavedRecipeRecordById(visibleSavedRecipes, id),
+    [visibleSavedRecipes]
   );
   const getSavedRecipeBySourceUrl = useCallback(
-    (sourceUrl: string) => getSavedRecipeRecordBySourceUrl(savedRecipes, sourceUrl),
-    [savedRecipes]
+    (sourceUrl: string) => getSavedRecipeRecordBySourceUrl(visibleSavedRecipes, sourceUrl),
+    [visibleSavedRecipes]
   );
   const getSharedRecipeById = useCallback(
     (id: string) => sharedRecipes.find((entry) => entry.id === id),
@@ -1395,7 +1433,7 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
       getSharedRecipeById,
       hasLoadedSavedRecipes,
       hasLoadedSharedRecipes,
-      savedRecipes,
+      savedRecipes: visibleSavedRecipes,
       sharedRecipeError,
       sharedRecipes,
       shareMode
@@ -1408,10 +1446,10 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
       getSharedRecipeById,
       hasLoadedSavedRecipes,
       hasLoadedSharedRecipes,
-      savedRecipes,
       sharedRecipeError,
       sharedRecipes,
-      shareMode
+      shareMode,
+      visibleSavedRecipes
     ]
   );
 

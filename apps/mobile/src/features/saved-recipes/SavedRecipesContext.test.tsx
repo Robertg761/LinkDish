@@ -842,6 +842,44 @@ describe("SavedRecipesProvider household save entitlement", () => {
       expect(latestSavedRecipes?.sharedRecipes).toEqual([otherRecipe]);
     });
 
+    it("treats another account's Family link on a recipe as not shared", async () => {
+      // Shared by member_1 earlier on this phone; another account is signed in now.
+      const [record] = buildSavedRecipes(1);
+      storeSavedRecipes([
+        {
+          ...record!,
+          sharedAt: "2026-04-19T12:10:00.000Z",
+          sharedByUserId: "member_1",
+          sharedRecipeId: "member_copy"
+        }
+      ]);
+      signInAsMember();
+      accountState.user = { email: "other@example.com", id: "other_1" };
+      apiMocks.getSharedRecipes.mockResolvedValue({ recipes: [] });
+      apiMocks.createSharedRecipe.mockResolvedValue({
+        recipe: { ...buildSharedRecipe(1, "other_copy"), ownerUserId: "other_1" }
+      });
+      await renderProvider();
+
+      expect(latestSavedRecipes?.savedRecipes[0]?.sharedRecipeId).toBeUndefined();
+
+      // Unsharing leaves the other account's copy (and its link) alone.
+      await act(async () => {
+        await latestSavedRecipes!.unshareRecipe(record!.id);
+        await flushAsyncWork();
+      });
+      expect(apiMocks.deleteSharedRecipe).not.toHaveBeenCalled();
+
+      // Sharing makes this account's own copy instead of updating the other account's.
+      await act(async () => {
+        await latestSavedRecipes!.shareRecipe(record!.id);
+        await flushAsyncWork();
+      });
+      expect(apiMocks.updateSharedRecipe).not.toHaveBeenCalled();
+      expect(apiMocks.createSharedRecipe).toHaveBeenCalledTimes(1);
+      expect(latestSavedRecipes?.savedRecipes[0]?.sharedRecipeId).toBe("other_copy");
+    });
+
     it("keeps a share that finished after a switch out of the next account's Family", async () => {
       storeSavedRecipes(buildSavedRecipes(1));
       signInAsMember();

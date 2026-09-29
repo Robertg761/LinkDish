@@ -23,8 +23,10 @@ import {
   starterRecipeSeedRecordToSavedRecipeRecord,
   updateSavedRecipeRecord,
   upsertSavedRecipeRecord,
+  getOwnSharedRecipeId,
   markSavedRecipeShared,
-  markSavedRecipeUnshared
+  markSavedRecipeUnshared,
+  withOwnSharedLink
 } from "./store";
 
 import type { SuccessfulExtractionState } from "../recipe-results/types";
@@ -410,7 +412,43 @@ describe("saved recipe store helpers", () => {
     const shared = markSavedRecipeShared([savedRecipe], savedRecipe.id, sharedRecipe);
 
     expect(shared[0]?.sharedRecipeId).toBe("shared_recipe_1");
-    expect(markSavedRecipeUnshared(shared, savedRecipe.id)[0]?.sharedRecipeId).toBeUndefined();
+    // The link belongs to the account that shared it, and survives a round trip through storage.
+    expect(shared[0]?.sharedByUserId).toBe("user_1");
+    expect(parseSavedRecipeRecords(serializeSavedRecipeRecords(shared))[0]?.sharedByUserId).toBe(
+      "user_1"
+    );
+    const unshared = markSavedRecipeUnshared(shared, savedRecipe.id)[0];
+    expect(unshared?.sharedRecipeId).toBeUndefined();
+    expect(unshared?.sharedByUserId).toBeUndefined();
+  });
+
+  it("lets only the account that shared a recipe use its Family link", () => {
+    const record = (sharedByUserId?: string) => ({
+      sharedByUserId,
+      sharedRecipeId: "copy_1"
+    });
+    const family = [{ id: "copy_1", ownerUserId: "user_1" }];
+
+    expect(getOwnSharedRecipeId(record("user_1"), "user_1", family)).toBe("copy_1");
+    expect(getOwnSharedRecipeId(record("user_1"), "user_2", family)).toBeUndefined();
+    expect(getOwnSharedRecipeId(record("user_1"), null, family)).toBeUndefined();
+    // Links from before the sharer was recorded: the account's Family list decides.
+    expect(getOwnSharedRecipeId(record(), "user_1", family)).toBe("copy_1");
+    expect(getOwnSharedRecipeId(record(), "user_2", family)).toBeUndefined();
+    expect(getOwnSharedRecipeId(record(), "user_2", [])).toBeUndefined();
+    expect(getOwnSharedRecipeId(record(), "user_2", null)).toBe("copy_1");
+
+    const savedRecipe = {
+      ...createSavedRecipeRecord(buildSuccessState(), "2026-04-19T12:00:00.000Z"),
+      sharedAt: "2026-04-19T12:05:00.000Z",
+      sharedByUserId: "user_1",
+      sharedRecipeId: "copy_1"
+    };
+    expect(withOwnSharedLink(savedRecipe, "user_1", family)).toBe(savedRecipe);
+    expect(withOwnSharedLink(savedRecipe, "user_2", family)).toMatchObject({
+      sharedAt: undefined,
+      sharedRecipeId: undefined
+    });
   });
 
   it("searches shared recipes while preserving shared ownership metadata", () => {
