@@ -52,6 +52,35 @@ describe("zip reader", () => {
     expect(listZipEntries(withComment).map((entry) => entry.name)).toEqual(["a.txt"]);
   });
 
+  it("isn't fooled by an end-of-directory signature inside the archive comment", async () => {
+    const zip = await buildZip([
+      { name: "a.txt", data: utf8Bytes("A") },
+      { name: "b.txt", data: utf8Bytes("B") }
+    ]);
+    // "PK\x05\x06" followed by more than a record's worth of bytes, all inside the comment.
+    const comment = new Uint8Array([
+      ...utf8Bytes("see PK"),
+      0x05,
+      0x06,
+      ...utf8Bytes("x".repeat(40))
+    ]);
+    const withComment = new Uint8Array(zip.length + comment.length);
+    withComment.set(zip);
+    withComment.set(comment, zip.length);
+    new DataView(withComment.buffer).setUint16(zip.length - 2, comment.length, true);
+
+    expect(listZipEntries(withComment).map((entry) => entry.name)).toEqual(["a.txt", "b.txt"]);
+  });
+
+  it("still reads an archive with bytes after its end-of-directory record", async () => {
+    const zip = await buildZip([{ name: "a.txt", data: utf8Bytes("A") }]);
+    // Some tools append padding without counting it as a comment.
+    const padded = new Uint8Array(zip.length + 16);
+    padded.set(zip);
+
+    expect(listZipEntries(padded).map((entry) => entry.name)).toEqual(["a.txt"]);
+  });
+
   it("recognizes gzip data and unpacks it", async () => {
     const gz = await compressBytes(utf8Bytes("hello"), "gzip");
 

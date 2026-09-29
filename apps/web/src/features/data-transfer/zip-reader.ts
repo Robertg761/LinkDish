@@ -94,14 +94,31 @@ export const isGzipData = (data: ArrayBuffer | Uint8Array): boolean => {
 const findEndOfCentralDirectory = (view: DataView): number => {
   const last = view.byteLength - END_OF_CENTRAL_DIRECTORY_SIZE;
   const first = Math.max(0, last - MAX_COMMENT_LENGTH);
+  let fallback: number | null = null;
 
   for (let offset = last; offset >= first; offset -= 1) {
-    if (view.getUint32(offset, true) === END_OF_CENTRAL_DIRECTORY_SIGNATURE) {
+    if (view.getUint32(offset, true) !== END_OF_CENTRAL_DIRECTORY_SIGNATURE) {
+      continue;
+    }
+
+    // The real record's comment runs exactly to the end of the file. The signature can also turn
+    // up inside that comment, which would read comment bytes as the directory.
+    const commentLength = view.getUint16(offset + 20, true);
+
+    if (offset + END_OF_CENTRAL_DIRECTORY_SIZE + commentLength === view.byteLength) {
       return offset;
     }
+
+    // Some tools leave bytes after the record that it doesn't count: use the last signature
+    // when no record fits exactly.
+    fallback ??= offset;
   }
 
-  throw corrupt();
+  if (fallback == null) {
+    throw corrupt();
+  }
+
+  return fallback;
 };
 
 const utf8Decoder = new TextDecoder("utf-8", { fatal: true });
