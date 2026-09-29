@@ -14,11 +14,13 @@ import {
   NOT_COOKED_FILTER,
   QUICK_FILTER,
   sortPersonalRecipes,
+  sortSharedRecipes,
   tagFilterKey
 } from "./library-model";
 
 import type { WebCollection } from "../../../data/collections-store";
 import type { WebSavedRecipe } from "../saved-recipe-types";
+import type { SharedRecipe } from "@linkdish/api-contracts";
 import type { Recipe } from "@linkdish/recipe-domain";
 
 const recipe = (overrides: Partial<Recipe> = {}): Recipe =>
@@ -85,6 +87,32 @@ describe("library-model", () => {
     expect(ids("recentlyCooked")[0]).toBe("apple");
     expect(ids("quickest")[0]).toBe("apple");
     expect(ids("topRated")).toEqual(["cherry", "Banana", "apple"]);
+  });
+
+  it("keeps recipes without a known time last when Quickest is reversed", () => {
+    const recipes = [
+      saved("untimed", { createdAt: "2026-09-04T00:00:00.000Z" }),
+      saved("short", {}, { cookTimeMinutes: 10 }),
+      saved("long", {}, { cookTimeMinutes: 90 }),
+      saved("medium", {}, { cookTimeMinutes: 40 })
+    ];
+    const ids = (direction: "forward" | "reverse") =>
+      sortPersonalRecipes(recipes, "quickest", direction).map((entry) => entry.id);
+    const sharedIds = (direction: "forward" | "reverse") =>
+      sortSharedRecipes(
+        recipes.map(
+          (entry) =>
+            ({ id: entry.id, recipe: entry.recipe, updatedAt: entry.updatedAt }) as SharedRecipe
+        ),
+        "quickest",
+        direction
+      ).map((entry) => entry.id);
+
+    expect(ids("forward")).toEqual(["short", "medium", "long", "untimed"]);
+    // Longest first, not "no idea how long" first.
+    expect(ids("reverse")).toEqual(["long", "medium", "short", "untimed"]);
+    expect(sharedIds("forward")).toEqual(["short", "medium", "long", "untimed"]);
+    expect(sharedIds("reverse")).toEqual(["long", "medium", "short", "untimed"]);
   });
 
   it("combines filters with AND", () => {

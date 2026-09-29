@@ -273,6 +273,30 @@ const byRecentlyAdded = (left: WebSavedRecipe, right: WebSavedRecipe): number =>
 
 const unknownLast = (value: number | null): number => value ?? Number.POSITIVE_INFINITY;
 
+const hasUnknownTime = (record: { recipe: WebSavedRecipe["recipe"] }): boolean =>
+  getRecipeFacts(record.recipe).totalMinutes === null;
+
+/**
+ * `sorted` (in `sort`'s own order) as `direction` asks. Reversed Quickest is longest first: the
+ * recipes with no known time stay last, in their own order, rather than coming first.
+ */
+const inDirection = <T extends { recipe: WebSavedRecipe["recipe"] }>(
+  sorted: T[],
+  sort: LibrarySort,
+  direction: LibrarySortDirection
+): T[] => {
+  if (direction !== "reverse") {
+    return sorted;
+  }
+
+  if (sort !== "quickest") {
+    return sorted.reverse();
+  }
+
+  const untimed = sorted.filter(hasUnknownTime);
+  return [...sorted.filter((record) => !hasUnknownTime(record)).reverse(), ...untimed];
+};
+
 const PERSONAL_COMPARATORS: Record<
   LibrarySort,
   (left: WebSavedRecipe, right: WebSavedRecipe) => number
@@ -301,7 +325,7 @@ export const sortPersonalRecipes = (
     sort === "az"
       ? sortByTitle(recipes, (recipe) => recipe.recipe.title)
       : [...recipes].sort(PERSONAL_COMPARATORS[sort]);
-  return direction === "reverse" ? sorted.reverse() : sorted;
+  return inDirection(sorted, sort, direction);
 };
 
 export const sortSharedRecipes = (
@@ -310,8 +334,11 @@ export const sortSharedRecipes = (
   direction: LibrarySortDirection = "forward"
 ): SharedRecipe[] => {
   if (sort === "az") {
-    const sorted = sortByTitle(recipes, (recipe) => recipe.recipe.title);
-    return direction === "reverse" ? sorted.reverse() : sorted;
+    return inDirection(
+      sortByTitle(recipes, (recipe) => recipe.recipe.title),
+      sort,
+      direction
+    );
   }
 
   const sorted = [...recipes].sort((left, right) => {
@@ -326,7 +353,7 @@ export const sortSharedRecipes = (
     return timeOf(right.updatedAt) - timeOf(left.updatedAt);
   });
 
-  return direction === "reverse" ? sorted.reverse() : sorted;
+  return inDirection(sorted, sort, direction);
 };
 
 /* ------------------------------------------------------------------------------------------------
