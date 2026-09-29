@@ -719,9 +719,20 @@ export const ShoppingListProvider = ({ children }: PropsWithChildren) => {
     );
   }, [applyMutation]);
 
+  const signedIntoAccount = Boolean(isSignedIn && user);
+  /**
+   * The household list shown: the account's household, or while it is in none, the one it was
+   * last in (it keeps its list until it joins another). Unknown (another account just signed in
+   * and its household is still being looked up, or it was never in one here): none, so another
+   * household's list never shows for it.
+   */
+  const listHouseholdId =
+    signedIntoAccount && checkedHousehold?.userId === user?.id
+      ? (checkedHousehold?.id ?? checkedHousehold?.lastId ?? null)
+      : null;
   const visibleShoppingItems = useMemo(
-    () => getShoppingListItems(shoppingItems, activeHouseholdId),
-    [activeHouseholdId, shoppingItems]
+    () => getShoppingListItems(shoppingItems, listHouseholdId, signedIntoAccount),
+    [listHouseholdId, shoppingItems, signedIntoAccount]
   );
 
   const state = useMemo<ShoppingListState>(

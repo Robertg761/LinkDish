@@ -811,6 +811,43 @@ describe("ShoppingListProvider across accounts on one device", () => {
     ]);
   });
 
+  it("never shows the last household's list to an account that isn't in a household", async () => {
+    const server = createHouseholdServer([{ householdId: "household_1", item: milk }]);
+    apiMocks.createExtractorApiClient.mockReturnValue(server.client);
+    const renderer = await renderProvider();
+    expect(listSummary()).toEqual([["milk", false, "synced"]]);
+
+    // Another account, in no household, signs straight in.
+    server.session.householdId = null;
+    let answer: (value: { household: null }) => void = () => undefined;
+    server.client.getHousehold.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          answer = resolve;
+        })
+    );
+    await switchAccount(renderer, nextCook);
+
+    // Not while its household is being looked up...
+    expect(listSummary()).toEqual([]);
+
+    // ...nor once it turns out to have none.
+    await act(async () => {
+      answer({ household: null });
+      await flushAsyncWork();
+    });
+    expect(latestShoppingList?.canSyncShoppingList).toBe(false);
+    expect(listSummary()).toEqual([]);
+
+    // The first cook's list is still on this device for them.
+    server.session.householdId = "household_1";
+    await switchAccount(renderer, firstCook);
+    await act(async () => {
+      await latestShoppingList!.refreshShoppingList();
+    });
+    expect(listSummary()).toEqual([["milk", false, "synced"]]);
+  });
+
   it("still sends offline edits when another member of the same household signs in", async () => {
     const server = createHouseholdServer([{ householdId: "household_1", item: milk }]);
     const renderer = await leaveUnsentChange(server, () => {

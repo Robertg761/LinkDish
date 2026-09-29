@@ -437,6 +437,9 @@ describe("shopping store helpers", () => {
     ]);
     // Signed out, the whole list on this device shows.
     expect(ids(getShoppingListItems(items, null))).toEqual(["milk-h1", "eggs-h1", "basil"]);
+    // Signed in to an account whose household isn't known yet (just switched to) or that has
+    // none: another household's list stays hidden.
+    expect(ids(getShoppingListItems(items, null, true))).toEqual(["basil"]);
 
     // Milk added in household_2 is household_2's own item, not more of household_1's.
     const added = addShoppingItemsToList(items, [{ text: "2 cups milk" }], household2);

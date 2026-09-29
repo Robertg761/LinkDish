@@ -530,11 +530,22 @@ export const getSyncableDirtyItems = (items: MobileShoppingItem[]): MobileShoppi
  * The list as `householdId` sees it: live items, without the records kept for another
  * household. Signed out (no household), every item on this device shows.
  */
+/**
+ * The list as shown for `householdId` (see ShoppingListContext's listHouseholdId): live items not
+ * kept for another household. Signed in without one (the account's household is still being looked
+ * up, or it was never in one here), items kept for a household don't show, so the next account on
+ * this device never sees the last one's household list. Signed out, the whole list shows.
+ */
 export const getShoppingListItems = (
   items: MobileShoppingItem[],
-  householdId: string | null | undefined
+  householdId: string | null | undefined,
+  signedIn = false
 ): MobileShoppingItem[] =>
-  items.filter((item) => !item.isDeleted && !belongsToOtherHousehold(item, householdId));
+  items.filter(
+    (item) =>
+      !item.isDeleted &&
+      !(item.sync.householdId && (householdId ? item.sync.householdId !== householdId : signedIn))
+  );
 
 /**
  * Unsent changes (edits and delete tombstones) that signed-in account `userId` may send to
