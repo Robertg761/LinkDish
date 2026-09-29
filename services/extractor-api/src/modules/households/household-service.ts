@@ -305,7 +305,10 @@ const getInviteByHash = async (inviteCodeHash: string): Promise<InviteRecord | n
 
 const getActiveInvites = async (householdId: string): Promise<InviteRecord[]> => {
   const inviteHashes = await getStoreSetMembers(householdKeys.householdInvites(householdId));
-  const invites = await getRecordsByKeys(inviteRecordSchema, inviteHashes.map(householdKeys.invite));
+  const invites = await getRecordsByKeys(
+    inviteRecordSchema,
+    inviteHashes.map(householdKeys.invite)
+  );
   const activeInvites = invites.filter((invite): invite is InviteRecord =>
     Boolean(invite && !invite.acceptedAt && Date.parse(invite.expiresAt) > Date.now())
   );
@@ -475,8 +478,8 @@ const listShoppingItemRecordsForHousehold = async (
   );
 
   return records
-    .filter(
-      (record): record is ShoppingItemRecord => Boolean(record && record.householdId === householdId)
+    .filter((record): record is ShoppingItemRecord =>
+      Boolean(record && record.householdId === householdId)
     )
     .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt));
 };
@@ -554,9 +557,7 @@ export const upsertShoppingItemsForUser = async (
     const existingRecords = await listShoppingItemRecordsForHousehold(householdId);
     const existingRecordIds = new Set(existingRecords.map((record) => record.id));
     const incomingNewItemIds = new Set(
-      input.items
-        .map((item) => item.id)
-        .filter((itemId) => !existingRecordIds.has(itemId))
+      input.items.map((item) => item.id).filter((itemId) => !existingRecordIds.has(itemId))
     );
 
     if (existingRecords.length + incomingNewItemIds.size > MAX_HOUSEHOLD_SHOPPING_ITEMS) {
@@ -1026,6 +1027,21 @@ export const acceptHouseholdInvite = async (
     }
 
     return withHouseholdLock(invite.householdId, async () => {
+      // Read again under the household lock: the owner may have canceled it (or it may have run
+      // out, or been used) while the plan was checked, and a canceled invite must not let anyone in.
+      const currentInvite = await getInviteByHash(inviteCodeHash);
+
+      if (
+        !currentInvite ||
+        currentInvite.id !== invite.id ||
+        currentInvite.householdId !== invite.householdId ||
+        currentInvite.acceptedAt ||
+        Date.parse(currentInvite.expiresAt) <= Date.now() ||
+        currentInvite.emailHash !== hashEmail(user.email)
+      ) {
+        throw new HouseholdError("That household invite is no longer valid.", 404);
+      }
+
       const household = await getHouseholdById(invite.householdId);
 
       if (!household) {
@@ -1053,7 +1069,7 @@ export const acceptHouseholdInvite = async (
       await setStoreString(
         householdKeys.invite(inviteCodeHash),
         JSON.stringify({
-          ...invite,
+          ...currentInvite,
           acceptedAt: now
         }),
         {
