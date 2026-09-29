@@ -122,9 +122,19 @@ const RemoveMemberButton = ({
 };
 
 export default function HouseholdScreen() {
+  const { user } = useAccount();
+
+  // One screen per account: when another account signs in (or this one signs out), the last
+  // one's household, open confirmations and drafts go with its screen, so a confirmation opened
+  // for one account can never be carried out (with the next one's credentials) for another.
+  return <HouseholdView key={user ? `account:${user.id}` : "signed-out"} />;
+}
+
+function HouseholdView() {
   const params = useLocalSearchParams<{ invite?: string | string[] }>();
   const inviteParam = Array.isArray(params.invite) ? params.invite[0] : params.invite;
-  const { getAuthHeaders, hasLoadedAccount, isSignedIn, refreshAccount, user } = useAccount();
+  const { getAuthHeaders, getAuthHeadersFor, hasLoadedAccount, isSignedIn, refreshAccount, user } =
+    useAccount();
   const { purchaseStatus, restorePurchases, revenueCatConfigured, tier } = useBilling();
   const { showUpgradeMoment } = useOptionalUpgradeMoment();
   const { refreshSharedRecipes } = useSavedRecipes();
@@ -141,15 +151,19 @@ export default function HouseholdScreen() {
     id: string;
   } | null>(null);
   const [removingMemberId, setRemovingMemberId] = useState<string | null>(null);
+  const [isLeaveConfirmationVisible, setIsLeaveConfirmationVisible] = useState(false);
+  /** False once another account took this screen's place: its late answers land nowhere. */
+  const activeRef = useRef(true);
   const hasFamilyPlan = tier === "family";
   const isRestoringPurchases = purchaseStatus === "restoring";
   const client = useMemo(
     () =>
       createExtractorApiClient({
         baseUrl: mobileEnv.apiBaseUrl,
-        getHeaders: getAuthHeaders
+        // Sent only as the account this screen is for: never another Clerk switches to meanwhile.
+        getHeaders: user ? getAuthHeadersFor(user.id) : getAuthHeaders
       }),
-    [getAuthHeaders]
+    [getAuthHeaders, getAuthHeadersFor, user]
   );
   const groupedHouseholdMembers = useMemo(
     () => ({
@@ -170,13 +184,27 @@ export default function HouseholdScreen() {
 
     try {
       const response = await client.getHousehold();
-      setHousehold(response.household);
+
+      if (activeRef.current) {
+        setHousehold(response.household);
+      }
     } catch (loadError) {
-      setError(getErrorMessage(loadError));
+      if (activeRef.current) {
+        setError(getErrorMessage(loadError));
+      }
     } finally {
-      setIsLoading(false);
+      if (activeRef.current) {
+        setIsLoading(false);
+      }
     }
   }, [client, isSignedIn]);
+
+  useEffect(() => {
+    activeRef.current = true;
+    return () => {
+      activeRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     void refreshHousehold();
@@ -196,16 +224,27 @@ export default function HouseholdScreen() {
     setError(null);
 
     try {
-      setHousehold(await action());
+      const next = await action();
+
+      // Another account signed in meanwhile: this answer (and its refreshes) was the last one's.
+      if (!activeRef.current) {
+        return;
+      }
+
+      setHousehold(next);
       await refreshSharedRecipes();
 
       if (options.refreshAccountAfterward) {
         await refreshAccount();
       }
     } catch (actionError) {
-      setError(getErrorMessage(actionError));
+      if (activeRef.current) {
+        setError(getErrorMessage(actionError));
+      }
     } finally {
-      setIsLoading(false);
+      if (activeRef.current) {
+        setIsLoading(false);
+      }
     }
   };
 
@@ -284,6 +323,12 @@ export default function HouseholdScreen() {
         refreshAccountAfterward: true
       }
     );
+
+  // Leaving drops access to the shared cookbook and list at once, so it always asks first.
+  const confirmLeave = () => {
+    setIsLeaveConfirmationVisible(false);
+    void leave();
+  };
 
   const handleRestorePurchases = () => {
     void restorePurchases().catch(() => undefined);
@@ -477,7 +522,12 @@ export default function HouseholdScreen() {
 
             {household.role !== "owner" ? (
               <AppSurface style={styles.card}>
-                <AppButton disabled={isLoading} label="Leave household" onPress={leave} />
+                <AppButton
+                  disabled={isLoading}
+                  label="Leave household"
+                  onPress={() => setIsLeaveConfirmationVisible(true)}
+                  variant="outline-danger"
+                />
               </AppSurface>
             ) : null}
           </>
@@ -691,6 +741,25 @@ export default function HouseholdScreen() {
         onRequestClose={() => setInvitePendingCancellation(null)}
         title="Cancel invite?"
         visible={invitePendingCancellation != null}
+      />
+      <AppDialog
+        actions={[
+          {
+            label: "Stay",
+            onPress: () => setIsLeaveConfirmationVisible(false),
+            variant: "outline"
+          },
+          {
+            disabled: isLoading,
+            label: "Leave",
+            onPress: confirmLeave,
+            variant: "danger"
+          }
+        ]}
+        message="You will lose the shared Family cookbook and shopping list right away. You can rejoin later with a new invite."
+        onRequestClose={() => setIsLeaveConfirmationVisible(false)}
+        title="Leave this household?"
+        visible={isLeaveConfirmationVisible}
       />
     </>
   );

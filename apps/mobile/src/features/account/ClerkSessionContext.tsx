@@ -4,13 +4,20 @@ interface ClerkSessionContextValue {
   getToken: () => Promise<string | null>;
   isLoaded: boolean;
   isSignedIn: boolean;
-  signOut: () => Promise<void>;
+  /**
+   * Clerk's active session (null signed out). Clerk can switch straight to another account's
+   * session with `isSignedIn` staying true; this changes when it does.
+   */
+  sessionId: string | null;
+  /** Ends Clerk session `sessionId` only, when given; otherwise Clerk's active session. */
+  signOut: (sessionId?: string) => Promise<void>;
 }
 
 const noopContext: ClerkSessionContextValue = {
   getToken: () => Promise.resolve(null),
   isLoaded: true,
   isSignedIn: false,
+  sessionId: null,
   signOut: () => Promise.resolve()
 };
 

@@ -14,22 +14,66 @@ const strategyBaseScores = {
   "llm-fallback": 0.8
 } as const;
 
+/*
+ * Servings and times are optional metadata. Heuristic extractions lose a lot of confidence when
+ * they are missing (their absence often means the page was not really parsed), but a site's own
+ * structured recipe data is trusted for what it does say: it only loses a little.
+ */
+const heuristicMissingFieldPenalty = 0.12;
+const structuredMissingFieldPenalty = 0.03;
+
 export interface ScoredExtraction {
   confidenceScore: number;
   missingFields: MissingRecipeField[];
 }
+
+const minimumStrongIngredientCount = 2;
+
+/**
+ * A recipe the site published as structured data (JSON-LD or microdata) with a title, at least
+ * two ingredients and at least one step. These are imported as successes even when servings or
+ * times are missing; the gaps become a warning instead of a needs_retry round trip.
+ */
+export const isStrongStructuredCandidate = (candidate: ExtractionCandidate): boolean =>
+  candidate.strategy === "recipe-schema" &&
+  !candidate.signals.requiredFieldsInferred &&
+  candidate.provenance.some((source) => source === "jsonld" || source === "microdata") &&
+  typeof candidate.recipe.title === "string" &&
+  candidate.recipe.title.trim().length > 0 &&
+  (candidate.recipe.ingredients?.length ?? 0) >= minimumStrongIngredientCount &&
+  (candidate.recipe.steps?.length ?? 0) >= 1;
+
+/*
+ * Optional fields that count against confidence. A published total time stands in for missing
+ * prep and cook times (many sites only give "Total: 45 min").
+ */
+const countPenalizedMissingFields = (
+  recipe: Partial<Recipe>,
+  missingFields: MissingRecipeField[]
+): number =>
+  missingFields.filter((field) => {
+    if (field === "servings") {
+      return true;
+    }
+
+    if (field === "prepTimeMinutes" || field === "cookTimeMinutes") {
+      return recipe.totalTimeMinutes == null;
+    }
+
+    return false;
+  }).length;
 
 export const scoreRecipe = (
   recipe: Partial<Recipe>,
   candidate: ExtractionCandidate
 ): ScoredExtraction => {
   const missingFields = computeMissingRecipeFields(recipe);
+  const missingFieldPenalty = isStrongStructuredCandidate({ ...candidate, recipe })
+    ? structuredMissingFieldPenalty
+    : heuristicMissingFieldPenalty;
   let score = strategyBaseScores[candidate.strategy];
 
-  score -=
-    missingFields.filter(
-      (field) => field === "servings" || field === "prepTimeMinutes" || field === "cookTimeMinutes"
-    ).length * 0.12;
+  score -= countPenalizedMissingFields(recipe, missingFields) * missingFieldPenalty;
 
   if (candidate.signals.requiredFieldsInferred) {
     score -= 0.2;

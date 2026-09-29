@@ -1,0 +1,203 @@
+.library-welcome {
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}
+
+.library-welcome-hero {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 28px 20px 22px;
+  overflow: hidden;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-xl);
+  background:
+    radial-gradient(
+      circle at 100% 0%,
+      color-mix(in srgb, var(--color-butter) 18%, transparent) 0,
+      transparent 40%
+    ),
+    radial-gradient(
+      circle at 0% 100%,
+      color-mix(in srgb, var(--color-primary-soft) 70%, transparent) 0,
+      transparent 46%
+    ),
+    var(--color-surface);
+  box-shadow: var(--shadow-sm);
+  isolation: isolate;
+}
+
+.library-welcome-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.library-welcome-eyebrow {
+  color: var(--color-tomato-ink);
+  font-size: var(--text-label);
+  font-weight: 800;
+  letter-spacing: var(--text-label-letter-spacing);
+  line-height: var(--text-label-line-height);
+  text-transform: uppercase;
+}
+
+.library-welcome-title {
+  color: var(--color-ink);
+  font-family: var(--font-family-serif);
+  font-size: clamp(2.125rem, 1.6rem + 2.4vw, 3.25rem);
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  line-height: 1.02;
+}
+
+.library-welcome-accent {
+  display: table;
+  color: var(--color-primary);
+  font-style: italic;
+  font-weight: 600;
+  background-image: linear-gradient(var(--color-butter), var(--color-butter));
+  background-position: 0 90%;
+  background-repeat: no-repeat;
+  background-size: 100% 0.13em;
+}
+
+.library-welcome-body {
+  max-width: 46ch;
+  color: var(--color-ink-muted);
+  font-size: var(--text-body-lg);
+  line-height: var(--text-body-lg-line-height);
+}
+
+.library-welcome-art {
+  display: none;
+}
+
+.library-welcome-steps {
+  display: grid;
+  gap: 10px;
+  margin-top: 4px;
+  list-style: none;
+}
+
+.library-welcome-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.library-welcome-step-icon {
+  position: relative;
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-sm);
+  background: var(--color-primary-soft);
+  color: var(--color-on-primary-soft);
+}
+
+.library-welcome-step-number {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--color-surface);
+  border-radius: var(--radius-pill);
+  background: var(--color-tomato);
+  color: var(--color-on-tomato);
+  font-size: 0.625rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.library-welcome-step-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  padding-top: 1px;
+}
+
+.library-welcome-step-title {
+  color: var(--color-ink);
+  font-size: var(--text-body);
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.library-welcome-step-body {
+  color: var(--color-ink-muted);
+  font-size: var(--text-small);
+  line-height: var(--text-small-line-height);
+}
+
+@media (min-width: 768px) {
+  .library-welcome-hero {
+    gap: 24px;
+    padding: 40px 40px 32px;
+  }
+
+  .library-welcome-hero .paste-link {
+    max-width: 620px;
+  }
+
+  .library-welcome-art {
+    position: absolute;
+    top: 32px;
+    right: 40px;
+    z-index: -1;
+    display: block;
+    width: clamp(180px, 24vw, 280px);
+  }
+
+  .library-welcome-art svg {
+    width: 100%;
+    height: auto;
+  }
+
+  .library-welcome-steps {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 20px;
+    margin-top: 8px;
+    padding-top: 24px;
+    border-top: 1px solid var(--color-border-subtle);
+  }
+}
+
+/* Sample cards while the samples load: a sample card's boxes, with shimmering text lines. */
+.library-welcome-sample-placeholder {
+  pointer-events: none;
+}
+
+.library-welcome-sample-photo {
+  aspect-ratio: 4 / 3;
+  border-radius: 0;
+}
+
+/* Inline blocks of text in the card's own font, so every line keeps its height exactly. */
+.skeleton.library-welcome-sample-text {
+  display: inline-block;
+  width: 88%;
+  clip-path: inset(0.22em 0 0.22em 0 round 6px);
+}
+
+.skeleton.library-welcome-sample-text.is-short {
+  width: 56%;
+}
+
+.skeleton.library-welcome-sample-text.is-meta {
+  display: block;
+  width: 48%;
+}
+
+/* With starter recipes below, the hero is a friendly card rather than the whole page. */
+.library-welcome-starter .library-welcome-title {
+  font-size: clamp(1.875rem, 1.5rem + 1.8vw, 2.75rem);
+}

@@ -1,0 +1,80 @@
+/*
+ * Recipe without a photo: a plate on a gingham cloth. Sizes come from container units, so the
+ * same art works as a 32px thumbnail, a grid card and the recipe hero.
+ */
+.recipe-cover {
+  --cover-bg: var(--color-primary-soft);
+  --cover-check: color-mix(in srgb, var(--color-primary) 7%, transparent);
+  --cover-rim: color-mix(in srgb, var(--color-primary) 16%, transparent);
+  --cover-ink: var(--color-on-primary-soft);
+
+  position: absolute;
+  inset: 0;
+  display: block;
+  overflow: hidden;
+  container-type: size;
+  background: var(--cover-bg);
+  pointer-events: none;
+  user-select: none;
+}
+
+.recipe-cover.is-butter {
+  --cover-bg: var(--color-butter-soft);
+  --cover-check: color-mix(in srgb, var(--color-butter) 20%, transparent);
+  --cover-rim: color-mix(in srgb, var(--color-butter) 45%, transparent);
+  --cover-ink: var(--color-on-butter-soft);
+}
+
+.recipe-cover.is-tomato {
+  --cover-bg: var(--color-tomato-soft);
+  --cover-check: color-mix(in srgb, var(--color-tomato) 9%, transparent);
+  --cover-rim: color-mix(in srgb, var(--color-tomato) 22%, transparent);
+  --cover-ink: var(--color-on-tomato-soft);
+}
+
+/* The cloth: two crossing bands make the gingham checks. */
+.recipe-cover::before {
+  --cover-cell: clamp(3px, 6.5cqw, 22px);
+
+  position: absolute;
+  inset: 0;
+  background-image:
+    repeating-linear-gradient(
+      90deg,
+      var(--cover-check) 0 var(--cover-cell),
+      transparent var(--cover-cell) calc(var(--cover-cell) * 2)
+    ),
+    repeating-linear-gradient(
+      0deg,
+      var(--cover-check) 0 var(--cover-cell),
+      transparent var(--cover-cell) calc(var(--cover-cell) * 2)
+    );
+  content: "";
+}
+
+.recipe-cover-plate {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: grid;
+  place-items: center;
+  width: min(56cqw, 74cqh);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    var(--color-surface-raised) 0 60%,
+    var(--cover-rim) 60.5% 62.5%,
+    var(--color-surface-raised) 63%
+  );
+  box-shadow:
+    0 0 0 min(2.2cqw, 3cqh) color-mix(in srgb, var(--color-surface-raised) 40%, transparent),
+    0 min(1.6cqw, 2cqh) min(5cqw, 6cqh) rgba(var(--shadow-color), 0.16);
+  color: var(--cover-ink);
+  transform: translate(-50%, -50%);
+}
+
+.recipe-cover-icon.icon {
+  width: 44%;
+  height: 44%;
+}

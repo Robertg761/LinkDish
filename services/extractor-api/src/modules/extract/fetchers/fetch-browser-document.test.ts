@@ -245,6 +245,89 @@ describe("createBrowserFetcher", () => {
     });
   });
 
+  it("gives up waiting for a busy browser slot instead of queueing past the deadline", async () => {
+    let finishFirstRender: (() => void) | undefined;
+    pageMock.goto.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishFirstRender = () => resolve({ status: () => 200 });
+        })
+    );
+    const fetcher = createEnabledFetcher();
+
+    const firstFetch = fetcher.fetch("https://example.com/slow");
+    await vi.waitFor(() => {
+      expect(finishFirstRender).toBeDefined();
+    });
+
+    await expect(
+      fetcher.fetch("https://example.com/queued", { queueTimeoutMs: 20 })
+    ).rejects.toMatchObject({ name: "BrowserFetchError", reason: "timeout" });
+
+    const cancellation = new AbortController();
+    const cancelledFetch = fetcher.fetch("https://example.com/cancelled", {
+      queueTimeoutMs: 5_000,
+      signal: cancellation.signal
+    });
+    cancellation.abort();
+    await expect(cancelledFetch).rejects.toMatchObject({ reason: "timeout" });
+
+    finishFirstRender?.();
+    await expect(firstFetch).resolves.toMatchObject({ mode: "browser" });
+    await expect(fetcher.fetch("https://example.com/after")).resolves.toMatchObject({
+      mode: "browser"
+    });
+  });
+
+  it("caps navigation at the caller's budget and validates each sub-request origin once", async () => {
+    const validateUrl = vi.fn(() => Promise.resolve({ safe: true as const }));
+    const fetcher = createEnabledFetcher(validateUrl);
+
+    await fetcher.fetch("https://example.com/original", { timeoutMs: 700 });
+
+    expect(pageMock.goto).toHaveBeenCalledWith("https://example.com/original", {
+      timeout: 700,
+      waitUntil: "domcontentloaded"
+    });
+
+    const routeHandler = contextMock.route.mock.calls[0]?.[1] as (
+      route: TestRoute
+    ) => Promise<void>;
+    const scriptRoute = (url: string) => ({
+      abort: vi.fn().mockResolvedValue(undefined),
+      continue: vi.fn().mockResolvedValue(undefined),
+      request: () => ({ resourceType: () => "script", url: () => url })
+    });
+    validateUrl.mockClear();
+
+    await routeHandler(scriptRoute("https://cdn.example.com/a.js"));
+    await routeHandler(scriptRoute("https://cdn.example.com/b.js"));
+    await routeHandler(scriptRoute("https://other.example.com/c.js"));
+
+    expect(validateUrl).toHaveBeenCalledTimes(2);
+  });
+
+  it("drops stylesheets and sockets as well as media during a render", async () => {
+    const fetcher = createEnabledFetcher();
+
+    await fetcher.fetch("https://example.com/original");
+
+    const routeHandler = contextMock.route.mock.calls[0]?.[1] as (
+      route: TestRoute
+    ) => Promise<void>;
+
+    for (const resourceType of ["stylesheet", "websocket", "eventsource"]) {
+      const route = {
+        abort: vi.fn().mockResolvedValue(undefined),
+        continue: vi.fn().mockResolvedValue(undefined),
+        request: () => ({ resourceType: () => resourceType, url: () => "https://example.com/x" })
+      };
+
+      await routeHandler(route);
+      expect(route.abort).toHaveBeenCalled();
+    }
+  });
+
   it("relaunches Chromium when a cached browser closes before context creation", async () => {
     const staleBrowserMock = {
       newContext: vi

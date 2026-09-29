@@ -2,109 +2,105 @@ import React, { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
 import { trackWebV2AnalyticsEvent } from "../../analytics/client";
-import { apiClient } from "../../api/client";
 import { useAuth } from "../../auth/AuthProvider";
 import { Button, ButtonLink } from "../../components/Button";
-import { Card } from "../../components/Card";
-import {
-  isRevenueCatWebSdkCheckoutConfigured,
-  startRevenueCatWebSdkCheckout,
-  startRevenueCatWebSdkFoundingCheckout
-} from "../billing/revenuecat-web-sdk-checkout";
+import { PageHeader } from "../../components/PageHeader";
+import { ProgressBar } from "../../components/ProgressBar";
+import { useDocumentTitle } from "../../lib/use-document-title";
+import { useMediaQuery } from "../../lib/use-media-query";
+import { useWebBillingAvailability } from "../billing/billing-availability";
+import { useWebCheckout } from "../billing/use-web-checkout";
 import {
   getRemainingImports,
   getWebBillingTier,
+  webBillingPlans,
   type WebBillingTier
 } from "../billing/web-billing";
-
 import {
-  defaultBillingAvailability,
-  FoundingOfferCard,
-  getCheckoutButtonLabel,
-  PricingPlansContent,
-  type PlanActionsRenderer,
-  UsageSummaryCard
+  getHouseholdOwner,
+  getMemberDisplayName,
+  useHouseholdSummary
+} from "../household/use-household-summary";
+
+import { BillingErrorNotice, CheckoutCancelled, CheckoutSuccess } from "./CheckoutStatus";
+import { PlanCard, PlanStatus } from "./PlanCard";
+import {
+  getBestYearlySavings,
+  getPurchasablePeriod,
+  isBillingPeriod,
+  isPaidPlan,
+  planContent,
+  RECOMMENDED_PLAN
 } from "./plans-content";
+import {
+  BillingPeriodToggle,
+  FoundingOfferCard,
+  PlanComparisonTable,
+  PricingFaq,
+  PricingTrustRow,
+  SUPPORT_EMAIL
+} from "./PricingSections";
+
+import type { BillingPeriod, PaidBillingPlan } from "@linkdish/api-contracts";
+
 import "./PricingPage.css";
 
-import type {
-  BillingPeriod,
-  PaidBillingPlan,
-  QuotaStatus,
-  WebBillingAvailability
-} from "@linkdish/api-contracts";
+/** Side by side, Free sits first like a price ladder. */
+const WIDE_TIERS: ReadonlyArray<WebBillingTier> = ["free", "plus", "family"];
+/** Stacked on phones, the paid plans come first so they're visible without scrolling past Free. */
+const STACKED_TIERS: ReadonlyArray<WebBillingTier> = ["plus", "family", "free"];
+const WIDE_GRID_QUERY = "(min-width: 900px)";
+
+/** Who pays for the plan the person is on, which decides whether "Manage billing" is theirs. */
+type BillingOwner = "self" | "household" | "unknown";
+
+const prefersReducedMotion = (): boolean =>
+  typeof window !== "undefined" &&
+  window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
 
 export const PricingPage: React.FC = () => {
-  const { isAuthenticated, refreshUser, user } = useAuth();
-  const [searchParams] = useSearchParams();
-  const accountPlan = getWebBillingTier(user);
-  const [householdPlan, setHouseholdPlan] = useState<WebBillingTier | null>(null);
-  const [billingAvailability, setBillingAvailability] = useState<WebBillingAvailability>(
-    defaultBillingAvailability
+  useDocumentTitle("Plans");
+  const { credentialsKey, isAuthenticated, refreshUser, user } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedPlanParam = searchParams.get("upgrade");
+  const requestedPlan: PaidBillingPlan | null = isPaidPlan(requestedPlanParam)
+    ? requestedPlanParam
+    : null;
+  const periodParam = searchParams.get("period");
+  const [period, setPeriod] = useState<BillingPeriod>(
+    isBillingPeriod(periodParam) ? periodParam : "yearly"
   );
-  const [billingAction, setBillingAction] = useState<string | null>(null);
-  const [billingError, setBillingError] = useState("");
-  const currentPlan = householdPlan ?? accountPlan;
-  const remainingImports = isAuthenticated ? null : getRemainingImports(currentPlan);
-  const monthlyQuota = (user as (typeof user & { quota?: QuotaStatus }) | null)?.quota;
   const checkoutResult = searchParams.get("checkout");
-  const refreshedCheckoutRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    if (!isAuthenticated) {
-      setHouseholdPlan(null);
-      return;
-    }
-
-    setHouseholdPlan(null);
-
-    async function loadHouseholdPlan() {
-      try {
-        const response = await apiClient.getHousehold();
-        const hasActiveFamilyHousehold = response.household?.ownerFamilyEntitlementActive === true;
-
-        if (!cancelled) {
-          setHouseholdPlan(hasActiveFamilyHousehold ? "family" : null);
-        }
-      } catch {
-        if (!cancelled) {
-          setHouseholdPlan(null);
-        }
-      }
-    }
-
-    void loadHouseholdPlan();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [isAuthenticated, user?.id]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadBillingAvailability() {
-      try {
-        const availability = await apiClient.getWebBillingAvailability();
-
-        if (!cancelled) {
-          setBillingAvailability(availability);
-        }
-      } catch {
-        if (!cancelled) {
-          setBillingAvailability(defaultBillingAvailability);
-        }
-      }
-    }
-
-    void loadBillingAvailability();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const celebrating = checkoutResult === "success";
+  /** After paying, the plans (and the sales pitch) stay folded away unless asked for. */
+  const [plansOpen, setPlansOpen] = useState(false);
+  const showPlans = !celebrating || plansOpen;
+  const availabilityView = useWebBillingAvailability();
+  const { availability } = availabilityView;
+  const checkout = useWebCheckout({ trigger: "pricing" });
+  const householdSummary = useHouseholdSummary(isAuthenticated, user?.id, credentialsKey);
+  const household = householdSummary.household;
+  const accountPlan = getWebBillingTier(user);
+  const currentPlan: WebBillingTier =
+    isAuthenticated && household?.ownerFamilyEntitlementActive === true ? "family" : accountPlan;
+  const billingOwner: BillingOwner =
+    currentPlan !== "family"
+      ? "self"
+      : householdSummary.status === "ready"
+        ? household?.role === "member"
+          ? "household"
+          : "self"
+        : "unknown";
+  const householdOwner = billingOwner === "household" ? getHouseholdOwner(household) : null;
+  const canManageBilling =
+    isAuthenticated &&
+    currentPlan !== "free" &&
+    billingOwner === "self" &&
+    availability.managementPortalAvailable;
+  const remainingImports = isAuthenticated ? null : getRemainingImports("free");
+  const bestSavings = getBestYearlySavings(availability);
+  const tiers = useMediaQuery(WIDE_GRID_QUERY) ? WIDE_TIERS : STACKED_TIERS;
+  const cardRefs = useRef<Partial<Record<WebBillingTier, HTMLElement | null>>>({});
 
   useEffect(() => {
     trackWebV2AnalyticsEvent({
@@ -116,268 +112,307 @@ export const PricingPage: React.FC = () => {
     });
   }, []);
 
+  // Arriving with ?upgrade=plus|family (from the upgrade sheet, or back from sign-in): bring that
+  // plan into view.
   useEffect(() => {
-    if (checkoutResult !== "success" || refreshedCheckoutRef.current === checkoutResult) {
+    if (!requestedPlan) {
       return;
     }
 
-    refreshedCheckoutRef.current = checkoutResult;
-    trackWebV2AnalyticsEvent({
-      name: "upgrade_purchased",
-      routeOrScreen: window.location.pathname,
-      properties: {
-        plan: "unknown",
-        trigger: "pricing"
-      }
-    });
-    void refreshUser();
-  }, [checkoutResult, refreshUser]);
-
-  const startCheckout = async (checkoutPlan: PaidBillingPlan, period: BillingPeriod) => {
-    const actionId = `${checkoutPlan}-${period}`;
-    setBillingAction(actionId);
-    setBillingError("");
-
-    try {
-      if (isRevenueCatWebSdkCheckoutConfigured() && user) {
-        await startRevenueCatWebSdkCheckout({
-          period,
-          plan: checkoutPlan,
-          user
-        });
-        trackWebV2AnalyticsEvent({
-          name: "upgrade_purchased",
-          routeOrScreen: window.location.pathname,
-          properties: {
-            billing_period: period,
-            plan: checkoutPlan,
-            trigger: "pricing"
-          }
-        });
-        await refreshUser();
-        setBillingAction(null);
-        return;
-      }
-
-      const response = await apiClient.createWebBillingCheckout({
-        period,
-        plan: checkoutPlan
+    const frame = window.requestAnimationFrame(() => {
+      cardRefs.current[requestedPlan]?.scrollIntoView?.({
+        behavior: prefersReducedMotion() ? "auto" : "smooth",
+        block: "center"
       });
-      window.location.assign(response.url);
-    } catch (error) {
-      setBillingError(
-        error instanceof Error
-          ? error.message
-          : "LinkDish could not start checkout. Please try again."
-      );
-      setBillingAction(null);
-    }
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [requestedPlan]);
+
+  const dismissCheckoutResult = () => {
+    const next = new URLSearchParams(searchParams);
+    next.delete("checkout");
+    setSearchParams(next, { replace: true });
   };
 
-  const startFoundingCheckout = async () => {
-    setBillingAction("founding");
-    setBillingError("");
+  const signInPath = (plan: PaidBillingPlan) =>
+    `/account?upgrade=${plan}${period === "monthly" ? "&period=monthly" : ""}`;
 
-    try {
-      if (isRevenueCatWebSdkCheckoutConfigured() && user) {
-        await startRevenueCatWebSdkFoundingCheckout({ user });
-        trackWebV2AnalyticsEvent({
-          name: "upgrade_purchased",
-          routeOrScreen: window.location.pathname,
-          properties: {
-            billing_period: "lifetime",
-            plan: "plus",
-            trigger: "founding"
-          }
-        });
-        await refreshUser();
-        setBillingAction(null);
-        return;
+  /**
+   * The one plan that gets the forest card: the one asked about, else the paid plan the cook
+   * already has (a Family member isn't told Plus is "Recommended"), else Plus.
+   */
+  const featuredPlan: PaidBillingPlan =
+    requestedPlan ?? (isAuthenticated && isPaidPlan(currentPlan) ? currentPlan : RECOMMENDED_PLAN);
+
+  const renderPaidAction = (plan: PaidBillingPlan): React.ReactNode => {
+    const emphasize = plan === featuredPlan;
+    const planName = planContent[plan].name;
+
+    if (currentPlan === plan) {
+      if (billingOwner === "household") {
+        const ownerName = householdOwner ? getMemberDisplayName(householdOwner) : null;
+
+        return (
+          <>
+            <PlanStatus icon="users">
+              {ownerName ? `Shared with you by ${ownerName}` : "Included with your household"}
+            </PlanStatus>
+            <p className="plan-card-action-note">
+              Family comes from your household&apos;s plan, so there&apos;s nothing to pay or manage
+              here. <Link to="/household">Open household</Link>
+            </p>
+          </>
+        );
       }
 
-      const response = await apiClient.createWebBillingCheckout({ offer: "founding" });
-      window.location.assign(response.url);
-    } catch (error) {
-      setBillingError(
-        error instanceof Error
-          ? error.message
-          : "LinkDish could not start checkout. Please try again."
+      if (canManageBilling) {
+        return (
+          <Button
+            fullWidth
+            icon="credit-card"
+            loading={checkout.busyAction === "portal"}
+            onClick={() => void checkout.openBillingPortal()}
+            variant="secondary"
+          >
+            Manage billing
+          </Button>
+        );
+      }
+
+      return (
+        <>
+          <PlanStatus icon="check-circle">Your current plan</PlanStatus>
+          {billingOwner === "unknown" ? (
+            <p className="plan-card-action-note">
+              Billing is managed by the account that started this plan.
+            </p>
+          ) : null}
+        </>
       );
-      setBillingAction(null);
     }
-  };
 
-  const openBillingPortal = async () => {
-    setBillingAction("portal");
-    setBillingError("");
-
-    try {
-      const response = await apiClient.createWebBillingPortal();
-      window.location.assign(response.url);
-    } catch (error) {
-      setBillingError(
-        error instanceof Error
-          ? error.message
-          : "LinkDish could not open billing management. Please try again."
-      );
-      setBillingAction(null);
-    }
-  };
-
-  const renderPlanActions: PlanActionsRenderer = (checkoutPlan, prices) => {
-    if (currentPlan === checkoutPlan) {
-      const canManageBilling =
-        accountPlan === checkoutPlan && billingAvailability.managementPortalAvailable;
-
-      return canManageBilling ? (
-        <Button
-          variant="outline"
-          loading={billingAction === "portal"}
-          onClick={() => {
-            void openBillingPortal();
-          }}
-          fullWidth
-        >
-          Manage Billing
-        </Button>
-      ) : (
-        <Button variant="outline" disabled fullWidth>
-          Active Plan
-        </Button>
-      );
+    if (currentPlan === "family" && plan === "plus") {
+      return <PlanStatus tone="muted">Included in Family</PlanStatus>;
     }
 
     if (!isAuthenticated) {
       return (
-        <Link
-          className="pricing-sign-in-link btn btn-primary btn-block"
-          to={`/account?upgrade=${checkoutPlan}`}
+        <ButtonLink
+          fullWidth
+          to={signInPath(plan)}
+          trailingIcon="arrow-right"
+          variant={emphasize ? "primary" : "secondary"}
         >
           Sign in to upgrade
-        </Link>
+        </ButtonLink>
       );
     }
 
-    // The RevenueCat Web SDK path resolves offerings/packages client-side, so it does
-    // not depend on backend Web Purchase Link availability. When it is configured, offer
-    // both periods; otherwise fall back to the backend-driven Purchase Link availability.
-    const webSdkCheckoutConfigured = isRevenueCatWebSdkCheckoutConfigured();
-    const availablePeriods = (["yearly", "monthly"] as const).filter(
-      (period) => webSdkCheckoutConfigured || billingAvailability.plans[checkoutPlan][period]
-    );
+    const purchasablePeriod = getPurchasablePeriod(plan, period, availabilityView);
 
-    if (availablePeriods.length === 0) {
+    if (availabilityView.status === "error" && purchasablePeriod === null) {
       return (
-        <div className="pricing-upgrade-info">
-          <Button variant="primary" disabled fullWidth>
-            Web Checkout Setup Needed
+        <>
+          <Button fullWidth icon="refresh" onClick={availabilityView.retry} variant="secondary">
+            Try again
           </Button>
-          <p className="upgrade-note">
-            Web purchases are almost ready. Finish RevenueCat Web Billing setup to enable checkout.
-          </p>
-        </div>
+          <p className="plan-card-action-note">We couldn&apos;t load checkout just now.</p>
+        </>
+      );
+    }
+
+    if (availabilityView.status === "loading" && purchasablePeriod === null) {
+      return (
+        <Button fullWidth loading variant={emphasize ? "primary" : "secondary"}>
+          Upgrade to {planName}
+        </Button>
+      );
+    }
+
+    if (purchasablePeriod === null) {
+      return (
+        <p className="plan-card-action-note plan-card-action-note-box">
+          Online checkout is taking a short break. Email{" "}
+          <a href={`mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(`LinkDish ${planName}`)}`}>
+            {SUPPORT_EMAIL}
+          </a>{" "}
+          and we&apos;ll get you set up.
+        </p>
       );
     }
 
     return (
-      <div className="pricing-upgrade-info">
-        {availablePeriods.map((period) => (
-          <Button
-            key={period}
-            variant={period === "yearly" ? "primary" : "secondary"}
-            loading={billingAction === `${checkoutPlan}-${period}`}
-            disabled={billingAction !== null}
-            onClick={() => {
-              void startCheckout(checkoutPlan, period);
-            }}
-            fullWidth
-          >
-            {getCheckoutButtonLabel(period, prices[period])}
-          </Button>
-        ))}
-      </div>
+      <>
+        <Button
+          disabled={checkout.busyAction !== null}
+          fullWidth
+          loading={checkout.busyAction === `${plan}-${purchasablePeriod}`}
+          onClick={() => void checkout.startCheckout(plan, purchasablePeriod)}
+          variant={emphasize ? "primary" : "secondary"}
+        >
+          Upgrade to {planName}
+        </Button>
+        {purchasablePeriod !== period ? (
+          <p className="plan-card-action-note">
+            Only {purchasablePeriod} billing is available online right now.
+          </p>
+        ) : null}
+      </>
     );
   };
 
+  const renderFreeAction = (): React.ReactNode => {
+    if (currentPlan !== "free") {
+      return <PlanStatus tone="muted">Always free</PlanStatus>;
+    }
+
+    // Signed out, Free isn't "your plan" yet: it's where to start.
+    if (!isAuthenticated) {
+      return (
+        <ButtonLink fullWidth to="/" variant="secondary">
+          Start free
+        </ButtonLink>
+      );
+    }
+
+    return <PlanStatus icon="check-circle">Your current plan</PlanStatus>;
+  };
+
+  const freeImportLimit = webBillingPlans.free.limits.monthlyImports;
+  const freeImportsUsed =
+    remainingImports === null ? 0 : Math.max(0, freeImportLimit - remainingImports);
+
+  const showFoundingOffer = availability.founding?.available === true && currentPlan === "free";
+
   return (
-    <div className="pricing-page container page-enter">
-      <header className="pricing-header">
-        <p className="pricing-eyebrow">Plans</p>
-        <h1 className="pricing-title">LinkDish Plans & Pricing</h1>
-        <p className="pricing-subtitle">
-          Choose the perfect plan to clean and organize your culinary world.
-        </p>
-      </header>
-
-      {checkoutResult === "success" && (
-        <Card variant="subtle" className="billing-status-card">
-          <h2>Checkout Complete</h2>
-          <p>Thanks for upgrading. Your LinkDish plan will refresh once RevenueCat confirms it.</p>
-        </Card>
-      )}
-
-      {checkoutResult === "cancelled" && (
-        <Card variant="subtle" className="billing-status-card">
-          <h2>Checkout Cancelled</h2>
-          <p>No changes were made to your LinkDish plan.</p>
-        </Card>
-      )}
-
-      {billingError && (
-        <Card variant="subtle" className="billing-status-card">
-          <h2>Billing Error</h2>
-          <p>{billingError}</p>
-        </Card>
-      )}
-
-      <UsageSummaryCard
-        currentPlan={currentPlan}
-        isAuthenticated={isAuthenticated}
-        monthlyQuota={monthlyQuota}
-        remainingImports={remainingImports}
-      />
-
-      <PricingPlansContent
-        billingAvailability={billingAvailability}
-        currentPlan={currentPlan}
-        renderPlanActions={renderPlanActions}
-      />
-
-      {billingAvailability.founding?.available && currentPlan === "free" && (
-        <FoundingOfferCard
-          priceLabel={billingAvailability.founding.priceLabel}
-          action={
-            isAuthenticated ? (
-              <Button
-                variant="primary"
-                loading={billingAction === "founding"}
-                disabled={billingAction !== null}
-                onClick={() => {
-                  void startFoundingCheckout();
-                }}
-                fullWidth
-              >
-                Become a founding member
-              </Button>
-            ) : (
-              <Link
-                className="pricing-sign-in-link btn btn-primary btn-block"
-                to="/account?upgrade=plus"
-              >
-                Sign in to claim
-              </Link>
-            )
-          }
+    <div className="pricing-page container-wide page-enter">
+      {checkoutResult === "success" ? (
+        <CheckoutSuccess
+          accountPlan={accountPlan}
+          isAuthenticated={isAuthenticated}
+          onDismiss={dismissCheckoutResult}
+          refreshUser={refreshUser}
         />
+      ) : null}
+      {checkoutResult === "cancelled" ? (
+        <CheckoutCancelled onDismiss={dismissCheckoutResult} />
+      ) : null}
+
+      {showPlans ? null : (
+        <div className="pricing-compare-toggle">
+          <Button onClick={() => setPlansOpen(true)} trailingIcon="chevron-down" variant="ghost">
+            Compare plans
+          </Button>
+        </div>
       )}
 
-      {currentPlan === "family" && (
-        <Card variant="subtle" className="family-manage-card">
-          <h2>Family Household</h2>
-          <p>Manage household members, invites, and your shared recipe book.</p>
-          <ButtonLink to="/household">Manage Household</ButtonLink>
-        </Card>
-      )}
+      {showPlans ? (
+        <>
+          <PageHeader
+            accent="juggle less."
+            align="center"
+            className="pricing-header"
+            eyebrow="Plans"
+            size="lg"
+            subtitle="Save recipes from anywhere and cook from them calmly. Start free, and upgrade when your cookbook outgrows it."
+            title="Cook more,"
+          />
+
+          {checkout.error ? (
+            <BillingErrorNotice message={checkout.error} onDismiss={checkout.clearError} />
+          ) : null}
+
+          <div className="pricing-period">
+            <BillingPeriodToggle bestSavings={bestSavings} onChange={setPeriod} value={period} />
+          </div>
+
+          <div className="pricing-grid">
+            {tiers.map((tier) => (
+              <PlanCard
+                action={tier === "free" ? renderFreeAction() : renderPaidAction(tier)}
+                availability={availability}
+                isCurrent={isAuthenticated ? currentPlan === tier : false}
+                isRecommended={tier === featuredPlan}
+                isSelected={tier === requestedPlan && currentPlan !== tier}
+                key={tier}
+                period={period}
+                ref={(element) => {
+                  cardRefs.current[tier] = element;
+                }}
+                tier={tier}
+              >
+                {tier === "free" && remainingImports !== null ? (
+                  // The app's one meter convention: what's used, filling toward the limit.
+                  <div className="pricing-usage">
+                    <div className="pricing-usage-row">
+                      <span>Free imports used on this device</span>
+                      <strong className="num">
+                        {freeImportsUsed} of {freeImportLimit}
+                      </strong>
+                    </div>
+                    <ProgressBar
+                      label="Free imports used"
+                      max={freeImportLimit}
+                      tone={
+                        freeImportsUsed >= freeImportLimit
+                          ? "tomato"
+                          : freeImportsUsed >= freeImportLimit - 1
+                            ? "butter"
+                            : "primary"
+                      }
+                      value={freeImportsUsed}
+                      valueText={`${freeImportsUsed} of ${freeImportLimit} used`}
+                    />
+                  </div>
+                ) : null}
+              </PlanCard>
+            ))}
+          </div>
+
+          {showFoundingOffer && availability.founding ? (
+            <FoundingOfferCard
+              action={
+                isAuthenticated ? (
+                  <Button
+                    disabled={checkout.busyAction !== null}
+                    fullWidth
+                    loading={checkout.busyAction === "founding"}
+                    onClick={() => void checkout.startFoundingCheckout()}
+                  >
+                    Become a founding member
+                  </Button>
+                ) : (
+                  <ButtonLink fullWidth to="/account?upgrade=plus">
+                    Sign in to claim
+                  </ButtonLink>
+                )
+              }
+              priceLabel={availability.founding.priceLabel}
+            />
+          ) : null}
+
+          <PricingTrustRow />
+
+          {currentPlan === "family" ? (
+            <section className="pricing-household-callout">
+              <div>
+                <h2>Your household</h2>
+                <p>Invite the people you cook with and share one cookbook and shopping list.</p>
+              </div>
+              <ButtonLink icon="users" to="/household" variant="secondary">
+                Manage household
+              </ButtonLink>
+            </section>
+          ) : null}
+
+          <PlanComparisonTable
+            currentPlan={isAuthenticated ? currentPlan : null}
+            featuredPlan={featuredPlan}
+          />
+          <PricingFaq />
+        </>
+      ) : null}
     </div>
   );
 };

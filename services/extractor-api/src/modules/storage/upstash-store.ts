@@ -306,16 +306,57 @@ const runMemoryCommand = (command: string[]): UpstashResponse => {
   }
 };
 
-export const runStoreTransaction = async (commands: string[][]): Promise<UpstashResponse[]> => {
+export interface StoreRequestOptions {
+  /*
+   * Upper bound for the Upstash round trip. Hot-path optional reads and writes
+   * (result cache, hand-off, entitlement cache) pass a short one so a slow
+   * store degrades to a cache miss instead of stalling the request.
+   */
+  timeoutMs?: number;
+}
+
+const fetchUpstash = async (
+  path: string,
+  init: RequestInit,
+  options: StoreRequestOptions
+): Promise<Response> => {
+  if (!options.timeoutMs) {
+    return fetch(getUpstashUrl(path), init);
+  }
+
+  try {
+    return await fetch(getUpstashUrl(path), {
+      ...init,
+      signal: AbortSignal.timeout(options.timeoutMs)
+    });
+  } catch (error) {
+    if (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")) {
+      throw new KeyValueStoreUnavailableError(
+        `Upstash request timed out after ${options.timeoutMs}ms.`
+      );
+    }
+
+    throw error;
+  }
+};
+
+export const runStoreTransaction = async (
+  commands: string[][],
+  options: StoreRequestOptions = {}
+): Promise<UpstashResponse[]> => {
   if (!isKeyValueStoreConfigured()) {
     return commands.map(runMemoryCommand);
   }
 
-  const response = await fetch(getUpstashUrl("/multi-exec"), {
-    method: "POST",
-    headers: getHeaders(),
-    body: JSON.stringify(commands)
-  });
+  const response = await fetchUpstash(
+    "/multi-exec",
+    {
+      method: "POST",
+      headers: getHeaders(),
+      body: JSON.stringify(commands)
+    },
+    options
+  );
 
   if (!response.ok) {
     throw new KeyValueStoreUnavailableError(`Upstash transaction failed with ${response.status}.`);
@@ -330,8 +371,11 @@ export const runStoreTransaction = async (commands: string[][]): Promise<Upstash
   return body;
 };
 
-export const runStoreCommand = async (command: string[]): Promise<UpstashResponse> => {
-  const result = await runStoreTransaction([command]);
+export const runStoreCommand = async (
+  command: string[],
+  options: StoreRequestOptions = {}
+): Promise<UpstashResponse> => {
+  const result = await runStoreTransaction([command], options);
   const first = result[0] ?? {};
 
   if (first.error) {
@@ -341,17 +385,27 @@ export const runStoreCommand = async (command: string[]): Promise<UpstashRespons
   return first;
 };
 
-export const getStoreString = async (key: string): Promise<string | null> => {
-  const result = await runStoreCommand(["GET", key]);
+export const getStoreString = async (
+  key: string,
+  options: StoreRequestOptions = {}
+): Promise<string | null> => {
+  const result = await runStoreCommand(["GET", key], options);
   return typeof result.result === "string" ? result.result : null;
 };
 
-export const getStoreStrings = async (keys: string[]): Promise<Array<string | null>> => {
+/* One round trip (a single /multi-exec) for any number of keys. */
+export const getStoreStrings = async (
+  keys: string[],
+  options: StoreRequestOptions = {}
+): Promise<Array<string | null>> => {
   if (keys.length === 0) {
     return [];
   }
 
-  const results = await runStoreTransaction(keys.map((key) => ["GET", key]));
+  const results = await runStoreTransaction(
+    keys.map((key) => ["GET", key]),
+    options
+  );
 
   return results.map((result) => {
     if (result.error) {
@@ -365,7 +419,7 @@ export const getStoreStrings = async (keys: string[]): Promise<Array<string | nu
 export const setStoreString = async (
   key: string,
   value: string,
-  options?: SetOptions
+  options?: SetOptions & StoreRequestOptions
 ): Promise<boolean> => {
   const command = ["SET", key, value];
 
@@ -377,7 +431,10 @@ export const setStoreString = async (
     command.push("EX", String(options.ttlSeconds));
   }
 
-  const result = await runStoreCommand(command);
+  const result = await runStoreCommand(
+    command,
+    options?.timeoutMs ? { timeoutMs: options.timeoutMs } : {}
+  );
   return result.result === "OK";
 };
 
@@ -580,14 +637,46 @@ const runMemorySlidingWindowRateLimit = (keys: string[], args: string[]): Upstas
   return { result: [1, sortedSet.size] };
 };
 
+const setUnlessBlockedScript = `
+-- linkdish_set_unless_blocked_v1
+if redis.call('EXISTS', KEYS[2]) == 1 then
+  return 0
+end
+
+redis.call('SET', KEYS[1], ARGV[1], 'EX', tonumber(ARGV[2]))
+return 1
+`;
+
+const runMemorySetUnlessBlocked = (keys: string[], args: string[]): UpstashResponse => {
+  const [key, blockerKey] = keys;
+  const [value, ttlSeconds] = args;
+
+  if (!key || !blockerKey || value === undefined || !ttlSeconds) {
+    return { error: "Invalid set-unless-blocked arguments." };
+  }
+
+  pruneExpiredMemoryKey(blockerKey);
+
+  if (keyExists(blockerKey)) {
+    return { result: 0 };
+  }
+
+  return { result: runMemoryCommand(["SET", key, value, "EX", ttlSeconds]).error ? 0 : 1 };
+};
+
 export const runStoreEval = async (
   script: string,
   keys: string[],
-  args: string[]
+  args: string[],
+  options: StoreRequestOptions = {}
 ): Promise<UpstashResponse> => {
   if (!isKeyValueStoreConfigured()) {
     if (script.includes("linkdish_sliding_window_rate_limit_v1") && keys.length === 1) {
       return runMemorySlidingWindowRateLimit(keys, args);
+    }
+
+    if (script.includes("linkdish_set_unless_blocked_v1") && keys.length === 2) {
+      return runMemorySetUnlessBlocked(keys, args);
     }
 
     if (script.includes("redis.call('get'") && keys.length === 1 && args.length === 1) {
@@ -604,13 +693,37 @@ export const runStoreEval = async (
     return { error: "Unsupported in-memory EVAL script." };
   }
 
-  const result = await runStoreCommand(["EVAL", script, String(keys.length), ...keys, ...args]);
+  const result = await runStoreCommand(
+    ["EVAL", script, String(keys.length), ...keys, ...args],
+    options
+  );
 
   if (result.error) {
     throw new KeyValueStoreUnavailableError(result.error);
   }
 
   return result;
+};
+
+/**
+ * SET key value EX ttl, atomically skipped while `blockerKey` exists. Returns whether the value
+ * was written. Lets a writer holding a possibly stale value lose to a concurrent invalidation
+ * that leaves `blockerKey` behind.
+ */
+export const setStoreStringUnlessBlocked = async (
+  key: string,
+  value: string,
+  blockerKey: string,
+  options: { ttlSeconds: number } & StoreRequestOptions
+): Promise<boolean> => {
+  const result = await runStoreEval(
+    setUnlessBlockedScript,
+    [key, blockerKey],
+    [value, String(options.ttlSeconds)],
+    options.timeoutMs ? { timeoutMs: options.timeoutMs } : {}
+  );
+
+  return parseNumeric(result.result) === 1;
 };
 
 export const checkStoreSlidingWindowRateLimit = async ({

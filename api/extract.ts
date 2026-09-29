@@ -1,10 +1,8 @@
-import { ZodError } from "zod";
+import { waitUntil } from "@vercel/functions";
 
-import { extractRecipeRequestSchema } from "../packages/api-contracts/src/index.js";
+import { extractRecipeAnyRequestSchema } from "../packages/api-contracts/src/index.js";
 import { corsJson, corsPreflight } from "../services/extractor-api/src/http/vercel-cors.js";
-import { recordDurableExtractionAnalyticsEvent } from "../services/extractor-api/src/modules/analytics/extraction-analytics.js";
-import { authorizeExtractionRequest } from "../services/extractor-api/src/modules/billing/enforce-billing.js";
-import { extractRecipe } from "../services/extractor-api/src/modules/extract/services/extract-recipe.js";
+import { runExtractRequestPipeline } from "../services/extractor-api/src/modules/extract/services/extract-request-pipeline.js";
 import {
   checkExtractRateLimit,
   RateLimitUnavailableError
@@ -14,6 +12,11 @@ import { getVercelRequestIdentity } from "./_lib/vercel-request-identity.js";
 
 export const config = {
   maxDuration: 60
+};
+
+const structuredLogger = {
+  info: (entry: Record<string, unknown>) => console.info(JSON.stringify(entry)),
+  warn: (entry: Record<string, unknown>) => console.warn(JSON.stringify(entry))
 };
 
 export function OPTIONS(request: Request) {
@@ -48,76 +51,47 @@ export async function POST(request: Request) {
       );
     }
 
-    const payload = extractRecipeRequestSchema.parse(await request.json());
-    const billingAuthorization = await authorizeExtractionRequest(
-      request.headers,
-      payload.attempt,
-      requestIdentity
-    );
+    /*
+     * Only the request itself is the client's fault. A ZodError from inside the extraction
+     * (an extracted value failing the response contract) is a server error below.
+     */
+    const parsedPayload = extractRecipeAnyRequestSchema.safeParse(await request.json());
 
-    if (!billingAuthorization.allowed) {
-      const latencyMs = Date.now() - startedAt;
-      await recordDurableExtractionAnalyticsEvent(
-        request.headers,
+    if (!parsedPayload.success) {
+      return corsJson(
+        request,
         {
-          extraction: null,
-          billing: billingAuthorization.logContext,
-          latencyMs,
-          blockedReason:
-            billingAuthorization.response?.status === "failure"
-              ? billingAuthorization.response.reason
-              : "billing_denied"
+          message: "Invalid extract request.",
+          issues: parsedPayload.error.issues
         },
         {
-          ...(payload.correlationId ? { correlationId: payload.correlationId } : {})
+          status: 400
         }
-      ).catch((error) => {
-        console.warn("Failed to record durable extraction analytics.", error);
-      });
-
-      console.warn(
-        JSON.stringify({
-          ...billingAuthorization.logContext,
-          ...rateLimit.logContext,
-          attempt: payload.attempt,
-          outcomeStatus: "failure",
-          latencyMs
-        })
       );
-
-      return corsJson(request, billingAuthorization.response, {
-        status: 200
-      });
     }
 
-    const { response, logContext } = await extractRecipe(payload);
-    const billingLogContext = await billingAuthorization.commitUsage(response);
-    const latencyMs = Date.now() - startedAt;
-
-    await recordDurableExtractionAnalyticsEvent(
-      request.headers,
-      {
-        extraction: logContext,
-        billing: billingLogContext,
-        latencyMs
+    const payload = parsedPayload.data;
+    /*
+     * Durable analytics and extraction cache writes run after the response
+     * through waitUntil, so the recipe is returned as soon as usage is
+     * committed. A needs_retry answer first waits briefly for its fallback
+     * hand-off to be stored (see FALLBACK_HANDOFF_MAX_WAIT_MS); a slower write
+     * finishes through waitUntil.
+     */
+    const { response, headers } = await runExtractRequestPipeline({
+      payload,
+      headers: request.headers,
+      identity: requestIdentity,
+      startedAt,
+      schedule: (task) => {
+        waitUntil(task);
       },
-      {
-        ...(payload.correlationId ? { correlationId: payload.correlationId } : {})
-      }
-    ).catch((error) => {
-      console.warn("Failed to record durable extraction analytics.", error);
+      logContext: rateLimit.logContext,
+      logger: structuredLogger
     });
 
-    console.info(
-      JSON.stringify({
-        ...billingLogContext,
-        ...rateLimit.logContext,
-        ...logContext,
-        latencyMs
-      })
-    );
-
     return corsJson(request, response, {
+      headers,
       status: 200
     });
   } catch (error) {
@@ -134,19 +108,6 @@ export async function POST(request: Request) {
             "retry-after": "30"
           },
           status: 503
-        }
-      );
-    }
-
-    if (error instanceof ZodError) {
-      return corsJson(
-        request,
-        {
-          message: "Invalid extract request.",
-          issues: error.issues
-        },
-        {
-          status: 400
         }
       );
     }

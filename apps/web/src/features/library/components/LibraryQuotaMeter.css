@@ -1,0 +1,119 @@
+.library-quota {
+  display: flex;
+  align-items: center;
+  gap: 12px 14px;
+  padding: 12px 12px 12px 18px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+}
+
+.library-quota-copy {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.library-quota-title {
+  grid-area: title;
+  min-width: 0;
+  color: var(--color-ink);
+  font-family: var(--font-family-serif);
+  font-size: 1.0625rem;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  line-height: 1.2;
+}
+
+.library-quota-text {
+  grid-area: text;
+  min-width: 0;
+  color: var(--color-ink-muted);
+  font-size: var(--text-small);
+  line-height: 1.4;
+}
+
+.library-quota-text .num {
+  color: var(--color-ink);
+  font-weight: 700;
+}
+
+.library-quota-bar {
+  grid-area: bar;
+  max-width: 280px;
+  margin-top: 2px;
+}
+
+.library-quota-action.btn {
+  flex-shrink: 0;
+  grid-area: action;
+}
+
+/* ------------------------- Nearly full / full prompt ------------------------ */
+/* One grid: icon, title and status beside the button; the bar spans the copy column. Phones
+   stack it so the title never squeezes and the bar runs the full width of the card. */
+.library-quota.is-prompt {
+  display: grid;
+  grid-template-areas:
+    "icon title action"
+    "icon text action"
+    "icon bar action";
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 14px;
+  padding: 14px 16px 16px 14px;
+  border-color: color-mix(in srgb, var(--color-butter) 45%, transparent);
+  background:
+    radial-gradient(
+      circle at 100% 0%,
+      color-mix(in srgb, var(--color-butter) 22%, transparent) 0,
+      transparent 55%
+    ),
+    var(--color-butter-soft);
+}
+
+.library-quota.is-prompt .library-quota-text {
+  color: var(--color-on-butter-soft);
+}
+
+.library-quota.is-prompt .library-quota-bar {
+  max-width: 360px;
+  margin-top: 6px;
+}
+
+.library-quota-icon {
+  display: grid;
+  grid-area: icon;
+  align-self: start;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-sm);
+  background: var(--color-butter);
+  color: var(--color-on-butter);
+}
+
+@media (max-width: 559px) {
+  .library-quota.is-prompt {
+    grid-template-areas:
+      "icon title action"
+      "text text text"
+      "bar bar bar";
+    row-gap: 8px;
+  }
+
+  .library-quota.is-prompt .library-quota-title {
+    align-self: center;
+  }
+
+  .library-quota.is-prompt .library-quota-bar {
+    max-width: none;
+    margin-top: 0;
+  }
+
+  .library-quota.is-prompt .library-quota-action.btn {
+    padding-inline: 14px;
+  }
+}

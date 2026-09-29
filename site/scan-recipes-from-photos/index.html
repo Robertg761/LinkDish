@@ -1,0 +1,569 @@
+<!doctype html>
+<html lang="en-CA">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Scan Recipes From Photos, Cookbooks and Recipe Cards | LinkDish</title>
+    <meta
+      name="description"
+      content="Snap a cookbook page, a handwritten recipe card or a screenshot and LinkDish turns it into an editable recipe you can scale, convert, cook from and add to your shopping list."
+    />
+    <link rel="canonical" href="https://linkdish.ca/scan-recipes-from-photos/" />
+    <meta name="theme-color" content="#f4efe7" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#1a1816" media="(prefers-color-scheme: dark)" />
+    <meta name="color-scheme" content="light dark" />
+    <meta property="og:site_name" content="LinkDish" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Scan recipes from photos, cookbooks and recipe cards" />
+    <meta
+      property="og:description"
+      content="Snap a cookbook page, a handwritten recipe card or a screenshot and LinkDish turns it into an editable recipe you can scale, convert, cook from and add to your shopping list."
+    />
+    <meta property="og:url" content="https://linkdish.ca/scan-recipes-from-photos/" />
+    <meta property="og:image" content="https://linkdish.ca/assets/social-card-20260928b.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="LinkDish: Paste a link. Get cooking. Save recipes from websites, YouTube, TikTok, Pinterest and photos."
+    />
+    <meta property="og:locale" content="en_CA" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Scan recipes from photos, cookbooks and recipe cards" />
+    <meta
+      name="twitter:description"
+      content="Snap a cookbook page, a handwritten recipe card or a screenshot and LinkDish turns it into an editable recipe you can scale, convert, cook from and add to your shopping list."
+    />
+    <meta name="twitter:image" content="https://linkdish.ca/assets/social-card-20260928b.png" />
+    <meta
+      name="twitter:image:alt"
+      content="LinkDish: Paste a link. Get cooking. Save recipes from websites, YouTube, TikTok, Pinterest and photos."
+    />
+    <link rel="icon" href="/favicon.ico" sizes="48x48" />
+    <link rel="icon" href="/assets/favicon-32.png" type="image/png" sizes="32x32" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link
+      rel="preload"
+      href="/assets/fonts/Fraunces-Bold.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
+    <link
+      rel="preload"
+      href="/assets/fonts/Fraunces-SemiBoldItalic.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
+    <script>
+      (function (root) {
+        root.classList.add("js");
+        if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+          root.classList.add("motion-ready");
+          // If site.js never runs, show everything instead of leaving it hidden.
+          window.setTimeout(function () {
+            if (!root.classList.contains("site-ready")) {
+              root.classList.remove("motion-ready");
+            }
+          }, 3000);
+        }
+      })(document.documentElement);
+    </script>
+    <link rel="stylesheet" href="/base.css" />
+    <link rel="stylesheet" href="/marketing.css" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "LinkDish",
+        "applicationCategory": "LifestyleApplication",
+        "operatingSystem": "Android, Web",
+        "url": "https://linkdish.ca/scan-recipes-from-photos/",
+        "downloadUrl": "https://play.google.com/store/apps/details?id=com.linkdish.app",
+        "image": "https://linkdish.ca/assets/linkdish-icon.png",
+        "description": "Scan recipes from photos of cookbook pages, recipe cards and screenshots into editable digital recipes.",
+        "offers": [
+          {
+            "@type": "Offer",
+            "name": "Free",
+            "price": "0",
+            "priceCurrency": "CAD"
+          },
+          {
+            "@type": "Offer",
+            "name": "Plus (monthly)",
+            "price": "2.99",
+            "priceCurrency": "CAD"
+          },
+          {
+            "@type": "Offer",
+            "name": "Plus (yearly)",
+            "price": "24.99",
+            "priceCurrency": "CAD"
+          },
+          {
+            "@type": "Offer",
+            "name": "Family (monthly)",
+            "price": "4.99",
+            "priceCurrency": "CAD"
+          },
+          {
+            "@type": "Offer",
+            "name": "Family (yearly)",
+            "price": "44.99",
+            "priceCurrency": "CAD"
+          }
+        ]
+      }
+    </script>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+          {
+            "@type": "ListItem",
+            "position": 1,
+            "name": "Home",
+            "item": "https://linkdish.ca/"
+          },
+          {
+            "@type": "ListItem",
+            "position": 2,
+            "name": "Scan recipes from photos",
+            "item": "https://linkdish.ca/scan-recipes-from-photos/"
+          }
+        ]
+      }
+    </script>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "FAQPage",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "Can LinkDish read handwritten recipes?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Often, yes, as long as the writing is clear and the photo is sharp. Always check the result, and edit anything that was misread."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Can one recipe use more than one photo?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes. Add up to 4 photos to a single scan for recipes that run across pages."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Where can I scan recipes?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "In the LinkDish Android app and in the web app, including the web app on iPhone."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Can I scan a screenshot from Instagram?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes. Instagram links can't be imported directly yet, but a screenshot of the recipe text can be scanned like any other photo."
+            }
+          }
+        ]
+      }
+    </script>
+  </head>
+  <body class="landing-page has-dock">
+    <a class="skip-link" href="#main-content">Skip to content</a>
+    <svg
+      class="icon-sprite"
+      aria-hidden="true"
+      focusable="false"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <symbol id="i-camera" viewBox="0 0 24 24">
+        <path
+          d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"
+        />
+        <circle cx="12" cy="13.5" r="3.5" />
+      </symbol>
+      <symbol id="i-phone" viewBox="0 0 24 24">
+        <rect x="6.5" y="2.5" width="11" height="19" rx="2.5" />
+        <path d="M11 18.5h2" />
+      </symbol>
+      <symbol id="i-arrow-right" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6" /></symbol>
+      <symbol id="i-book" viewBox="0 0 24 24">
+        <path
+          d="M12 6.5C10 5 7.2 4.5 3.5 5v13.5c3.7-.5 6.5 0 8.5 1.5 2-1.5 4.8-2 8.5-1.5V5c-3.7-.5-6.5 0-8.5 1.5zM12 6.5V20"
+        />
+      </symbol>
+      <symbol id="i-heart" viewBox="0 0 24 24">
+        <path
+          d="M12 20s-7.5-4.6-7.5-10.2A4.3 4.3 0 0 1 12 7.2a4.3 4.3 0 0 1 7.5 2.6C19.5 15.4 12 20 12 20z"
+        />
+      </symbol>
+    </svg>
+    <header class="site-header" data-header>
+      <a class="brand" href="/" aria-label="LinkDish home">
+        <img
+          src="/assets/linkdish-icon-64.png"
+          srcset="/assets/linkdish-icon-64.png 1x, /assets/linkdish-icon-128.png 2x"
+          alt=""
+          width="38"
+          height="38"
+        />
+        <span>LinkDish</span>
+      </a>
+
+      <button
+        class="menu-toggle"
+        type="button"
+        aria-expanded="false"
+        aria-controls="site-navigation"
+        data-menu-toggle
+      >
+        <span class="sr-only">Open navigation</span>
+        <span aria-hidden="true"></span>
+        <span aria-hidden="true"></span>
+      </button>
+
+      <nav class="site-nav" id="site-navigation" aria-label="Primary" data-site-nav>
+        <a href="/#how-it-works">How it works</a>
+        <a href="/#features">Features</a>
+        <a href="/#plans">Pricing</a>
+        <a href="/support/">Support</a>
+        <a
+          class="button button-small button-primary"
+          href="https://app.linkdish.ca/"
+          data-cta="nav"
+        >
+          Open LinkDish
+        </a>
+      </nav>
+    </header>
+
+    <main id="main-content">
+      <section class="lp-hero" aria-labelledby="page-title">
+        <nav class="shell breadcrumbs" aria-label="Breadcrumb">
+          <ol>
+            <li><a href="/">Home</a></li>
+            <li aria-current="page">Scan recipes from photos</li>
+          </ol>
+        </nav>
+        <div class="lp-hero-inner">
+          <div>
+            <p class="eyebrow">Photos, cookbooks &amp; recipe cards</p>
+            <h1 id="page-title">Snap the page.<br /><em>Keep the recipe.</em></h1>
+            <p class="hero-lede">
+              Take a photo of a cookbook page, a handwritten recipe card or a screenshot. LinkDish
+              reads it into a real recipe you can edit, scale, convert, plan with and add to your
+              shopping list.
+            </p>
+            <div class="cta-row hero-actions" data-dock-sentinel>
+              <a
+                class="button button-tomato"
+                href="https://app.linkdish.ca/import"
+                data-cta="hero-scan"
+              >
+                <svg class="icon" aria-hidden="true"><use href="#i-camera" /></svg>
+                Scan a recipe
+              </a>
+              <a
+                class="button button-primary"
+                href="https://play.google.com/store/apps/details?id=com.linkdish.app"
+                data-cta="hero-android"
+              >
+                <svg class="icon" aria-hidden="true"><use href="#i-phone" /></svg>
+                Get it on Android
+              </a>
+            </div>
+            <p class="hero-note">
+              Works in the Android app and the web app <span aria-hidden="true">·</span> Up to 4
+              photos per recipe
+            </p>
+          </div>
+          <div class="lp-visual">
+            <div
+              class="scan-demo"
+              role="img"
+              aria-label="A handwritten recipe card turned into a tidy LinkDish recipe"
+            >
+              <div class="paper-card" aria-hidden="true">
+                <b>Grandma's Oat Scones</b>
+                <span>2 cups flour</span>
+                <span>1 cup rolled oats</span>
+                <span>½ cup cold butter</span>
+                <span>⅔ cup buttermilk</span>
+                <span>Bake 400° for 15 min</span>
+              </div>
+              <span class="video-arrow" aria-hidden="true"
+                ><svg class="icon"><use href="#i-arrow-right" /></svg
+              ></span>
+              <div class="clean-card" aria-hidden="true">
+                <span class="label-chip good">In LinkDish</span>
+                <b>Grandma's Oat Scones</b>
+                <span class="num">8 scones · Bake 15 min</span>
+                <ul>
+                  <li><span class="num">2</span> cups flour</li>
+                  <li><span class="num">1</span> cup rolled oats</li>
+                  <li><span class="num">½</span> cup cold butter</li>
+                  <li><span class="num">⅔</span> cup buttermilk</li>
+                </ul>
+                <small>Scanned from a photo · Edit anytime</small>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section section-surface" aria-labelledby="what-title">
+        <div class="shell">
+          <div class="section-head" data-reveal>
+            <p class="eyebrow">What you can scan</p>
+            <h2 class="section-title" id="what-title">
+              If you can photograph it,<br /><em>you can cook from it.</em>
+            </h2>
+          </div>
+          <ul class="card-grid" role="list">
+            <li class="info-card" data-reveal>
+              <span class="source-icon tone-sage"
+                ><svg class="icon" aria-hidden="true"><use href="#i-book" /></svg
+              ></span>
+              <h3>Cookbook pages</h3>
+              <p>
+                Keep the recipes you actually make from the books on your shelf, searchable and
+                ready to scale.
+              </p>
+            </li>
+            <li class="info-card" data-reveal>
+              <span class="source-icon tone-butter"
+                ><svg class="icon" aria-hidden="true"><use href="#i-heart" /></svg
+              ></span>
+              <h3>Family recipe cards</h3>
+              <p>
+                Handwritten cards and clippings become recipes you can share with your household on
+                the Family plan.
+              </p>
+            </li>
+            <li class="info-card" data-reveal>
+              <span class="source-icon tone-tomato"
+                ><svg class="icon" aria-hidden="true"><use href="#i-phone" /></svg
+              ></span>
+              <h3>Screenshots</h3>
+              <p>
+                Found a recipe in an app LinkDish can't open directly? Screenshot the ingredients
+                and the method and scan those.
+              </p>
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="section" aria-labelledby="tips-title">
+        <div class="shell lp-split">
+          <div class="feature-copy" data-reveal>
+            <p class="eyebrow">Tips for a clean scan</p>
+            <h2 class="section-title" id="tips-title">Good light.<br /><em>Flat page.</em></h2>
+            <ul class="check-list">
+              <li>Lay the page flat and fill the frame with the recipe</li>
+              <li>Use daylight or a bright kitchen light, without glare</li>
+              <li>Recipe runs over two pages? Add up to 4 photos to one scan</li>
+              <li>Check the result and fix anything that reads oddly</li>
+            </ul>
+          </div>
+          <div class="info-card" data-reveal>
+            <h3>What happens to your photos</h3>
+            <p>
+              Photos you choose to scan are sent to LinkDish so the recipe can be read, including by
+              the extraction providers LinkDish uses for this. They are used to make your recipe,
+              not for advertising.
+            </p>
+            <p>
+              Read the <a class="text-link" href="/privacy/">privacy policy</a> for the details.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section class="section section-canvas" id="faq" aria-labelledby="faq-title">
+        <div class="shell faq">
+          <div class="faq-head" data-reveal>
+            <p class="eyebrow">Questions</p>
+            <h2 class="section-title" id="faq-title">Scanning<br /><em>questions.</em></h2>
+          </div>
+          <div class="faq-list" data-reveal>
+            <details data-faq>
+              <summary>Can LinkDish read handwritten recipes?</summary>
+              <div>
+                <p>
+                  Often, yes, as long as the writing is clear and the photo is sharp. Always check
+                  the result, and edit anything that was misread.
+                </p>
+              </div>
+            </details>
+            <details data-faq>
+              <summary>Can one recipe use more than one photo?</summary>
+              <div>
+                <p>Yes. Add up to 4 photos to a single scan for recipes that run across pages.</p>
+              </div>
+            </details>
+            <details data-faq>
+              <summary>Where can I scan recipes?</summary>
+              <div>
+                <p>
+                  In the LinkDish Android app and in the web app, including the web app on iPhone.
+                </p>
+              </div>
+            </details>
+            <details data-faq>
+              <summary>Can I scan a screenshot from Instagram?</summary>
+              <div>
+                <p>
+                  Yes. Instagram links can't be imported directly yet, but a screenshot of the
+                  recipe text can be scanned like any other photo.
+                </p>
+              </div>
+            </details>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" aria-labelledby="related-title">
+        <div class="shell">
+          <h2 class="related-title" id="related-title">Keep reading</h2>
+          <ul class="related" role="list">
+            <li>
+              <a href="/save-recipes-from-websites/"
+                >Save recipes from websites
+                <svg class="icon" aria-hidden="true"><use href="#i-arrow-right" /></svg
+              ></a>
+            </li>
+            <li>
+              <a href="/save-recipes-from-youtube/"
+                >Save recipes from YouTube
+                <svg class="icon" aria-hidden="true"><use href="#i-arrow-right" /></svg
+              ></a>
+            </li>
+            <li>
+              <a href="/recipe-saver-app/"
+                >The recipe saver app
+                <svg class="icon" aria-hidden="true"><use href="#i-arrow-right" /></svg
+              ></a>
+            </li>
+            <li>
+              <a href="/meal-planner-and-grocery-list/"
+                >Meal planner and grocery list
+                <svg class="icon" aria-hidden="true"><use href="#i-arrow-right" /></svg
+              ></a>
+            </li>
+            <li>
+              <a href="/paprika-alternative/"
+                >LinkDish vs Paprika
+                <svg class="icon" aria-hidden="true"><use href="#i-arrow-right" /></svg
+              ></a>
+            </li>
+            <li>
+              <a href="/#family"
+                >Share with your household
+                <svg class="icon" aria-hidden="true"><use href="#i-arrow-right" /></svg
+              ></a>
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="final-call" aria-labelledby="final-title">
+        <div class="final-call-inner" data-reveal>
+          <h2 id="final-title">Save the card.<br /><em>Keep the recipe.</em></h2>
+          <p>Scan your first recipe today. The Free plan includes 3 imports, no card required.</p>
+          <div class="final-actions">
+            <a
+              class="button button-light"
+              href="https://app.linkdish.ca/import"
+              data-cta="final-scan"
+              >Scan a recipe</a
+            >
+            <a
+              class="button button-outline-light"
+              href="https://play.google.com/store/apps/details?id=com.linkdish.app"
+              data-cta="final-android"
+              >Get it on Android</a
+            >
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-brand">
+        <a class="brand" href="/">
+          <img
+            src="/assets/linkdish-icon-64.png"
+            srcset="/assets/linkdish-icon-64.png 1x, /assets/linkdish-icon-128.png 2x"
+            alt=""
+            width="38"
+            height="38"
+          />
+          <span>LinkDish</span>
+        </a>
+        <p>
+          Keep the recipe. Lose the clutter. Save from anywhere, plan the week and shop by aisle.
+        </p>
+      </div>
+      <nav class="footer-column" aria-labelledby="footer-product">
+        <h2 id="footer-product">Product</h2>
+        <a href="/#features">Features</a>
+        <a href="/#planner">Meal planner</a>
+        <a href="/#plans">Pricing</a>
+        <a href="/#iphone">iPhone &amp; iPad</a>
+        <a href="https://app.linkdish.ca/" data-cta="footer-web">Web app</a>
+        <a
+          href="https://play.google.com/store/apps/details?id=com.linkdish.app"
+          data-cta="footer-android"
+          >Android app</a
+        >
+      </nav>
+      <nav class="footer-column" aria-labelledby="footer-guides">
+        <h2 id="footer-guides">Guides</h2>
+        <a href="/recipe-saver-app/">Recipe saver app</a>
+        <a href="/save-recipes-from-websites/">Save recipes from websites</a>
+        <a href="/save-recipes-from-youtube/">Save recipes from YouTube</a>
+        <a href="/scan-recipes-from-photos/">Scan recipes from photos</a>
+        <a href="/meal-planner-and-grocery-list/">Meal planner &amp; grocery list</a>
+        <a href="/paprika-alternative/">Paprika alternative</a>
+      </nav>
+      <nav class="footer-column" aria-labelledby="footer-help">
+        <h2 id="footer-help">Help</h2>
+        <a href="/support/">Support</a>
+        <a href="/privacy/">Privacy</a>
+        <a href="mailto:support@linkdish.ca">support@linkdish.ca</a>
+        <a href="https://app.linkdish.ca/install" data-cta="footer-install">Install on iPhone</a>
+      </nav>
+      <p class="footer-bottom">
+        <span>Made in Canada</span>
+        <span>&copy; <span data-current-year>2026</span> LinkDish</span>
+      </p>
+    </footer>
+
+    <div class="mobile-dock" data-mobile-dock>
+      <a class="button button-primary" href="https://app.linkdish.ca/" data-cta="dock-web"
+        >Open the web app</a
+      >
+      <a
+        class="button button-secondary"
+        href="https://play.google.com/store/apps/details?id=com.linkdish.app"
+        data-cta="dock-android"
+        >Android app</a
+      >
+    </div>
+
+    <script src="/site.js" defer></script>
+    <script src="/analytics.js" defer></script>
+  </body>
+</html>

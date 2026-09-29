@@ -1,34 +1,275 @@
-import React, { useEffect, useState } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
+import React, {
+  createContext,
+  Suspense,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState
+} from "react";
+import { createPortal } from "react-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 
+import { preloadCommandPalette } from "../features/command-palette/CommandCenter";
 import { FirstRunOnboardingSheet } from "../features/onboarding/FirstRunOnboardingSheet";
+import { requestCommandPalette } from "../lib/command-palette-events";
 import { SAVE_FEEDBACK_EVENT } from "../lib/delight-events";
+import { paletteShortcutLabel, RAIL_SHORTCUTS } from "../lib/shortcuts";
+import { RAIL_MEDIA_QUERY, useMediaQuery } from "../lib/use-media-query";
+import { useBootSettled } from "../platform/boot-settle";
+import { lazyWithRetry } from "../platform/lazy";
+import { useOnlineStatus } from "../platform/online-status";
+import { OptionalChunkBoundary } from "../platform/OptionalChunkBoundary";
 
+import { getAppRouteMeta } from "./app-route-meta";
+import { BrandMark } from "./BrandMark";
 import { Icon } from "./Icon";
+import { usePageHidesTabBar } from "./tab-bar-visibility";
+
+import type { AppSection } from "./app-route-meta";
+import type { IconName } from "./Icon";
+import type * as StoredActivity from "../data/stored-activity";
+
 import "./AppShell.css";
 
 interface AppShellProps {
   children?: React.ReactNode;
 }
 
-const prefersReducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+interface NavItem {
+  section: AppSection;
+  to: string;
+  label: string;
+  icon: IconName;
+  /** Accessible name when it should differ from the visible label. */
+  ariaLabel?: string;
+}
+
+const NAV_ITEMS: ReadonlyArray<NavItem> = [
+  {
+    section: "cookbook",
+    to: "/",
+    label: "Cookbook",
+    icon: "book-open",
+    ariaLabel: "Go to Cookbook"
+  },
+  { section: "plan", to: "/plan", label: "Plan", icon: "calendar-days" },
+  { section: "add", to: "/import", label: "Add", icon: "plus", ariaLabel: "Add recipe" },
+  { section: "shopping", to: "/shopping", label: "Shopping", icon: "shopping-basket" },
+  {
+    section: "you",
+    to: "/account",
+    label: "You",
+    icon: "circle-user",
+    ariaLabel: "You: household and account"
+  }
+];
+
+const prefersReducedMotion = () => {
+  try {
+    return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  } catch {
+    return false;
+  }
+};
+
+/** How long "Back online" stays up after the connection returns. */
+const BACK_ONLINE_MS = 3000;
+
+/** Key caps shown on hover/focus of a rail destination ("G then C"). */
+const RailShortcutHint: React.FC<{ keys: readonly string[] }> = ({ keys }) => (
+  <span className="app-nav-shortcut" aria-hidden="true">
+    {keys.map((key) => (
+      <kbd key={key}>{key}</kbd>
+    ))}
+  </span>
+);
+
+/**
+ * A slim bar while the browser is offline ("your recipes still work": the cookbook lives on the
+ * device), then a brief "Back online".
+ */
+const OfflineBanner: React.FC = () => {
+  const online = useOnlineStatus();
+  const [showBackOnline, setShowBackOnline] = useState(false);
+  const wasOfflineRef = useRef(!online);
+
+  useEffect(() => {
+    if (!online) {
+      wasOfflineRef.current = true;
+      setShowBackOnline(false);
+      return;
+    }
+
+    if (!wasOfflineRef.current) {
+      return;
+    }
+
+    wasOfflineRef.current = false;
+    setShowBackOnline(true);
+    const timer = window.setTimeout(() => setShowBackOnline(false), BACK_ONLINE_MS);
+    return () => window.clearTimeout(timer);
+  }, [online]);
+
+  const visible = !online || showBackOnline;
+
+  return (
+    <div
+      className={`app-offline-banner${visible ? " is-visible" : ""}${online ? " is-online" : ""}`}
+      data-testid="offline-banner"
+      role="status"
+    >
+      {visible ? (
+        <p className="app-offline-banner-text">
+          <Icon name={online ? "check-circle" : "wifi-off"} size={16} strokeWidth={2.2} />
+          {online ? "Back online" : "You're offline — your recipes still work"}
+        </p>
+      ) : null}
+    </div>
+  );
+};
+
+// Kitchen timers float above the tab bar on every page. The dock (and the saved timers it
+// restores) loads once the first screen has settled (platform/boot-settle.ts).
+const TimerDock = lazyWithRetry(() =>
+  import("../features/cook-mode/TimerDock").then((module) => ({ default: module.TimerDock }))
+);
+
+// The import queue count on Add reads IndexedDB, so it loads after the first screen, not in the
+// entry.
+const ImportQueueCount = lazyWithRetry(() =>
+  import("./ImportQueueCount").then((module) => ({ default: module.ImportQueueCount }))
+);
+
+type StoredActivityWatch = keyof typeof StoredActivity;
+
+let storedActivityLoad: Promise<typeof StoredActivity> | null = null;
+
+/** The watchers' module, imported once for every hook (a failed import is tried again). */
+const loadStoredActivity = (): Promise<typeof StoredActivity> => {
+  storedActivityLoad ??= import("../data/stored-activity").catch((error: unknown) => {
+    storedActivityLoad = null;
+    throw error;
+  });
+
+  return storedActivityLoad;
+};
+
+/**
+ * True once the first screen has settled and the store behind some shell UI holds data (or is
+ * written to, in this tab or another): until then that UI and its chunks stay unloaded.
+ */
+const useStoredActivity = (watch: StoredActivityWatch): boolean => {
+  const settled = useBootSettled();
+  const [active, setActive] = useState(false);
+
+  useEffect(() => {
+    if (!settled || active) {
+      return;
+    }
+
+    let cancelled = false;
+    let stop: () => void = () => undefined;
+
+    loadStoredActivity().then(
+      (module) => {
+        if (!cancelled) {
+          stop = module[watch](() => setActive(true));
+        }
+      },
+      () => {
+        // The watcher couldn't load: show the UI, as before it existed.
+        if (!cancelled) {
+          setActive(true);
+        }
+      }
+    );
+
+    return () => {
+      cancelled = true;
+      stop();
+    };
+  }, [active, settled, watch]);
+
+  return active;
+};
+
+/** The Add tab / rail button's queue count; renders nothing while the queue is empty. */
+const AddQueueBadge: React.FC<{ onDescribe: (description: string) => void; show: boolean }> = ({
+  onDescribe,
+  show
+}) =>
+  show ? (
+    <OptionalChunkBoundary name="Import queue count">
+      <Suspense fallback={null}>
+        <ImportQueueCount onDescribe={onDescribe} />
+      </Suspense>
+    </OptionalChunkBoundary>
+  ) : null;
+
+/** Mounted once a cook session (where timers are kept) exists: most visits never load it. */
+const DeferredTimerDock: React.FC = () =>
+  useStoredActivity("whenKitchenTimersMayExist") ? (
+    <OptionalChunkBoundary name="Timer dock">
+      <Suspense fallback={null}>
+        <TimerDock />
+      </Suspense>
+    </OptionalChunkBoundary>
+  ) : null;
+
+const TopBarActionsContext = createContext<HTMLElement | null>(null);
+
+/**
+ * Lets a page put actions (share, favorite, overflow menu) into the slim top app bar
+ * on secondary routes. Renders nothing when there is no top bar on the current route.
+ */
+export const AppTopBarActions: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const target = useContext(TopBarActionsContext);
+
+  return target ? createPortal(children, target) : null;
+};
 
 export const AppShell: React.FC<AppShellProps> = ({ children }) => {
   const [cookbookBounceActive, setCookbookBounceActive] = useState(false);
+  const [topBarActionsTarget, setTopBarActionsTarget] = useState<HTMLElement | null>(null);
+  const [topBarScrolled, setTopBarScrolled] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
+  const routeMeta = getAppRouteMeta(location.pathname);
+  const showTopBar = !routeMeta.isDestination;
+  const shortcutLabel = paletteShortcutLabel();
+  // The page a visit lands on appears as-is; entrance animations are for in-app navigation.
+  const initialKeyRef = useRef(location.key);
+  const isInitialView = location.key === initialKeyRef.current;
+  // Phones get a bottom tab bar with a raised center Add button; from 1024px the same
+  // nav becomes a side rail with Add as its primary button.
+  const isRail = useMediaQuery(RAIL_MEDIA_QUERY);
+  const addItem = NAV_ITEMS.find((item) => item.section === "add");
+  const listItems = isRail ? NAV_ITEMS.filter((item) => item.section !== "add") : NAV_ITEMS;
+  // Recipe detail pages (and an import result on screen) drop the phone tab bar; their action
+  // bar and Back cover navigation.
+  const pageHidesTabBar = usePageHidesTabBar();
+  const hideTabBar = !isRail && (routeMeta.hideTabBar === true || pageHidesTabBar);
+  const [importQueueLabel, setImportQueueLabel] = useState("");
+  // The count (and its IndexedDB reads) loads only once a link waits in the queue.
+  const importQueueActive = useStoredActivity("whenImportQueueMayHaveItems");
+  const addLabel = importQueueLabel ? `Add recipe (${importQueueLabel})` : "Add recipe";
 
-  const isCookbookDestination =
-    location.pathname === "/" || location.pathname.startsWith("/recipes/");
-  const isImportDestination = location.pathname === "/import";
-  const isShoppingDestination = location.pathname === "/shopping";
-  const isHouseholdDestination =
-    location.pathname === "/account" || location.pathname === "/household";
-  const isDestinationPage =
-    location.pathname === "/" ||
-    location.pathname === "/import" ||
-    location.pathname === "/shopping" ||
-    location.pathname === "/account";
+  // Sheets, toasts and the timer dock are portaled outside the shell, so the inset they read
+  // (--app-bottom-inset) is switched on the root element rather than on .app-shell.
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+
+    if (!hideTabBar) {
+      return;
+    }
+
+    root.dataset.tabbar = "hidden";
+
+    return () => {
+      delete root.dataset.tabbar;
+    };
+  }, [hideTabBar]);
 
   useEffect(() => {
     const handleSaveFeedback = () => {
@@ -49,8 +290,40 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
     };
   }, []);
 
+  // The top bar starts transparent with no title (the page shows its own big title)
+  // and turns into a glass bar with a compact title once the page scrolls.
+  useEffect(() => {
+    if (!showTopBar) {
+      return;
+    }
+
+    let frame = 0;
+    const update = () => {
+      frame = 0;
+      setTopBarScrolled(window.scrollY > 40);
+    };
+    const handleScroll = () => {
+      if (!frame) {
+        frame = window.requestAnimationFrame(update);
+      }
+    };
+
+    update();
+    window.addEventListener("scroll", handleScroll, { passive: true });
+
+    return () => {
+      window.removeEventListener("scroll", handleScroll);
+
+      if (frame) {
+        window.cancelAnimationFrame(frame);
+      }
+    };
+  }, [showTopBar, location.pathname]);
+
+  // Only step back when the previous entry is inside LinkDish. On a deep link opened
+  // in the same tab, history.length also counts other sites, so Back used to leave the app.
   const handleBack = () => {
-    if (window.history.length > 1) {
+    if (location.key !== "default") {
       void navigate(-1);
       return;
     }
@@ -58,72 +331,172 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
     void navigate("/");
   };
 
+  const renderNavItem = (item: NavItem) => {
+    const active = routeMeta.section === item.section;
+    const isAdd = item.section === "add";
+    const isCookbook = item.section === "cookbook";
+
+    return (
+      <li className={`app-nav-item app-nav-item-${item.section}`} key={item.section}>
+        <Link
+          aria-current={active ? "page" : undefined}
+          aria-keyshortcuts={isRail ? RAIL_SHORTCUTS[item.to]?.aria : undefined}
+          aria-label={isAdd ? addLabel : item.ariaLabel}
+          className={[
+            "app-nav-link",
+            isAdd ? "app-nav-link-add" : "",
+            active ? "is-active" : "",
+            isCookbook && cookbookBounceActive ? "app-nav-link-save-bounce" : ""
+          ]
+            .filter(Boolean)
+            .join(" ")}
+          onAnimationEnd={isCookbook ? () => setCookbookBounceActive(false) : undefined}
+          to={item.to}
+        >
+          <span className="app-nav-icon" aria-hidden="true">
+            <Icon name={item.icon} size={isAdd ? 26 : 22} strokeWidth={isAdd ? 2.4 : 2} />
+            {isAdd ? (
+              <AddQueueBadge onDescribe={setImportQueueLabel} show={importQueueActive} />
+            ) : null}
+          </span>
+          <span className="app-nav-label">{item.label}</span>
+          {isRail && RAIL_SHORTCUTS[item.to] ? (
+            <RailShortcutHint keys={RAIL_SHORTCUTS[item.to]?.keys ?? []} />
+          ) : null}
+        </Link>
+      </li>
+    );
+  };
+
   return (
-    <div className="app-shell">
-      <header
-        className={`app-topbar ${isDestinationPage ? "app-topbar-destination" : ""}`}
-        aria-label="App navigation"
-      >
-        {!isDestinationPage && (
-          <button className="app-nav-btn" onClick={handleBack} aria-label="Go back">
-            <Icon name="chevron-left" size={24} color="currentColor" />
-          </button>
-        )}
+    <div
+      className={[
+        "app-shell",
+        isRail ? "app-shell-rail" : "app-shell-tabs",
+        showTopBar ? "app-shell-has-topbar" : "",
+        hideTabBar ? "app-shell-tabbar-hidden" : ""
+      ]
+        .filter(Boolean)
+        .join(" ")}
+    >
+      <a className="skip-link" href="#main-content">
+        Skip to content
+      </a>
 
-        <button
-          className={`app-wordmark-btn ${isCookbookDestination ? "app-nav-btn-active" : ""} ${
-            cookbookBounceActive ? "app-nav-btn-save-bounce" : ""
-          }`}
-          onClick={() => {
-            void navigate("/");
-          }}
-          onAnimationEnd={() => setCookbookBounceActive(false)}
-          aria-label="Go to Cookbook"
-          aria-current={isCookbookDestination ? "page" : undefined}
-        >
-          LinkDish
-        </button>
+      {hideTabBar ? null : (
+        <nav className={`app-nav ${isRail ? "app-nav-rail" : "app-nav-tabs"}`} aria-label="Primary">
+          {isRail ? (
+            <>
+              <Link className="app-nav-brand" to="/" aria-label="LinkDish home">
+                <span className="app-nav-brand-tile" aria-hidden="true">
+                  <BrandMark size={28} />
+                </span>
+                <span className="app-nav-brand-word">LinkDish</span>
+              </Link>
 
-        <span className="app-topbar-spacer" aria-hidden="true" />
+              {addItem ? (
+                <Link
+                  aria-current={routeMeta.section === "add" ? "page" : undefined}
+                  aria-keyshortcuts="N"
+                  aria-label={addLabel}
+                  className={`app-nav-add-button${routeMeta.section === "add" ? " is-active" : ""}`}
+                  title="Add recipe (N)"
+                  to={addItem.to}
+                >
+                  <Icon name="plus" size={20} strokeWidth={2.4} />
+                  Add recipe
+                  <AddQueueBadge onDescribe={setImportQueueLabel} show={importQueueActive} />
+                </Link>
+              ) : null}
 
-        <button
-          className={`app-nav-btn ${isImportDestination ? "app-nav-btn-active" : ""}`}
-          onClick={() => {
-            void navigate("/import");
-          }}
-          aria-label="Add recipe"
-          aria-current={isImportDestination ? "page" : undefined}
-        >
-          <Icon name="plus-circle-outline" size={22} color="currentColor" />
-          <span className="app-nav-btn-label">Add</span>
-        </button>
+              <button
+                aria-keyshortcuts={shortcutLabel.startsWith("⌘") ? "Meta+K" : "Control+K"}
+                className="app-nav-search"
+                onClick={() => requestCommandPalette({ source: "rail_search" })}
+                onFocus={preloadCommandPalette}
+                onPointerEnter={preloadCommandPalette}
+                type="button"
+              >
+                <Icon name="search" size={18} />
+                <span className="app-nav-search-label">Search recipes</span>
+                <kbd className="app-nav-search-kbd" aria-hidden="true">
+                  {shortcutLabel}
+                </kbd>
+              </button>
+            </>
+          ) : null}
 
-        <button
-          className={`app-nav-btn ${isShoppingDestination ? "app-nav-btn-active" : ""}`}
-          onClick={() => {
-            void navigate("/shopping");
-          }}
-          aria-label="Shopping"
-          aria-current={isShoppingDestination ? "page" : undefined}
-        >
-          <Icon name="cart-outline" size={22} color="currentColor" />
-          <span className="app-nav-btn-label">Shopping</span>
-        </button>
+          <ul className="app-nav-list">{listItems.map(renderNavItem)}</ul>
 
-        <button
-          className={`app-nav-btn ${isHouseholdDestination ? "app-nav-btn-active" : ""}`}
-          onClick={() => {
-            void navigate("/account");
-          }}
-          aria-label="Household and account"
-          aria-current={isHouseholdDestination ? "page" : undefined}
-        >
-          <Icon name="account-group-outline" size={22} color="currentColor" />
-          <span className="app-nav-btn-label">Household</span>
-        </button>
-      </header>
+          {isRail ? (
+            <div className="app-nav-footer">
+              <Link
+                aria-current={location.pathname === "/settings" ? "page" : undefined}
+                className={`app-nav-footer-link${location.pathname === "/settings" ? " is-active" : ""}`}
+                to="/settings"
+              >
+                <Icon name="settings" size={18} />
+                Settings
+              </Link>
+              <Link
+                aria-current={location.pathname === "/install" ? "page" : undefined}
+                className={`app-nav-footer-link${location.pathname === "/install" ? " is-active" : ""}`}
+                to="/install"
+              >
+                <Icon name="smartphone-download" size={18} />
+                Install app
+              </Link>
+            </div>
+          ) : null}
+        </nav>
+      )}
 
-      <main className="app-shell-content">{children}</main>
+      <div className="app-main-column">
+        <OfflineBanner />
+
+        {showTopBar ? (
+          <header className={`app-topbar${topBarScrolled ? " is-scrolled" : ""}`}>
+            <button
+              aria-label="Go back"
+              className="app-topbar-back"
+              onClick={handleBack}
+              type="button"
+            >
+              <Icon name="chevron-left" size={24} />
+            </button>
+            <p className="app-topbar-title">{routeMeta.title}</p>
+            <div className="app-topbar-actions">
+              <div className="app-topbar-page-actions" ref={setTopBarActionsTarget} />
+              {!isRail ? (
+                <button
+                  aria-label="Search recipes and commands"
+                  className="app-topbar-icon app-topbar-search"
+                  onClick={() => requestCommandPalette({ source: "topbar_search" })}
+                  onFocus={preloadCommandPalette}
+                  onPointerDown={preloadCommandPalette}
+                  type="button"
+                >
+                  <Icon name="search" size={21} />
+                </button>
+              ) : null}
+            </div>
+          </header>
+        ) : null}
+
+        <TopBarActionsContext.Provider value={showTopBar ? topBarActionsTarget : null}>
+          <main
+            className="app-shell-content"
+            data-initial-view={isInitialView ? "" : undefined}
+            id="main-content"
+            tabIndex={-1}
+          >
+            {children}
+          </main>
+        </TopBarActionsContext.Provider>
+      </div>
+
+      <DeferredTimerDock />
+
       <FirstRunOnboardingSheet />
     </div>
   );

@@ -1,0 +1,135 @@
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 40px 20px;
+  text-align: center;
+}
+
+.empty-state-compact {
+  gap: 8px;
+  padding: 24px 12px;
+}
+
+.empty-state-art {
+  margin-bottom: 8px;
+}
+
+.empty-state-compact .empty-state-art svg {
+  width: 120px;
+  height: 90px;
+}
+
+.empty-state-title {
+  max-width: 24ch;
+  color: var(--color-ink);
+  font-family: var(--font-family-serif);
+  font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+}
+
+.empty-state-compact .empty-state-title {
+  font-size: 1.25rem;
+}
+
+.empty-state-body {
+  max-width: 38ch;
+  color: var(--color-ink-muted);
+  font-size: var(--text-body);
+  line-height: 1.55;
+}
+
+.empty-state-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+/* Illustration paint — theme aware. */
+.illo {
+  display: block;
+  overflow: visible;
+}
+
+.illo-blob {
+  fill: var(--color-butter-soft);
+}
+
+.illo-dot-tomato,
+.illo-fill-tomato {
+  fill: var(--color-tomato);
+}
+
+.illo-dot-tomato {
+  opacity: 0.75;
+}
+
+.illo-dot-butter {
+  fill: var(--color-butter);
+}
+
+.illo-paper {
+  fill: var(--color-surface-raised);
+  stroke: var(--color-ink);
+  stroke-linejoin: round;
+  stroke-width: 2.5;
+}
+
+.illo-line,
+.illo-handle {
+  fill: none;
+  stroke: var(--color-ink);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.5;
+}
+
+.illo-handle {
+  stroke-width: 7;
+}
+
+.illo-line-soft {
+  fill: none;
+  stroke: var(--color-border-strong);
+  stroke-linecap: round;
+  stroke-width: 2.5;
+}
+
+.illo-accent {
+  fill: none;
+  stroke: var(--color-tomato);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 3.5;
+}
+
+.illo-steam {
+  fill: none;
+  stroke: var(--color-primary);
+  stroke-linecap: round;
+  stroke-width: 2.5;
+  opacity: 0.75;
+}
+
+.illo-leaf {
+  fill: var(--color-primary);
+}
+
+.illo-band {
+  fill: var(--color-primary-soft);
+  stroke: var(--color-ink);
+  stroke-width: 2.5;
+}
+
+.illo-cell {
+  fill: var(--color-surface-tint);
+}
+
+.illo-cell-accent {
+  fill: var(--color-tomato);
+}

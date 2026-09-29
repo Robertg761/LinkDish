@@ -1,3 +1,4 @@
+import { toYouTubeWatchUrl } from "../../source-detection/parse-youtube-video-id.js";
 import {
   buildFieldProvenance,
   extractMinutesFromText,
@@ -93,7 +94,10 @@ export const extractYouTubeRecipe = (
       servings: extractServingsFromText(combinedText),
       prepTimeMinutes: extractMinutesFromText(combinedText, "prep"),
       cookTimeMinutes: extractMinutesFromText(combinedText, "cook"),
-      nutrition: null
+      nutrition: null,
+      siteName: "YouTube",
+      videoUrl: toYouTubeWatchUrl(document.videoId),
+      ...(document.authorName ? { author: document.authorName } : {})
     },
     strategy: "youtube-transcript",
     evidence: [

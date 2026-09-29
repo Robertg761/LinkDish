@@ -1,33 +1,69 @@
 <!doctype html>
-<html lang="en">
+<html lang="en-CA">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#f4efe7" />
+    <title>Page not found | LinkDish</title>
+    <meta name="description" content="This LinkDish page could not be found." />
     <meta name="robots" content="noindex" />
-    <title>Page not found — LinkDish</title>
-    <link rel="icon" href="/assets/linkdish-icon.png" />
-    <link rel="stylesheet" href="/home.css" />
+    <meta name="theme-color" content="#f4efe7" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#1a1816" media="(prefers-color-scheme: dark)" />
+    <meta name="color-scheme" content="light dark" />
+    <link rel="icon" href="/favicon.ico" sizes="48x48" />
+    <link rel="icon" href="/assets/favicon-32.png" type="image/png" sizes="32x32" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link
+      rel="preload"
+      href="/assets/fonts/Fraunces-Bold.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
+    <link
+      rel="preload"
+      href="/assets/fonts/Fraunces-SemiBoldItalic.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
+    <script>
+      (function (root) {
+        root.classList.add("js");
+        if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+          root.classList.add("motion-ready");
+          // If site.js never runs, show everything instead of leaving it hidden.
+          window.setTimeout(function () {
+            if (!root.classList.contains("site-ready")) {
+              root.classList.remove("motion-ready");
+            }
+          }, 3000);
+        }
+      })(document.documentElement);
+    </script>
+    <link rel="stylesheet" href="/base.css" />
     <link rel="stylesheet" href="/info.css" />
     <script>
       (function () {
         var match = window.location.pathname.match(/^\/invite\/([^/?#]+)\/?$/);
 
         if (match) {
-          window.location.replace(
-            "/invite/?code=" + encodeURIComponent(match[1]),
-          );
+          window.location.replace("/invite/?code=" + encodeURIComponent(match[1]));
         }
       })();
     </script>
   </head>
   <body class="info-page">
     <a class="skip-link" href="#main-content">Skip to content</a>
-
     <header class="site-header" data-header>
       <a class="brand" href="/" aria-label="LinkDish home">
-        <img src="/assets/linkdish-icon.png" alt="" width="40" height="40" />
-        <span class="brand-word">LinkDish</span>
+        <img
+          src="/assets/linkdish-icon-64.png"
+          srcset="/assets/linkdish-icon-64.png 1x, /assets/linkdish-icon-128.png 2x"
+          alt=""
+          width="38"
+          height="38"
+        />
+        <span>LinkDish</span>
       </a>
 
       <button
@@ -42,71 +78,89 @@
         <span aria-hidden="true"></span>
       </button>
 
-      <nav
-        class="site-nav"
-        id="site-navigation"
-        aria-label="Primary navigation"
-        data-site-nav
-      >
+      <nav class="site-nav" id="site-navigation" aria-label="Primary" data-site-nav>
         <a href="/#how-it-works">How it works</a>
-        <a href="/#plans">Plans</a>
+        <a href="/#features">Features</a>
+        <a href="/#plans">Pricing</a>
         <a href="/support/">Support</a>
         <a
           class="button button-small button-primary"
-          href="https://app.linkdish.ca"
+          href="https://app.linkdish.ca/"
+          data-cta="nav"
         >
-          Open LinkDish <span aria-hidden="true">↗</span>
+          Open LinkDish
         </a>
       </nav>
     </header>
 
     <main class="not-found-shell" id="main-content">
       <section class="not-found" aria-labelledby="not-found-title">
-        <h1 id="not-found-title">This one fell behind the fridge.</h1>
+        <p class="eyebrow">Page not found</p>
+        <h1 id="not-found-title">This one fell<br /><em>behind the fridge.</em></h1>
         <p>
-          The page may have moved, or the link might be a little overdone. Head
-          back to the kitchen pass or ask for help.
+          The page may have moved, or the link might be a little overdone. Head back to the kitchen,
+          or paste the recipe link you were after straight into LinkDish.
         </p>
-        <div class="not-found-actions">
+        <div class="cta-row not-found-actions">
           <a class="button button-primary" href="/">Back to LinkDish</a>
+          <a class="button button-secondary" href="https://app.linkdish.ca/" data-cta="404-web"
+            >Open the web app</a
+          >
           <a class="button button-secondary" href="/support/">Get support</a>
         </div>
       </section>
     </main>
 
-    <footer class="site-footer inner-footer">
-      <div class="footer-brand-block">
-        <a class="brand brand-footer" href="/">
-          <img src="/assets/linkdish-icon.png" alt="" width="48" height="48" />
-          <span class="brand-word">LinkDish</span>
+    <footer class="site-footer">
+      <div class="footer-brand">
+        <a class="brand" href="/">
+          <img
+            src="/assets/linkdish-icon-64.png"
+            srcset="/assets/linkdish-icon-64.png 1x, /assets/linkdish-icon-128.png 2x"
+            alt=""
+            width="38"
+            height="38"
+          />
+          <span>LinkDish</span>
         </a>
-        <p>Keep the recipe. Lose the clutter.</p>
+        <p>
+          Keep the recipe. Lose the clutter. Save from anywhere, plan the week and shop by aisle.
+        </p>
       </div>
-      <div class="footer-column">
-        <h2>Help</h2>
+      <nav class="footer-column" aria-labelledby="footer-product">
+        <h2 id="footer-product">Product</h2>
+        <a href="/#features">Features</a>
+        <a href="/#planner">Meal planner</a>
+        <a href="/#plans">Pricing</a>
+        <a href="/#iphone">iPhone &amp; iPad</a>
+        <a href="https://app.linkdish.ca/" data-cta="footer-web">Web app</a>
+        <a
+          href="https://play.google.com/store/apps/details?id=com.linkdish.app"
+          data-cta="footer-android"
+          >Android app</a
+        >
+      </nav>
+      <nav class="footer-column" aria-labelledby="footer-guides">
+        <h2 id="footer-guides">Guides</h2>
+        <a href="/recipe-saver-app/">Recipe saver app</a>
+        <a href="/save-recipes-from-websites/">Save recipes from websites</a>
+        <a href="/save-recipes-from-youtube/">Save recipes from YouTube</a>
+        <a href="/scan-recipes-from-photos/">Scan recipes from photos</a>
+        <a href="/meal-planner-and-grocery-list/">Meal planner &amp; grocery list</a>
+        <a href="/paprika-alternative/">Paprika alternative</a>
+      </nav>
+      <nav class="footer-column" aria-labelledby="footer-help">
+        <h2 id="footer-help">Help</h2>
         <a href="/support/">Support</a>
         <a href="/privacy/">Privacy</a>
-        <a href="mailto:support@linkdish.ca">Contact</a>
-      </div>
-      <div class="footer-column">
-        <h2>Product</h2>
-        <a href="https://app.linkdish.ca">Open web app</a>
-        <a href="https://play.google.com/store/apps/details?id=com.linkdish.app"
-          >Android</a
-        >
-      </div>
-      <div class="footer-bottom">
+        <a href="mailto:support@linkdish.ca">support@linkdish.ca</a>
+        <a href="https://app.linkdish.ca/install" data-cta="footer-install">Install on iPhone</a>
+      </nav>
+      <p class="footer-bottom">
+        <span>Made in Canada</span>
         <span>&copy; <span data-current-year>2026</span> LinkDish</span>
-        <span>Made in Canada · Set in Fraunces</span>
-      </div>
+      </p>
     </footer>
-
-    <aside class="mobile-cta-dock" aria-label="Get LinkDish">
-      <a href="https://app.linkdish.ca">Open web app</a>
-      <a href="https://play.google.com/store/apps/details?id=com.linkdish.app"
-        >Android</a
-      >
-    </aside>
 
     <script src="/site.js" defer></script>
     <script src="/analytics.js" defer></script>

@@ -1,0 +1,234 @@
+import React, { memo, useMemo } from "react";
+
+import { Badge } from "../../../components/Badge";
+import { IconButton } from "../../../components/IconButton";
+import { Menu } from "../../../components/Menu";
+import { RecipeCard } from "../../../components/RecipeCard";
+
+import { HighlightedText } from "./HighlightedText";
+import { isStarterRecipe, normalizeText } from "./library-model";
+import { CompactRecipeMeta, RecipeMetaLine } from "./RecipeMeta";
+
+import type { TextHighlighter } from "./HighlightedText";
+import type { LibraryView } from "./library-model";
+import type { MenuEntry } from "../../../components/Menu";
+import type { WebSavedRecipe } from "../saved-recipe-types";
+
+export type LibraryRecipeAction =
+  | "collections"
+  | "tags"
+  | "plan"
+  | "shopping"
+  | "family"
+  | "duplicate"
+  | "delete";
+
+interface LibraryRecipeTileProps {
+  recipe: WebSavedRecipe;
+  view: LibraryView;
+  /** Eager-load the photo (the first cards on screen). */
+  priority?: boolean | undefined;
+  /** Marks search matches in the title. */
+  highlight?: TextHighlighter | undefined;
+  /** Offer "Share to Family" (signed in with an active household). */
+  canShareToFamily?: boolean | undefined;
+  onAction: (action: LibraryRecipeAction, recipe: WebSavedRecipe) => void;
+  onToggleFavorite: (recipe: WebSavedRecipe) => void;
+  /** Called when the overflow menu opens (e.g. to warm lazy sheets). */
+  onMenuOpen?: (() => void) | undefined;
+}
+
+interface StatusBadge {
+  key: string;
+  label: string;
+  tone: "neutral" | "primary" | "butter" | "danger";
+  icon?: "users" | "chef-hat" | "alert-circle" | "refresh" | "sparkles" | undefined;
+}
+
+/**
+ * Household sync states only mean something to a cook with a household, and they use the same
+ * plain words as the card's menu ("Share changes with Family").
+ */
+const getStatusBadges = (recipe: WebSavedRecipe, showSync: boolean): StatusBadge[] => {
+  const badges: StatusBadge[] = [];
+
+  if (isStarterRecipe(recipe)) {
+    badges.push({ icon: "sparkles", key: "starter", label: "Starter", tone: "butter" });
+  }
+
+  if (!showSync) {
+    // Nothing to say about sync without a household.
+  } else if (recipe.sync?.status === "synced") {
+    badges.push({ icon: "users", key: "sync", label: "Family", tone: "primary" });
+  } else if (recipe.sync?.status === "dirty") {
+    badges.push({ icon: "refresh", key: "sync", label: "Edits not shared", tone: "butter" });
+  } else if (recipe.sync?.status === "sync_failed") {
+    badges.push({ icon: "alert-circle", key: "sync", label: "Not shared", tone: "danger" });
+  }
+
+  const timesCooked = recipe.timesCooked ?? 0;
+
+  if (timesCooked > 0) {
+    badges.push({
+      icon: "chef-hat",
+      key: "cooked",
+      label: `Cooked ${timesCooked}×`,
+      tone: "neutral"
+    });
+  }
+
+  return badges;
+};
+
+const familyMenuLabel = (recipe: WebSavedRecipe): string | null => {
+  switch (recipe.sync?.status) {
+    case "synced":
+      return null;
+    case "dirty":
+      return "Share changes with Family";
+    case "sync_failed":
+      return "Try sharing with Family again";
+    default:
+      return "Share to Family";
+  }
+};
+
+/** A personal cookbook card: photo, title, meta, favorite heart and an overflow menu. */
+const LibraryRecipeTileComponent: React.FC<LibraryRecipeTileProps> = ({
+  recipe,
+  view,
+  priority = false,
+  highlight,
+  canShareToFamily = false,
+  onAction,
+  onToggleFavorite,
+  onMenuOpen
+}) => {
+  const title = normalizeText(recipe.recipe.title);
+  const isList = view === "list";
+  const favorite = Boolean(recipe.favorite);
+  const badges = useMemo(
+    () => getStatusBadges(recipe, canShareToFamily),
+    [canShareToFamily, recipe]
+  );
+
+  const menuItems = useMemo<MenuEntry[]>(() => {
+    const familyLabel =
+      canShareToFamily && !isStarterRecipe(recipe) ? familyMenuLabel(recipe) : null;
+
+    // Grouped like the recipe page's menu: organise first, then copies, then Delete on its own.
+    return [
+      { id: "group-organise", label: "Plan & organise", type: "separator" },
+      {
+        icon: "folder-plus",
+        id: "collections",
+        label: "Add to collection…",
+        onSelect: () => onAction("collections", recipe)
+      },
+      { icon: "tag", id: "tags", label: "Edit tags…", onSelect: () => onAction("tags", recipe) },
+      {
+        icon: "calendar-plus",
+        id: "plan",
+        label: "Add to meal plan…",
+        onSelect: () => onAction("plan", recipe)
+      },
+      {
+        icon: "shopping-basket",
+        id: "shopping",
+        label: "Add to shopping list",
+        onSelect: () => onAction("shopping", recipe)
+      },
+      { id: "group-copy", type: "separator" },
+      ...(familyLabel
+        ? [
+            {
+              icon: "users" as const,
+              id: "family",
+              label: familyLabel,
+              onSelect: () => onAction("family", recipe)
+            }
+          ]
+        : []),
+      {
+        icon: "copy",
+        id: "duplicate",
+        label: "Duplicate",
+        onSelect: () => onAction("duplicate", recipe)
+      },
+      { id: "separator", type: "separator" },
+      {
+        icon: "trash",
+        id: "delete",
+        label: "Delete",
+        onSelect: () => onAction("delete", recipe),
+        tone: "danger"
+      }
+    ];
+  }, [canShareToFamily, onAction, recipe]);
+
+  const badgeNodes = badges.map((badge) => (
+    <Badge
+      className={isList ? undefined : "library-media-badge"}
+      icon={badge.icon}
+      key={badge.key}
+      tone={badge.tone}
+    >
+      {badge.label}
+    </Badge>
+  ));
+
+  return (
+    <RecipeCard
+      actionsSlot={
+        <Menu
+          items={menuItems}
+          label={`Actions for ${title}`}
+          presentation="adaptive"
+          sheetTitle={title}
+          onOpenChange={(open) => {
+            if (open) {
+              onMenuOpen?.();
+            }
+          }}
+          renderTrigger={(props) => (
+            <IconButton
+              aria-label={`More actions for ${title}`}
+              icon="more-horizontal"
+              size="sm"
+              {...props}
+            />
+          )}
+        />
+      }
+      badges={isList && badgeNodes.length ? badgeNodes : undefined}
+      className="library-card"
+      favoriteSlot={
+        <IconButton
+          aria-label={`Favorite ${title}`}
+          className="library-favorite"
+          icon="heart"
+          onClick={() => onToggleFavorite(recipe)}
+          pressed={favorite}
+          pressedIcon="heart-filled"
+          size={isList ? "md" : "sm"}
+        />
+      }
+      image={recipe.recipe.image}
+      mediaBadges={!isList && badgeNodes.length ? badgeNodes.slice(0, 2) : undefined}
+      meta={
+        isList ? (
+          <RecipeMetaLine recipe={recipe.recipe} />
+        ) : (
+          <CompactRecipeMeta recipe={recipe.recipe} />
+        )
+      }
+      priority={priority}
+      title={title}
+      titleContent={highlight ? <HighlightedText highlight={highlight} text={title} /> : undefined}
+      to={`/recipes/${recipe.id}`}
+      variant={view}
+    />
+  );
+};
+
+export const LibraryRecipeTile = memo(LibraryRecipeTileComponent);

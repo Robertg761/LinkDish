@@ -1,0 +1,278 @@
+/* Plan cards: Free, Plus (recommended, forest), Family. Colors come from local custom
+   properties so the featured card can flip its palette per theme. */
+.plan-card {
+  --plan-card-bg: var(--color-surface);
+  --plan-card-ink: var(--color-ink);
+  --plan-card-muted: var(--color-ink-muted);
+  --plan-card-border: var(--color-border-subtle);
+  --plan-card-check: var(--color-primary);
+  --plan-card-divider: var(--color-border-subtle);
+
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+  padding: 22px 22px 26px;
+  border: 1px solid var(--plan-card-border);
+  border-radius: var(--radius-card);
+  background: var(--plan-card-bg);
+  box-shadow: var(--shadow-sm);
+  color: var(--plan-card-ink);
+  scroll-margin-top: calc(var(--topbar-height) + 24px);
+  transition:
+    box-shadow var(--transition-normal),
+    border-color var(--transition-normal),
+    transform var(--transition-normal);
+}
+
+.plan-card-featured {
+  --plan-card-bg: var(--color-primary);
+  --plan-card-ink: var(--color-on-primary);
+  --plan-card-muted: color-mix(in srgb, var(--color-on-primary) 76%, transparent);
+  --plan-card-border: var(--color-primary);
+  --plan-card-check: var(--color-butter);
+  --plan-card-divider: color-mix(in srgb, var(--color-on-primary) 18%, transparent);
+  --plan-card-cta-bg: var(--color-on-primary);
+  --plan-card-cta-fg: var(--color-primary);
+  --plan-card-cta-bg-hover: color-mix(in srgb, var(--color-on-primary) 88%, var(--color-butter));
+
+  box-shadow: var(--shadow-lg);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .plan-card-featured {
+    --plan-card-bg: var(--color-primary-soft);
+    --plan-card-ink: var(--color-ink);
+    --plan-card-muted: var(--color-ink-muted);
+    --plan-card-border: color-mix(in srgb, var(--color-primary) 55%, transparent);
+    --plan-card-check: var(--color-primary);
+    --plan-card-divider: color-mix(in srgb, var(--color-primary) 22%, transparent);
+    --plan-card-cta-bg: var(--color-primary);
+    --plan-card-cta-fg: var(--color-on-primary);
+    --plan-card-cta-bg-hover: var(--color-primary-hover);
+  }
+}
+
+:root[data-theme="dark"] .plan-card-featured {
+  --plan-card-bg: var(--color-primary-soft);
+  --plan-card-ink: var(--color-ink);
+  --plan-card-muted: var(--color-ink-muted);
+  --plan-card-border: color-mix(in srgb, var(--color-primary) 55%, transparent);
+  --plan-card-check: var(--color-primary);
+  --plan-card-divider: color-mix(in srgb, var(--color-primary) 22%, transparent);
+  --plan-card-cta-bg: var(--color-primary);
+  --plan-card-cta-fg: var(--color-on-primary);
+  --plan-card-cta-bg-hover: var(--color-primary-hover);
+}
+
+.plan-card-featured .btn-primary {
+  --btn-bg: var(--plan-card-cta-bg);
+  --btn-fg: var(--plan-card-cta-fg);
+  --btn-bg-hover: var(--plan-card-cta-bg-hover);
+}
+
+.plan-card-featured .btn-secondary,
+.plan-card-featured .btn-outline {
+  --btn-bg: transparent;
+  --btn-fg: var(--plan-card-ink);
+  --btn-border: var(--plan-card-divider);
+  --btn-bg-hover: color-mix(in srgb, var(--plan-card-ink) 8%, transparent);
+  --btn-border-hover: var(--plan-card-muted);
+}
+
+/* Solid badges would vanish on the forest card; flip them to the card's CTA colors. */
+.plan-card-featured .plan-card-badges .badge-primary {
+  --badge-solid-bg: var(--plan-card-cta-bg);
+  --badge-solid-fg: var(--plan-card-cta-fg);
+}
+
+.plan-card.is-selected {
+  border-color: var(--color-tomato);
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--color-tomato) 28%, transparent),
+    var(--shadow-md);
+}
+
+/* The plan asked about is already the featured one: one emphasis, not a ring on top of it. */
+.plan-card-featured.is-selected {
+  border-color: var(--plan-card-border);
+  box-shadow: var(--shadow-lg);
+}
+
+.plan-card-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: 22px;
+}
+
+@media (max-width: 899px) {
+  .plan-card-badges:empty {
+    display: none;
+  }
+}
+
+.plan-card-badges .badge {
+  min-height: 22px;
+  padding: 3px 9px;
+  font-size: 0.6875rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.plan-card-header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: -6px;
+}
+
+.plan-card-name {
+  color: var(--plan-card-ink);
+  font-family: var(--font-family-serif);
+  font-size: 1.625rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+
+.plan-card-tagline {
+  color: var(--plan-card-muted);
+  font-size: var(--text-small);
+}
+
+.plan-card-price {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--plan-card-divider);
+}
+
+.plan-card-amount-row {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.plan-card-amount {
+  color: var(--plan-card-ink);
+  font-family: var(--font-family-serif);
+  font-size: clamp(2.5rem, 2.1rem + 1.4vw, 3rem);
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  line-height: 1;
+}
+
+.plan-card-unit {
+  color: var(--plan-card-muted);
+  font-size: var(--text-small);
+  font-weight: 600;
+}
+
+.plan-card-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  min-height: 22px;
+  color: var(--plan-card-muted);
+  font-size: var(--text-caption);
+  font-variant-numeric: lining-nums tabular-nums;
+}
+
+.plan-card-savings {
+  font-size: 0.6875rem;
+}
+
+.plan-card-action {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.plan-card-action-note {
+  color: var(--plan-card-muted);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line-height);
+}
+
+.plan-card-action-note a {
+  color: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.plan-card-features {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  list-style: none;
+}
+
+.plan-card-features li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  color: var(--plan-card-ink);
+  font-size: var(--text-small);
+  line-height: 1.45;
+}
+
+.plan-card-features strong {
+  font-weight: 750;
+}
+
+.plan-card-check {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: var(--plan-card-check);
+}
+
+/* A status, not a button: no outline, but the button row's height so the cards line up. */
+.plan-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 48px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: var(--radius-button);
+  color: var(--plan-card-ink);
+  font-size: var(--text-small);
+  font-weight: 650;
+  text-align: center;
+}
+
+.plan-status-muted {
+  color: var(--plan-card-muted);
+  font-weight: 600;
+}
+
+.plan-status .icon {
+  flex-shrink: 0;
+  color: var(--plan-card-check);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .plan-card.is-selected {
+    animation: plan-card-attention 900ms var(--ease-out) 240ms both;
+  }
+}
+
+@keyframes plan-card-attention {
+  0% {
+    transform: translateY(0);
+  }
+
+  35% {
+    transform: translateY(-4px);
+  }
+
+  100% {
+    transform: translateY(0);
+  }
+}

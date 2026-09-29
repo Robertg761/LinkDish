@@ -91,6 +91,18 @@ describe("extractor-api retry helpers", () => {
     expect(shouldRetryTransientExtractionError(new ExtractorApiError("Failed.", 429))).toBe(true);
     expect(shouldRetryTransientExtractionError(new ExtractorApiError("Failed.", 422))).toBe(false);
     expect(shouldRetryTransientExtractionError(new Error("Network request failed"))).toBe(true);
+    expect(
+      shouldRetryTransientExtractionError(
+        new ExtractorApiError("Network request failed", 0, undefined, { kind: "network" })
+      )
+    ).toBe(true);
+    expect(
+      shouldRetryTransientExtractionError(
+        new ExtractorApiError("Extractor API request timed out.", 0, undefined, {
+          kind: "timeout"
+        })
+      )
+    ).toBe(false);
   });
 
   it("classifies retryable primary API failures correctly", () => {

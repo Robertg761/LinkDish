@@ -27,6 +27,26 @@ let purchasesModulePromise: Promise<RevenueCatPurchasesModule> | null = null;
 export const isRevenueCatWebSdkCheckoutConfigured = (): boolean =>
   Boolean(revenueCatWebPublicApiKey);
 
+/** purchases-js `ErrorCode.UserCancelledError`; kept as a number so this check loads no SDK code. */
+const USER_CANCELLED_ERROR_CODE = 1;
+
+/** True when the person closed the in-page checkout themselves; not an error worth showing. */
+export const isCheckoutCancelledError = (error: unknown): boolean =>
+  typeof error === "object" &&
+  error !== null &&
+  "errorCode" in error &&
+  (error as { errorCode?: unknown }).errorCode === USER_CANCELLED_ERROR_CODE;
+
+/**
+ * Stops before the checkout opens when another account signed in while it was being prepared
+ * (the SDK and offerings load first): the purchase would go to the account that started it.
+ */
+const ensureStillCurrent = (isCurrent: (() => boolean) | undefined) => {
+  if (isCurrent && !isCurrent()) {
+    throw new Error("Another account signed in before checkout opened.");
+  }
+};
+
 const loadPurchasesModule = (): Promise<RevenueCatPurchasesModule> => {
   purchasesModulePromise ??= import("@revenuecat/purchases-js");
   return purchasesModulePromise;
@@ -69,23 +89,27 @@ const getCheckoutPackage = async (
   );
 
   if (!checkoutPackage) {
-    throw new Error("This RevenueCat checkout option is not available right now.");
+    throw new Error("This checkout option is not available right now.");
   }
 
   return checkoutPackage;
 };
 
 export const startRevenueCatWebSdkCheckout = async ({
+  isCurrent,
   period,
   plan,
   user
 }: {
+  /** False once another account has signed in: the checkout then never opens. */
+  isCurrent?: (() => boolean) | undefined;
   period: BillingPeriod;
   plan: PaidBillingPlan;
   user: AccountUser;
 }): Promise<void> => {
   const purchases = await getPurchasesForUser(user);
   const checkoutPackage = await getCheckoutPackage(purchases, plan, period);
+  ensureStillCurrent(isCurrent);
 
   await purchases.purchase({
     customerEmail: user.email,
@@ -100,19 +124,23 @@ const getFoundingCheckoutPackage = async (purchases: PurchasesInstance): Promise
   );
 
   if (!checkoutPackage) {
-    throw new Error("This RevenueCat checkout option is not available right now.");
+    throw new Error("This checkout option is not available right now.");
   }
 
   return checkoutPackage;
 };
 
 export const startRevenueCatWebSdkFoundingCheckout = async ({
+  isCurrent,
   user
 }: {
+  /** False once another account has signed in: the checkout then never opens. */
+  isCurrent?: (() => boolean) | undefined;
   user: AccountUser;
 }): Promise<void> => {
   const purchases = await getPurchasesForUser(user);
   const checkoutPackage = await getFoundingCheckoutPackage(purchases);
+  ensureStillCurrent(isCurrent);
 
   await purchases.purchase({
     customerEmail: user.email,

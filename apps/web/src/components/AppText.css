@@ -3,50 +3,57 @@
 }
 
 .app-text-display {
+  color: var(--color-ink);
   font-family: var(--font-family-serif);
   font-size: var(--text-display);
-  font-weight: normal;
-  line-height: var(--text-display-line-height);
+  font-weight: 700;
   letter-spacing: var(--text-display-letter-spacing);
-  color: var(--color-text);
+  line-height: var(--text-display-line-height);
 }
 
 .app-text-headline {
+  color: var(--color-ink);
   font-family: var(--font-family-serif);
   font-size: var(--text-headline);
-  font-weight: normal;
-  line-height: var(--text-headline-line-height);
+  font-weight: 700;
   letter-spacing: var(--text-headline-letter-spacing);
-  color: var(--color-text);
+  line-height: var(--text-headline-line-height);
 }
 
 .app-text-title {
-  font-family: var(--font-family-sans);
+  color: var(--color-ink);
+  font-family: var(--font-family-serif);
   font-size: var(--text-title);
   font-weight: 700;
-  line-height: var(--text-title-line-height);
   letter-spacing: var(--text-title-letter-spacing);
-  color: var(--color-text);
+  line-height: var(--text-title-line-height);
 }
 
 .app-text-body {
+  color: var(--color-ink);
   font-family: var(--font-family-sans);
   font-size: var(--text-body);
-  font-weight: normal;
+  font-weight: 400;
   line-height: var(--text-body-line-height);
-  color: var(--color-text);
+}
+
+.app-text-small {
+  color: var(--color-ink);
+  font-family: var(--font-family-sans);
+  font-size: var(--text-small);
+  line-height: var(--text-small-line-height);
 }
 
 .app-text-label {
+  color: var(--color-ink-muted);
   font-family: var(--font-family-sans);
   font-size: var(--text-label);
-  font-weight: 600;
-  line-height: var(--text-label-line-height);
+  font-weight: 750;
   letter-spacing: var(--text-label-letter-spacing);
+  line-height: var(--text-label-line-height);
   text-transform: uppercase;
-  color: var(--color-muted);
 }
 
 .app-text-muted {
-  color: var(--color-muted);
+  color: var(--color-ink-muted);
 }

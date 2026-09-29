@@ -1,10 +1,10 @@
 import { extractorApiEnv } from "../../../config/env.js";
+import { isAbortError } from "../deadline.js";
 import { isSourceUrlRejection, validatePublicSourceUrl } from "../source-url-safety.js";
 
-
+import { HtmlFetchError } from "./errors.js";
 import {
   browserLikeHeaders,
-  buildHtmlSourceDocument,
   classifyFetchStatusCode,
   createTimeoutSignal,
   detectBlockedSignals,
@@ -14,38 +14,39 @@ import {
   sleep
 } from "./shared.js";
 
+import type * as DocumentBuilder from "../html/parsed-html-document.js";
 import type { ValidateSourceUrl } from "../source-url-safety.js";
-import type { FetchResult, InternalFetchFailureKind } from "../types.js";
+import type { FetchResult } from "../types.js";
 
-export class HtmlFetchError extends Error {
-  public constructor(
-    message: string,
-    public readonly reason: InternalFetchFailureKind,
-    public readonly blockedSignals: string[] = [],
-    public readonly statusCode?: number,
-    public readonly finalUrl?: string
-  ) {
-    super(message);
-    this.name = "HtmlFetchError";
-  }
-}
+export { HtmlFetchError } from "./errors.js";
 
 export interface FetchHtmlDocumentOptions {
   timeoutMs: number;
+  /** Retries after a connection error. Capped at one; timeouts and HTTP statuses never retry. */
   retries: number;
   blockSignalPatterns?: RegExp[];
   maxBytes?: number;
   maxRedirects?: number;
   validateUrl?: ValidateSourceUrl;
+  /** The request deadline or a cancellation; aborts the fetch and suppresses retries. */
+  signal?: AbortSignal;
 }
 
-const shouldRetry = (error: HtmlFetchError, attempt: number, maxRetries: number): boolean => {
-  if (attempt >= maxRetries) {
-    return false;
-  }
+const maxConnectionRetries = 1;
 
-  return error.reason === "timeout" || error.reason === "unreachable";
+/*
+ * The HTML parser (cheerio, ~250 ms to import on a cold instance) is only
+ * needed once the body has arrived, so its import overlaps the network fetch
+ * instead of preceding it.
+ */
+let documentBuilderModule: Promise<typeof DocumentBuilder> | null = null;
+
+const loadDocumentBuilder = () => {
+  documentBuilderModule ??= import("../html/parsed-html-document.js");
+  return documentBuilderModule;
 };
+
+class ConnectionFailure extends Error {}
 
 export const fetchHtmlDocument = async (
   url: string,
@@ -55,9 +56,13 @@ export const fetchHtmlDocument = async (
   const validateUrl = options.validateUrl ?? validatePublicSourceUrl;
   const maxRedirects = options.maxRedirects ?? 5;
   const maxBytes = options.maxBytes ?? extractorApiEnv.FETCH_MAX_RESPONSE_BYTES;
+  const maxRetries = Math.max(0, Math.min(options.retries, maxConnectionRetries));
+  const documentBuilder = loadDocumentBuilder();
 
-  for (let attempt = 0; attempt <= options.retries; attempt += 1) {
-    const timeout = createTimeoutSignal(options.timeoutMs);
+  void documentBuilder.catch(() => undefined);
+
+  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+    const timeout = createTimeoutSignal(options.timeoutMs, options.signal);
     let requestUrl = url;
 
     try {
@@ -73,11 +78,19 @@ export const fetchHtmlDocument = async (
       let response: Response | null = null;
 
       for (let redirectCount = 0; redirectCount <= maxRedirects; redirectCount += 1) {
-        response = await fetchImplementation(requestUrl, {
-          headers: browserLikeHeaders,
-          redirect: "manual",
-          signal: timeout.signal
-        });
+        try {
+          response = await fetchImplementation(requestUrl, {
+            headers: browserLikeHeaders,
+            redirect: "manual",
+            signal: timeout.signal
+          });
+        } catch (error) {
+          throw timeout.signal.aborted || isAbortError(error)
+            ? error
+            : new ConnectionFailure(
+                error instanceof Error ? error.message : "HTML request failed."
+              );
+        }
 
         if (response.status < 300 || response.status >= 400) {
           break;
@@ -182,6 +195,8 @@ export const fetchHtmlDocument = async (
         );
       }
 
+      const { buildHtmlSourceDocument } = await documentBuilder;
+
       return {
         document: buildHtmlSourceDocument({
           url,
@@ -195,23 +210,29 @@ export const fetchHtmlDocument = async (
         blockedSignals
       };
     } catch (error) {
-      const normalizedError =
-        error instanceof HtmlFetchError
-          ? error
-          : new HtmlFetchError(
-              error instanceof Error && error.name === "AbortError"
-                ? "HTML request timed out."
-                : error instanceof Error
-                  ? error.message
-                  : "HTML request failed.",
-              error instanceof Error && error.name === "AbortError" ? "timeout" : "unreachable"
-            );
-
-      if (!shouldRetry(normalizedError, attempt, options.retries)) {
-        throw normalizedError;
+      if (error instanceof HtmlFetchError) {
+        throw error;
       }
 
-      await sleep(250 * (attempt + 1));
+      if (timeout.signal.aborted || isAbortError(error)) {
+        throw new HtmlFetchError(
+          options.signal?.aborted && !timeout.timedOut()
+            ? "HTML request was cancelled or ran out of request time."
+            : "HTML request timed out.",
+          "timeout"
+        );
+      }
+
+      const connectionError = new HtmlFetchError(
+        error instanceof Error ? error.message : "HTML request failed.",
+        "unreachable"
+      );
+
+      if (!(error instanceof ConnectionFailure) || attempt >= maxRetries) {
+        throw connectionError;
+      }
+
+      await sleep(250);
     } finally {
       timeout.cleanup();
     }

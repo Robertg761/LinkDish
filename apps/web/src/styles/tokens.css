@@ -1,3 +1,17 @@
+/*
+ * LinkDish design tokens — v2 ("warm editorial kitchen").
+ *
+ * Layers:
+ *   1. Semantic tokens (--color-bg, --color-ink, --color-primary, ...) with a light
+ *      theme on :root and a dark theme applied either by the OS preference (unless the
+ *      person picked Light) or by an explicit data-theme="dark" on <html>.
+ *   2. Legacy aliases (--color-accent, --color-text, --color-muted, ...) that point at
+ *      the semantic tokens so older CSS keeps rendering correctly in both themes.
+ *
+ * Feature CSS must only use tokens — never hard-coded hex/rgba colors.
+ * Translucent variants: color-mix(in srgb, var(--color-x) 70%, transparent).
+ */
+
 @font-face {
   font-display: swap;
   font-family: "Fraunces";
@@ -22,97 +36,452 @@
   src: url("/fonts/Fraunces-SemiBoldItalic.woff2") format("woff2");
 }
 
+/* ------------------------------------------------------------------------ */
+/* Theme-independent tokens                                                  */
+/* ------------------------------------------------------------------------ */
 :root {
-  /* Colors – core palette */
-  --color-accent: #29443b;
-  --color-accent-rgb: 41, 68, 59;
-  --color-accent-hover: #1e322b;
-  --color-accent-soft: #dde7df;
-  --color-accent-soft-hover: #cbd9ce;
-  --color-background: #f4efe7;
-  --color-border: #ddd2c3;
-  --color-border-rgb: 221, 210, 195;
-  --color-canvas: #fbf7f0;
-  --color-surface: #fffdf8;
-  --color-surface-muted: #efe7da;
-  --color-surface-subtle: #f1eadf;
-  --color-muted: #6e685f;
-  --color-muted-rgb: 110, 104, 95;
-  --color-text: #1f211d;
-  --color-text-rgb: 31, 33, 29;
-
-  --color-danger: #9a523f;
-  --color-danger-bg: #f2d8d2;
-  --color-danger-bg-hover: #e8c4bc;
-  --color-danger-text: #8b2e23;
-  --color-danger-text-rgb: 139, 46, 35;
-  --color-danger-hover: #72241b;
-
-  --color-white: #ffffff;
-
-  --color-placeholder: rgba(var(--color-muted-rgb), 0.6);
-  --color-focus-ring: rgba(var(--color-accent-rgb), 0.08);
-  --color-focus-ring-strong: rgba(41, 68, 59, 0.12);
-  --color-accent-border-tint: rgba(var(--color-accent-rgb), 0.18);
-  --color-danger-border-subtle: rgba(var(--color-danger-text-rgb), 0.1);
-  --color-danger-border: rgba(var(--color-danger-text-rgb), 0.15);
-  --color-topbar-border: rgba(var(--color-border-rgb), 0.78);
-  --color-scan-backdrop: rgba(31, 28, 24, 0.28);
-  --color-editor-backdrop: rgba(35, 31, 27, 0.42);
-
   /* Typography */
   --font-family-serif: "Fraunces", Georgia, Cambria, "Times New Roman", Times, serif;
   --font-family-sans:
     -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif,
     "Apple Color Emoji", "Segoe UI Emoji";
-  --text-display: 40px;
-  --text-display-line-height: 1.1;
-  --text-display-letter-spacing: -1px;
-  --text-headline: 31px;
-  --text-headline-line-height: 1.16;
-  --text-headline-letter-spacing: -0.5px;
-  --text-title: 22px;
-  --text-title-line-height: 1.27;
-  --text-title-letter-spacing: -0.2px;
-  --text-body: 16px;
-  --text-body-line-height: 1.5;
-  --text-small: 14px;
-  --text-small-line-height: 1.43;
-  --text-label: 12px;
-  --text-label-line-height: 1.33;
-  --text-label-letter-spacing: 1.2px;
+  --font-family-mono:
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --font-display: var(--font-family-serif);
+  --font-ui: var(--font-family-sans);
 
-  /* Spacing scale */
-  --space-xs: 4px;
-  --space-sm: 8px;
-  --space-md: 12px;
-  --space-lg: 16px;
-  --space-xl: 20px;
-  --space-xxl: 24px;
-  --space-xxxl: 32px;
+  --font-weight-regular: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+  --font-weight-heavy: 800;
+
+  /* Type scale — display is fluid; everything else is fixed for UI rhythm. */
+  --text-display: clamp(2.375rem, 1.7rem + 2.6vw, 3.5rem);
+  --text-display-line-height: 1;
+  --text-display-letter-spacing: -0.035em;
+  --text-headline: clamp(1.875rem, 1.55rem + 1.2vw, 2.5rem);
+  --text-headline-line-height: 1.05;
+  --text-headline-letter-spacing: -0.03em;
+  --text-title: 1.375rem;
+  --text-title-line-height: 1.25;
+  --text-title-letter-spacing: -0.015em;
+  --text-title-sm: 1.125rem;
+  --text-title-sm-line-height: 1.3;
+  --text-body-lg: 1.0625rem;
+  --text-body-lg-line-height: 1.55;
+  --text-body: 1rem;
+  --text-body-line-height: 1.5;
+  --text-small: 0.875rem;
+  --text-small-line-height: 1.43;
+  --text-caption: 0.8125rem;
+  --text-caption-line-height: 1.38;
+  --text-label: 0.75rem;
+  --text-label-line-height: 1.33;
+  --text-label-letter-spacing: 0.08em;
+
+  /* Spacing scale (4px grid). Named aliases kept for older CSS. */
+  --space-0: 0;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 28px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+  --space-xs: var(--space-1);
+  --space-sm: var(--space-2);
+  --space-md: var(--space-3);
+  --space-lg: var(--space-4);
+  --space-xl: var(--space-5);
+  --space-xxl: var(--space-6);
+  --space-xxxl: var(--space-8);
 
   /* Layout */
   --max-width-content: 720px;
   --max-width-grid: 1100px;
+  --max-width-wide: 1240px;
+  --page-gutter: 16px;
+  --topbar-height: 56px;
+  --tabbar-height: 64px;
+  --rail-width: 248px;
+  /* Space that page content must leave at the bottom so the phone tab bar never
+     covers it. The shell sets it to 0 on desktop where the rail is used instead. */
+  --app-bottom-inset: calc(var(--tabbar-height) + env(safe-area-inset-bottom, 0px));
+  /* How far the raised Add button pokes above the tab bar. Full-width floating UI (the timer
+     dock) adds it so it never touches the button; 0 where there is no tab bar. */
+  --app-fab-clearance: 24px;
 
   /* Border radii */
   --radius-xs: 8px;
   --radius-sm: 12px;
   --radius-md: 16px;
   --radius-lg: 24px;
-  --radius-card: var(--radius-md);
-  --radius-button: var(--radius-sm);
-  --radius-input: var(--radius-sm);
+  --radius-xl: 28px;
+  --radius-card: 20px;
+  --radius-button: 14px;
+  --radius-input: 14px;
+  --radius-sheet: 28px;
   --radius-pill: 9999px;
 
-  /* Shadows */
-  --color-shadow-rgb: 93, 86, 75;
-  --shadow-soft: 0 1px 2px rgba(93, 86, 75, 0.06), 0 4px 12px rgba(93, 86, 75, 0.07);
-  --shadow-premium: 0 2px 4px rgba(93, 86, 75, 0.05), 0 12px 28px rgba(93, 86, 75, 0.1);
-  --shadow-button: 0 1px 2px rgba(41, 68, 59, 0.1), 0 4px 10px rgba(41, 68, 59, 0.16);
-  --shadow-topbar: 0 4px 16px rgba(var(--color-shadow-rgb), 0.05);
+  /* Motion */
+  --duration-instant: 90ms;
+  --duration-fast: 150ms;
+  --duration-base: 220ms;
+  --duration-slow: 280ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
+  --transition-fast: var(--duration-fast) var(--ease-standard);
+  --transition-normal: var(--duration-base) var(--ease-standard);
+  --transition-slow: var(--duration-slow) var(--ease-out);
 
-  /* Transitions */
-  --transition-fast: 0.15s ease;
-  --transition-normal: 0.25s ease;
+  /* Z-index scale. Anything opened from cook mode (a sheet, dialog, menu or toast)
+     must sit above --z-immersive, so cook mode stays below every modal layer. */
+  --z-raised: 1;
+  --z-sticky: 10;
+  --z-dropdown: 30;
+  --z-nav: 100;
+  --z-fab: 110;
+  --z-immersive: 200;
+  --z-sheet: 300;
+  --z-dialog: 400;
+  --z-popover: 450;
+  --z-toast: 500;
+  --z-overlay: 600;
+}
+
+/* ------------------------------------------------------------------------ */
+/* Light theme (default)                                                     */
+/* ------------------------------------------------------------------------ */
+:root {
+  color-scheme: light;
+
+  /* Surfaces */
+  --color-bg: #f4efe7;
+  --color-canvas: #fbf7f0;
+  --color-surface: #fffdf8;
+  --color-surface-raised: #fffefb;
+  --color-surface-sunken: #efe7da;
+  --color-surface-subtle: #f1eadf;
+  /* Tinted fill for chips, icon tiles and small controls on a surface. */
+  --color-surface-tint: #efe7da;
+
+  /* Ink. Every text color clears WCAG AA (4.5:1) on bg, canvas, surface, raised, sunken and
+     tint in both themes; ink-subtle is the quietest text allowed. */
+  --color-ink: #1f211d;
+  --color-ink-muted: #625c53;
+  --color-ink-subtle: #6f675c;
+  --color-ink-inverse: #fffdf8;
+
+  /* Lines. border / border-subtle are decorative dividers; border-strong is the boundary of a
+     control (field outline, unchecked tick box, off switch) and keeps 3:1 on every surface. */
+  --color-border: #ddd2c3;
+  --color-border-subtle: #e8dfd2;
+  --color-border-strong: #8a7f6f;
+
+  /* Brand */
+  --color-primary: #29443b;
+  --color-primary-hover: #1f352e;
+  --color-primary-pressed: #182a24;
+  --color-on-primary: #fffdf8;
+  --color-primary-soft: #dde7df;
+  --color-primary-soft-hover: #cbd9ce;
+  --color-on-primary-soft: #29443b;
+
+  --color-tomato: #b95233;
+  --color-tomato-hover: #a2462a;
+  --color-on-tomato: #fffdf8;
+  --color-tomato-soft: #f3ddd3;
+  --color-on-tomato-soft: #8e3b22;
+  /* Tomato for small text (eyebrows, labels): the fill color is 4.25:1 on bg. */
+  --color-tomato-ink: #a4462a;
+
+  --color-butter: #e9bd5a;
+  --color-butter-soft: #f7e9c8;
+  --color-on-butter: #3b2f12;
+  --color-on-butter-soft: #5c4613;
+
+  /* Status */
+  --color-success: #2f6b4a;
+  --color-success-soft: #dcebdf;
+  --color-warning: #8a5d0c;
+  --color-warning-soft: #f7e9c8;
+  --color-danger: #a23a2a;
+  --color-danger-hover: #7f2a1e;
+  --color-on-danger: #fffdf8;
+  --color-danger-soft: #f2d8d2;
+  --color-danger-soft-hover: #e8c4bc;
+  --color-on-danger-soft: #8b2e23;
+
+  /* Interaction */
+  --color-focus: #29443b;
+  --color-focus-ring: color-mix(in srgb, var(--color-primary) 10%, transparent);
+  --color-focus-ring-strong: color-mix(in srgb, var(--color-primary) 16%, transparent);
+  --color-state-hover: color-mix(in srgb, var(--color-ink) 5%, transparent);
+  --color-state-pressed: color-mix(in srgb, var(--color-ink) 9%, transparent);
+  --color-selection: color-mix(in srgb, var(--color-butter) 55%, transparent);
+  --color-scrim: rgba(31, 28, 24, 0.42);
+  /* Frosted layers over content (cook footer, floating panels): opaque enough that big type
+     never ghosts through. The app's top bar and tab bar are solid (--color-bar). */
+  --color-overlay: color-mix(in srgb, var(--color-canvas) 96%, transparent);
+  /* Several fields have no visible label, so the placeholder is real text (≥ 4.5:1). */
+  --color-placeholder: var(--color-ink-subtle);
+  --color-skeleton: #ebe3d6;
+  --color-skeleton-shine: #f6f1e8;
+
+  /* Inverse surface (toasts, tooltips): dark on light theme, cream on dark theme. */
+  --color-inverse-surface: #262823;
+  --color-on-inverse: #fffdf8;
+  --color-inverse-primary: #e9bd5a;
+
+  /* Recipe image placeholder tint and monogram colors */
+  --color-image-placeholder: #e8e0d2;
+  --color-monogram-bg: var(--color-primary-soft);
+  --color-monogram-ink: var(--color-primary);
+
+  /* Switch: a light thumb in both themes on a track that keeps 3:1 against the surface. */
+  --color-switch-on: var(--color-primary);
+  --color-switch-thumb: #fffefb;
+
+  /* Shadows */
+  --shadow-color: 93, 86, 75;
+  --shadow-xs: 0 1px 2px rgba(var(--shadow-color), 0.07);
+  --shadow-sm:
+    0 1px 2px rgba(var(--shadow-color), 0.06), 0 4px 12px rgba(var(--shadow-color), 0.07);
+  --shadow-md:
+    0 2px 4px rgba(var(--shadow-color), 0.05), 0 12px 28px rgba(var(--shadow-color), 0.1);
+  --shadow-lg:
+    0 2px 6px rgba(var(--shadow-color), 0.07), 0 22px 60px rgba(var(--shadow-color), 0.16);
+  --shadow-primary: 0 1px 2px rgba(41, 68, 59, 0.12), 0 6px 16px rgba(41, 68, 59, 0.18);
+  --shadow-tomato: 0 1px 2px rgba(185, 82, 51, 0.22), 0 6px 16px rgba(185, 82, 51, 0.24);
+  --shadow-nav: 0 -1px 0 var(--color-border-subtle), 0 -8px 28px rgba(var(--shadow-color), 0.06);
+
+  /* Legacy RGB triplets (prefer color-mix with semantic tokens in new CSS). */
+  --color-accent-rgb: 41, 68, 59;
+  --color-border-rgb: 221, 210, 195;
+  --color-muted-rgb: 98, 92, 83;
+  --color-text-rgb: 31, 33, 29;
+  --color-danger-text-rgb: 139, 46, 35;
+  --color-shadow-rgb: var(--shadow-color);
+}
+
+/* ------------------------------------------------------------------------ */
+/* Dark theme — warm charcoal, cream ink, lifted sage primary.               */
+/* Applied by the OS preference unless the person chose Light, or forced by */
+/* data-theme="dark". Both blocks must stay identical. Screens only: paper  */
+/* is white, so print always resolves the light palette (cream ink on white */
+/* paper printed an almost blank page).                                     */
+/* ------------------------------------------------------------------------ */
+@media screen and (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+
+    --color-bg: #1a1816;
+    --color-canvas: #1f1d1a;
+    --color-surface: #24221e;
+    --color-surface-raised: #2c2925;
+    --color-surface-sunken: #151311;
+    --color-surface-subtle: #2a2723;
+    --color-surface-tint: #34302b;
+
+    --color-ink: #f3ece0;
+    --color-ink-muted: #bcb3a5;
+    --color-ink-subtle: #a39b8e;
+    --color-ink-inverse: #1a1816;
+
+    --color-border: #3a3631;
+    --color-border-subtle: #2f2c28;
+    --color-border-strong: #807a70;
+
+    --color-primary: #a9cbb9;
+    --color-primary-hover: #bdd9ca;
+    --color-primary-pressed: #cfe3d7;
+    --color-on-primary: #13241d;
+    --color-primary-soft: #2a3a33;
+    --color-primary-soft-hover: #334740;
+    --color-on-primary-soft: #cfe3d7;
+
+    --color-tomato: #e0795a;
+    --color-tomato-hover: #ea8c6f;
+    --color-on-tomato: #2a120a;
+    --color-tomato-soft: #3d2620;
+    --color-on-tomato-soft: #f2b9a4;
+    --color-tomato-ink: #e8876b;
+
+    --color-butter: #e9bd5a;
+    --color-butter-soft: #3a3020;
+    --color-on-butter: #2a200a;
+    --color-on-butter-soft: #f2d387;
+
+    --color-success: #8fd0a8;
+    --color-success-soft: #22352a;
+    --color-warning: #f0c76e;
+    --color-warning-soft: #3a3020;
+    --color-danger: #f19a86;
+    --color-danger-hover: #f6b2a2;
+    --color-on-danger: #2a100b;
+    --color-danger-soft: #432621;
+    --color-danger-soft-hover: #52302a;
+    --color-on-danger-soft: #f3c9bd;
+
+    --color-focus: #a9cbb9;
+    --color-state-hover: color-mix(in srgb, var(--color-ink) 7%, transparent);
+    --color-state-pressed: color-mix(in srgb, var(--color-ink) 12%, transparent);
+    --color-selection: color-mix(in srgb, var(--color-butter) 40%, transparent);
+    --color-scrim: rgba(6, 5, 4, 0.62);
+    --color-overlay: color-mix(in srgb, var(--color-canvas) 96%, transparent);
+    --color-skeleton: #2b2824;
+    --color-skeleton-shine: #36322d;
+
+    --color-inverse-surface: #f3ece0;
+    --color-on-inverse: #1f211d;
+    --color-inverse-primary: #29443b;
+
+    --color-image-placeholder: #2c2925;
+    --color-switch-on: #568470;
+    --color-switch-thumb: #f3ece0;
+
+    --shadow-color: 0, 0, 0;
+    --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.35);
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 14px rgba(0, 0, 0, 0.28);
+    --shadow-md: 0 2px 4px rgba(0, 0, 0, 0.3), 0 12px 32px rgba(0, 0, 0, 0.38);
+    --shadow-lg: 0 2px 6px rgba(0, 0, 0, 0.35), 0 24px 64px rgba(0, 0, 0, 0.5);
+    --shadow-primary: 0 1px 2px rgba(0, 0, 0, 0.35), 0 6px 16px rgba(0, 0, 0, 0.3);
+    --shadow-tomato: 0 2px 4px rgba(0, 0, 0, 0.35), 0 10px 24px rgba(0, 0, 0, 0.35);
+    --shadow-nav: 0 -1px 0 var(--color-border), 0 -8px 28px rgba(0, 0, 0, 0.3);
+
+    --color-accent-rgb: 169, 203, 185;
+    --color-border-rgb: 58, 54, 49;
+    --color-muted-rgb: 188, 179, 165;
+    --color-text-rgb: 243, 236, 224;
+    --color-danger-text-rgb: 241, 154, 134;
+  }
+}
+
+@media screen {
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+
+    --color-bg: #1a1816;
+    --color-canvas: #1f1d1a;
+    --color-surface: #24221e;
+    --color-surface-raised: #2c2925;
+    --color-surface-sunken: #151311;
+    --color-surface-subtle: #2a2723;
+    --color-surface-tint: #34302b;
+
+    --color-ink: #f3ece0;
+    --color-ink-muted: #bcb3a5;
+    --color-ink-subtle: #a39b8e;
+    --color-ink-inverse: #1a1816;
+
+    --color-border: #3a3631;
+    --color-border-subtle: #2f2c28;
+    --color-border-strong: #807a70;
+
+    --color-primary: #a9cbb9;
+    --color-primary-hover: #bdd9ca;
+    --color-primary-pressed: #cfe3d7;
+    --color-on-primary: #13241d;
+    --color-primary-soft: #2a3a33;
+    --color-primary-soft-hover: #334740;
+    --color-on-primary-soft: #cfe3d7;
+
+    --color-tomato: #e0795a;
+    --color-tomato-hover: #ea8c6f;
+    --color-on-tomato: #2a120a;
+    --color-tomato-soft: #3d2620;
+    --color-on-tomato-soft: #f2b9a4;
+    --color-tomato-ink: #e8876b;
+
+    --color-butter: #e9bd5a;
+    --color-butter-soft: #3a3020;
+    --color-on-butter: #2a200a;
+    --color-on-butter-soft: #f2d387;
+
+    --color-success: #8fd0a8;
+    --color-success-soft: #22352a;
+    --color-warning: #f0c76e;
+    --color-warning-soft: #3a3020;
+    --color-danger: #f19a86;
+    --color-danger-hover: #f6b2a2;
+    --color-on-danger: #2a100b;
+    --color-danger-soft: #432621;
+    --color-danger-soft-hover: #52302a;
+    --color-on-danger-soft: #f3c9bd;
+
+    --color-focus: #a9cbb9;
+    --color-state-hover: color-mix(in srgb, var(--color-ink) 7%, transparent);
+    --color-state-pressed: color-mix(in srgb, var(--color-ink) 12%, transparent);
+    --color-selection: color-mix(in srgb, var(--color-butter) 40%, transparent);
+    --color-scrim: rgba(6, 5, 4, 0.62);
+    --color-overlay: color-mix(in srgb, var(--color-canvas) 96%, transparent);
+    --color-skeleton: #2b2824;
+    --color-skeleton-shine: #36322d;
+
+    --color-inverse-surface: #f3ece0;
+    --color-on-inverse: #1f211d;
+    --color-inverse-primary: #29443b;
+
+    --color-image-placeholder: #2c2925;
+    --color-switch-on: #568470;
+    --color-switch-thumb: #f3ece0;
+
+    --shadow-color: 0, 0, 0;
+    --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.35);
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 14px rgba(0, 0, 0, 0.28);
+    --shadow-md: 0 2px 4px rgba(0, 0, 0, 0.3), 0 12px 32px rgba(0, 0, 0, 0.38);
+    --shadow-lg: 0 2px 6px rgba(0, 0, 0, 0.35), 0 24px 64px rgba(0, 0, 0, 0.5);
+    --shadow-primary: 0 1px 2px rgba(0, 0, 0, 0.35), 0 6px 16px rgba(0, 0, 0, 0.3);
+    --shadow-tomato: 0 2px 4px rgba(0, 0, 0, 0.35), 0 10px 24px rgba(0, 0, 0, 0.35);
+    --shadow-nav: 0 -1px 0 var(--color-border), 0 -8px 28px rgba(0, 0, 0, 0.3);
+
+    --color-accent-rgb: 169, 203, 185;
+    --color-border-rgb: 58, 54, 49;
+    --color-muted-rgb: 188, 179, 165;
+    --color-text-rgb: 243, 236, 224;
+    --color-danger-text-rgb: 241, 154, 134;
+  }
+}
+
+/* ------------------------------------------------------------------------ */
+/* Legacy aliases — resolve to the semantic tokens above in both themes.     */
+/* New CSS should use the semantic names directly.                           */
+/* ------------------------------------------------------------------------ */
+:root {
+  --color-accent: var(--color-primary);
+  --color-accent-hover: var(--color-primary-hover);
+  --color-accent-soft: var(--color-primary-soft);
+  --color-accent-soft-hover: var(--color-primary-soft-hover);
+  --color-accent-border-tint: color-mix(in srgb, var(--color-primary) 22%, transparent);
+  --color-background: var(--color-bg);
+  --color-surface-muted: var(--color-surface-tint);
+  --color-muted: var(--color-ink-muted);
+  --color-text: var(--color-ink);
+  --color-white: var(--color-on-primary);
+
+  --color-danger-bg: var(--color-danger-soft);
+  --color-danger-bg-hover: var(--color-danger-soft-hover);
+  --color-danger-text: var(--color-on-danger-soft);
+  --color-danger-border-subtle: color-mix(in srgb, var(--color-danger) 14%, transparent);
+  --color-danger-border: color-mix(in srgb, var(--color-danger) 26%, transparent);
+
+  --color-topbar-border: color-mix(in srgb, var(--color-border) 78%, transparent);
+  --color-bar: var(--color-canvas);
+  /* Hairline between groups on raised surfaces (menus, sheet header/footer). border-subtle
+     all but vanishes on a raised dark surface; this reads in both themes. */
+  --color-divider: color-mix(in srgb, var(--color-ink) 13%, transparent);
+  --color-scan-backdrop: var(--color-scrim);
+  --color-editor-backdrop: var(--color-scrim);
+
+  --shadow-soft: var(--shadow-sm);
+  --shadow-premium: var(--shadow-md);
+  --shadow-button: var(--shadow-primary);
+  --shadow-topbar: 0 4px 16px rgba(var(--shadow-color), 0.05);
 }

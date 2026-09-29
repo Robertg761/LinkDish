@@ -11,11 +11,13 @@ const apiMocks = vi.hoisted(() => ({
   createExtractorApiClient: vi.fn(),
   createHousehold: vi.fn(),
   createHouseholdInvite: vi.fn(),
-  getHousehold: vi.fn()
+  getHousehold: vi.fn(),
+  leaveHousehold: vi.fn()
 }));
 
 const accountState = vi.hoisted(() => ({
   getAuthHeaders: vi.fn(),
+  getAuthHeadersFor: vi.fn(),
   hasLoadedAccount: true,
   isSignedIn: true,
   refreshAccount: vi.fn(),
@@ -206,6 +208,10 @@ const buildHousehold = (): HouseholdDetails => ({
 describe("HouseholdScreen billing gate", () => {
   beforeEach(() => {
     accountState.getAuthHeaders.mockReset();
+    accountState.getAuthHeadersFor.mockReset();
+    accountState.getAuthHeadersFor.mockImplementation(
+      () => () => accountState.getAuthHeaders() as Promise<Record<string, string>>
+    );
     accountState.getAuthHeaders.mockResolvedValue({
       authorization: "Bearer token"
     });
@@ -250,6 +256,8 @@ describe("HouseholdScreen billing gate", () => {
     });
     shareMocks.share.mockReset();
     shareMocks.share.mockResolvedValue({ action: "sharedAction" });
+    apiMocks.leaveHousehold.mockReset();
+    apiMocks.leaveHousehold.mockResolvedValue({ household: null });
     apiMocks.createExtractorApiClient.mockReset();
     apiMocks.createExtractorApiClient.mockReturnValue({
       acceptHouseholdInvite: apiMocks.acceptHouseholdInvite,
@@ -257,9 +265,96 @@ describe("HouseholdScreen billing gate", () => {
       createHousehold: apiMocks.createHousehold,
       createHouseholdInvite: apiMocks.createHouseholdInvite,
       getHousehold: apiMocks.getHousehold,
-      leaveHousehold: vi.fn(),
+      leaveHousehold: apiMocks.leaveHousehold,
       removeHouseholdMember: vi.fn()
     });
+  });
+
+  it("asks for confirmation before leaving a household", async () => {
+    apiMocks.getHousehold.mockResolvedValue({
+      household: {
+        ...buildHousehold(),
+        members: [
+          ...buildHousehold().members,
+          {
+            email: "family@example.com",
+            joinedAt: "2026-06-02T00:00:00.000Z",
+            role: "member",
+            userId: "user_member"
+          }
+        ],
+        ownerUserId: "user_owner",
+        role: "member"
+      }
+    });
+    let renderer: ReturnType<typeof create>;
+
+    await act(async () => {
+      renderer = create(<HouseholdScreen />);
+      await flushAsyncWork();
+    });
+
+    await act(async () => {
+      (
+        renderer!.root.findByProps({ label: "Leave household" }).props as { onPress: () => void }
+      ).onPress();
+      await flushAsyncWork();
+    });
+
+    expect(apiMocks.leaveHousehold).not.toHaveBeenCalled();
+    expect(JSON.stringify(renderer!.toJSON())).toContain("Leave this household?");
+
+    await act(async () => {
+      (renderer!.root.findByProps({ label: "Stay" }).props as { onPress: () => void }).onPress();
+      await flushAsyncWork();
+    });
+
+    expect(apiMocks.leaveHousehold).not.toHaveBeenCalled();
+    expect(JSON.stringify(renderer!.toJSON())).not.toContain("Leave this household?");
+
+    await act(async () => {
+      (
+        renderer!.root.findByProps({ label: "Leave household" }).props as { onPress: () => void }
+      ).onPress();
+      await flushAsyncWork();
+    });
+    await act(async () => {
+      (renderer!.root.findByProps({ label: "Leave" }).props as { onPress: () => void }).onPress();
+      await flushAsyncWork();
+    });
+
+    expect(apiMocks.leaveHousehold).toHaveBeenCalledTimes(1);
+  });
+
+  it("closes an open leave confirmation when another account signs in", async () => {
+    apiMocks.getHousehold.mockResolvedValue({
+      household: { ...buildHousehold(), ownerUserId: "user_owner", role: "member" }
+    });
+    let renderer: ReturnType<typeof create>;
+
+    await act(async () => {
+      renderer = create(<HouseholdScreen />);
+      await flushAsyncWork();
+    });
+    await act(async () => {
+      (
+        renderer!.root.findByProps({ label: "Leave household" }).props as { onPress: () => void }
+      ).onPress();
+      await flushAsyncWork();
+    });
+    expect(JSON.stringify(renderer!.toJSON())).toContain("Leave this household?");
+
+    // Another account signs in on the phone while the confirmation is open.
+    accountState.user = { email: "next@example.com", id: "user_next" };
+    await act(async () => {
+      renderer!.update(<HouseholdScreen />);
+      await flushAsyncWork();
+    });
+
+    // Its Leave can't be pressed for the next account: the confirmation went with the last one.
+    expect(JSON.stringify(renderer!.toJSON())).not.toContain("Leave this household?");
+    expect(renderer!.root.findAllByProps({ label: "Leave" })).toHaveLength(0);
+    expect(apiMocks.leaveHousehold).not.toHaveBeenCalled();
   });
 
   it("lets server-verified Family users create a household without local RevenueCat customer info", async () => {

@@ -1,7 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
 
-import { Pool } from "pg";
-
 import { extractorApiEnv } from "../../config/env.js";
 
 import type {
@@ -10,6 +8,7 @@ import type {
   QuotaMeteringMode
 } from "../../../../../packages/api-contracts/src/index.js";
 import type { ExtractionLogContext } from "../extract/types.js";
+import type { Pool } from "pg";
 
 interface AnalyticsWriteEvent extends AnalyticsEventInput {
   accountUserHash?: string;
@@ -141,19 +140,24 @@ export const buildAnalyticsPoolSslConfig = ():
   };
 };
 
-const getPool = (): Pool => {
+/*
+ * pg is imported on first use: the /extract function only writes analytics
+ * after it has responded (waitUntil), so it should not pay for loading the
+ * driver while it boots.
+ */
+const getPool = async (): Promise<Pool> => {
   if (!extractorApiEnv.ANALYTICS_DATABASE_URL) {
     throw new Error("ANALYTICS_DATABASE_URL is not configured.");
   }
 
+  const { Pool: PostgresPool } = await import("pg");
   const ssl = buildAnalyticsPoolSslConfig();
 
-  pool ??= new Pool({
+  pool ??= new PostgresPool({
     connectionString: extractorApiEnv.ANALYTICS_DATABASE_URL,
-    // The extract route awaits its analytics write, so an unreachable or
-    // slow-handshaking analytics database would otherwise stall every import
-    // until the function itself times out. Fail fast and let the caller's
-    // catch drop the event instead.
+    // An unreachable or slow-handshaking analytics database must not hold a
+    // function open (the write runs after the response, but still inside the
+    // invocation). Fail fast and let the caller's catch drop the event.
     connectionTimeoutMillis: 5_000,
     max: 4,
     ...(ssl ? { ssl } : {})
@@ -167,7 +171,9 @@ const ensureSchema = async (): Promise<void> => {
     return;
   }
 
-  await getPool().query(`
+  const analyticsPool = await getPool();
+
+  await analyticsPool.query(`
     create table if not exists analytics_events (
       id uuid primary key,
       occurred_at timestamptz not null,
@@ -345,10 +351,11 @@ export const writeAnalyticsEvents = async (events: AnalyticsWriteEvent[]): Promi
   }
 
   await ensureSchema();
+  const analyticsPool = await getPool();
   let accepted = 0;
 
   for (const event of events) {
-    const insertResult = await getPool().query(
+    const insertResult = await analyticsPool.query(
       `
         insert into analytics_events (
           id, occurred_at, platform, event_name, anonymous_id, session_id, account_user_hash,
@@ -390,7 +397,7 @@ export const writeAnalyticsEvents = async (events: AnalyticsWriteEvent[]): Promi
     pushMemoryEvent(event);
 
     if (event.eventName === "client_error") {
-      await getPool().query(
+      await analyticsPool.query(
         `
           insert into error_analytics (
             id, occurred_at, platform, source, severity, error_fingerprint, message_class,
@@ -439,8 +446,9 @@ export const writeExtractionAnalyticsEvent = async (
   await ensureSchema();
 
   const extraction = event.extraction;
+  const analyticsPool = await getPool();
 
-  await getPool().query(
+  await analyticsPool.query(
     `
       insert into extraction_analytics (
         id, occurred_at, platform, anonymous_id, session_id, account_user_hash, correlation_id,
@@ -476,7 +484,10 @@ export const writeExtractionAnalyticsEvent = async (
         blockedSignalCount: extraction?.blockedSignals.length ?? 0,
         browserAttempted: extraction?.browserAttempted ?? false,
         meteringMode: event.meteringMode,
-        missingFieldCount: extraction?.missingFieldCount ?? 0
+        missingFieldCount: extraction?.missingFieldCount ?? 0,
+        ...(extraction?.cacheStatus ? { cacheStatus: extraction.cacheStatus } : {}),
+        ...(extraction?.textCleanup ? { textCleanup: extraction.textCleanup } : {}),
+        ...(extraction?.fallbackHandoff ? { fallbackHandoff: extraction.fallbackHandoff } : {})
       })
     ]
   );
@@ -623,6 +634,7 @@ export const getAnalyticsDashboardSummary = async (): Promise<AnalyticsDashboard
   try {
     await ensureSchema();
 
+    const analyticsPool = await getPool();
     const [
       eventTotals,
       platformRows,
@@ -638,7 +650,7 @@ export const getAnalyticsDashboardSummary = async (): Promise<AnalyticsDashboard
       failureSessionRows,
       recentFailureRows
     ] = await Promise.all([
-      getPool().query(`
+      analyticsPool.query(`
           select
             count(*)::int as events,
             count(distinct anonymous_id)::int as unique_visitors,
@@ -646,28 +658,28 @@ export const getAnalyticsDashboardSummary = async (): Promise<AnalyticsDashboard
           from analytics_events
           where occurred_at >= now() - interval '30 days'
         `),
-      getPool().query(`
+      analyticsPool.query(`
           select platform as label, count(*)::int as count
           from analytics_events
           where occurred_at >= now() - interval '30 days'
           group by platform
           order by platform
         `),
-      getPool().query(`
+      analyticsPool.query(`
           select event_name as label, count(*)::int as count
           from analytics_events
           where occurred_at >= now() - interval '30 days'
           group by event_name
           order by event_name
         `),
-      getPool().query(`
+      analyticsPool.query(`
           select status as label, count(*)::int as count
           from extraction_analytics
           where occurred_at >= now() - interval '30 days'
           group by status
           order by status
         `),
-      getPool().query(`
+      analyticsPool.query(`
           select
             source_hostname as label,
             count(*)::int as count,
@@ -678,7 +690,7 @@ export const getAnalyticsDashboardSummary = async (): Promise<AnalyticsDashboard
           order by count desc
           limit 10
         `),
-      getPool().query(`
+      analyticsPool.query(`
           select
             count(*)::int as total,
             count(distinct coalesce(anonymous_id::text, account_user_hash))::int
@@ -688,7 +700,7 @@ export const getAnalyticsDashboardSummary = async (): Promise<AnalyticsDashboard
           where occurred_at >= now() - interval '30 days'
             and status in ('failure', 'blocked')
         `),
-      getPool().query(`
+      analyticsPool.query(`
           select coalesce(error_code, blocked_reason, 'unknown') as label, count(*)::int as count
           from extraction_analytics
           where occurred_at >= now() - interval '30 days'
@@ -696,7 +708,7 @@ export const getAnalyticsDashboardSummary = async (): Promise<AnalyticsDashboard
           group by label
           order by count desc, label
         `),
-      getPool().query(`
+      analyticsPool.query(`
           select coalesce(source_hostname, 'unknown') as label, count(*)::int as count
           from extraction_analytics
           where occurred_at >= now() - interval '30 days'
@@ -704,7 +716,7 @@ export const getAnalyticsDashboardSummary = async (): Promise<AnalyticsDashboard
           group by label
           order by count desc, label
         `),
-      getPool().query(`
+      analyticsPool.query(`
           select platform as label, count(*)::int as count
           from extraction_analytics
           where occurred_at >= now() - interval '30 days'
@@ -712,7 +724,7 @@ export const getAnalyticsDashboardSummary = async (): Promise<AnalyticsDashboard
           group by platform
           order by count desc, platform
         `),
-      getPool().query(`
+      analyticsPool.query(`
           select
             coalesce(nullif(concat_ws(' / ', app_version, build_number), ''), 'unknown') as label,
             count(*)::int as count
@@ -722,7 +734,7 @@ export const getAnalyticsDashboardSummary = async (): Promise<AnalyticsDashboard
           group by label
           order by count desc, label
         `),
-      getPool().query(`
+      analyticsPool.query(`
           select
             coalesce(
               'visitor-' || substr(md5(coalesce(anonymous_id::text, account_user_hash)), 1, 10),
@@ -736,7 +748,7 @@ export const getAnalyticsDashboardSummary = async (): Promise<AnalyticsDashboard
           order by count desc, label
           limit 20
         `),
-      getPool().query(`
+      analyticsPool.query(`
           select
             coalesce('session-' || substr(md5(session_id::text), 1, 10), 'unknown') as label,
             count(*)::int as count
@@ -747,7 +759,7 @@ export const getAnalyticsDashboardSummary = async (): Promise<AnalyticsDashboard
           order by count desc, label
           limit 20
         `),
-      getPool().query(`
+      analyticsPool.query(`
           select
             occurred_at,
             coalesce(error_code, blocked_reason, 'unknown') as reason,

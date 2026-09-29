@@ -1,0 +1,403 @@
+/* ------------------------------ Shared --------------------------------- */
+.plan-sheet-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  background: var(--color-danger-soft);
+  color: var(--color-on-danger-soft);
+  font-size: var(--text-small);
+  font-weight: 600;
+}
+
+.plan-sheet-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--color-ink-muted);
+  font-size: var(--text-small);
+}
+
+.plan-sheet-note > .icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.plan-sheet-empty {
+  padding: 24px 8px;
+  color: var(--color-ink-muted);
+  text-align: center;
+}
+
+.plan-slot-control.segmented .segmented-option {
+  padding-inline: 4px;
+}
+
+/* ------------------------------ Recipe picker -------------------------- */
+.plan-picker-sheet .sheet-body {
+  gap: 14px;
+}
+
+.plan-picker-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.plan-picker-notes-label {
+  color: var(--color-ink-subtle);
+  font-size: var(--text-caption);
+  font-weight: 800;
+  letter-spacing: var(--text-label-letter-spacing);
+  text-transform: uppercase;
+}
+
+.plan-picker-note-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.plan-note-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: 0 14px 0 11px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  background: var(--color-butter-soft);
+  color: var(--color-on-butter-soft);
+  font: inherit;
+  font-size: var(--text-small);
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    border-color var(--transition-fast),
+    transform var(--transition-fast);
+}
+
+.plan-note-chip:hover {
+  border-color: var(--color-butter);
+}
+
+.plan-note-chip:active {
+  transform: scale(0.97);
+}
+
+.plan-note-chip.is-quiet {
+  border-color: var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-ink-muted);
+}
+
+.plan-picker-custom {
+  display: flex;
+  gap: 8px;
+}
+
+.plan-picker-custom-input {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1.5px solid var(--color-border);
+  border-radius: var(--radius-input);
+  background: var(--color-surface);
+  color: var(--color-ink);
+  font: inherit;
+  font-size: 1rem;
+}
+
+.plan-picker-custom-input:focus {
+  border-color: var(--color-primary);
+  outline: none;
+  box-shadow: 0 0 0 4px var(--color-focus-ring);
+}
+
+.plan-picker-loading {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.plan-picker-none {
+  padding: 16px 4px;
+  color: var(--color-ink-muted);
+  text-align: center;
+}
+
+.plan-picker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.plan-picker-row {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr) 28px;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 68px;
+  padding: 6px 12px 6px 6px;
+  border: 1.5px solid transparent;
+  border-radius: 16px;
+  background: transparent;
+  color: var(--color-ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+@media (hover: hover) {
+  .plan-picker-row:hover {
+    background: var(--color-state-hover);
+  }
+}
+
+.plan-picker-row:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 1px;
+}
+
+.plan-picker-row.is-selected {
+  border-color: var(--color-primary);
+  background: var(--color-primary-soft);
+}
+
+.plan-picker-thumb {
+  width: 56px;
+  overflow: hidden;
+  border-radius: 12px;
+}
+
+.plan-picker-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.plan-picker-title {
+  display: -webkit-box;
+  overflow: hidden;
+  font-weight: 700;
+  line-height: 1.3;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.plan-picker-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  color: var(--color-ink-muted);
+  font-size: var(--text-caption);
+  font-variant-numeric: lining-nums tabular-nums;
+}
+
+.plan-picker-favorite {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--color-tomato);
+  font-weight: 700;
+}
+
+.plan-picker-radio {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 2px solid var(--color-border-strong);
+  border-radius: var(--radius-pill);
+  color: transparent;
+}
+
+.plan-picker-row.is-selected .plan-picker-radio {
+  border-color: var(--color-primary);
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+}
+
+.plan-picker-footer {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.plan-picker-servings {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-ink-muted);
+}
+
+.plan-picker-hint {
+  color: var(--color-ink-subtle);
+  font-size: var(--text-small);
+}
+
+/* ------------------------------ Day picker ----------------------------- */
+.plan-daypicker-week {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.plan-daypicker-heading {
+  color: var(--color-ink-muted);
+  font-family: var(--font-family-sans);
+  font-size: var(--text-label);
+  font-weight: 800;
+  letter-spacing: var(--text-label-letter-spacing);
+  text-transform: uppercase;
+}
+
+.plan-daypicker-grid,
+.plan-add-days {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.plan-daypicker-day,
+.plan-add-day {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  width: 100%;
+  min-height: 60px;
+  padding: 8px 0;
+  border: 1.5px solid var(--color-border-subtle);
+  border-radius: 14px;
+  background: var(--color-surface);
+  color: var(--color-ink);
+  font: inherit;
+  cursor: pointer;
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.plan-daypicker-day:hover:not(:disabled),
+.plan-add-day:hover {
+  border-color: var(--color-primary);
+}
+
+.plan-daypicker-day:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+.plan-daypicker-day.is-origin {
+  border-style: dashed;
+}
+
+.plan-daypicker-weekday,
+.plan-add-day-name {
+  color: var(--color-ink-muted);
+  font-size: 0.6875rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.plan-daypicker-date,
+.plan-add-day-date {
+  font-family: var(--font-family-serif);
+  font-size: 1.25rem;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.plan-daypicker-day.is-today,
+.plan-add-day.is-today {
+  border-color: var(--color-primary);
+}
+
+.plan-add-day.is-selected {
+  border-color: var(--color-primary);
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+}
+
+/* Disabled "Add to Tue" reads as unavailable, not as a muted-but-enabled button. */
+.plan-picker-add.btn:disabled {
+  border-color: transparent;
+  background: var(--color-surface-sunken);
+  box-shadow: none;
+  color: var(--color-ink-subtle);
+  opacity: 1;
+}
+
+.plan-add-day.is-today:not(.is-selected) .plan-add-day-name {
+  color: var(--color-tomato-ink);
+}
+
+.plan-add-day.is-today:not(.is-selected) {
+  box-shadow: inset 0 0 0 1px var(--color-primary);
+}
+
+.plan-add-day.is-selected .plan-add-day-name {
+  color: var(--color-on-primary);
+}
+
+.plan-add-day-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: var(--radius-pill);
+  background: transparent;
+}
+
+.plan-add-day-dot.is-visible {
+  background: var(--color-tomato);
+}
+
+.plan-add-day.is-selected .plan-add-day-dot.is-visible {
+  background: var(--color-on-primary);
+}
+
+/* ------------------------------ Add to plan ---------------------------- */
+.plan-add-field {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.plan-add-field.is-row {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.plan-add-label {
+  color: var(--color-ink);
+  font-size: var(--text-small);
+  font-weight: 800;
+}
+
+.plan-add-hint {
+  color: var(--color-ink-muted);
+  font-size: var(--text-caption);
+}

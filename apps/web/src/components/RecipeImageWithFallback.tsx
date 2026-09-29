@@ -1,18 +1,31 @@
 import React, { useEffect, useState } from "react";
 
+import { FadeImage } from "./RecipeImage";
+
 interface RecipeImageWithFallbackProps {
   src: string;
-  alt?: string;
+  alt?: string | undefined;
   imageClassName: string;
   /** Rendered when the image fails to load; typically a monogram block. */
   fallback: React.ReactNode;
+  srcSet?: string | undefined;
+  sizes?: string | undefined;
+  /** Hero image: eager + fetchpriority=high. */
+  priority?: boolean | undefined;
 }
 
+/**
+ * Plain-src image with a fallback. Prefer <RecipeImage image={recipe.image} /> in new
+ * code — it adds the proxy srcset, aspect-ratio box and monogram automatically.
+ */
 export const RecipeImageWithFallback: React.FC<RecipeImageWithFallbackProps> = ({
   src,
   alt = "",
   imageClassName,
-  fallback
+  fallback,
+  srcSet,
+  sizes,
+  priority = false
 }) => {
   const [failed, setFailed] = useState(false);
 
@@ -26,12 +39,14 @@ export const RecipeImageWithFallback: React.FC<RecipeImageWithFallbackProps> = (
   }
 
   return (
-    <img
-      className={imageClassName}
-      src={src}
+    <FadeImage
       alt={alt}
-      loading="lazy"
+      className={imageClassName}
       onError={() => setFailed(true)}
+      priority={priority}
+      sizes={sizes}
+      src={src}
+      srcSet={srcSet}
     />
   );
 };

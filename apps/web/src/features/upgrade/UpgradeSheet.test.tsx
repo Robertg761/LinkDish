@@ -1,69 +1,182 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import React from "react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { resetWebBillingAvailabilityForTests } from "../billing/billing-availability";
+import {
+  CHECKOUT_SESSION_STORAGE_KEY,
+  resetCheckoutSessionForTests
+} from "../billing/checkout-session";
+
 import { UpgradeSheetProvider, useUpgradeSheet } from "./UpgradeSheet";
 
+import type { UpgradeSheetTrigger } from "./UpgradeSheet";
+import type * as RevenueCatCheckoutModule from "../billing/revenuecat-web-sdk-checkout";
+
 const analyticsMocks = vi.hoisted(() => ({
-  trackWebEvent: vi.fn()
+  trackWebEvent: vi.fn(),
+  trackWebV2AnalyticsEvent: vi.fn()
 }));
 
 vi.mock("../../analytics/client", () => ({
-  trackWebEvent: analyticsMocks.trackWebEvent
+  trackWebEvent: analyticsMocks.trackWebEvent,
+  trackWebV2AnalyticsEvent: analyticsMocks.trackWebV2AnalyticsEvent
+}));
+
+const apiMocks = vi.hoisted(() => ({
+  createWebBillingCheckout: vi.fn(),
+  getWebBillingAvailability: vi.fn()
+}));
+
+vi.mock("../../api/client", () => ({
+  apiClient: {
+    createWebBillingCheckout: apiMocks.createWebBillingCheckout,
+    getWebBillingAvailability: apiMocks.getWebBillingAvailability
+  }
+}));
+
+const authState = vi.hoisted(() => ({
+  isAuthenticated: true,
+  plan: "free" as "free" | "plus" | "family",
+  userId: "user_1"
 }));
 
 vi.mock("../../auth/AuthProvider", () => ({
   useAuth: () => ({
-    isAuthenticated: true,
-    user: {
-      billingPlan: "free",
-      email: "cook@example.com",
-      id: "user_1"
-    }
+    isAuthenticated: authState.isAuthenticated,
+    refreshUser: vi.fn(),
+    user: authState.isAuthenticated
+      ? { billingPlan: authState.plan, email: "cook@example.com", id: authState.userId }
+      : null
   })
 }));
 
+/** The in-page checkout: off unless a test turns it on; it opens once `prepared` settles. */
+const inPageCheckout = vi.hoisted(() => ({
+  configured: false,
+  prepared: Promise.resolve(),
+  purchase: vi.fn()
+}));
+
+vi.mock("../billing/revenuecat-web-sdk-checkout", async (importOriginal) => ({
+  ...(await importOriginal<typeof RevenueCatCheckoutModule>()),
+  isRevenueCatWebSdkCheckoutConfigured: () => inPageCheckout.configured,
+  // Like the real one: loads the SDK and offerings, stops if the account changed, then opens.
+  startRevenueCatWebSdkCheckout: async ({
+    isCurrent,
+    user
+  }: {
+    isCurrent?: () => boolean;
+    user: { email: string };
+  }) => {
+    await inPageCheckout.prepared;
+
+    if (isCurrent && !isCurrent()) {
+      throw new Error("Another account signed in before checkout opened.");
+    }
+
+    inPageCheckout.purchase(user.email);
+  }
+}));
+
+const libraryMocks = vi.hoisted(() => ({
+  recipes: [] as Array<{ id: string; isStarter?: boolean }>
+}));
+
+vi.mock("../../data/library-store", () => ({
+  useSavedRecipes: () => ({
+    error: null,
+    recipes: libraryMocks.recipes,
+    retry: vi.fn(),
+    status: "ready"
+  })
+}));
+
+const cookbookOf = (saved: number, starters = 0) => [
+  ...Array.from({ length: saved }, (_, index) => ({ id: `recipe-${index}` })),
+  ...Array.from({ length: starters }, (_, index) => ({ id: `starter-${index}`, isStarter: true }))
+];
+
 const TriggerButtons = () => {
   const { requestUpgradeSheet } = useUpgradeSheet();
+  const triggers: UpgradeSheetTrigger[] = ["save_limit", "import_limit", "family_share_no_plan"];
 
   return (
     <>
-      <button onClick={() => requestUpgradeSheet("save_limit")} type="button">
-        Save limit
-      </button>
-      <button onClick={() => requestUpgradeSheet("import_limit")} type="button">
-        Import limit
-      </button>
+      {triggers.map((trigger) => (
+        <button key={trigger} onClick={() => requestUpgradeSheet(trigger)} type="button">
+          {trigger}
+        </button>
+      ))}
     </>
   );
 };
 
-const renderUpgradeHarness = () =>
-  render(
-    <MemoryRouter>
-      <UpgradeSheetProvider>
-        <TriggerButtons />
-      </UpgradeSheetProvider>
-    </MemoryRouter>
-  );
+const upgradeHarness = () => (
+  <MemoryRouter>
+    <UpgradeSheetProvider>
+      <TriggerButtons />
+    </UpgradeSheetProvider>
+  </MemoryRouter>
+);
+
+const renderUpgradeHarness = () => render(upgradeHarness());
+
+const deferred = <T,>() => {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((settle) => {
+    resolve = settle;
+  });
+  return { promise, resolve };
+};
+
+const assign = vi.fn();
 
 describe("UpgradeSheetProvider", () => {
   beforeEach(() => {
     analyticsMocks.trackWebEvent.mockReset();
+    analyticsMocks.trackWebV2AnalyticsEvent.mockReset();
+    apiMocks.createWebBillingCheckout.mockReset();
+    apiMocks.createWebBillingCheckout.mockResolvedValue({ url: "https://pay.rev.cat/test" });
+    apiMocks.getWebBillingAvailability.mockReset();
+    apiMocks.getWebBillingAvailability.mockResolvedValue({
+      managementPortalAvailable: false,
+      plans: {
+        family: { monthly: true, yearly: true },
+        plus: { monthly: true, yearly: true }
+      },
+      prices: {
+        family: { monthly: "$4.99/month", yearly: "$44.99/year" },
+        plus: { monthly: "$2.99/month", yearly: "$24.99/year" }
+      },
+      webCheckoutEnabled: true
+    });
+    authState.isAuthenticated = true;
+    authState.plan = "free";
+    authState.userId = "user_1";
+    inPageCheckout.configured = false;
+    inPageCheckout.prepared = Promise.resolve();
+    inPageCheckout.purchase.mockReset();
+    libraryMocks.recipes = cookbookOf(15);
+    resetWebBillingAvailabilityForTests();
+    resetCheckoutSessionForTests();
     sessionStorage.clear();
+    assign.mockReset();
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: { assign, pathname: "/" }
+    });
   });
 
   it("shows a sheet once per trigger per session and never stacks sheets", async () => {
     renderUpgradeHarness();
 
-    fireEvent.click(screen.getByRole("button", { name: "Save limit" }));
+    fireEvent.click(screen.getByRole("button", { name: "save_limit" }));
 
-    expect(
-      await screen.findByRole("dialog", { name: "Your free cookbook is full." })
-    ).toBeInTheDocument();
-    expect(screen.getByText(/You have 15 recipes saved on Free/u)).toBeInTheDocument();
-    expect(screen.getByText("Better recovery for difficult recipe pages")).toBeInTheDocument();
+    const dialog = await screen.findByRole("dialog", { name: "Your free cookbook is full." });
+    expect(dialog).toHaveTextContent(/15 of 15 saved on Free\./u);
+    expect(within(dialog).getByText("Unlimited saved recipes")).toBeInTheDocument();
     expect(analyticsMocks.trackWebEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         eventName: "upgrade_viewed",
@@ -73,21 +186,226 @@ describe("UpgradeSheetProvider", () => {
       })
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Import limit" }));
+    fireEvent.click(screen.getByRole("button", { name: "import_limit" }));
     expect(screen.getAllByRole("dialog")).toHaveLength(1);
 
-    fireEvent.click(screen.getByRole("button", { name: "Dismiss upgrade" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Not now" }));
     await waitFor(() => {
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Save limit" }));
+    fireEvent.click(screen.getByRole("button", { name: "save_limit" }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Import limit" }));
+    fireEvent.click(screen.getByRole("button", { name: "import_limit" }));
     expect(
       await screen.findByRole("dialog", { name: "More room for the recipes worth keeping." })
     ).toBeInTheDocument();
     expect(analyticsMocks.trackWebEvent).toHaveBeenCalledTimes(2);
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+  });
+
+  it("matches the Cookbook meter: nearly full with the live count, starters explained", async () => {
+    libraryMocks.recipes = cookbookOf(13, 3);
+    renderUpgradeHarness();
+
+    fireEvent.click(screen.getByRole("button", { name: "save_limit" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Your cookbook is nearly full." });
+    expect(dialog).toHaveTextContent(
+      "You've saved 13 of 15 free recipes, so there's room for 2 more. 3 starter recipes don't count."
+    );
+    expect(dialog).not.toHaveTextContent(/is full/u);
+    expect(
+      within(dialog).getByText("Your 13 saved recipes stay right where they are")
+    ).toBeVisible();
+  });
+
+  it("tells an over-the-limit cook the true count instead of clamping it", async () => {
+    libraryMocks.recipes = cookbookOf(17);
+    renderUpgradeHarness();
+
+    fireEvent.click(screen.getByRole("button", { name: "save_limit" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Your free cookbook is full." });
+    expect(dialog).toHaveTextContent(
+      "17 of 15 saved on Free (2 over the limit, and they all stay)."
+    );
+  });
+
+  it("preselects yearly and the plan that fits the trigger, then checks out from the sheet", async () => {
+    renderUpgradeHarness();
+
+    fireEvent.click(screen.getByRole("button", { name: "family_share_no_plan" }));
+    const dialog = await screen.findByRole("dialog", { name: "Share the kitchen with Family." });
+
+    expect(within(dialog).getByRole("radio", { name: "Yearly" })).toHaveAttribute(
+      "aria-checked",
+      "true"
+    );
+    expect(within(dialog).getByRole("radio", { name: "Family, $44.99/year" })).toBeChecked();
+
+    fireEvent.click(within(dialog).getByRole("radio", { name: "Monthly" }));
+    expect(within(dialog).getByRole("radio", { name: "Family, $4.99/month" })).toBeChecked();
+
+    const upgrade = within(dialog).getByRole("button", { name: "Upgrade to Family" });
+    await waitFor(() => expect(upgrade).toBeEnabled());
+    fireEvent.click(upgrade);
+
+    await waitFor(() => {
+      expect(apiMocks.createWebBillingCheckout).toHaveBeenCalledWith({
+        period: "monthly",
+        plan: "family"
+      });
+    });
+    expect(assign).toHaveBeenCalledWith("https://pay.rev.cat/test");
+    expect(JSON.parse(sessionStorage.getItem(CHECKOUT_SESSION_STORAGE_KEY) ?? "{}")).toMatchObject({
+      plan: "family",
+      trigger: "household"
+    });
+  });
+
+  it("sends signed-out cooks to sign in with the chosen plan", async () => {
+    authState.isAuthenticated = false;
+    renderUpgradeHarness();
+
+    fireEvent.click(screen.getByRole("button", { name: "import_limit" }));
+    const dialog = await screen.findByRole("dialog", {
+      name: "More room for the recipes worth keeping."
+    });
+
+    expect(within(dialog).getByRole("radio", { name: "Plus, $24.99/year" })).toBeChecked();
+    expect(within(dialog).getByRole("link", { name: "Sign in to upgrade" })).toHaveAttribute(
+      "href",
+      "/account?upgrade=plus"
+    );
+
+    fireEvent.click(within(dialog).getByRole("radio", { name: "Family, $44.99/year" }));
+    expect(within(dialog).getByRole("link", { name: "Sign in to upgrade" })).toHaveAttribute(
+      "href",
+      "/account?upgrade=family"
+    );
+    await waitFor(() => expect(apiMocks.getWebBillingAvailability).toHaveBeenCalled());
+  });
+
+  it("closes a sheet opened for one account when another signs in", async () => {
+    const view = renderUpgradeHarness();
+
+    fireEvent.click(screen.getByRole("button", { name: "import_limit" }));
+    expect(
+      await screen.findByRole("dialog", { name: "More room for the recipes worth keeping." })
+    ).toBeInTheDocument();
+
+    // Clerk answers with a different (free) account than the cached one.
+    authState.userId = "user_2";
+    view.rerender(upgradeHarness());
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    // The new account can still be offered a sheet of its own.
+    fireEvent.click(screen.getByRole("button", { name: "family_share_no_plan" }));
+    expect(
+      await screen.findByRole("dialog", { name: "Share the kitchen with Family." })
+    ).toBeInTheDocument();
+
+    authState.isAuthenticated = false;
+    view.rerender(upgradeHarness());
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    // Signing back in doesn't bring back a sheet that closed on the way out.
+    authState.isAuthenticated = true;
+    view.rerender(upgradeHarness());
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  describe("a checkout started from the sheet when another account signs in or out", () => {
+    const startFamilyCheckout = async () => {
+      fireEvent.click(screen.getByRole("button", { name: "family_share_no_plan" }));
+      const dialog = await screen.findByRole("dialog", { name: "Share the kitchen with Family." });
+      const upgrade = within(dialog).getByRole("button", { name: "Upgrade to Family" });
+      await waitFor(() => expect(upgrade).toBeEnabled());
+      fireEvent.click(upgrade);
+    };
+
+    it.each([
+      ["another account signs straight in", () => void (authState.userId = "user_2")],
+      ["the account signs out", () => void (authState.isAuthenticated = false)]
+    ])("never opens the hosted checkout when %s", async (_case, switchAccount) => {
+      const checkout = deferred<{ url: string }>();
+      apiMocks.createWebBillingCheckout.mockReturnValue(checkout.promise);
+      const view = renderUpgradeHarness();
+
+      await startFamilyCheckout();
+      await waitFor(() => expect(apiMocks.createWebBillingCheckout).toHaveBeenCalled());
+
+      // The sheet (and the checkout hook inside it) goes away with the account it was for.
+      switchAccount();
+      view.rerender(upgradeHarness());
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+      await act(async () => {
+        checkout.resolve({ url: "https://pay.rev.cat/user_1-checkout" });
+        await checkout.promise;
+      });
+
+      expect(assign).not.toHaveBeenCalled();
+      expect(sessionStorage.getItem(CHECKOUT_SESSION_STORAGE_KEY)).toBeNull();
+    });
+
+    it("never opens the in-page checkout for the account that signed in since", async () => {
+      const prepared = deferred<undefined>();
+      inPageCheckout.configured = true;
+      inPageCheckout.prepared = prepared.promise;
+      const view = renderUpgradeHarness();
+
+      await startFamilyCheckout();
+
+      authState.userId = "user_2";
+      view.rerender(upgradeHarness());
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+      await act(async () => {
+        prepared.resolve(undefined);
+        await prepared.promise;
+      });
+
+      expect(inPageCheckout.purchase).not.toHaveBeenCalled();
+      expect(analyticsMocks.trackWebV2AnalyticsEvent).not.toHaveBeenCalledWith(
+        expect.objectContaining({ name: "upgrade_purchased" })
+      );
+    });
+
+    it("still opens the checkout while the same account stays signed in", async () => {
+      const checkout = deferred<{ url: string }>();
+      apiMocks.createWebBillingCheckout.mockReturnValue(checkout.promise);
+      const view = renderUpgradeHarness();
+
+      await startFamilyCheckout();
+      await waitFor(() => expect(apiMocks.createWebBillingCheckout).toHaveBeenCalled());
+      view.rerender(upgradeHarness());
+
+      await act(async () => {
+        checkout.resolve({ url: "https://pay.rev.cat/user_1-checkout" });
+        await checkout.promise;
+      });
+
+      expect(assign).toHaveBeenCalledWith("https://pay.rev.cat/user_1-checkout");
+    });
+  });
+
+  it("stays quiet for paid plans", () => {
+    authState.plan = "plus";
+    renderUpgradeHarness();
+
+    fireEvent.click(screen.getByRole("button", { name: "save_limit" }));
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(analyticsMocks.trackWebEvent).not.toHaveBeenCalled();
   });
 });

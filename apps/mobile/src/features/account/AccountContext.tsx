@@ -1,4 +1,5 @@
 import { ExtractorApiError, createExtractorApiClient } from "@linkdish/api-client";
+import { getTokenSessionId } from "@linkdish/utils";
 import * as SecureStore from "expo-secure-store";
 import React, {
   createContext,
@@ -13,6 +14,7 @@ import React, {
 
 import { mobileEnv } from "../../config/env";
 
+import { AccountChangedError } from "./account-changed-error";
 import { useClerkSession } from "./ClerkSessionContext";
 
 import type {
@@ -27,6 +29,13 @@ interface AccountContextValue {
   clearAccountError: () => void;
   deleteAccount: (confirmEmail: string) => Promise<void>;
   getAuthHeaders: () => Promise<Record<string, string>>;
+  /**
+   * Headers for requests made for account `userId` only: once the token is in hand, they are
+   * handed over only while that account is still the one loaded, and a Clerk token only if it is
+   * for the session the account was loaded under. Otherwise nothing is sent: the request rejects
+   * with {@link AccountChangedError}.
+   */
+  getAuthHeadersFor: (userId: string) => () => Promise<Record<string, string>>;
   getAuthToken: () => Promise<string | null>;
   hasLoadedAccount: boolean;
   isAccountBusy: boolean;
@@ -48,6 +57,7 @@ interface AccountContextValue {
 }
 
 const AccountContext = createContext<AccountContextValue | null>(null);
+
 const SESSION_TOKEN_STORAGE_KEY = "linkdish.account.sessionToken";
 const defaultAuthConfig: AuthConfigResponse = {
   authMode: "legacy_email_code",
@@ -102,6 +112,22 @@ export const AccountProvider = ({ children }: PropsWithChildren) => {
   const [isAccountBusy, setIsAccountBusy] = useState(false);
   const [sessionToken, setSessionToken] = useState<string | null>(null);
   const [user, setUser] = useState<AccountUser | null>(null);
+  /** The Clerk session `user` was loaded for (null: not loaded through Clerk). */
+  const [userClerkSessionId, setUserClerkSessionId] = useState<string | null>(null);
+  const clerkSessionId = clerkSession.isSignedIn ? clerkSession.sessionId : null;
+  const clerkSessionIdRef = useRef(clerkSessionId);
+  clerkSessionIdRef.current = clerkSessionId;
+  // Clerk switched straight to another session (or ended it) while `user` is the last one's, and
+  // requests already carry the new session's token: nobody is shown (or acted for) as signed in
+  // until the new session's account is loaded.
+  const switchingAccount =
+    user !== null && userClerkSessionId !== null && clerkSessionId !== userClerkSessionId;
+  const accountUser = switchingAccount ? null : user;
+  /** Who is shown as signed in now, for work that finishes after an account switch. */
+  const accountUserRef = useRef(accountUser);
+  accountUserRef.current = accountUser;
+  const userClerkSessionIdRef = useRef(userClerkSessionId);
+  userClerkSessionIdRef.current = userClerkSessionId;
 
   const applySessionToken = useCallback(async (nextSessionToken: string | null) => {
     if (nextSessionToken) {
@@ -130,6 +156,27 @@ export const AccountProvider = ({ children }: PropsWithChildren) => {
         }
       : {};
   }, [getAuthToken]);
+
+  const getAuthHeadersFor = useCallback(
+    (userId: string) => async () => {
+      const headers = await getAuthHeaders();
+      const tokenSession = getTokenSessionId(
+        /^Bearer (.+)$/u.exec(headers.authorization ?? "")?.[1]
+      );
+
+      // Checked with the token in hand: Clerk may have switched to another account's session
+      // while it was fetched, before that account is loaded (or shown) here.
+      if (
+        accountUserRef.current?.id !== userId ||
+        (tokenSession !== null && tokenSession !== userClerkSessionIdRef.current)
+      ) {
+        throw new AccountChangedError();
+      }
+
+      return headers;
+    },
+    [getAuthHeaders]
+  );
 
   const loadAuthConfig = useCallback(async (): Promise<LoadedAuthConfig> => {
     try {
@@ -174,6 +221,7 @@ export const AccountProvider = ({ children }: PropsWithChildren) => {
         }).getSession();
 
         setUser(session.authenticated ? session.user : null);
+        setUserClerkSessionId(session.authenticated ? clerkSession.sessionId : null);
         return;
       }
 
@@ -201,6 +249,7 @@ export const AccountProvider = ({ children }: PropsWithChildren) => {
 
       setSessionToken(storedSessionToken);
       setUser(session.user);
+      setUserClerkSessionId(null);
     },
     [applySessionToken, clerkSession]
   );
@@ -242,41 +291,79 @@ export const AccountProvider = ({ children }: PropsWithChildren) => {
     };
   }, [clerkSession.isLoaded, loadAccountSession, loadAuthConfig]);
 
+  // Load the account of the session Clerk switched to (or let the last one go).
+  useEffect(() => {
+    if (!switchingAccount) {
+      return;
+    }
+
+    const loadingFor = clerkSessionId;
+    void loadAccountSession().catch((error: unknown) => {
+      // Clerk moved on to another session meanwhile, whose own load decides who is signed in:
+      // this failure must not sign that account out.
+      if (clerkSessionIdRef.current !== loadingFor) {
+        return;
+      }
+
+      console.warn("Failed to load the LinkDish account for the new session.", error);
+      setAccountError(getAccountErrorMessage(error));
+      setUser(null);
+    });
+  }, [clerkSessionId, loadAccountSession, switchingAccount]);
+
   const value = useMemo<AccountContextValue>(
     () => ({
       accountError,
       authMode: authConfig.authMode,
       clearAccountError: () => setAccountError(null),
       deleteAccount: async (confirmEmail) => {
-        if (!user) {
+        if (!accountUser) {
           return;
         }
 
         setAccountError(null);
         setIsAccountBusy(true);
 
+        const deletingFor = accountUser.id;
+        // The Clerk session the account was loaded under (null: not through Clerk).
+        const deletingSession = userClerkSessionIdRef.current;
+
         try {
-          await createClientWithHeaders(getAuthHeaders).deleteAccount({ confirmEmail });
-          if (clerkSession.isSignedIn) {
-            await clerkSession.signOut();
+          await createClientWithHeaders(getAuthHeadersFor(deletingFor)).deleteAccount({
+            confirmEmail
+          });
+
+          // Another account signed in meanwhile: it stays signed in (the deleted account's
+          // session is gone with it).
+          if (accountUserRef.current?.id !== deletingFor) {
+            return;
+          }
+
+          // Only the deleted account's session ends: Clerk may already be on another account's
+          // before this render knows it.
+          if (deletingSession) {
+            await clerkSession.signOut(deletingSession);
           }
           preferLegacySessionRef.current = false;
           await applySessionToken(null);
           setUser(null);
         } catch (error) {
-          setAccountError(getAccountErrorMessage(error));
+          if (accountUserRef.current?.id === deletingFor) {
+            setAccountError(getAccountErrorMessage(error));
+          }
           throw error;
         } finally {
           setIsAccountBusy(false);
         }
       },
       getAuthHeaders,
+      getAuthHeadersFor,
       getAuthToken,
-      hasLoadedAccount,
+      hasLoadedAccount: hasLoadedAccount && !switchingAccount,
       isAccountBusy,
       isClerkSignInEnabled: hasClerkPublishableKey && authConfig.clerkEnabled,
       isEmailCodeSignInEnabled: authConfig.emailCodeEnabled,
-      isSignedIn: Boolean(user),
+      isSignedIn: Boolean(accountUser),
       logout: async () => {
         setAccountError(null);
         setIsAccountBusy(true);
@@ -401,6 +488,7 @@ export const AccountProvider = ({ children }: PropsWithChildren) => {
 
               await applySessionToken(simulation.sessionToken);
               setUser(simulation.user);
+              setUserClerkSessionId(null);
             } catch (error) {
               setAccountError(getAccountErrorMessage(error));
               throw error;
@@ -414,28 +502,41 @@ export const AccountProvider = ({ children }: PropsWithChildren) => {
             return Promise.reject(error);
           },
       updateProfile: async (profile) => {
-        if (!user) {
+        if (!accountUser) {
           return;
         }
 
         setAccountError(null);
         setIsAccountBusy(true);
 
+        const updatedFor = accountUser.id;
+
         try {
-          const response =
-            await createClientWithHeaders(getAuthHeaders).updateAccountProfile(profile);
-          setUser({
-            ...response.user,
-            billingPlan: response.user.billingPlan ?? user.billingPlan
-          });
+          const response = await createClientWithHeaders(
+            getAuthHeadersFor(updatedFor)
+          ).updateAccountProfile(profile);
+          // Only onto the account that saved it: if another account signed in (or out) meanwhile,
+          // this is the last one's profile and must never be shown as the one signed in now.
+          setUser((current) =>
+            current?.id === updatedFor && response.user.id === updatedFor
+              ? {
+                  ...response.user,
+                  billingPlan: response.user.billingPlan ?? current.billingPlan
+                }
+              : current
+          );
         } catch (error) {
-          setAccountError(getAccountErrorMessage(error));
+          // The caller still hears about it, but the account shown now isn't told the last
+          // one's profile couldn't be saved.
+          if (accountUserRef.current?.id === updatedFor) {
+            setAccountError(getAccountErrorMessage(error));
+          }
           throw error;
         } finally {
           setIsAccountBusy(false);
         }
       },
-      user,
+      user: accountUser,
       verifyCode: async (email, code, profile) => {
         setAccountError(null);
         setIsAccountBusy(true);
@@ -449,6 +550,7 @@ export const AccountProvider = ({ children }: PropsWithChildren) => {
           preferLegacySessionRef.current = true;
           await applySessionToken(response.sessionToken);
           setUser(response.user);
+          setUserClerkSessionId(null);
         } catch (error) {
           setAccountError(getAccountErrorMessage(error));
           throw error;
@@ -463,12 +565,14 @@ export const AccountProvider = ({ children }: PropsWithChildren) => {
       authConfig,
       clerkSession,
       getAuthHeaders,
+      getAuthHeadersFor,
       getAuthToken,
+      accountUser,
       hasLoadedAccount,
       isAccountBusy,
       loadAccountSession,
       sessionToken,
-      user
+      switchingAccount
     ]
   );
 

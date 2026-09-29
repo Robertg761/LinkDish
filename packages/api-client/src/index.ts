@@ -5,6 +5,7 @@ import {
   analyticsEventBatchResponseSchema,
   authConfigResponseSchema,
   authSessionResponseSchema,
+  billingUsageResponseSchema,
   cancelInviteRequestSchema,
   createWebBillingCheckoutRequestSchema,
   createHouseholdResponseSchema,
@@ -17,6 +18,7 @@ import {
   deleteAccountResponseSchema,
   extractRecipeRequestSchema,
   extractRecipeResponseSchema,
+  extractRecipeTextRequestSchema,
   householdMutationResponseSchema,
   householdShoppingListResponseSchema,
   householdSummarySchema,
@@ -42,6 +44,7 @@ import {
   type AnalyticsEventBatchResponse,
   type AuthConfigResponse,
   type AuthSessionResponse,
+  type BillingUsageResponse,
   type CancelInviteRequest,
   type CreateWebBillingCheckoutRequest,
   type CreateHouseholdResponse,
@@ -54,6 +57,7 @@ import {
   type DeleteAccountResponse,
   type ExtractRecipeRequest,
   type ExtractRecipeResponse,
+  type ExtractRecipeTextRequestInput,
   type HouseholdMutationResponse,
   type HouseholdShoppingListResponse,
   type HouseholdSummary,
@@ -79,46 +83,164 @@ import type { ZodType, ZodTypeDef } from "zod";
 
 export type FetchLike = typeof fetch;
 
+/**
+ * What went wrong with an API call:
+ * - "network": no response arrived (offline, DNS, CORS, connection reset). `statusCode` is 0.
+ * - "timeout": the client-side timeout fired before a response arrived. `statusCode` is 0.
+ * - "http": the API answered with a non-2xx status. `serverMessage` carries `body.message`.
+ * - "contract": a 2xx response did not match the shared contract (version skew or a proxy page).
+ * - "validation": the request input was invalid, so nothing was sent. `statusCode` is 0 and
+ *   `details` holds the zod issues.
+ */
+export type ExtractorApiErrorKind = "network" | "timeout" | "http" | "contract" | "validation";
+
+export interface ExtractorApiErrorOptions {
+  /** Defaults to "http", which is what every error was before kinds existed. */
+  kind?: ExtractorApiErrorKind | undefined;
+  /** Defaults to `details.message` when the response body carried one. */
+  serverMessage?: string | undefined;
+  cause?: unknown;
+}
+
+const readServerMessage = (details: unknown): string | undefined => {
+  if (!details || typeof details !== "object" || !("message" in details)) {
+    return undefined;
+  }
+
+  const { message } = details as { message?: unknown };
+
+  return typeof message === "string" && message.trim().length > 0 ? message : undefined;
+};
+
 export class ExtractorApiError extends Error {
+  public readonly kind: ExtractorApiErrorKind;
+  /** The API's own `message` from the error body, when it sent one. */
+  public readonly serverMessage: string | undefined;
+
   public constructor(
     message: string,
     public readonly statusCode: number,
-    public readonly details?: unknown
+    public readonly details?: unknown,
+    options: ExtractorApiErrorOptions = {}
   ) {
     super(message);
     this.name = "ExtractorApiError";
+
+    // Set by hand: `new Error(message, { cause })` needs an ES2022 lib the apps may not target.
+    if (options.cause !== undefined) {
+      Object.defineProperty(this, "cause", {
+        configurable: true,
+        enumerable: false,
+        value: options.cause,
+        writable: true
+      });
+    }
+
+    this.kind = options.kind ?? "http";
+    this.serverMessage = options.serverMessage ?? readServerMessage(details);
   }
 }
 
+export const isExtractorApiError = (error: unknown): error is ExtractorApiError =>
+  error instanceof ExtractorApiError;
+
+/** Per-call options accepted by every client method. */
+export interface ExtractorApiRequestOptions {
+  /**
+   * Cancels the request. It is combined with the client timeout; a caller abort rejects with
+   * the signal's reason (an `AbortError` by default), not with an `ExtractorApiError`.
+   */
+  signal?: AbortSignal | undefined;
+}
+
+type RequestOptionsArgument = ExtractorApiRequestOptions | undefined;
+
 export interface ExtractorApiClient {
-  acceptHouseholdInvite(input: AcceptInviteRequest): Promise<AcceptInviteResponse>;
-  cancelHouseholdInvite(input: CancelInviteRequest): Promise<HouseholdMutationResponse>;
+  acceptHouseholdInvite(
+    input: AcceptInviteRequest,
+    options?: RequestOptionsArgument
+  ): Promise<AcceptInviteResponse>;
+  cancelHouseholdInvite(
+    input: CancelInviteRequest,
+    options?: RequestOptionsArgument
+  ): Promise<HouseholdMutationResponse>;
   createWebBillingCheckout(
-    input: CreateWebBillingCheckoutRequest
+    input: CreateWebBillingCheckoutRequest,
+    options?: RequestOptionsArgument
   ): Promise<WebBillingRedirectResponse>;
-  createWebBillingPortal(): Promise<WebBillingRedirectResponse>;
-  createHousehold(): Promise<CreateHouseholdResponse>;
-  createHouseholdInvite(input: CreateInviteRequest): Promise<CreateInviteResponse>;
-  createSharedRecipe(input: UpsertSharedRecipeRequest): Promise<SharedRecipeResponse>;
-  deleteAccount(input: DeleteAccountRequest): Promise<DeleteAccountResponse>;
-  deleteShoppingItems(input: DeleteShoppingItemsRequest): Promise<DeleteShoppingItemsResponse>;
-  deleteSharedRecipe(id: string): Promise<DeleteSharedRecipeResponse>;
-  extractRecipe(input: ExtractRecipeRequest): Promise<ExtractRecipeResponse>;
-  getAuthConfig(): Promise<AuthConfigResponse>;
-  getWebBillingAvailability(): Promise<WebBillingAvailability>;
-  getHousehold(): Promise<HouseholdSummary>;
-  getSession(): Promise<AuthSessionResponse>;
-  getSharedRecipes(): Promise<SharedRecipeListResponse>;
-  getShoppingList(): Promise<HouseholdShoppingListResponse>;
-  leaveHousehold(): Promise<HouseholdMutationResponse>;
-  logout(): Promise<LogoutResponse>;
-  removeHouseholdMember(input: RemoveHouseholdMemberRequest): Promise<HouseholdMutationResponse>;
-  requestLoginCode(input: RequestLoginCodeRequest): Promise<RequestLoginCodeResponse>;
-  sendAnalyticsEvents(input: AnalyticsEventBatchRequest): Promise<AnalyticsEventBatchResponse>;
-  updateAccountProfile(input: UpdateAccountProfileRequest): Promise<UpdateAccountProfileResponse>;
-  updateSharedRecipe(id: string, input: UpdateSharedRecipeRequest): Promise<SharedRecipeResponse>;
-  upsertShoppingItems(input: UpsertShoppingItemsRequest): Promise<UpsertShoppingItemsResponse>;
-  verifyLoginCode(input: VerifyLoginCodeRequest): Promise<VerifyLoginCodeResponse>;
+  createWebBillingPortal(options?: RequestOptionsArgument): Promise<WebBillingRedirectResponse>;
+  createHousehold(options?: RequestOptionsArgument): Promise<CreateHouseholdResponse>;
+  createHouseholdInvite(
+    input: CreateInviteRequest,
+    options?: RequestOptionsArgument
+  ): Promise<CreateInviteResponse>;
+  createSharedRecipe(
+    input: UpsertSharedRecipeRequest,
+    options?: RequestOptionsArgument
+  ): Promise<SharedRecipeResponse>;
+  deleteAccount(
+    input: DeleteAccountRequest,
+    options?: RequestOptionsArgument
+  ): Promise<DeleteAccountResponse>;
+  deleteShoppingItems(
+    input: DeleteShoppingItemsRequest,
+    options?: RequestOptionsArgument
+  ): Promise<DeleteShoppingItemsResponse>;
+  deleteSharedRecipe(
+    id: string,
+    options?: RequestOptionsArgument
+  ): Promise<DeleteSharedRecipeResponse>;
+  extractRecipe(
+    input: ExtractRecipeRequest,
+    options?: RequestOptionsArgument
+  ): Promise<ExtractRecipeResponse>;
+  /**
+   * Imports a recipe from pasted text (20 to 20,000 characters). The API always uses its AI
+   * extractor for text, so a success counts like an explicit fallback attempt for billing.
+   */
+  extractRecipeFromText(
+    input: ExtractRecipeTextRequestInput,
+    options?: RequestOptionsArgument
+  ): Promise<ExtractRecipeResponse>;
+  getAuthConfig(options?: RequestOptionsArgument): Promise<AuthConfigResponse>;
+  /** The caller's current import allowance (GET /billing/usage), without counting an import. */
+  getBillingUsage(options?: RequestOptionsArgument): Promise<BillingUsageResponse>;
+  getWebBillingAvailability(options?: RequestOptionsArgument): Promise<WebBillingAvailability>;
+  getHousehold(options?: RequestOptionsArgument): Promise<HouseholdSummary>;
+  getSession(options?: RequestOptionsArgument): Promise<AuthSessionResponse>;
+  getSharedRecipes(options?: RequestOptionsArgument): Promise<SharedRecipeListResponse>;
+  getShoppingList(options?: RequestOptionsArgument): Promise<HouseholdShoppingListResponse>;
+  leaveHousehold(options?: RequestOptionsArgument): Promise<HouseholdMutationResponse>;
+  logout(options?: RequestOptionsArgument): Promise<LogoutResponse>;
+  removeHouseholdMember(
+    input: RemoveHouseholdMemberRequest,
+    options?: RequestOptionsArgument
+  ): Promise<HouseholdMutationResponse>;
+  requestLoginCode(
+    input: RequestLoginCodeRequest,
+    options?: RequestOptionsArgument
+  ): Promise<RequestLoginCodeResponse>;
+  sendAnalyticsEvents(
+    input: AnalyticsEventBatchRequest,
+    options?: RequestOptionsArgument
+  ): Promise<AnalyticsEventBatchResponse>;
+  updateAccountProfile(
+    input: UpdateAccountProfileRequest,
+    options?: RequestOptionsArgument
+  ): Promise<UpdateAccountProfileResponse>;
+  updateSharedRecipe(
+    id: string,
+    input: UpdateSharedRecipeRequest,
+    options?: RequestOptionsArgument
+  ): Promise<SharedRecipeResponse>;
+  upsertShoppingItems(
+    input: UpsertShoppingItemsRequest,
+    options?: RequestOptionsArgument
+  ): Promise<UpsertShoppingItemsResponse>;
+  verifyLoginCode(
+    input: VerifyLoginCodeRequest,
+    options?: RequestOptionsArgument
+  ): Promise<VerifyLoginCodeResponse>;
 }
 
 /** A stalled mobile connection would otherwise hang forever, so every request is bounded. */
@@ -131,48 +253,151 @@ export interface CreateExtractorApiClientOptions {
   baseUrl: string;
   fetchImplementation?: FetchLike;
   getHeaders?: () => Promise<Record<string, string>> | Record<string, string>;
-  /** Per-request timeout in milliseconds. Pass 0 (or a negative value) to disable. */
+  /**
+   * Per-request timeout in milliseconds, covering `getHeaders` as well as the fetch. Pass 0 (or a
+   * negative value) to disable.
+   */
   timeoutMs?: number;
-  /** Timeout for `extractRecipe` specifically. Defaults to {@link DEFAULT_EXTRACT_TIMEOUT_MS}. */
+  /** Timeout for extraction requests specifically. Defaults to {@link DEFAULT_EXTRACT_TIMEOUT_MS}. */
   extractTimeoutMs?: number;
 }
 
-interface RequestTimeout {
+interface RequestSignal {
   signal: AbortSignal | undefined;
+  timedOut: () => boolean;
   dispose: () => void;
 }
 
-const noTimeout: RequestTimeout = { signal: undefined, dispose: () => undefined };
+const createAbortError = (): Error => {
+  const error = new Error("The request was aborted.");
+  error.name = "AbortError";
+  return error;
+};
 
-const createRequestTimeout = (timeoutMs: number): RequestTimeout => {
-  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
-    return noTimeout;
+/* The caller's own cancellation reason, so `signal.reason` round-trips like it does with fetch. */
+const callerAbortReason = (signal: AbortSignal): unknown =>
+  (signal.reason as unknown) ?? createAbortError();
+
+const unrefTimer = (timer: unknown): void => {
+  if (timer && typeof (timer as { unref?: () => void }).unref === "function") {
+    (timer as { unref: () => void }).unref();
   }
+};
 
-  if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") {
-    return { signal: AbortSignal.timeout(timeoutMs), dispose: () => undefined };
-  }
+/*
+ * One signal for the client timeout and the caller's signal. Built on AbortController and
+ * setTimeout rather than AbortSignal.timeout/any, which React Native and older browsers lack.
+ */
+const createRequestSignal = (
+  timeoutMs: number,
+  callerSignal: AbortSignal | undefined
+): RequestSignal => {
+  const hasTimeout = Number.isFinite(timeoutMs) && timeoutMs > 0;
 
-  // React Native and older runtimes may ship AbortController without AbortSignal.timeout.
   if (typeof AbortController === "undefined") {
-    return noTimeout;
+    return { signal: callerSignal, timedOut: () => false, dispose: () => undefined };
+  }
+
+  if (!hasTimeout && !callerSignal) {
+    return { signal: undefined, timedOut: () => false, dispose: () => undefined };
   }
 
   const controller = new AbortController();
-  const timer: unknown = setTimeout(() => {
-    controller.abort(new Error("Extractor API request timed out."));
-  }, timeoutMs);
+  let didTimeOut = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const abortFromCaller = () => {
+    controller.abort(callerSignal ? callerAbortReason(callerSignal) : undefined);
+  };
 
-  if (timer && typeof (timer as { unref?: () => void }).unref === "function") {
-    (timer as { unref: () => void }).unref();
+  if (hasTimeout) {
+    timer = setTimeout(() => {
+      didTimeOut = true;
+      controller.abort(new Error("Extractor API request timed out."));
+    }, timeoutMs);
+    unrefTimer(timer);
+  }
+
+  if (callerSignal?.aborted) {
+    abortFromCaller();
+  } else {
+    callerSignal?.addEventListener("abort", abortFromCaller, { once: true });
   }
 
   return {
     signal: controller.signal,
+    timedOut: () => didTimeOut,
     dispose: () => {
-      clearTimeout(timer as ReturnType<typeof setTimeout>);
+      if (timer !== undefined) {
+        clearTimeout(timer);
+      }
+
+      callerSignal?.removeEventListener("abort", abortFromCaller);
     }
   };
+};
+
+/*
+ * Settles like `task()` unless `signal` aborts first, in which case it rejects straight away and
+ * the task's eventual outcome is ignored. A synchronous throw from `task` becomes a rejection.
+ */
+const settleUnlessAborted = async <Value>(
+  task: () => Promise<Value> | Value,
+  signal: AbortSignal | undefined
+): Promise<Value> => {
+  const pending = new Promise<Value>((resolve) => {
+    resolve(task());
+  });
+
+  if (!signal) {
+    return pending;
+  }
+
+  let onAbort: () => void = () => undefined;
+  const aborted = new Promise<never>((_resolve, reject) => {
+    onAbort = () => {
+      reject(createAbortError());
+    };
+  });
+
+  if (signal.aborted) {
+    onAbort();
+  } else {
+    signal.addEventListener("abort", onAbort, { once: true });
+  }
+
+  try {
+    // race() subscribes to both, so the loser settling later is never an unhandled rejection.
+    return await Promise.race([pending, aborted]);
+  } finally {
+    signal.removeEventListener("abort", onAbort);
+  }
+};
+
+const describeTransportError = (error: unknown, fallback: string): string =>
+  error instanceof Error && error.message.trim().length > 0 ? error.message : fallback;
+
+type HttpMethod = "DELETE" | "GET" | "PATCH" | "POST" | "PUT";
+
+interface RequestJsonOptions<Response> {
+  body?: unknown;
+  method?: HttpMethod;
+  responseSchema: ZodType<Response, ZodTypeDef, unknown>;
+  timeoutMs?: number;
+  signal?: AbortSignal | undefined;
+}
+
+/** Validates request input; a failure becomes a "validation" ExtractorApiError. */
+const validateInput = <Output>(schema: ZodType<Output, ZodTypeDef, unknown>, input: unknown) => {
+  const parsed = schema.safeParse(input);
+
+  if (!parsed.success) {
+    throw new ExtractorApiError("Extractor API request input is invalid.", 0, parsed.error.issues, {
+      kind: "validation",
+      cause: parsed.error
+    });
+  }
+
+  return parsed.data;
 };
 
 export const createExtractorApiClient = (
@@ -192,32 +417,74 @@ export const createExtractorApiClient = (
 
   const requestJson = async <Response>(
     path: string,
-    options: {
-      body?: unknown;
-      method?: "DELETE" | "GET" | "PATCH" | "POST" | "PUT";
-      responseSchema: ZodType<Response, ZodTypeDef, unknown>;
-      timeoutMs?: number;
-    }
+    request: RequestJsonOptions<Response>
   ): Promise<Response> => {
-    const timeout = createRequestTimeout(options.timeoutMs ?? timeoutMs);
+    const callerSignal = request.signal;
+
+    if (callerSignal?.aborted) {
+      throw callerAbortReason(callerSignal);
+    }
+
+    // Created before the headers are fetched, so a slow token provider (Clerk's getToken() while
+    // a session refreshes) is bounded by the timeout and can be cancelled like the fetch itself.
+    const requestSignal = createRequestSignal(request.timeoutMs ?? timeoutMs, callerSignal);
+    const throwIfCancelled = (cause: unknown): void => {
+      if (callerSignal?.aborted) {
+        throw callerAbortReason(callerSignal);
+      }
+
+      if (requestSignal.timedOut()) {
+        throw new ExtractorApiError("Extractor API request timed out.", 0, undefined, {
+          kind: "timeout",
+          cause
+        });
+      }
+    };
 
     let response: Awaited<ReturnType<FetchLike>>;
     let rawBody: string;
 
     try {
-      response = await fetchImplementation(`${normalizedBaseUrl}${path}`, {
-        method: options.method ?? "GET",
-        headers: {
-          ...(options.body === undefined ? {} : { "content-type": "application/json" }),
-          ...(getHeaders ? await getHeaders() : {})
-        },
-        ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
-        ...(timeout.signal === undefined ? {} : { signal: timeout.signal })
-      });
+      let providedHeaders: Record<string, string> = {};
 
-      rawBody = await response.text();
+      if (getHeaders) {
+        try {
+          providedHeaders = await settleUnlessAborted(getHeaders, requestSignal.signal);
+        } catch (error) {
+          throwIfCancelled(error);
+          // The provider's own failure is surfaced unchanged, as it always was.
+          throw error;
+        }
+      }
+
+      const headers = {
+        ...(request.body === undefined ? {} : { "content-type": "application/json" }),
+        ...providedHeaders
+      };
+
+      try {
+        response = await fetchImplementation(`${normalizedBaseUrl}${path}`, {
+          method: request.method ?? "GET",
+          headers,
+          ...(request.body === undefined ? {} : { body: JSON.stringify(request.body) }),
+          ...(requestSignal.signal === undefined ? {} : { signal: requestSignal.signal })
+        });
+
+        rawBody = await response.text();
+      } catch (error) {
+        throwIfCancelled(error);
+
+        // The original message is kept ("Network request failed", "Failed to fetch"): callers
+        // already match on it.
+        throw new ExtractorApiError(
+          describeTransportError(error, "Extractor API request failed to send."),
+          0,
+          undefined,
+          { kind: "network", cause: error }
+        );
+      }
     } finally {
-      timeout.dispose();
+      requestSignal.dispose();
     }
 
     let body: unknown;
@@ -230,10 +497,12 @@ export const createExtractorApiClient = (
 
     // An error response is an error even when its body happens to satisfy the success contract.
     if (!response.ok) {
-      throw new ExtractorApiError("Extractor API request failed.", response.status, body);
+      throw new ExtractorApiError("Extractor API request failed.", response.status, body, {
+        kind: "http"
+      });
     }
 
-    const parsedBody = options.responseSchema.safeParse(body);
+    const parsedBody = request.responseSchema.safeParse(body);
 
     if (parsedBody.success) {
       return parsedBody.data;
@@ -242,176 +511,222 @@ export const createExtractorApiClient = (
     throw new ExtractorApiError(
       "Extractor API response did not match the contract.",
       response.status,
-      body
+      body,
+      { kind: "contract", cause: parsedBody.error }
     );
   };
 
+  /*
+   * Every method is async, so invalid input (including a thrown getHeaders) always surfaces as
+   * a rejected promise, never as a synchronous throw from the call site.
+   */
   return {
-    acceptHouseholdInvite(input) {
+    async acceptHouseholdInvite(input, callOptions) {
       return requestJson("/household/invites/accept", {
-        body: acceptInviteRequestSchema.parse(input),
+        body: validateInput(acceptInviteRequestSchema, input),
         method: "POST",
-        responseSchema: acceptInviteResponseSchema
+        responseSchema: acceptInviteResponseSchema,
+        signal: callOptions?.signal
       });
     },
-    cancelHouseholdInvite(input) {
-      const request = cancelInviteRequestSchema.parse(input);
+    async cancelHouseholdInvite(input, callOptions) {
+      const request = validateInput(cancelInviteRequestSchema, input);
 
       return requestJson(`/household/invites/${encodeURIComponent(request.inviteId)}`, {
         method: "DELETE",
-        responseSchema: householdMutationResponseSchema
+        responseSchema: householdMutationResponseSchema,
+        signal: callOptions?.signal
       });
     },
-    createWebBillingCheckout(input) {
+    async createWebBillingCheckout(input, callOptions) {
       return requestJson("/billing/checkout", {
-        body: createWebBillingCheckoutRequestSchema.parse(input),
+        body: validateInput(createWebBillingCheckoutRequestSchema, input),
         method: "POST",
-        responseSchema: webBillingRedirectResponseSchema
+        responseSchema: webBillingRedirectResponseSchema,
+        signal: callOptions?.signal
       });
     },
-    createWebBillingPortal() {
+    async createWebBillingPortal(callOptions) {
       return requestJson("/billing/portal", {
         method: "POST",
-        responseSchema: webBillingRedirectResponseSchema
+        responseSchema: webBillingRedirectResponseSchema,
+        signal: callOptions?.signal
       });
     },
-    createHousehold() {
+    async createHousehold(callOptions) {
       return requestJson("/household", {
         method: "POST",
-        responseSchema: createHouseholdResponseSchema
+        responseSchema: createHouseholdResponseSchema,
+        signal: callOptions?.signal
       });
     },
-    createHouseholdInvite(input) {
+    async createHouseholdInvite(input, callOptions) {
       return requestJson("/household/invites", {
-        body: createInviteRequestSchema.parse(input),
+        body: validateInput(createInviteRequestSchema, input),
         method: "POST",
-        responseSchema: createInviteResponseSchema
+        responseSchema: createInviteResponseSchema,
+        signal: callOptions?.signal
       });
     },
-    createSharedRecipe(input) {
+    async createSharedRecipe(input, callOptions) {
       return requestJson("/household/recipes", {
-        body: upsertSharedRecipeRequestSchema.parse(input),
+        body: validateInput(upsertSharedRecipeRequestSchema, input),
         method: "POST",
-        responseSchema: sharedRecipeResponseSchema
+        responseSchema: sharedRecipeResponseSchema,
+        signal: callOptions?.signal
       });
     },
-    deleteAccount(input) {
+    async deleteAccount(input, callOptions) {
       return requestJson("/account", {
-        body: deleteAccountRequestSchema.parse(input),
+        body: validateInput(deleteAccountRequestSchema, input),
         method: "DELETE",
-        responseSchema: deleteAccountResponseSchema
+        responseSchema: deleteAccountResponseSchema,
+        signal: callOptions?.signal
       });
     },
-    deleteShoppingItems(input) {
+    async deleteShoppingItems(input, callOptions) {
       return requestJson("/household/shopping/items", {
-        body: deleteShoppingItemsRequestSchema.parse(input),
+        body: validateInput(deleteShoppingItemsRequestSchema, input),
         method: "DELETE",
-        responseSchema: deleteShoppingItemsResponseSchema
+        responseSchema: deleteShoppingItemsResponseSchema,
+        signal: callOptions?.signal
       });
     },
-    deleteSharedRecipe(id) {
+    async deleteSharedRecipe(id, callOptions) {
       return requestJson(`/household/recipes/${encodeURIComponent(id)}`, {
         method: "DELETE",
-        responseSchema: deleteSharedRecipeResponseSchema
+        responseSchema: deleteSharedRecipeResponseSchema,
+        signal: callOptions?.signal
       });
     },
-    extractRecipe(input) {
+    async extractRecipe(input, callOptions) {
       return requestJson("/extract", {
-        body: extractRecipeRequestSchema.parse(input),
+        body: validateInput(extractRecipeRequestSchema, input),
         method: "POST",
         responseSchema: extractRecipeResponseSchema,
-        timeoutMs: extractTimeoutMs
+        timeoutMs: extractTimeoutMs,
+        signal: callOptions?.signal
       });
     },
-    getAuthConfig() {
+    async extractRecipeFromText(input, callOptions) {
+      return requestJson("/extract", {
+        body: validateInput(extractRecipeTextRequestSchema, input),
+        method: "POST",
+        responseSchema: extractRecipeResponseSchema,
+        timeoutMs: extractTimeoutMs,
+        signal: callOptions?.signal
+      });
+    },
+    async getAuthConfig(callOptions) {
       return requestJson("/auth/config", {
-        responseSchema: authConfigResponseSchema
+        responseSchema: authConfigResponseSchema,
+        signal: callOptions?.signal
       });
     },
-    getWebBillingAvailability() {
+    async getBillingUsage(callOptions) {
+      return requestJson("/billing/usage", {
+        responseSchema: billingUsageResponseSchema,
+        signal: callOptions?.signal
+      });
+    },
+    async getWebBillingAvailability(callOptions) {
       return requestJson("/billing/config", {
-        responseSchema: webBillingAvailabilitySchema
+        responseSchema: webBillingAvailabilitySchema,
+        signal: callOptions?.signal
       });
     },
-    getHousehold() {
+    async getHousehold(callOptions) {
       return requestJson("/household", {
-        responseSchema: householdSummarySchema
+        responseSchema: householdSummarySchema,
+        signal: callOptions?.signal
       });
     },
-    getSession() {
+    async getSession(callOptions) {
       return requestJson("/auth/session", {
-        responseSchema: authSessionResponseSchema
+        responseSchema: authSessionResponseSchema,
+        signal: callOptions?.signal
       });
     },
-    getSharedRecipes() {
+    async getSharedRecipes(callOptions) {
       return requestJson("/household/recipes", {
-        responseSchema: sharedRecipeListResponseSchema
+        responseSchema: sharedRecipeListResponseSchema,
+        signal: callOptions?.signal
       });
     },
-    getShoppingList() {
+    async getShoppingList(callOptions) {
       return requestJson("/household/shopping", {
-        responseSchema: householdShoppingListResponseSchema
+        responseSchema: householdShoppingListResponseSchema,
+        signal: callOptions?.signal
       });
     },
-    leaveHousehold() {
+    async leaveHousehold(callOptions) {
       return requestJson("/household/leave", {
         method: "POST",
-        responseSchema: householdMutationResponseSchema
+        responseSchema: householdMutationResponseSchema,
+        signal: callOptions?.signal
       });
     },
-    logout() {
+    async logout(callOptions) {
       return requestJson("/auth/logout", {
         method: "POST",
-        responseSchema: logoutResponseSchema
+        responseSchema: logoutResponseSchema,
+        signal: callOptions?.signal
       });
     },
-    removeHouseholdMember(input) {
+    async removeHouseholdMember(input, callOptions) {
       return requestJson("/household/members/remove", {
-        body: removeHouseholdMemberRequestSchema.parse(input),
+        body: validateInput(removeHouseholdMemberRequestSchema, input),
         method: "POST",
-        responseSchema: householdMutationResponseSchema
+        responseSchema: householdMutationResponseSchema,
+        signal: callOptions?.signal
       });
     },
-    requestLoginCode(input) {
+    async requestLoginCode(input, callOptions) {
       return requestJson("/auth/login-code", {
-        body: requestLoginCodeRequestSchema.parse(input),
+        body: validateInput(requestLoginCodeRequestSchema, input),
         method: "POST",
-        responseSchema: requestLoginCodeResponseSchema
+        responseSchema: requestLoginCodeResponseSchema,
+        signal: callOptions?.signal
       });
     },
-    sendAnalyticsEvents(input) {
+    async sendAnalyticsEvents(input, callOptions) {
       return requestJson("/analytics/events", {
-        body: analyticsEventBatchRequestSchema.parse(input),
+        body: validateInput(analyticsEventBatchRequestSchema, input),
         method: "POST",
-        responseSchema: analyticsEventBatchResponseSchema
+        responseSchema: analyticsEventBatchResponseSchema,
+        signal: callOptions?.signal
       });
     },
-    updateAccountProfile(input) {
+    async updateAccountProfile(input, callOptions) {
       return requestJson("/account", {
-        body: updateAccountProfileRequestSchema.parse(input),
+        body: validateInput(updateAccountProfileRequestSchema, input),
         method: "PATCH",
-        responseSchema: updateAccountProfileResponseSchema
+        responseSchema: updateAccountProfileResponseSchema,
+        signal: callOptions?.signal
       });
     },
-    updateSharedRecipe(id, input) {
+    async updateSharedRecipe(id, input, callOptions) {
       return requestJson(`/household/recipes/${encodeURIComponent(id)}`, {
-        body: updateSharedRecipeRequestSchema.parse(input),
+        body: validateInput(updateSharedRecipeRequestSchema, input),
         method: "PATCH",
-        responseSchema: sharedRecipeResponseSchema
+        responseSchema: sharedRecipeResponseSchema,
+        signal: callOptions?.signal
       });
     },
-    upsertShoppingItems(input) {
+    async upsertShoppingItems(input, callOptions) {
       return requestJson("/household/shopping/items", {
-        body: upsertShoppingItemsRequestSchema.parse(input),
+        body: validateInput(upsertShoppingItemsRequestSchema, input),
         method: "PUT",
-        responseSchema: upsertShoppingItemsResponseSchema
+        responseSchema: upsertShoppingItemsResponseSchema,
+        signal: callOptions?.signal
       });
     },
-    verifyLoginCode(input) {
+    async verifyLoginCode(input, callOptions) {
       return requestJson("/auth/verify-code", {
-        body: verifyLoginCodeRequestSchema.parse(input),
+        body: validateInput(verifyLoginCodeRequestSchema, input),
         method: "POST",
-        responseSchema: verifyLoginCodeResponseSchema
+        responseSchema: verifyLoginCodeResponseSchema,
+        signal: callOptions?.signal
       });
     }
   };

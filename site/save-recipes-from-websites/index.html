@@ -1,37 +1,143 @@
 <!doctype html>
-<html lang="en">
+<html lang="en-CA">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#f4efe7" />
-    <title>Save Recipes From Websites Without the Clutter | LinkDish</title>
+    <title>Save Recipes From Any Website, Without the Clutter | LinkDish</title>
     <meta
       name="description"
-      content="Paste or share a recipe URL to save its ingredients, steps, timing, photo, and source in a clean personal cookbook."
+      content="Paste a recipe link and LinkDish saves the ingredients, steps, times and photo from any public recipe website, without the ads and pop-ups, and keeps the source credited."
     />
-    <link
-      rel="canonical"
-      href="https://linkdish.ca/save-recipes-from-websites/"
-    />
+    <link rel="canonical" href="https://linkdish.ca/save-recipes-from-websites/" />
+    <meta name="theme-color" content="#f4efe7" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#1a1816" media="(prefers-color-scheme: dark)" />
+    <meta name="color-scheme" content="light dark" />
+    <meta property="og:site_name" content="LinkDish" />
     <meta property="og:type" content="website" />
-    <meta
-      property="og:title"
-      content="Save recipes from websites without the clutter"
-    />
+    <meta property="og:title" content="Save recipes from any website, without the clutter" />
     <meta
       property="og:description"
-      content="Paste a recipe link and keep the ingredients, method, timing, photo, and original source in one clean entry."
+      content="Paste a recipe link and LinkDish saves the ingredients, steps, times and photo from any public recipe website, without the ads and pop-ups, and keeps the source credited."
     />
+    <meta property="og:url" content="https://linkdish.ca/save-recipes-from-websites/" />
+    <meta property="og:image" content="https://linkdish.ca/assets/social-card-20260928b.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
     <meta
-      property="og:url"
-      content="https://linkdish.ca/save-recipes-from-websites/"
+      property="og:image:alt"
+      content="LinkDish: Paste a link. Get cooking. Save recipes from websites, YouTube, TikTok, Pinterest and photos."
     />
+    <meta property="og:locale" content="en_CA" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Save recipes from any website, without the clutter" />
     <meta
-      property="og:image"
-      content="https://linkdish.ca/assets/social-card-20260729.png"
+      name="twitter:description"
+      content="Paste a recipe link and LinkDish saves the ingredients, steps, times and photo from any public recipe website, without the ads and pop-ups, and keeps the source credited."
     />
-    <link rel="icon" href="/assets/linkdish-icon.png" />
-    <link rel="stylesheet" href="/seo.css" />
+    <meta name="twitter:image" content="https://linkdish.ca/assets/social-card-20260928b.png" />
+    <meta
+      name="twitter:image:alt"
+      content="LinkDish: Paste a link. Get cooking. Save recipes from websites, YouTube, TikTok, Pinterest and photos."
+    />
+    <link rel="icon" href="/favicon.ico" sizes="48x48" />
+    <link rel="icon" href="/assets/favicon-32.png" type="image/png" sizes="32x32" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link
+      rel="preload"
+      href="/assets/fonts/Fraunces-Bold.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
+    <link
+      rel="preload"
+      href="/assets/fonts/Fraunces-SemiBoldItalic.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
+    <script>
+      (function (root) {
+        root.classList.add("js");
+        if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+          root.classList.add("motion-ready");
+          // If site.js never runs, show everything instead of leaving it hidden.
+          window.setTimeout(function () {
+            if (!root.classList.contains("site-ready")) {
+              root.classList.remove("motion-ready");
+            }
+          }, 3000);
+        }
+      })(document.documentElement);
+    </script>
+    <link rel="stylesheet" href="/base.css" />
+    <link rel="stylesheet" href="/marketing.css" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "LinkDish",
+        "applicationCategory": "LifestyleApplication",
+        "operatingSystem": "Android, Web",
+        "url": "https://linkdish.ca/save-recipes-from-websites/",
+        "downloadUrl": "https://play.google.com/store/apps/details?id=com.linkdish.app",
+        "image": "https://linkdish.ca/assets/linkdish-icon.png",
+        "description": "Save recipes from any public recipe website as clean, readable recipes with the original source kept.",
+        "offers": [
+          {
+            "@type": "Offer",
+            "name": "Free",
+            "price": "0",
+            "priceCurrency": "CAD"
+          },
+          {
+            "@type": "Offer",
+            "name": "Plus (monthly)",
+            "price": "2.99",
+            "priceCurrency": "CAD"
+          },
+          {
+            "@type": "Offer",
+            "name": "Plus (yearly)",
+            "price": "24.99",
+            "priceCurrency": "CAD"
+          },
+          {
+            "@type": "Offer",
+            "name": "Family (monthly)",
+            "price": "4.99",
+            "priceCurrency": "CAD"
+          },
+          {
+            "@type": "Offer",
+            "name": "Family (yearly)",
+            "price": "44.99",
+            "priceCurrency": "CAD"
+          }
+        ]
+      }
+    </script>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+          {
+            "@type": "ListItem",
+            "position": 1,
+            "name": "Home",
+            "item": "https://linkdish.ca/"
+          },
+          {
+            "@type": "ListItem",
+            "position": 2,
+            "name": "Save recipes from websites",
+            "item": "https://linkdish.ca/save-recipes-from-websites/"
+          }
+        ]
+      }
+    </script>
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
@@ -39,198 +145,519 @@
         "mainEntity": [
           {
             "@type": "Question",
-            "name": "How do I save a recipe from a website?",
+            "name": "Which recipe websites work with LinkDish?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "Copy or share the public recipe URL to LinkDish. LinkDish turns the useful recipe details into a clean cookbook entry while keeping the original source linked."
+              "text": "Most public recipe pages work, from large food sites to personal blogs. Pages that publish their recipe in a standard recipe format import most cleanly. Pages behind a login or a paywall may not import."
             }
           },
           {
             "@type": "Question",
-            "name": "Can LinkDish import every recipe website?",
+            "name": "Does LinkDish copy the whole article?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "Public recipe pages work best. Pages that require a login or block automated access may not import."
+              "text": "No. It keeps the recipe itself: ingredients, steps, times, servings and the photo, with a link back to the original page so the author keeps the credit."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "What if an import misses something?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "You can edit any saved recipe. If a site keeps importing badly, send the link through LinkDish Support so it can be looked at."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Is it quick?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Usually a few seconds. Links LinkDish has already read come back almost instantly."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Is it free to try?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes. The Free plan includes 3 recipe imports and up to 15 saved recipes, and no card is required."
             }
           }
         ]
       }
     </script>
   </head>
-  <body>
+  <body class="landing-page has-dock">
     <a class="skip-link" href="#main-content">Skip to content</a>
-    <header class="site-header">
-      <a class="brand" href="/">
-        <img src="/assets/linkdish-icon.png" alt="" width="40" height="40" />
+    <svg
+      class="icon-sprite"
+      aria-hidden="true"
+      focusable="false"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <symbol id="i-link" viewBox="0 0 24 24">
+        <path d="M10 14a4 4 0 0 0 5.66 0l3-3a4 4 0 0 0-5.66-5.66l-1 1" />
+        <path d="M14 10a4 4 0 0 0-5.66 0l-3 3a4 4 0 0 0 5.66 5.66l1-1" />
+      </symbol>
+      <symbol id="i-phone" viewBox="0 0 24 24">
+        <rect x="6.5" y="2.5" width="11" height="19" rx="2.5" />
+        <path d="M11 18.5h2" />
+      </symbol>
+      <symbol id="food-bars" viewBox="0 0 120 90">
+        <rect width="120" height="90" fill="#f3ddd3" />
+        <rect x="14" y="12" width="92" height="66" rx="6" fill="#c98a45" opacity=".35" />
+        <g fill="#dca55a">
+          <rect x="18" y="16" width="26" height="26" rx="4" />
+          <rect x="47" y="16" width="26" height="26" rx="4" />
+          <rect x="76" y="16" width="26" height="26" rx="4" />
+          <rect x="18" y="47" width="26" height="27" rx="4" />
+          <rect x="47" y="47" width="26" height="27" rx="4" />
+          <rect x="76" y="47" width="26" height="27" rx="4" />
+        </g>
+        <g fill="#f3d492">
+          <circle cx="24" cy="22" r="2.2" />
+          <circle cx="38" cy="36" r="2" />
+          <circle cx="55" cy="21" r="2.2" />
+          <circle cx="66" cy="37" r="2" />
+          <circle cx="84" cy="24" r="2.2" />
+          <circle cx="96" cy="35" r="2" />
+          <circle cx="26" cy="68" r="2" />
+          <circle cx="60" cy="52" r="2.2" />
+          <circle cx="90" cy="66" r="2.2" />
+        </g>
+        <g fill="#7c2d4a">
+          <circle cx="30" cy="28" r="3.4" />
+          <circle cx="36" cy="22" r="2.6" />
+          <circle cx="61" cy="30" r="3.4" />
+          <circle cx="90" cy="30" r="3.4" />
+          <circle cx="32" cy="58" r="3.4" />
+          <circle cx="66" cy="62" r="3.4" />
+          <circle cx="84" cy="56" r="3" />
+          <circle cx="96" cy="60" r="2.6" />
+        </g>
+        <g fill="#b3344a">
+          <circle cx="25" cy="34" r="2.4" />
+          <circle cx="53" cy="35" r="2.4" />
+          <circle cx="82" cy="37" r="2.4" />
+          <circle cx="24" cy="54" r="2.4" />
+          <circle cx="53" cy="66" r="2.4" />
+          <circle cx="92" cy="50" r="2.4" />
+        </g>
+      </symbol>
+      <symbol id="i-arrow-right" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6" /></symbol>
+    </svg>
+    <header class="site-header" data-header>
+      <a class="brand" href="/" aria-label="LinkDish home">
+        <img
+          src="/assets/linkdish-icon-64.png"
+          srcset="/assets/linkdish-icon-64.png 1x, /assets/linkdish-icon-128.png 2x"
+          alt=""
+          width="38"
+          height="38"
+        />
         <span>LinkDish</span>
       </a>
-      <nav class="site-nav" aria-label="Primary navigation">
+
+      <button
+        class="menu-toggle"
+        type="button"
+        aria-expanded="false"
+        aria-controls="site-navigation"
+        data-menu-toggle
+      >
+        <span class="sr-only">Open navigation</span>
+        <span aria-hidden="true"></span>
+        <span aria-hidden="true"></span>
+      </button>
+
+      <nav class="site-nav" id="site-navigation" aria-label="Primary" data-site-nav>
         <a href="/#how-it-works">How it works</a>
-        <a href="/#plans">Plans</a>
-        <a class="button" href="https://app.linkdish.ca">Open LinkDish</a>
+        <a href="/#features">Features</a>
+        <a href="/#plans">Pricing</a>
+        <a href="/support/">Support</a>
+        <a
+          class="button button-small button-primary"
+          href="https://app.linkdish.ca/"
+          data-cta="nav"
+        >
+          Open LinkDish
+        </a>
       </nav>
     </header>
 
     <main id="main-content">
-      <div class="page-shell">
-        <nav class="breadcrumbs" aria-label="Breadcrumb">
-          <a href="/">Home</a> / Save recipes from websites
+      <section class="lp-hero" aria-labelledby="page-title">
+        <nav class="shell breadcrumbs" aria-label="Breadcrumb">
+          <ol>
+            <li><a href="/">Home</a></li>
+            <li aria-current="page">Save recipes from websites</li>
+          </ol>
         </nav>
-        <section class="seo-hero">
+        <div class="lp-hero-inner">
           <div>
             <p class="eyebrow">Save recipes from websites</p>
-            <h1>Keep the recipe.<br /><em>Lose the webpage.</em></h1>
-            <p class="lede">
-              Paste or share a recipe URL. LinkDish saves the photo,
-              ingredients, steps, timing, servings, and source as a clean entry
-              in your own cookbook.
+            <h1 id="page-title">Save the recipe.<br /><em>Skip the scroll.</em></h1>
+            <p class="hero-lede">
+              Paste a link from any public recipe site and LinkDish keeps what you need: the
+              ingredients, steps, times, servings and photo. No pop-ups, no autoplay, no life story,
+              and the original source stays credited.
             </p>
-            <div class="hero-actions">
-              <a class="button" href="https://app.linkdish.ca">Import a recipe</a>
+            <form
+              class="paste-form"
+              action="https://app.linkdish.ca/import"
+              method="get"
+              data-paste-form
+            >
+              <label class="sr-only" for="lp-recipe-url">Recipe page link</label>
+              <div class="paste-field">
+                <svg class="icon paste-icon" aria-hidden="true"><use href="#i-link" /></svg>
+                <input
+                  class="paste-input"
+                  id="lp-recipe-url"
+                  name="url"
+                  type="url"
+                  inputmode="url"
+                  autocomplete="off"
+                  autocapitalize="off"
+                  spellcheck="false"
+                  placeholder="Paste a recipe page link"
+                  required
+                  aria-describedby="lp-paste-hint"
+                />
+                <button
+                  class="button button-tomato paste-submit"
+                  type="submit"
+                  data-cta="hero-import"
+                >
+                  Get the recipe
+                </button>
+              </div>
+              <input type="hidden" name="utm_source" value="linkdish.ca" />
+              <input type="hidden" name="utm_medium" value="hero" />
+              <input type="hidden" name="utm_campaign" value="save-recipes-from-websites" />
+              <p class="paste-hint" id="lp-paste-hint" data-paste-status>
+                Opens in the LinkDish web app. Your first 3 imports are free, no account needed.
+              </p>
+            </form>
+            <div class="cta-row hero-actions" data-dock-sentinel>
               <a
-                class="button button-secondary"
+                class="button button-primary"
                 href="https://play.google.com/store/apps/details?id=com.linkdish.app"
-                >Get the Android app</a
+                data-cta="hero-android"
+              >
+                <svg class="icon" aria-hidden="true"><use href="#i-phone" /></svg>
+                Get it on Android
+              </a>
+              <a class="button button-secondary" href="https://app.linkdish.ca/" data-cta="hero-web"
+                >Open the web app</a
               >
             </div>
           </div>
-          <figure class="hero-phone">
-            <img
-              src="/assets/screen-recipe.png"
-              alt="A recipe imported from a website into LinkDish"
-              width="720"
-              height="1482"
-            />
-          </figure>
-        </section>
-      </div>
-
-      <section class="content-section">
-        <div class="page-shell">
-          <div class="section-heading">
-            <p class="eyebrow">A cleaner workflow</p>
-            <h2>Stop reopening the same cluttered tab.</h2>
-            <p>
-              A browser bookmark sends you back to the full webpage every time.
-              LinkDish keeps a practical copy for cooking and preserves the
-              original link for attribution and context.
-            </p>
-          </div>
-          <div class="benefit-grid">
-            <article class="card">
-              <h3>The parts you need</h3>
-              <p>
-                Ingredients, method, timing, servings, and the recipe photo are
-                organized into one consistent layout.
-              </p>
-            </article>
-            <article class="card">
-              <h3>The source stays</h3>
-              <p>
-                The original recipe author and source page remain visible and
-                available from every saved entry.
-              </p>
-            </article>
-            <article class="card">
-              <h3>Ready when you cook</h3>
-              <p>
-                Use focused steps, serving scaling, timers, and a shopping list
-                without switching tools.
-              </p>
-            </article>
+          <div class="lp-visual">
+            <div
+              class="clutter-demo"
+              role="img"
+              aria-label="A cluttered recipe blog page next to the same recipe as a clean LinkDish card"
+            >
+              <div class="clutter-page" aria-hidden="true">
+                <span class="label-chip">The web page</span>
+                <span class="clutter-ad">Ad</span>
+                <span class="clutter-line"></span>
+                <span class="clutter-line"></span>
+                <span class="clutter-line short"></span>
+                <span class="clutter-ad">Sign up for our newsletter</span>
+                <span class="clutter-line"></span>
+                <span class="clutter-line short"></span>
+                <span class="clutter-ad">Ad</span>
+                <span class="clutter-line"></span>
+                <span class="clutter-line"></span>
+                <span class="clutter-line short"></span>
+              </div>
+              <div class="clean-card" aria-hidden="true">
+                <span class="label-chip good">In LinkDish</span>
+                <svg class="mock-thumb" viewBox="0 0 120 90"><use href="#food-bars" /></svg>
+                <b>Brown Butter Berry Oat Bars</b>
+                <span class="num">9 bars · Prep 15 min · Cook 38 min</span>
+                <ul>
+                  <li><span class="num">1 ½</span> cups rolled oats</li>
+                  <li><span class="num">½</span> cup butter</li>
+                  <li><span class="num">1 ½</span> cups mixed berries</li>
+                </ul>
+                <small>From weeknightkitchen.com</small>
+              </div>
+            </div>
           </div>
         </div>
       </section>
 
-      <section class="content-section">
-        <div class="page-shell feature-split">
-          <div class="feature-copy">
-            <p class="eyebrow">Android and web</p>
-            <h2>Share a link straight from your browser.</h2>
+      <section class="section section-surface" aria-labelledby="how-title">
+        <div class="shell">
+          <div class="section-head" data-reveal>
+            <p class="eyebrow">How to save a recipe from a website</p>
+            <h2 class="section-title" id="how-title">
+              Three ways in.<br /><em>One clean recipe.</em>
+            </h2>
+          </div>
+          <ul class="card-grid" role="list">
+            <li class="info-card" data-reveal>
+              <span class="step-number num">01</span>
+              <h3>On the web</h3>
+              <p>
+                Copy the page address from your browser, open LinkDish and paste it into Add, or
+                paste it into the box at the top of this page.
+              </p>
+            </li>
+            <li class="info-card" data-reveal>
+              <span class="step-number num">02</span>
+              <h3>On Android</h3>
+              <p>
+                On the recipe page, tap Share and choose LinkDish. The recipe opens ready to check
+                and save.
+              </p>
+            </li>
+            <li class="info-card" data-reveal>
+              <span class="step-number num">03</span>
+              <h3>On iPhone</h3>
+              <p>
+                Add the LinkDish web app to your Home Screen from Safari, then paste links into Add.
+                A native iPhone app is on the way.
+              </p>
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="section" aria-labelledby="keeps-title">
+        <div class="shell lp-split">
+          <div class="feature-copy" data-reveal>
+            <p class="eyebrow">What LinkDish keeps</p>
+            <h2 class="section-title" id="keeps-title">The recipe,<br /><em>not the rest.</em></h2>
             <p>
-              On Android, use the system share menu to send a recipe page to
-              LinkDish. On the web, copy the URL and paste it into the import
-              field.
+              LinkDish reads the recipe the site publishes, then gives you a calm page built for
+              cooking. Anything it misses, you can edit.
             </p>
-            <ul>
-              <li>Works with public recipe pages</li>
-              <li>Personal cookbook available across devices</li>
-              <li>Web app can be installed on an iPhone or iPad Home Screen</li>
+            <ul class="check-list">
+              <li>Ingredients, with sections like "For the filling" when the site uses them</li>
+              <li>Numbered steps with timers taken from the method</li>
+              <li>Prep and cook times, servings and the photo</li>
+              <li>The original page, one tap away</li>
             </ul>
           </div>
-          <div class="feature-visual">
-            <img
-              src="/assets/screen-recipe.png"
-              alt="Imported recipe ingredients in LinkDish"
-              width="720"
-              height="1482"
-              loading="lazy"
-            />
-            <img
-              src="/assets/screen-cookmode.png"
-              alt="Imported recipe displayed in LinkDish cook mode"
-              width="720"
-              height="1482"
-              loading="lazy"
-            />
+          <figure class="shot-frame" data-reveal>
+            <picture class="shot-crop">
+              <source
+                type="image/avif"
+                srcset="
+                  /assets/screen-recipe-360.avif 360w,
+                  /assets/screen-recipe-600.avif 600w,
+                  /assets/screen-recipe-720.avif 720w
+                "
+                sizes="(max-width: 640px) 234px, 304px"
+              />
+              <source
+                type="image/webp"
+                srcset="
+                  /assets/screen-recipe-360.webp 360w,
+                  /assets/screen-recipe-600.webp 600w,
+                  /assets/screen-recipe-720.webp 720w
+                "
+                sizes="(max-width: 640px) 234px, 304px"
+              />
+              <img
+                src="/assets/screen-recipe.png"
+                alt="A recipe saved in LinkDish: the dish photo, the weeknightkitchen.com source, total, prep and cook times, a five-star rating with how often it was cooked, and the ingredients with servings and Metric selected"
+                width="720"
+                height="1558"
+                loading="lazy"
+                decoding="async"
+              />
+            </picture>
+          </figure>
+        </div>
+      </section>
+
+      <section class="section section-canvas" id="faq" aria-labelledby="faq-title">
+        <div class="shell faq">
+          <div class="faq-head" data-reveal>
+            <p class="eyebrow">Questions</p>
+            <h2 class="section-title" id="faq-title">Saving from<br /><em>websites.</em></h2>
+          </div>
+          <div class="faq-list" data-reveal>
+            <details data-faq>
+              <summary>Which recipe websites work with LinkDish?</summary>
+              <div>
+                <p>
+                  Most public recipe pages work, from large food sites to personal blogs. Pages that
+                  publish their recipe in a standard recipe format import most cleanly. Pages behind
+                  a login or a paywall may not import.
+                </p>
+              </div>
+            </details>
+            <details data-faq>
+              <summary>Does LinkDish copy the whole article?</summary>
+              <div>
+                <p>
+                  No. It keeps the recipe itself: ingredients, steps, times, servings and the photo,
+                  with a link back to the original page so the author keeps the credit.
+                </p>
+              </div>
+            </details>
+            <details data-faq>
+              <summary>What if an import misses something?</summary>
+              <div>
+                <p>
+                  You can edit any saved recipe. If a site keeps importing badly, send the link
+                  through LinkDish Support so it can be looked at.
+                </p>
+              </div>
+            </details>
+            <details data-faq>
+              <summary>Is it quick?</summary>
+              <div>
+                <p>
+                  Usually a few seconds. Links LinkDish has already read come back almost instantly.
+                </p>
+              </div>
+            </details>
+            <details data-faq>
+              <summary>Is it free to try?</summary>
+              <div>
+                <p>
+                  Yes. The Free plan includes 3 recipe imports and up to 15 saved recipes, and no
+                  card is required.
+                </p>
+              </div>
+            </details>
           </div>
         </div>
       </section>
 
-      <section class="content-section">
-        <div class="page-shell">
-          <div class="section-heading">
-            <p class="eyebrow">Frequently asked</p>
-            <h2>Importing recipe links.</h2>
-          </div>
-          <div class="faq-list">
-            <details>
-              <summary>How do I save a recipe from a website?</summary>
-              <p>
-                Copy or share the public recipe URL to LinkDish. It turns the
-                useful recipe details into a clean cookbook entry while keeping
-                the original source linked.
-              </p>
-            </details>
-            <details>
-              <summary>Can LinkDish import every recipe website?</summary>
-              <p>
-                Public recipe pages work best. Pages that require a login or
-                block access may not import.
-              </p>
-            </details>
-            <details>
-              <summary>Can I organize more than fifteen recipes?</summary>
-              <p>
-                Yes. The free plan holds up to fifteen saved recipes. Plus and
-                Family include unlimited saved recipes.
-              </p>
-            </details>
-          </div>
+      <section class="section" aria-labelledby="related-title">
+        <div class="shell">
+          <h2 class="related-title" id="related-title">Keep reading</h2>
+          <ul class="related" role="list">
+            <li>
+              <a href="/save-recipes-from-youtube/"
+                >Save recipes from YouTube
+                <svg class="icon" aria-hidden="true"><use href="#i-arrow-right" /></svg
+              ></a>
+            </li>
+            <li>
+              <a href="/scan-recipes-from-photos/"
+                >Scan recipes from photos
+                <svg class="icon" aria-hidden="true"><use href="#i-arrow-right" /></svg
+              ></a>
+            </li>
+            <li>
+              <a href="/recipe-saver-app/"
+                >The recipe saver app
+                <svg class="icon" aria-hidden="true"><use href="#i-arrow-right" /></svg
+              ></a>
+            </li>
+            <li>
+              <a href="/meal-planner-and-grocery-list/"
+                >Meal planner and grocery list
+                <svg class="icon" aria-hidden="true"><use href="#i-arrow-right" /></svg
+              ></a>
+            </li>
+            <li>
+              <a href="/paprika-alternative/"
+                >LinkDish vs Paprika
+                <svg class="icon" aria-hidden="true"><use href="#i-arrow-right" /></svg
+              ></a>
+            </li>
+            <li>
+              <a href="/support/"
+                >Import help <svg class="icon" aria-hidden="true"><use href="#i-arrow-right" /></svg
+              ></a>
+            </li>
+          </ul>
         </div>
       </section>
 
-      <section class="final-call">
-        <h2>Your next recipe, cleaned up.</h2>
-        <p>Import your first recipe free. No card required.</p>
-        <div class="hero-actions">
-          <a class="button" href="https://app.linkdish.ca">Try LinkDish</a>
-          <a
-            class="button button-secondary"
-            href="https://play.google.com/store/apps/details?id=com.linkdish.app"
-            >Get it on Android</a
-          >
+      <section class="final-call" aria-labelledby="final-title">
+        <div class="final-call-inner" data-reveal>
+          <h2 id="final-title">Paste a link.<br /><em>Get cooking.</em></h2>
+          <p>Save your first recipe from the web in a few seconds. No card required.</p>
+          <div class="final-actions">
+            <a class="button button-light" href="https://app.linkdish.ca/" data-cta="final-web"
+              >Open the web app</a
+            >
+            <a
+              class="button button-outline-light"
+              href="https://play.google.com/store/apps/details?id=com.linkdish.app"
+              data-cta="final-android"
+              >Get it on Android</a
+            >
+          </div>
         </div>
       </section>
     </main>
 
     <footer class="site-footer">
-      <span>© 2026 LinkDish · Made in Canada</span>
-      <span
-        ><a href="/recipe-saver-app/">Recipe saver app</a> ·
-        <a href="/paprika-alternative/">Paprika alternative</a> ·
-        <a href="/support/">Support</a></span
-      >
+      <div class="footer-brand">
+        <a class="brand" href="/">
+          <img
+            src="/assets/linkdish-icon-64.png"
+            srcset="/assets/linkdish-icon-64.png 1x, /assets/linkdish-icon-128.png 2x"
+            alt=""
+            width="38"
+            height="38"
+          />
+          <span>LinkDish</span>
+        </a>
+        <p>
+          Keep the recipe. Lose the clutter. Save from anywhere, plan the week and shop by aisle.
+        </p>
+      </div>
+      <nav class="footer-column" aria-labelledby="footer-product">
+        <h2 id="footer-product">Product</h2>
+        <a href="/#features">Features</a>
+        <a href="/#planner">Meal planner</a>
+        <a href="/#plans">Pricing</a>
+        <a href="/#iphone">iPhone &amp; iPad</a>
+        <a href="https://app.linkdish.ca/" data-cta="footer-web">Web app</a>
+        <a
+          href="https://play.google.com/store/apps/details?id=com.linkdish.app"
+          data-cta="footer-android"
+          >Android app</a
+        >
+      </nav>
+      <nav class="footer-column" aria-labelledby="footer-guides">
+        <h2 id="footer-guides">Guides</h2>
+        <a href="/recipe-saver-app/">Recipe saver app</a>
+        <a href="/save-recipes-from-websites/">Save recipes from websites</a>
+        <a href="/save-recipes-from-youtube/">Save recipes from YouTube</a>
+        <a href="/scan-recipes-from-photos/">Scan recipes from photos</a>
+        <a href="/meal-planner-and-grocery-list/">Meal planner &amp; grocery list</a>
+        <a href="/paprika-alternative/">Paprika alternative</a>
+      </nav>
+      <nav class="footer-column" aria-labelledby="footer-help">
+        <h2 id="footer-help">Help</h2>
+        <a href="/support/">Support</a>
+        <a href="/privacy/">Privacy</a>
+        <a href="mailto:support@linkdish.ca">support@linkdish.ca</a>
+        <a href="https://app.linkdish.ca/install" data-cta="footer-install">Install on iPhone</a>
+      </nav>
+      <p class="footer-bottom">
+        <span>Made in Canada</span>
+        <span>&copy; <span data-current-year>2026</span> LinkDish</span>
+      </p>
     </footer>
+
+    <div class="mobile-dock" data-mobile-dock>
+      <a class="button button-primary" href="https://app.linkdish.ca/" data-cta="dock-web"
+        >Open the web app</a
+      >
+      <a
+        class="button button-secondary"
+        href="https://play.google.com/store/apps/details?id=com.linkdish.app"
+        data-cta="dock-android"
+        >Android app</a
+      >
+    </div>
+
+    <script src="/site.js" defer></script>
+    <script src="/analytics.js" defer></script>
   </body>
 </html>

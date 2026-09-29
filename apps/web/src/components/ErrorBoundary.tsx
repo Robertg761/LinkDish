@@ -1,6 +1,10 @@
 import React from "react";
 
+import { trackWebError } from "../analytics/client";
+import { isChunkLoadError, retryFailedLazyImports } from "../platform/lazy";
+
 import { Button } from "./Button";
+import { Icon } from "./Icon";
 import "./ErrorBoundary.css";
 
 interface ErrorBoundaryProps {
@@ -27,9 +31,16 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
 
   override componentDidCatch(error: Error, errorInfo: React.ErrorInfo): void {
     console.error("Unhandled render error:", error, errorInfo.componentStack);
+    // React does not re-dispatch caught render errors to window "error", so report them here.
+    trackWebError(error, window.location.pathname, "error_boundary");
   }
 
   private handleRetry = (): void => {
+    if (isChunkLoadError(this.state.error)) {
+      // React.lazy caches a failed import; let lazyWithRetry components import again.
+      retryFailedLazyImports();
+    }
+
     this.setState({ error: null });
     this.props.onReset?.();
   };
@@ -46,7 +57,7 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
     return (
       <div className="app-error-boundary" role="alert">
         <div aria-hidden="true" className="app-error-boundary-icon">
-          ⚠️
+          <Icon name="alert-triangle" size={28} />
         </div>
         <h1 className="app-error-boundary-title">Something went wrong</h1>
         <p className="app-error-boundary-message">

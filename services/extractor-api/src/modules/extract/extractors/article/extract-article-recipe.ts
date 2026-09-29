@@ -2,6 +2,7 @@ import { Readability } from "@mozilla/readability";
 import { load } from "cheerio";
 import { JSDOM } from "jsdom";
 
+import { getParsedHtmlDocument } from "../../html/parsed-html-document.js";
 import { getDomainAdapter } from "../../source-detection/domain-adapters.js";
 import { captureRecipeImage } from "../capture-recipe-image.js";
 import {
@@ -27,32 +28,38 @@ export const extractArticleRecipe = (document: HtmlSourceDocument): ExtractionCa
     url: document.finalUrl
   });
   const readabilityResult = new Readability(dom.window.document).parse();
+  const parsedDocument = getParsedHtmlDocument(document);
   const adapter = getDomainAdapter(new URL(document.finalUrl).hostname.toLowerCase());
-  const articleHtml = readabilityResult?.content ?? document.html;
+  /*
+   * The Readability output (or the page itself when Readability finds nothing)
+   * is parsed once and shared by every section helper below.
+   */
+  const article$ =
+    readabilityResult?.content == null ? parsedDocument.$ : load(readabilityResult.content);
   const articleTitle =
-    readabilityResult?.title ?? document.title ?? load(document.html)("title").text().trim();
+    readabilityResult?.title ?? document.title ?? parsedDocument.titleText.trim();
   const adapterIngredients = adapter
-    ? extractItemsFromSelectors(document.html, adapter.selectors.ingredients)
+    ? extractItemsFromSelectors(parsedDocument.$, adapter.selectors.ingredients)
     : [];
   const adapterSteps = adapter
-    ? extractItemsFromSelectors(document.html, adapter.selectors.steps)
+    ? extractItemsFromSelectors(parsedDocument.$, adapter.selectors.steps)
     : [];
 
   const ingredientItems =
     adapterIngredients.length > 0
       ? adapterIngredients
       : [
-          ...extractSectionListItems(articleHtml, /ingredients?/i),
-          ...extractSectionContent(articleHtml, /ingredients?/i)
+          ...extractSectionListItems(article$, /ingredients?/i),
+          ...extractSectionContent(article$, /ingredients?/i)
         ];
   const stepItems =
     adapterSteps.length > 0
       ? adapterSteps
       : [
-          ...extractSectionListItems(articleHtml, /(instructions?|directions?|method|steps?)/i),
-          ...extractSectionContent(articleHtml, /(instructions?|directions?|method|steps?)/i)
+          ...extractSectionListItems(article$, /(instructions?|directions?|method|steps?)/i),
+          ...extractSectionContent(article$, /(instructions?|directions?|method|steps?)/i)
         ];
-  const textBlocks = extractTextBlocks(articleHtml);
+  const textBlocks = extractTextBlocks(article$);
   const inferredIngredients =
     ingredientItems.length > 0
       ? ingredientItems
@@ -72,24 +79,28 @@ export const extractArticleRecipe = (document: HtmlSourceDocument): ExtractionCa
     ...parseTextRecipeSignals(textBlocks).signals,
     recipeLike: heuristicRecipeLike
   };
-  const flattenedText = load(articleHtml).text();
-
   if (!signals.recipeLike) {
     return null;
   }
+
+  const flattenedText = article$.text();
+  const servings = extractServingsFromText(flattenedText);
+  const prepTimeMinutes = extractMinutesFromText(flattenedText, "prep");
+  const cookTimeMinutes = extractMinutesFromText(flattenedText, "cook");
+  const nutrition = extractNutritionFromText(flattenedText);
 
   return {
     recipe: {
       title: articleTitle,
       sourceUrl: document.finalUrl,
       sourceType: "article",
-      image: captureRecipeImage(document.html, document.finalUrl),
+      image: captureRecipeImage(parsedDocument, document.finalUrl),
       ingredients: toIngredientLines(inferredIngredients),
       steps: toStepLines(inferredSteps),
-      servings: extractServingsFromText(flattenedText),
-      prepTimeMinutes: extractMinutesFromText(flattenedText, "prep"),
-      cookTimeMinutes: extractMinutesFromText(flattenedText, "cook"),
-      nutrition: extractNutritionFromText(flattenedText)
+      servings,
+      prepTimeMinutes,
+      cookTimeMinutes,
+      nutrition
     },
     strategy: "article-pattern",
     evidence: [
@@ -103,12 +114,10 @@ export const extractArticleRecipe = (document: HtmlSourceDocument): ExtractionCa
       title: "visible-text",
       ingredients: "visible-text",
       steps: "visible-text",
-      servings: extractServingsFromText(flattenedText) ? "visible-text" : null,
-      prepTimeMinutes:
-        extractMinutesFromText(flattenedText, "prep") == null ? null : "visible-text",
-      cookTimeMinutes:
-        extractMinutesFromText(flattenedText, "cook") == null ? null : "visible-text",
-      nutrition: extractNutritionFromText(flattenedText) ? "visible-text" : null
+      servings: servings ? "visible-text" : null,
+      prepTimeMinutes: prepTimeMinutes == null ? null : "visible-text",
+      cookTimeMinutes: cookTimeMinutes == null ? null : "visible-text",
+      nutrition: nutrition ? "visible-text" : null
     }),
     signals
   };

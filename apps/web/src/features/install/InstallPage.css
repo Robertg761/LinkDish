@@ -1,92 +1,391 @@
 .install-page {
-  padding: 20px 20px 80px 20px;
-  max-width: var(--max-width-content);
-  margin: 0 auto;
-}
-
-.install-header {
-  text-align: center;
-  margin-bottom: 32px;
-}
-
-.install-eyebrow {
-  color: var(--color-accent);
-  font-family: var(--font-family-sans);
-  font-size: var(--text-label);
-  font-weight: 600;
-  letter-spacing: var(--text-label-letter-spacing);
-  line-height: var(--text-label-line-height);
-  margin: 0 0 8px;
-  text-transform: uppercase;
-}
-
-.install-title {
-  font-family: var(--font-family-serif);
-  font-size: var(--text-headline);
-  font-weight: normal;
-  line-height: var(--text-headline-line-height);
-  letter-spacing: var(--text-headline-letter-spacing);
-  color: var(--color-text);
-  margin: 0 0 8px 0;
-}
-
-.install-subtitle {
-  font-family: var(--font-family-sans);
-  color: var(--color-muted);
-  font-size: var(--text-small);
-  line-height: var(--text-small-line-height);
-  margin: 0;
-}
-
-.install-steps-container {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 20px;
+  padding-bottom: calc(48px + var(--app-bottom-inset));
 }
 
-.install-step-card {
-  padding: 20px;
+.install-page > .page-header {
+  margin-bottom: 4px;
+}
+
+/* Hero: install button or the steps for this device ------------------------- */
+.install-hero {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px 18px;
+  background:
+    radial-gradient(
+      360px 180px at 0% 0%,
+      color-mix(in srgb, var(--color-butter) 24%, transparent),
+      transparent 70%
+    ),
+    var(--color-surface-raised);
+}
+
+.install-hero-copy {
+  display: flex;
+  flex: 1 1 200px;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.install-hero-copy h2 {
+  font-size: var(--text-title);
+  letter-spacing: var(--text-title-letter-spacing);
+}
+
+.install-hero-copy p {
+  color: var(--color-ink-muted);
+  font-size: var(--text-small);
+}
+
+.install-hero-icon {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 18px;
+  background: var(--color-butter-soft);
+  color: var(--color-primary);
+  box-shadow: var(--shadow-xs);
+}
+
+.install-hero-icon-done {
+  background: var(--color-success-soft);
+  color: var(--color-success);
+}
+
+@media (max-width: 520px) {
+  .install-hero > .btn {
+    width: 100%;
+  }
+}
+
+.install-guide {
+  gap: 18px;
+}
+
+.install-guide-head {
+  display: flex;
+  align-items: center;
   gap: 14px;
 }
 
-.step-card-title {
-  font-family: var(--font-family-serif);
-  font-size: 20px;
-  font-weight: normal;
-  color: var(--color-text);
-  margin: 0 0 4px 0;
+.install-guide-head .install-hero-icon {
+  width: 56px;
+  height: 56px;
 }
 
-.step-list-ordered {
-  padding-left: 20px;
+.install-guide-title {
+  font-size: var(--text-title);
+  letter-spacing: var(--text-title-letter-spacing);
+}
+
+.install-guide-browser {
+  color: var(--color-ink-muted);
+  font-family: var(--font-family-sans);
+  font-size: var(--text-body);
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+.install-guide-lede {
+  color: var(--color-ink-muted);
+  font-size: var(--text-small);
+}
+
+.install-steps {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  margin: 0;
+  gap: 12px;
+  list-style: none;
 }
 
-.step-list-ordered li {
-  font-family: var(--font-family-sans);
-  font-size: 15px;
-  color: var(--color-text);
+.install-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  color: var(--color-ink);
+  font-size: var(--text-body);
   line-height: 1.5;
 }
 
-.share-icon-large {
-  font-weight: bold;
-  background-color: var(--color-surface-subtle);
-  padding: 2px 6px;
-  border-radius: var(--radius-sm, 12px);
-  font-size: 14px;
+.install-step-number {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-pill);
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+  font-size: var(--text-small);
+  font-weight: 800;
 }
 
-.step-card-footer-note {
+.install-step-text {
+  padding-top: 3px;
+}
+
+.install-key {
+  font-weight: 750;
+}
+
+.install-inline-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  margin: -4px 1px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+  color: var(--color-primary);
+  vertical-align: middle;
+}
+
+.install-guide-note {
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-sunken);
+  color: var(--color-ink-muted);
+  font-size: var(--text-caption);
+}
+
+/* Other devices ----------------------------------------------------------------- */
+.install-other {
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-card);
+  background: var(--color-surface);
+}
+
+.install-other summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 56px;
+  padding: 12px 18px;
+  color: var(--color-ink);
+  font-weight: 650;
+  list-style: none;
+  cursor: pointer;
+}
+
+.install-other summary::-webkit-details-marker {
+  display: none;
+}
+
+.install-other-chevron {
+  color: var(--color-ink-subtle);
+  transition: transform var(--transition-fast);
+}
+
+.install-other[open] .install-other-chevron {
+  transform: rotate(180deg);
+}
+
+.install-other-body {
+  display: grid;
+  gap: 18px;
+  padding: 4px 18px 20px;
+}
+
+@media (min-width: 900px) {
+  .install-other-body {
+    grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+  }
+}
+
+.install-other-guide {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.install-other-guide h3 {
+  font-size: var(--text-title-sm);
+}
+
+.install-other-guide h3 span {
+  color: var(--color-ink-muted);
   font-family: var(--font-family-sans);
-  font-size: 12px;
-  color: var(--color-muted);
-  line-height: 1.5;
-  background-color: var(--color-surface-subtle);
-  padding: 12px;
+  font-size: var(--text-small);
+  font-weight: 600;
+}
+
+.install-other-guide .install-step {
+  font-size: var(--text-small);
+}
+
+.install-other-guide .install-step-number {
+  width: 26px;
+  height: 26px;
+  background: var(--color-primary-soft);
+  color: var(--color-on-primary-soft);
+}
+
+/* Save from anywhere ----------------------------------------------------------- */
+.install-section {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 8px;
+}
+
+.install-section-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.install-section-heading h2 {
+  font-size: var(--text-title);
+  letter-spacing: var(--text-title-letter-spacing);
+}
+
+.install-section-heading p {
+  color: var(--color-ink-muted);
+  font-size: var(--text-small);
+}
+
+.install-card-title {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.install-card-title h3 {
+  font-size: var(--text-title-sm);
+}
+
+.install-card-title p {
+  color: var(--color-ink-muted);
+  font-size: var(--text-small);
+}
+
+.install-card-icon {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 40px;
+  height: 40px;
   border-radius: 12px;
-  margin: 0;
+  background: var(--color-primary-soft);
+  color: var(--color-on-primary-soft);
+}
+
+.install-bookmarklet-demo {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 16px;
+  padding: 18px;
+  border: 1.5px dashed var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-sunken);
+}
+
+.install-bookmarklet {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 18px;
+  border-radius: var(--radius-pill);
+  background: var(--color-tomato);
+  box-shadow: var(--shadow-tomato);
+  color: var(--color-on-tomato);
+  font-weight: 750;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-drag: element;
+}
+
+.install-bookmarklet:hover {
+  background: var(--color-tomato-hover);
+  color: var(--color-on-tomato);
+  text-decoration: none;
+}
+
+.install-bookmarklet:active {
+  cursor: grabbing;
+}
+
+.install-bookmarklet-arrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-ink-muted);
+  font-size: var(--text-caption);
+  font-weight: 650;
+}
+
+.install-mini-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-left: 20px;
+  color: var(--color-ink);
+  font-size: var(--text-small);
+}
+
+.install-fineprint {
+  color: var(--color-ink-muted);
+  font-size: var(--text-caption);
+  line-height: 1.55;
+}
+
+.install-fineprint a {
+  font-weight: 650;
+}
+
+.install-text-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-primary);
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.install-share-tips {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  list-style: none;
+}
+
+.install-share-tips li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 14px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: var(--color-surface-subtle);
+  font-size: var(--text-small);
+}
+
+.install-share-tips li.is-yours {
+  border-color: color-mix(in srgb, var(--color-primary) 30%, transparent);
+  background: color-mix(in srgb, var(--color-primary-soft) 60%, transparent);
+}
+
+.install-share-tips strong {
+  color: var(--color-ink);
+}
+
+.install-share-tips span {
+  color: var(--color-ink-muted);
+}
+
+.install-share-tips em {
+  color: var(--color-ink);
+  font-style: normal;
+  font-weight: 700;
 }

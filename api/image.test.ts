@@ -62,7 +62,7 @@ describe("Vercel image adapter", () => {
     });
   });
 
-  it("returns WebP bytes with the immutable image cache policy", async () => {
+  it("returns WebP bytes with the browser cache policy and a CDN copy revalidated daily", async () => {
     imageMocks.parseImageProxyQuery.mockReturnValue({
       sourceUrl: new URL("https://img.test/food.jpg"),
       width: 480
@@ -75,6 +75,9 @@ describe("Vercel image adapter", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toBe("image/webp");
     expect(response.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
+    expect(response.headers.get("cdn-cache-control")).toBe(
+      "public, s-maxage=86400, stale-while-revalidate=604800"
+    );
     expect(response.headers.get("access-control-allow-origin")).toBe("https://app.linkdish.ca");
     expect(Buffer.from(await response.arrayBuffer()).toString("utf8")).toBe("webp-bytes");
     expect(imageMocks.getProxiedImage).toHaveBeenCalledWith(
@@ -100,6 +103,8 @@ describe("Vercel image adapter", () => {
     const response = await imageApi.GET(request());
 
     expect(response.status).toBe(415);
+    /* Errors must never be pinned in the CDN for a year. */
+    expect(response.headers.get("cdn-cache-control")).toBeNull();
     await expect(response.json()).resolves.toEqual({
       message: "Image source returned an unsupported content type.",
       reason: "invalid_content_type"

@@ -42,23 +42,95 @@ export const getAppSerifFontFamily = (
   return frauncesFontFamilies[voice];
 };
 
+/**
+ * Light palette ("warm editorial kitchen"). The values mirror the light theme in
+ * apps/web/src/styles/tokens.css and the marketing site, so the app, web and site share one
+ * brand: forest `accent`, cream `canvas`/`surface`, tomato for energetic accents (favorites,
+ * timers), butter for highlights and sage (`accentSoft`) for quiet fills.
+ *
+ * The original keys keep their names and values; brand keys were added alongside them.
+ */
 export const appColors = {
   background: "#f4efe7",
   canvas: "#fbf7f0",
   surface: "#fffdf8",
   surfaceMuted: "#efe7da",
+  surfaceSubtle: "#f1eadf",
   border: "#ddd2c3",
+  borderSubtle: "#e8dfd2",
+  borderStrong: "#bfb19d",
   accent: "#29443b",
+  accentPressed: "#1f352e",
   accentSoft: "#dde7df",
+  onAccent: "#fffdf8",
   text: "#1f211d",
   muted: "#6e685f",
+  subtle: "#857d71",
+  tomato: "#b95233",
+  tomatoSoft: "#f3ddd3",
+  onTomatoSoft: "#8e3b22",
+  butter: "#e9bd5a",
+  butterSoft: "#f7e9c8",
+  onButterSoft: "#5c4613",
+  success: "#2f6b4a",
+  successSoft: "#dcebdf",
   danger: "#9a523f",
   dangerText: "#8b2e23",
+  dangerSoft: "#f2d8d2",
+  dangerBorder: "#e1b2a9",
   shadow: "#5d564b",
   backdrop: "rgba(31, 33, 29, 0.4)",
   backdropLight: "rgba(31, 33, 29, 0.1)",
   placeholder: "rgba(110, 104, 95, 0.6)"
 } as const;
+
+export type AppColorName = keyof typeof appColors;
+export type AppColorPalette = Readonly<Record<AppColorName, string>>;
+
+/**
+ * Dark palette for a future dark mode: warm charcoal surfaces (never pure black), cream ink
+ * and a lifted sage primary so text keeps at least 4.5:1 contrast. The values mirror the dark
+ * theme in apps/web/src/styles/tokens.css. The app does not use it yet; screens still read
+ * `appColors`, and switching needs a theme hook plus `userInterfaceStyle: "automatic"`.
+ */
+export const appDarkColors: AppColorPalette = {
+  background: "#1a1816",
+  canvas: "#1f1d1a",
+  surface: "#24221e",
+  surfaceMuted: "#34302b",
+  surfaceSubtle: "#2a2723",
+  border: "#3a3631",
+  borderSubtle: "#2f2c28",
+  borderStrong: "#58524a",
+  accent: "#a9cbb9",
+  accentPressed: "#cfe3d7",
+  accentSoft: "#2a3a33",
+  onAccent: "#13241d",
+  text: "#f3ece0",
+  muted: "#b3aa9b",
+  subtle: "#8f877a",
+  tomato: "#e0795a",
+  tomatoSoft: "#3d2620",
+  onTomatoSoft: "#f2b9a4",
+  butter: "#e9bd5a",
+  butterSoft: "#3a3020",
+  onButterSoft: "#f2d387",
+  success: "#8fd0a8",
+  successSoft: "#22352a",
+  danger: "#f19a86",
+  dangerText: "#f3c9bd",
+  dangerSoft: "#432621",
+  dangerBorder: "#52302a",
+  shadow: "#000000",
+  backdrop: "rgba(6, 5, 4, 0.62)",
+  backdropLight: "rgba(6, 5, 4, 0.24)",
+  placeholder: "rgba(179, 170, 155, 0.6)"
+};
+
+export const appPalettes = {
+  dark: appDarkColors,
+  light: appColors
+} as const satisfies Record<"dark" | "light", AppColorPalette>;
 
 export const appSpacing = {
   xs: 4,
@@ -285,8 +357,8 @@ const styles = StyleSheet.create({
     elevation: 0
   },
   buttonDanger: {
-    backgroundColor: "#f2d8d2",
-    borderColor: "#e1b2a9",
+    backgroundColor: appColors.dangerSoft,
+    borderColor: appColors.dangerBorder,
     shadowOpacity: 0,
     elevation: 0
   },

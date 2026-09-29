@@ -46,6 +46,16 @@ const request = () =>
     method: "POST"
   });
 
+const batchRequest = (events: unknown[]) =>
+  new Request("https://api.linkdish.ca/analytics/events", {
+    body: JSON.stringify({ events }),
+    headers: {
+      "content-type": "application/json",
+      origin: "https://app.linkdish.ca"
+    },
+    method: "POST"
+  });
+
 beforeEach(() => {
   mocks.checkPublicEndpointRateLimit.mockResolvedValue({
     allowed: true,
@@ -73,9 +83,88 @@ describe("Vercel analytics adapter", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("access-control-allow-credentials")).toBe("true");
-    await expect(response.json()).resolves.toEqual({ accepted: 1 });
+    await expect(response.json()).resolves.toEqual({ accepted: 1, dropped: 0 });
     expect(mocks.checkPublicEndpointRateLimit).toHaveBeenCalledOnce();
     expect(mocks.writeAnalyticsEvents).toHaveBeenCalledOnce();
+  });
+
+  it("drops invalid events instead of rejecting the whole batch", async () => {
+    const analyticsApi = await import("./analytics.js");
+    const response = await analyticsApi.POST(
+      batchRequest([
+        { eventName: "recipe_favorited", platform: "web_app", properties: {} },
+        { eventName: "a_name_from_a_newer_client", platform: "web_app", properties: {} },
+        { eventName: "web_vitals", platform: "web_app", properties: { metric: "LCP", value: 812 } },
+        { eventName: "web_route_viewed", platform: "not_a_platform", properties: {} }
+      ])
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ accepted: 1, dropped: 2 });
+    const written = mocks.writeAnalyticsEvents.mock.calls[0]?.[0] as Array<{ eventName: string }>;
+    expect(written.map((event) => event.eventName)).toEqual(["recipe_favorited", "web_vitals"]);
+  });
+
+  it("answers 200 with nothing written when every event is invalid", async () => {
+    const analyticsApi = await import("./analytics.js");
+    const response = await analyticsApi.POST(
+      batchRequest([{ eventName: "unknown_event", platform: "web_app", properties: {} }])
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ accepted: 0, dropped: 1 });
+    expect(mocks.writeAnalyticsEvents).not.toHaveBeenCalled();
+  });
+
+  it("still rejects a malformed batch envelope", async () => {
+    const analyticsApi = await import("./analytics.js");
+    const response = await analyticsApi.POST(batchRequest([]));
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      message: "Invalid analytics event batch."
+    });
+    expect(mocks.writeAnalyticsEvents).not.toHaveBeenCalled();
+  });
+
+  it("parses a sendBeacon batch sent as text/plain and keeps the CORS headers", async () => {
+    const analyticsApi = await import("./analytics.js");
+    /* What the web client's beacon posts: the JSON batch in a text/plain Blob. */
+    const beacon = new Request("https://api.linkdish.ca/analytics/events", {
+      body: new Blob([await request().text()], { type: "text/plain;charset=UTF-8" }),
+      headers: { origin: "https://app.linkdish.ca" },
+      method: "POST"
+    });
+    expect(beacon.headers.get("content-type")).toMatch(/^text\/plain;charset=utf-8$/iu);
+
+    const response = await analyticsApi.POST(beacon);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("access-control-allow-origin")).toBe("https://app.linkdish.ca");
+    expect(response.headers.get("access-control-allow-credentials")).toBe("true");
+    await expect(response.json()).resolves.toEqual({ accepted: 1, dropped: 0 });
+    expect(mocks.writeAnalyticsEvents).toHaveBeenCalledOnce();
+  });
+
+  it("answers 400 without writing when a text/plain body is not JSON", async () => {
+    const analyticsApi = await import("./analytics.js");
+    const response = await analyticsApi.POST(
+      new Request("https://api.linkdish.ca/analytics/events", {
+        body: "{not json",
+        headers: {
+          "content-type": "text/plain;charset=UTF-8",
+          origin: "https://app.linkdish.ca"
+        },
+        method: "POST"
+      })
+    );
+
+    expect(response.status).toBe(400);
+    expect(response.headers.get("access-control-allow-origin")).toBe("https://app.linkdish.ca");
+    await expect(response.json()).resolves.toMatchObject({
+      message: "Invalid analytics event batch."
+    });
+    expect(mocks.writeAnalyticsEvents).not.toHaveBeenCalled();
   });
 
   it("allows credentialed web analytics preflights", async () => {

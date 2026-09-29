@@ -2,7 +2,7 @@ import { z } from "zod";
 
 import { recipeSchema, type Recipe } from "../../../../../../packages/recipe-domain/src/index.js";
 
-import type { RecipeTextCleaner } from "../types.js";
+import type { RecipeTextCleaner, RecipeTextCleanerOptions } from "../types.js";
 
 export const GEMINI_TEXT_CLEANUP_MODEL = "gemini-3.1-flash-lite-preview";
 
@@ -173,9 +173,17 @@ class AvailableGeminiRecipeTextCleaner implements RecipeTextCleaner {
     private readonly timeoutMs: number
   ) {}
 
-  public async clean(recipe: Recipe): Promise<Recipe> {
+  public async clean(recipe: Recipe, options: RecipeTextCleanerOptions = {}): Promise<Recipe> {
+    const timeoutMs = Math.min(this.timeoutMs, options.timeoutMs ?? this.timeoutMs);
+
+    if (timeoutMs <= 0 || options.signal?.aborted) {
+      return recipe;
+    }
+
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs);
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    const abortFromCaller = () => controller.abort();
+    options.signal?.addEventListener("abort", abortFromCaller, { once: true });
     const generationConfig = {
       ...(this.model.startsWith("gemini-3") ? {} : { temperature: 0 }),
       responseMimeType: "application/json",
@@ -237,6 +245,7 @@ class AvailableGeminiRecipeTextCleaner implements RecipeTextCleaner {
       return recipe;
     } finally {
       clearTimeout(timeoutId);
+      options.signal?.removeEventListener("abort", abortFromCaller);
     }
   }
 }

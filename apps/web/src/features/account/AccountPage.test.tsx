@@ -1,9 +1,13 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import React from "react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { AccountPage } from "./AccountPage";
+import { ExtractorApiError } from "../../api/errors";
+import { getRequestBinding } from "../../api/request-binding";
+import { ToastProvider } from "../../components/Toast";
+
+import { AccountPage, getPostSignInDestination } from "./AccountPage";
 
 const authMocks = vi.hoisted(() => ({
   clerkEnabled: true,
@@ -16,7 +20,7 @@ const authMocks = vi.hoisted(() => ({
   requestLoginCode: vi.fn(),
   user: null as {
     avatarEmoji?: string | null;
-    billingPlan?: string;
+    billingPlan?: "free" | "plus" | "family";
     displayName?: string | null;
     email: string;
     id: string;
@@ -24,10 +28,29 @@ const authMocks = vi.hoisted(() => ({
   verifyLoginCode: vi.fn()
 }));
 
+const apiMocks = vi.hoisted(() => ({
+  getBillingUsage: vi.fn(),
+  updateAccountProfile: vi.fn()
+}));
+
 vi.mock("../../api/client", () => ({
   apiClient: {
-    updateAccountProfile: vi.fn()
+    getBillingUsage: apiMocks.getBillingUsage,
+    updateAccountProfile: apiMocks.updateAccountProfile
   }
+}));
+
+const libraryMocks = vi.hoisted(() => ({
+  recipes: [] as Array<{ id: string; isStarter?: boolean }>
+}));
+
+vi.mock("../../data/library-store", () => ({
+  useSavedRecipes: () => ({
+    error: null,
+    recipes: libraryMocks.recipes,
+    retry: vi.fn(),
+    status: "ready"
+  })
 }));
 
 vi.mock("../../auth/AuthProvider", () => ({
@@ -49,27 +72,63 @@ vi.mock("../../auth/AuthProvider", () => ({
   })
 }));
 
-describe("AccountPage auth options", () => {
-  beforeEach(() => {
-    authMocks.clerkEnabled = true;
-    authMocks.clerkReady = true;
-    authMocks.deleteAccount.mockReset();
-    authMocks.hasClerkPublishableKey = true;
-    authMocks.loginWithGoogle.mockReset();
-    authMocks.logout.mockReset();
-    authMocks.refreshUser.mockReset();
-    authMocks.requestLoginCode.mockReset();
-    authMocks.user = null;
-    authMocks.verifyLoginCode.mockReset();
+const LocationProbe = () => {
+  const location = useLocation();
+  return <p data-testid="location">{`${location.pathname}${location.search}`}</p>;
+};
+
+const accountTree = (entry = "/account") => (
+  <ToastProvider>
+    <MemoryRouter initialEntries={[entry]}>
+      <Routes>
+        <Route path="/account" element={<AccountPage />} />
+        <Route path="*" element={<LocationProbe />} />
+      </Routes>
+    </MemoryRouter>
+  </ToastProvider>
+);
+
+const renderAccount = (entry = "/account") => render(accountTree(entry));
+
+const resetAuth = () => {
+  authMocks.clerkEnabled = true;
+  authMocks.clerkReady = true;
+  authMocks.deleteAccount.mockReset();
+  authMocks.hasClerkPublishableKey = true;
+  authMocks.loginWithGoogle.mockReset();
+  authMocks.logout.mockReset();
+  authMocks.logout.mockResolvedValue(undefined);
+  authMocks.refreshUser.mockReset();
+  authMocks.requestLoginCode.mockReset();
+  authMocks.user = null;
+  authMocks.verifyLoginCode.mockReset();
+  apiMocks.getBillingUsage.mockReset();
+  apiMocks.getBillingUsage.mockResolvedValue({ billingEnabled: false });
+};
+
+describe("post sign-in destinations", () => {
+  it("keeps invite and upgrade intent, including the billing period", () => {
+    expect(getPostSignInDestination(new URLSearchParams("invite=Ab Cd"))).toBe(
+      "/household?invite=Ab%20Cd"
+    );
+    expect(getPostSignInDestination(new URLSearchParams("upgrade=family"))).toBe(
+      "/pricing?upgrade=family"
+    );
+    expect(getPostSignInDestination(new URLSearchParams("upgrade=plus&period=monthly"))).toBe(
+      "/pricing?upgrade=plus&period=monthly"
+    );
+    expect(getPostSignInDestination(new URLSearchParams("upgrade=gold"))).toBeNull();
+    expect(getPostSignInDestination(new URLSearchParams(""))).toBeNull();
   });
+});
+
+describe("AccountPage sign-in", () => {
+  beforeEach(resetAuth);
 
   it("shows and starts Google sign-in when Clerk is configured for the web build", () => {
-    render(
-      <MemoryRouter>
-        <AccountPage />
-      </MemoryRouter>
-    );
+    renderAccount();
 
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Sign in to LinkDish");
     const googleButton = screen.getByRole("button", { name: /continue with google/i });
 
     expect(googleButton).toBeEnabled();
@@ -80,96 +139,237 @@ describe("AccountPage auth options", () => {
   it("keeps the Google option visible with a clear unavailable state when the web build lacks the Clerk key", () => {
     authMocks.hasClerkPublishableKey = false;
 
-    render(
-      <MemoryRouter>
-        <AccountPage />
-      </MemoryRouter>
-    );
+    renderAccount();
 
-    const googleButton = screen.getByRole("button", { name: /continue with google/i });
-
-    expect(googleButton).toBeDisabled();
+    expect(screen.getByRole("button", { name: /continue with google/i })).toBeDisabled();
     expect(screen.getByText(/google sign-in is temporarily unavailable/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /email sign-in code/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /sign-in code/i })).toBeEnabled();
   });
 
   it("keeps email sign-in usable while Clerk is still initializing", () => {
     authMocks.clerkReady = false;
 
-    render(
-      <MemoryRouter>
-        <AccountPage />
-      </MemoryRouter>
-    );
+    renderAccount();
 
     expect(screen.getByRole("button", { name: /continue with google/i })).toBeDisabled();
-    expect(screen.getByText(/google sign-in is temporarily unavailable/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /email sign-in code/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /sign-in code/i })).toBeEnabled();
   });
 
   it("hides Google sign-in when the API has Clerk disabled", () => {
     authMocks.clerkEnabled = false;
 
-    render(
-      <MemoryRouter>
-        <AccountPage />
-      </MemoryRouter>
-    );
+    renderAccount();
 
     expect(screen.queryByRole("button", { name: /continue with google/i })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /email sign-in code/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /sign-in code/i })).toBeEnabled();
   });
 
-  it("passes upgrade intent through Google sign-in", () => {
-    render(
-      <MemoryRouter initialEntries={["/account?upgrade=family"]}>
-        <AccountPage />
-      </MemoryRouter>
-    );
+  it("passes the chosen plan through Google sign-in and explains why", () => {
+    renderAccount("/account?upgrade=family");
 
+    expect(screen.getByText(/Sign in to continue to Family/u)).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: /continue with google/i }));
 
-    expect(authMocks.loginWithGoogle).toHaveBeenCalledWith("/pricing");
+    expect(authMocks.loginWithGoogle).toHaveBeenCalledWith("/pricing?upgrade=family");
   });
 
-  it("gives the sign-in fields accessible names", () => {
-    render(
-      <MemoryRouter>
-        <AccountPage />
-      </MemoryRouter>
+  it("sends signed-in people on to the plan they picked", async () => {
+    authMocks.user = { billingPlan: "free", email: "cook@example.com", id: "user_1" };
+
+    renderAccount("/account?upgrade=plus&period=monthly");
+
+    expect(await screen.findByTestId("location")).toHaveTextContent(
+      "/pricing?upgrade=plus&period=monthly"
     );
-
-    expect(screen.getByRole("textbox", { name: /email address/i })).toBeInTheDocument();
   });
 
-  it("gives the verification code input an accessible name", async () => {
+  it("walks through the email code with plain-language errors", async () => {
     authMocks.requestLoginCode.mockResolvedValue(undefined);
-
-    render(
-      <MemoryRouter>
-        <AccountPage />
-      </MemoryRouter>
+    authMocks.verifyLoginCode.mockRejectedValue(
+      new ExtractorApiError("Extractor API request failed.", 401, { message: "bad code" })
     );
 
-    fireEvent.change(screen.getByRole("textbox", { name: /email address/i }), {
-      target: { value: "cook@example.com" }
-    });
-    fireEvent.click(screen.getByRole("button", { name: /email sign-in code/i }));
+    renderAccount();
 
+    const email = screen.getByRole("textbox", { name: /email address/i });
+    fireEvent.change(email, { target: { value: "not-an-email" } });
+    fireEvent.click(screen.getByRole("button", { name: /sign-in code/i }));
+    expect(await screen.findByText(/Enter your email address/u)).toBeVisible();
+    expect(authMocks.requestLoginCode).not.toHaveBeenCalled();
+
+    fireEvent.change(email, { target: { value: "cook@example.com" } });
+    fireEvent.click(screen.getByRole("button", { name: /sign-in code/i }));
+
+    const codeField = await screen.findByRole("textbox", { name: /6-digit code/i });
+    expect(screen.getByText("cook@example.com")).toBeVisible();
+    fireEvent.change(codeField, { target: { value: "123456" } });
+    fireEvent.click(screen.getByRole("button", { name: "Verify and sign in" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("That code didn't work.");
+    expect(authMocks.verifyLoginCode).toHaveBeenCalledWith("cook@example.com", "123456");
+    expect(screen.queryByText("Extractor API request failed.")).not.toBeInTheDocument();
+  });
+});
+
+describe("AccountPage signed in", () => {
+  beforeEach(() => {
+    resetAuth();
+    authMocks.user = {
+      avatarEmoji: null,
+      billingPlan: "free",
+      displayName: "Sam Rivera",
+      email: "Cook@Example.com",
+      id: "user_1"
+    };
+    libraryMocks.recipes = [
+      { id: "starter-1", isStarter: true },
+      { id: "recipe-1" },
+      { id: "recipe-2" }
+    ];
+    apiMocks.updateAccountProfile.mockReset();
+    apiMocks.updateAccountProfile.mockResolvedValue({ user: authMocks.user });
+  });
+
+  it("shows the profile, plan usage and quick links", () => {
+    renderAccount();
+
+    expect(screen.getByRole("heading", { level: 1, name: "Sam Rivera" })).toBeVisible();
+    expect(screen.getByText("SR")).toBeVisible();
+    expect(screen.getByRole("heading", { name: /LinkDish Free/u })).toBeVisible();
+    expect(screen.getByRole("progressbar", { name: "Saved recipes" })).toHaveAttribute(
+      "aria-valuenow",
+      "2"
+    );
+    expect(screen.getByText("2 of 15")).toBeVisible();
+    expect(screen.getByRole("link", { name: /Upgrade to Plus/u })).toHaveAttribute(
+      "href",
+      "/pricing?upgrade=plus"
+    );
+
+    const links = within(screen.getByRole("navigation", { name: "Account links" }));
+    for (const label of [
+      "Settings",
+      "Household",
+      "Your data",
+      "Install app",
+      "Support",
+      "Privacy"
+    ]) {
+      expect(links.getByRole("link", { name: new RegExp(label, "u") })).toBeVisible();
+    }
+    // Shopping is a tab already; the grid doesn't repeat it.
+    expect(links.queryByRole("link", { name: /Shopping list/u })).not.toBeInTheDocument();
+  });
+
+  it("shows the true count past the free limit, with starters explained", () => {
+    libraryMocks.recipes = [
+      ...Array.from({ length: 17 }, (_, index) => ({ id: `recipe-${index}` })),
+      ...Array.from({ length: 3 }, (_, index) => ({ id: `starter-${index}`, isStarter: true }))
+    ];
+
+    renderAccount();
+
+    expect(screen.getByText("17 of 15")).toBeVisible();
+    expect(screen.getByRole("progressbar", { name: "Saved recipes" })).toHaveAttribute(
+      "aria-valuetext",
+      "17 of 15 used"
+    );
     expect(
-      await screen.findByRole("textbox", { name: /6-digit verification code/i })
-    ).toBeInTheDocument();
+      screen.getByText(
+        "2 over the free limit. They all stay; new saves need Plus. 3 starter recipes don't count."
+      )
+    ).toBeVisible();
+  });
+
+  it("gives paid plans the same usage meter, for this month's imports", async () => {
+    authMocks.user = { billingPlan: "plus", email: "cook@example.com", id: "user_1" };
+    apiMocks.getBillingUsage.mockResolvedValue({
+      billingEnabled: true,
+      quota: {
+        limit: 100,
+        meteringMode: "paid_monthly",
+        monthlyLimit: 100,
+        remaining: 96,
+        remainingThisMonth: 96,
+        resetsAt: "2026-10-01T12:00:00.000Z"
+      }
+    });
+
+    renderAccount();
+
+    // The meter holds its place while the usage loads, so the plan card doesn't jump.
+    expect(screen.getByRole("progressbar", { name: "Imports used this month" })).toHaveAttribute(
+      "aria-valuetext",
+      "Loading"
+    );
+    expect(await screen.findByText("4 of 100")).toBeVisible();
+    expect(screen.getByRole("progressbar", { name: "Imports used this month" })).toHaveAttribute(
+      "aria-valuenow",
+      "4"
+    );
+    expect(screen.getByText(/^Resets /u)).toBeVisible();
+    expect(screen.queryByRole("progressbar", { name: "Saved recipes" })).not.toBeInTheDocument();
+  });
+
+  it("points Family accounts at their household", async () => {
+    authMocks.user = { billingPlan: "family", email: "cook@example.com", id: "user_1" };
+
+    renderAccount();
+
+    expect(screen.getByRole("heading", { name: /LinkDish Family/u })).toBeVisible();
+    expect(screen.getByRole("link", { name: "Manage household" })).toHaveAttribute(
+      "href",
+      "/household"
+    );
+    // Billing is off in this test, so the placeholder meter goes once usage has answered.
+    await waitFor(() => {
+      expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+    });
+  });
+
+  it("edits the profile in a sheet", async () => {
+    let sentFor: string | null | undefined;
+    apiMocks.updateAccountProfile.mockImplementation(() => {
+      sentFor = getRequestBinding()?.account;
+      return Promise.resolve({ user: authMocks.user });
+    });
+    renderAccount();
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit profile" }));
+    const sheet = screen.getByRole("dialog", { name: "Edit profile" });
+    const name = within(sheet).getByRole("textbox", { name: /display name/i });
+    expect(name).toHaveValue("Sam Rivera");
+
+    fireEvent.change(name, { target: { value: "Sam R." } });
+    fireEvent.click(within(sheet).getByRole("button", { name: "Use 🍜" }));
+    fireEvent.click(within(sheet).getByRole("button", { name: "Save profile" }));
+
+    await waitFor(() => {
+      expect(apiMocks.updateAccountProfile).toHaveBeenCalledWith({
+        avatarEmoji: "🍜",
+        displayName: "Sam R."
+      });
+    });
+    // Sent only as this account, never onto one Clerk switches to before it goes out.
+    expect(sentFor).toBe(authMocks.user?.id);
+    expect(authMocks.refreshUser).toHaveBeenCalled();
+    expect(await screen.findByText("Profile saved")).toBeVisible();
+  });
+
+  it("signs out", async () => {
+    renderAccount();
+
+    const signOut = screen.getByRole("button", { name: "Sign out" });
+    fireEvent.click(signOut);
+    expect(authMocks.logout).toHaveBeenCalled();
+    await waitFor(() => expect(signOut).not.toHaveAttribute("aria-busy"));
   });
 });
 
 describe("AccountPage account deletion", () => {
   beforeEach(() => {
-    authMocks.clerkEnabled = true;
-    authMocks.clerkReady = true;
-    authMocks.deleteAccount.mockReset();
+    resetAuth();
     authMocks.deleteAccount.mockResolvedValue(undefined);
-    authMocks.hasClerkPublishableKey = true;
-    authMocks.refreshUser.mockReset();
     authMocks.user = {
       avatarEmoji: null,
       billingPlan: "free",
@@ -180,14 +380,20 @@ describe("AccountPage account deletion", () => {
   });
 
   const openDeleteForm = () => {
-    render(
-      <MemoryRouter>
-        <AccountPage />
-      </MemoryRouter>
-    );
+    renderAccount();
 
     fireEvent.click(screen.getByRole("button", { name: /delete account/i }));
   };
+
+  it("explains the consequences before anything is deleted", () => {
+    openDeleteForm();
+
+    const section = screen.getByRole("region", { name: "Delete your account?" });
+    expect(section).toHaveTextContent("Recipes saved in this browser stay on this device.");
+    expect(section).toHaveTextContent("doesn't cancel a subscription");
+    expect(screen.getByRole("button", { name: /delete account/i })).toBeDisabled();
+    expect(authMocks.deleteAccount).not.toHaveBeenCalled();
+  });
 
   it("accepts the confirmation email in any casing", async () => {
     openDeleteForm();
@@ -224,10 +430,106 @@ describe("AccountPage account deletion", () => {
     expect(authMocks.deleteAccount).not.toHaveBeenCalled();
   });
 
-  it("gives the profile and delete fields accessible names", () => {
+  it("gives the delete field an accessible name and can be backed out of", () => {
     openDeleteForm();
 
-    expect(screen.getByRole("textbox", { name: /display name/i })).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: /confirm your email/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Keep my account" }));
+    expect(screen.queryByRole("textbox", { name: /confirm your email/i })).not.toBeInTheDocument();
+  });
+});
+
+describe("AccountPage account switches", () => {
+  const firstAccount = {
+    avatarEmoji: null,
+    billingPlan: "free" as const,
+    displayName: null,
+    email: "first@example.com",
+    id: "user_1"
+  };
+  const nextAccount = {
+    avatarEmoji: null,
+    billingPlan: "free" as const,
+    displayName: null,
+    email: "next@example.com",
+    id: "user_2"
+  };
+
+  beforeEach(() => {
+    resetAuth();
+    authMocks.refreshUser.mockResolvedValue(undefined);
+    authMocks.user = firstAccount;
+    libraryMocks.recipes = [];
+    apiMocks.updateAccountProfile.mockReset();
+  });
+
+  it("closes the last account's profile editor and drops its draft", () => {
+    const view = renderAccount();
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit profile" }));
+    const sheet = screen.getByRole("dialog", { name: "Edit profile" });
+    fireEvent.change(within(sheet).getByRole("textbox", { name: /display name/i }), {
+      target: { value: "First's secret name" }
+    });
+
+    // Clerk answers with a different account than the cached one.
+    authMocks.user = nextAccount;
+    view.rerender(accountTree());
+
+    expect(screen.queryByRole("dialog", { name: "Edit profile" })).not.toBeInTheDocument();
+    expect(screen.queryByDisplayValue("First's secret name")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit profile" }));
+    expect(
+      within(screen.getByRole("dialog", { name: "Edit profile" })).getByRole("textbox", {
+        name: /display name/i
+      })
+    ).toHaveValue("");
+  });
+
+  it("doesn't report a profile save to an account that signed in since", async () => {
+    let finishSave: (value: unknown) => void = () => undefined;
+    apiMocks.updateAccountProfile.mockReturnValue(
+      new Promise((resolve) => {
+        finishSave = resolve;
+      })
+    );
+    const view = renderAccount();
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit profile" }));
+    const sheet = screen.getByRole("dialog", { name: "Edit profile" });
+    fireEvent.change(within(sheet).getByRole("textbox", { name: /display name/i }), {
+      target: { value: "First" }
+    });
+    fireEvent.click(within(sheet).getByRole("button", { name: "Save profile" }));
+    await waitFor(() => expect(apiMocks.updateAccountProfile).toHaveBeenCalled());
+
+    authMocks.user = nextAccount;
+    view.rerender(accountTree());
+
+    await act(async () => {
+      finishSave({ user: firstAccount });
+      await Promise.resolve();
+    });
+
+    expect(authMocks.refreshUser).not.toHaveBeenCalled();
+    expect(screen.queryByText("Profile saved")).not.toBeInTheDocument();
+    expect(screen.getByText("next@example.com")).toBeVisible();
+  });
+
+  it("closes the last account's delete confirmation", () => {
+    const view = renderAccount();
+
+    fireEvent.click(screen.getByRole("button", { name: /delete account/i }));
+    fireEvent.change(screen.getByRole("textbox", { name: /confirm your email/i }), {
+      target: { value: "first@example.com" }
+    });
+
+    authMocks.user = nextAccount;
+    view.rerender(accountTree());
+
+    expect(screen.queryByRole("textbox", { name: /confirm your email/i })).not.toBeInTheDocument();
+    expect(screen.queryByDisplayValue("first@example.com")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /delete account/i })).toBeVisible();
   });
 });

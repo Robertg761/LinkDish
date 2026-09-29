@@ -37,7 +37,39 @@ const parsedExtractorApiEnv = readEnv(
     RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
     RATE_LIMIT_MAX: z.coerce.number().int().positive().default(60),
     FETCH_HTTP_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
-    FETCH_HTTP_RETRIES: z.coerce.number().int().min(0).default(2),
+    /*
+     * Connection-error retries for the HTTP fetch. The fetcher caps this at 1
+     * (larger legacy values are accepted and clamped), and skips retries when
+     * the browser fetcher can take over.
+     */
+    FETCH_HTTP_RETRIES: z.coerce.number().int().min(0).default(1),
+    /* One deadline for the whole /extract request; kept below the function's maxDuration (60 s). */
+    EXTRACT_REQUEST_DEADLINE_MS: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(50_000)
+      .transform((value) => Math.min(Math.max(value, 5_000), 55_000)),
+    /* Kill switch for the URL-keyed extraction result cache. */
+    EXTRACT_CACHE_ENABLED: z
+      .union([trimmedBooleanString, z.boolean()])
+      .default("true")
+      .transform((value) => value === true || value === "true"),
+    /* Result cache lifetime, clamped to 1 minute .. 30 days (default 7 days). */
+    EXTRACT_CACHE_TTL_SECONDS: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(7 * 24 * 60 * 60)
+      .transform((value) => Math.min(Math.max(value, 60), 30 * 24 * 60 * 60)),
+    /*
+     * Gemini text cleanup of successful imports. Even when enabled it only runs
+     * when the text shows artifacts and an LLM provider is active (not "none").
+     */
+    RECIPE_TEXT_CLEANUP_ENABLED: z
+      .union([trimmedBooleanString, z.boolean()])
+      .default("true")
+      .transform((value) => value === true || value === "true"),
     FETCH_MAX_RESPONSE_BYTES: z.coerce
       .number()
       .int()

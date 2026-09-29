@@ -1,0 +1,689 @@
+.plan-page {
+  width: 100%;
+  max-width: var(--max-width-wide);
+  margin: 0 auto;
+  padding: 24px var(--page-gutter);
+}
+
+.plan-page .page-header {
+  margin-bottom: 16px;
+}
+
+.plan-page .page-header-subtitle {
+  font-size: var(--text-body);
+}
+
+/* ------------------------------ Week nav ------------------------------- */
+.plan-week-nav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.plan-shop-button {
+  margin-left: auto;
+}
+
+/* ------------------------------ Quick start ---------------------------- */
+.plan-quick-start {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-bottom: 20px;
+  padding: 20px 18px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--color-butter) 45%, transparent);
+  border-radius: var(--radius-card);
+  background: var(--color-butter-soft);
+  color: var(--color-on-butter-soft);
+}
+
+.plan-quick-start-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.plan-quick-start.has-done .plan-quick-start-copy {
+  padding-right: 64px;
+}
+
+.plan-quick-start-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-tomato-ink);
+  font-size: var(--text-label);
+  font-weight: 800;
+  letter-spacing: var(--text-label-letter-spacing);
+  text-transform: uppercase;
+}
+
+.plan-quick-start-title {
+  color: var(--color-ink);
+  font-family: var(--font-family-serif);
+  font-size: 1.625rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+
+.plan-quick-start-body {
+  color: var(--color-ink-muted);
+  font-size: var(--text-body);
+}
+
+/* Phones: one column, one-line titles with the time underneath, so two recipes that start
+   alike ("Grandma Rose's…") still read differently. */
+.plan-quick-chips {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.plan-quick-chips > li {
+  min-width: 0;
+}
+
+.plan-quick-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 56px;
+  padding: 6px 10px 6px 6px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 18px;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-xs);
+  color: var(--color-ink);
+  font: inherit;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast),
+    transform var(--transition-fast);
+}
+
+@media (hover: hover) {
+  .plan-quick-chip:hover {
+    border-color: var(--color-primary);
+    box-shadow: var(--shadow-sm);
+  }
+}
+
+.plan-quick-chip:active {
+  transform: scale(0.97);
+}
+
+.plan-quick-chip-thumb {
+  flex-shrink: 0;
+  width: 42px;
+  overflow: hidden;
+  border-radius: 12px;
+}
+
+.plan-quick-chip-thumb .recipe-image-monogram {
+  font-size: 1.125rem;
+}
+
+.plan-quick-chip-copy {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.plan-quick-chip-title {
+  overflow: hidden;
+  font-size: var(--text-small);
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plan-quick-chip-meta {
+  color: var(--color-ink-muted);
+  font-size: var(--text-caption);
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.plan-quick-chip-plus {
+  flex-shrink: 0;
+  color: var(--color-primary);
+}
+
+.plan-quick-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.plan-quick-done {
+  position: absolute;
+  top: 14px;
+  right: 12px;
+}
+
+/* ------------------------------ Days (phones: a vertical list) --------- */
+.plan-days {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.plan-day {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px 12px 12px 16px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-card);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-xs);
+  transition:
+    border-color var(--transition-fast),
+    background-color var(--transition-fast);
+}
+
+.plan-day.is-today {
+  border-color: var(--color-primary);
+  box-shadow:
+    0 0 0 1px var(--color-primary),
+    var(--shadow-sm);
+}
+
+.plan-day.is-past {
+  background: var(--color-surface-subtle);
+  box-shadow: none;
+}
+
+.plan-day.is-drop-target {
+  border-color: var(--color-primary);
+  background: var(--color-primary-soft);
+}
+
+.plan-day-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+/* A fixed date column, so "Plan a meal" starts at the same x on every row. */
+.plan-day-heading {
+  display: flex;
+  flex: 0 0 88px;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 88px;
+  margin: 0;
+}
+
+.plan-day-name {
+  color: var(--color-ink-muted);
+  font-family: var(--font-family-sans);
+  font-size: var(--text-label);
+  font-weight: 800;
+  letter-spacing: var(--text-label-letter-spacing);
+  text-transform: uppercase;
+}
+
+.plan-day-date {
+  color: var(--color-ink);
+  font-family: var(--font-family-serif);
+  font-size: 1.5rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.plan-day.is-today .plan-day-name,
+.plan-day.is-today .plan-day-date {
+  color: var(--color-primary);
+}
+
+.plan-day.is-past .plan-day-date {
+  color: var(--color-ink-subtle);
+}
+
+/* Today: the ringed day, marked with a small tomato dot beside the date. */
+.plan-day-today {
+  flex-shrink: 0;
+  align-self: center;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-pill);
+  background: var(--color-tomato);
+}
+
+/* ------------------------------ Loading --------------------------------- */
+.plan-day.is-skeleton {
+  flex-direction: row;
+  align-items: center;
+  padding-block: 8px;
+  box-shadow: none;
+}
+
+.plan-day.is-skeleton .plan-day-header {
+  display: contents;
+}
+
+.plan-day-placeholder {
+  flex: 1;
+  height: 44px;
+  border-radius: 14px;
+}
+
+.plan-day-add {
+  margin-left: auto;
+}
+
+.plan-day-empty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1.5px dashed var(--color-border);
+  border-radius: 14px;
+  background: transparent;
+  color: var(--color-ink-subtle);
+  font: inherit;
+  font-size: var(--text-small);
+  font-weight: 650;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color var(--transition-fast),
+    color var(--transition-fast),
+    background-color var(--transition-fast);
+}
+
+@media (hover: hover) {
+  .plan-day-empty:hover {
+    border-color: var(--color-primary);
+    background: var(--color-primary-soft);
+    color: var(--color-on-primary-soft);
+  }
+}
+
+/* Empty days collapse to one row on phones: [MON 28] [Plan a meal……] [+] */
+.plan-day.is-empty {
+  flex-direction: row;
+  align-items: center;
+  padding-block: 8px;
+}
+
+.plan-day.is-empty .plan-day-header {
+  display: contents;
+}
+
+.plan-day.is-empty .plan-day-empty {
+  flex: 1;
+  order: 1;
+  min-width: 0;
+  border-color: transparent;
+}
+
+.plan-day.is-empty .plan-day-empty-icon {
+  display: none;
+}
+
+.plan-day.is-empty .plan-day-add {
+  order: 2;
+  margin-left: 0;
+}
+
+.plan-day-entries {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* ------------------------------ Entries -------------------------------- */
+.plan-entry {
+  position: relative;
+  display: grid;
+  grid-template-columns: 68px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 4px 8px 8px;
+  border-radius: 16px;
+  background: var(--color-surface-subtle);
+}
+
+.plan-day.is-past .plan-entry {
+  background: var(--color-surface);
+}
+
+.plan-entry.is-dragging {
+  opacity: 0.45;
+}
+
+.plan-entry[draggable="true"] {
+  cursor: grab;
+}
+
+.plan-entry-media {
+  width: 68px;
+  height: 68px;
+  overflow: hidden;
+  border-radius: 12px;
+}
+
+.plan-entry-photo {
+  width: 100%;
+  height: 100%;
+}
+
+.plan-entry-note-icon {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  background: var(--color-butter-soft);
+  color: var(--color-on-butter-soft);
+}
+
+.plan-entry-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.plan-entry-slot {
+  color: var(--color-tomato-ink);
+  font-size: var(--text-caption);
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.plan-entry-title {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--color-ink);
+  font-size: var(--text-body);
+  font-weight: 700;
+  line-height: 1.3;
+  text-decoration: none;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+a.plan-entry-title:hover {
+  text-decoration: underline;
+  text-decoration-color: var(--color-butter);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+}
+
+.plan-entry-servings {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.plan-entry-servings .stepper {
+  padding: 2px;
+}
+
+.plan-entry-servings .stepper-button {
+  width: 30px;
+  height: 30px;
+}
+
+.plan-entry-servings .stepper-value {
+  min-width: 26px;
+  padding: 0 4px;
+}
+
+.plan-entry-servings-label {
+  display: inline-flex;
+  align-items: center;
+  color: var(--color-ink-muted);
+  font-size: var(--text-caption);
+  font-weight: 600;
+}
+
+.plan-entry-servings-icon {
+  display: none;
+}
+
+.plan-entry-menu {
+  align-self: start;
+}
+
+/* ------------------------------ Board (desktop) ------------------------ */
+@media (min-width: 768px) {
+  .plan-page {
+    padding-top: 40px;
+  }
+}
+
+@media (min-width: 1024px) {
+  .plan-days {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .plan-day,
+  .plan-day.is-empty,
+  .plan-day.is-skeleton {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    min-height: 440px;
+    padding: 12px 10px 10px;
+  }
+
+  .plan-day.is-skeleton .plan-day-header {
+    display: flex;
+  }
+
+  .plan-day-placeholder {
+    flex: 0 0 auto;
+    height: 120px;
+  }
+
+  .plan-day.is-empty .plan-day-header {
+    display: flex;
+  }
+
+  .plan-day.is-empty .plan-day-empty {
+    order: 0;
+  }
+
+  .plan-day.is-empty .plan-day-empty-icon {
+    display: block;
+  }
+
+  .plan-day-header {
+    align-items: flex-start;
+  }
+
+  .plan-day-heading {
+    flex: 1 1 auto;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  .plan-day-date {
+    font-size: 1.875rem;
+  }
+
+  .plan-day-heading {
+    display: grid;
+    grid-template-columns: auto auto;
+    justify-content: start;
+    align-items: center;
+    column-gap: 6px;
+    row-gap: 4px;
+  }
+
+  .plan-day-date {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .plan-day-today {
+    grid-column: 2;
+    grid-row: 1;
+    justify-self: start;
+  }
+
+  .plan-quick-chips {
+    display: flex;
+    flex-wrap: wrap;
+  }
+
+  .plan-quick-chip {
+    width: auto;
+    max-width: 280px;
+    min-height: 52px;
+    padding-right: 14px;
+    border-radius: var(--radius-pill);
+  }
+
+  .plan-quick-chip-thumb {
+    width: 40px;
+    border-radius: var(--radius-pill);
+  }
+
+  .plan-quick-chip-meta {
+    display: none;
+  }
+
+  .plan-entry-servings-icon {
+    display: block;
+  }
+
+  .plan-entry-servings-word {
+    display: none;
+  }
+
+  .plan-day-add,
+  .plan-day.is-empty .plan-day-add {
+    margin-left: auto;
+  }
+
+  .plan-day-empty,
+  .plan-day.is-empty .plan-day-empty {
+    flex: 1;
+    flex-direction: column;
+    justify-content: center;
+    gap: 6px;
+    min-height: 120px;
+    border-color: var(--color-border);
+    text-align: center;
+  }
+
+  .plan-entry {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+    gap: 0;
+    padding: 0;
+    overflow: hidden;
+    border: 1px solid var(--color-border-subtle);
+    border-radius: 14px;
+    background: var(--color-surface);
+    box-shadow: var(--shadow-xs);
+  }
+
+  .plan-day.is-past .plan-entry {
+    background: var(--color-surface);
+  }
+
+  /* A shorter photo leaves room for four lines of title (with the full title on hover). */
+  .plan-entry-media {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 16 / 9;
+    border-radius: 0;
+  }
+
+  .plan-entry.is-note .plan-entry-media {
+    aspect-ratio: auto;
+    height: 44px;
+  }
+
+  .plan-entry-body {
+    gap: 3px;
+    padding: 8px 10px 10px;
+  }
+
+  .plan-entry-title {
+    font-size: var(--text-small);
+    -webkit-line-clamp: 4;
+  }
+
+  .plan-entry-servings {
+    gap: 4px;
+  }
+
+  .plan-entry-servings .stepper-button {
+    width: 26px;
+    height: 26px;
+  }
+
+  .plan-entry-servings .stepper-value {
+    min-width: 22px;
+  }
+
+  .plan-entry-menu {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    border-radius: var(--radius-pill);
+    background: color-mix(in srgb, var(--color-surface) 88%, transparent);
+    box-shadow: var(--shadow-xs);
+  }
+
+  .plan-entry.is-note .plan-entry-menu {
+    top: 4px;
+    right: 4px;
+    box-shadow: none;
+    background: transparent;
+  }
+}
+
+@media (min-width: 1280px) {
+  .plan-days {
+    gap: 12px;
+  }
+
+  .plan-day,
+  .plan-day.is-empty {
+    padding: 14px 12px 12px;
+  }
+}
+
+/* Very wide screens: let the week breathe instead of stopping at ~1160px. */
+@media (min-width: 1600px) {
+  .plan-page {
+    max-width: min(1520px, 100%);
+  }
+}

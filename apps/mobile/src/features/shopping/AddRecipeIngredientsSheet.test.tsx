@@ -24,8 +24,15 @@ vi.mock("@linkdish/ui", () => ({
   },
   appShadows: { card: {} },
   appSpacing: { lg: 16, md: 12, sm: 8, xl: 20, xs: 4, xxl: 24 },
-  AppButton: ({ disabled, label, onPress }: { disabled?: boolean; label: string; onPress: () => void }) =>
-    React.createElement("AppButton", { disabled, label, onPress }, label),
+  AppButton: ({
+    disabled,
+    label,
+    onPress
+  }: {
+    disabled?: boolean;
+    label: string;
+    onPress: () => void;
+  }) => React.createElement("AppButton", { disabled, label, onPress }, label),
   AppSurface: ({ children }: { children?: React.ReactNode }) =>
     React.createElement("AppSurface", null, children),
   AppText: ({ children }: { children?: React.ReactNode }) =>
@@ -42,7 +49,8 @@ vi.mock("react-native", () => ({
   StyleSheet: {
     create: <T,>(styles: T) => styles
   },
-  View: ({ children }: { children?: React.ReactNode }) => React.createElement("View", null, children)
+  View: ({ children }: { children?: React.ReactNode }) =>
+    React.createElement("View", null, children)
 }));
 
 vi.mock("react-native-safe-area-context", () => ({
@@ -51,7 +59,8 @@ vi.mock("react-native-safe-area-context", () => ({
 }));
 
 vi.mock("./ShoppingListContext", () => ({
-  useShoppingList: () => shoppingMocks
+  useShoppingList: () => shoppingMocks,
+  useShoppingListActions: () => shoppingMocks
 }));
 
 import { AddRecipeIngredientsSheet } from "./AddRecipeIngredientsSheet";
@@ -97,7 +106,9 @@ const getCheckedLabels = (renderer: ReturnType<typeof create>): string[] =>
         (node.props as { accessibilityState?: { checked?: boolean } }).accessibilityState
           ?.checked === true
     )
-    .map((node: ReactTestInstance) => String((node.props as { accessibilityLabel: string }).accessibilityLabel));
+    .map((node: ReactTestInstance) =>
+      String((node.props as { accessibilityLabel: string }).accessibilityLabel)
+    );
 
 describe("AddRecipeIngredientsSheet", () => {
   beforeEach(() => {

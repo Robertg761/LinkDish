@@ -37,14 +37,20 @@ import {
   upsertUserByEmail
 } from "../auth/auth-service.js";
 import { tombstoneExternalIdentitiesForUser } from "../auth/external-identity-service.js";
-import { hasActiveRevenueCatFamilyEntitlement } from "../billing/revenuecat-entitlements.js";
+import {
+  hasActiveRevenueCatFamilyEntitlement,
+  verifyActiveRevenueCatFamilyEntitlement
+} from "../billing/revenuecat-entitlements.js";
 import {
   addStoreSetMembers,
   deleteStoreKeys,
   getStoreSetMembers,
   getStoreString,
+  getStoreStrings,
+  KeyValueStoreUnavailableError,
   removeStoreSetMembers,
   runStoreEval,
+  runStoreTransaction,
   setStoreString
 } from "../storage/upstash-store.js";
 
@@ -178,6 +184,30 @@ const parseJson = <Schema extends z.ZodTypeAny>(
   return schema.parse(JSON.parse(value) as unknown) as z.output<Schema>;
 };
 
+/*
+ * List reads used to issue one Upstash HTTP request per member key (N+1); a
+ * list now costs one SMEMBERS plus a single multi-exec GET for every record.
+ */
+const getRecordsByKeys = async <Schema extends z.ZodTypeAny>(
+  schema: Schema,
+  keys: string[]
+): Promise<Array<z.output<Schema> | null>> =>
+  (await getStoreStrings(keys)).map((value) => parseJson(schema, value));
+
+/* Applies several writes in one Upstash round trip, failing like the single-command helpers. */
+const runStoreWrites = async (commands: string[][]): Promise<void> => {
+  if (commands.length === 0) {
+    return;
+  }
+
+  const results = await runStoreTransaction(commands);
+  const failed = results.find((result) => result.error);
+
+  if (failed?.error) {
+    throw new KeyValueStoreUnavailableError(failed.error);
+  }
+};
+
 const getHouseholdById = async (householdId: string): Promise<HouseholdRecord | null> =>
   parseJson(householdRecordSchema, await getStoreString(householdKeys.household(householdId)));
 
@@ -190,14 +220,6 @@ const getSharedRecipeRecordById = async (
   parseJson(
     sharedRecipeRecordSchema,
     await getStoreString(householdKeys.sharedRecipe(sharedRecipeId))
-  );
-
-const getShoppingItemRecordById = async (
-  shoppingItemId: string
-): Promise<ShoppingItemRecord | null> =>
-  parseJson(
-    shoppingItemRecordSchema,
-    await getStoreString(householdKeys.shoppingItem(shoppingItemId))
   );
 
 const toSharedRecipe = (
@@ -283,7 +305,10 @@ const getInviteByHash = async (inviteCodeHash: string): Promise<InviteRecord | n
 
 const getActiveInvites = async (householdId: string): Promise<InviteRecord[]> => {
   const inviteHashes = await getStoreSetMembers(householdKeys.householdInvites(householdId));
-  const invites = await Promise.all(inviteHashes.map(getInviteByHash));
+  const invites = await getRecordsByKeys(
+    inviteRecordSchema,
+    inviteHashes.map(householdKeys.invite)
+  );
   const activeInvites = invites.filter((invite): invite is InviteRecord =>
     Boolean(invite && !invite.acceptedAt && Date.parse(invite.expiresAt) > Date.now())
   );
@@ -399,7 +424,10 @@ const listSharedRecipeRecordsForHousehold = async (
   householdId: string
 ): Promise<SharedRecipeRecord[]> => {
   const sharedRecipeIds = await getStoreSetMembers(householdKeys.sharedRecipes(householdId));
-  const records = await Promise.all(sharedRecipeIds.map(getSharedRecipeRecordById));
+  const records = await getRecordsByKeys(
+    sharedRecipeRecordSchema,
+    sharedRecipeIds.map(householdKeys.sharedRecipe)
+  );
 
   return records
     .filter((record): record is SharedRecipeRecord => Boolean(record))
@@ -444,11 +472,14 @@ const listShoppingItemRecordsForHousehold = async (
   householdId: string
 ): Promise<ShoppingItemRecord[]> => {
   const shoppingItemIds = await getStoreSetMembers(householdKeys.shoppingItems(householdId));
-  const records = await Promise.all(shoppingItemIds.map(getShoppingItemRecordById));
+  const records = await getRecordsByKeys(
+    shoppingItemRecordSchema,
+    shoppingItemIds.map(householdKeys.shoppingItem)
+  );
 
   return records
-    .filter(
-      (record): record is ShoppingItemRecord => Boolean(record && record.householdId === householdId)
+    .filter((record): record is ShoppingItemRecord =>
+      Boolean(record && record.householdId === householdId)
     )
     .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt));
 };
@@ -474,6 +505,19 @@ const deleteShoppingItemsForHousehold = async (householdId: string): Promise<voi
   const records = await listShoppingItemRecordsForHousehold(householdId);
   await Promise.all(records.map((record) => deleteShoppingItemRecord(record)));
   await deleteStoreKeys(householdKeys.shoppingItems(householdId));
+};
+
+/* The stored records for a batch of item ids, read in one round trip. */
+const readShoppingItemRecords = async (
+  itemIds: string[]
+): Promise<Map<string, ShoppingItemRecord | null>> => {
+  const uniqueItemIds = [...new Set(itemIds)];
+  const records = await getRecordsByKeys(
+    shoppingItemRecordSchema,
+    uniqueItemIds.map(householdKeys.shoppingItem)
+  );
+
+  return new Map(uniqueItemIds.map((itemId, index) => [itemId, records[index] ?? null]));
 };
 
 const isIncomingShoppingItemNewer = (
@@ -513,9 +557,7 @@ export const upsertShoppingItemsForUser = async (
     const existingRecords = await listShoppingItemRecordsForHousehold(householdId);
     const existingRecordIds = new Set(existingRecords.map((record) => record.id));
     const incomingNewItemIds = new Set(
-      input.items
-        .map((item) => item.id)
-        .filter((itemId) => !existingRecordIds.has(itemId))
+      input.items.map((item) => item.id).filter((itemId) => !existingRecordIds.has(itemId))
     );
 
     if (existingRecords.length + incomingNewItemIds.size > MAX_HOUSEHOLD_SHOPPING_ITEMS) {
@@ -526,9 +568,11 @@ export const upsertShoppingItemsForUser = async (
     }
 
     const ignored: UpsertShoppingItemsResponse["ignored"] = [];
+    const currentRecords = await readShoppingItemRecords(input.items.map((item) => item.id));
+    const writes: string[][] = [];
 
     for (const item of input.items) {
-      const existingRecord = await getShoppingItemRecordById(item.id);
+      const existingRecord = currentRecords.get(item.id) ?? null;
 
       if (existingRecord && existingRecord.householdId !== householdId) {
         throw new HouseholdError("This shopping item belongs to another household.", 403);
@@ -549,9 +593,15 @@ export const upsertShoppingItemsForUser = async (
         householdId
       };
 
-      await setStoreString(householdKeys.shoppingItem(record.id), JSON.stringify(record));
-      await addStoreSetMembers(householdKeys.shoppingItems(householdId), record.id);
+      currentRecords.set(record.id, record);
+      writes.push(
+        ["SET", householdKeys.shoppingItem(record.id), JSON.stringify(record)],
+        ["SADD", householdKeys.shoppingItems(householdId), record.id]
+      );
     }
+
+    /* Every accepted item is written in one round trip, and only if the whole batch is valid. */
+    await runStoreWrites(writes);
 
     return {
       ignored,
@@ -575,9 +625,11 @@ export const deleteShoppingItemsForUser = async (
 
     const deletedItemIds: string[] = [];
     const ignored: DeleteShoppingItemsResponse["ignored"] = [];
+    const currentRecords = await readShoppingItemRecords(input.items.map((item) => item.id));
+    const writes: string[][] = [];
 
     for (const item of input.items) {
-      const existingRecord = await getShoppingItemRecordById(item.id);
+      const existingRecord = currentRecords.get(item.id) ?? null;
 
       if (!existingRecord) {
         deletedItemIds.push(item.id);
@@ -597,9 +649,15 @@ export const deleteShoppingItemsForUser = async (
         continue;
       }
 
-      await deleteShoppingItemRecord(existingRecord);
+      currentRecords.set(item.id, null);
+      writes.push(
+        ["DEL", householdKeys.shoppingItem(existingRecord.id)],
+        ["SREM", householdKeys.shoppingItems(existingRecord.householdId), existingRecord.id]
+      );
       deletedItemIds.push(item.id);
     }
+
+    await runStoreWrites(writes);
 
     return {
       deletedItemIds,
@@ -770,7 +828,7 @@ export const getHouseholdSummaryForUser = async (
 };
 
 export const createHouseholdForOwner = async (owner: AccountUser): Promise<HouseholdDetails> => {
-  if (!(await hasActiveRevenueCatFamilyEntitlement(owner.id))) {
+  if (!(await verifyActiveRevenueCatFamilyEntitlement(owner.id))) {
     throw new HouseholdError("LinkDish Family is required to create a household.", 403);
   }
 
@@ -841,7 +899,7 @@ export const createHouseholdInvite = async (
     throw new HouseholdError("Only the household owner can invite members.", 403);
   }
 
-  if (!(await hasActiveRevenueCatFamilyEntitlement(owner.id))) {
+  if (!(await verifyActiveRevenueCatFamilyEntitlement(owner.id))) {
     throw new HouseholdError("LinkDish Family is required to invite household members.", 403);
   }
 
@@ -959,7 +1017,7 @@ export const acceptHouseholdInvite = async (
     throw new HouseholdError("That household no longer exists.", 404);
   }
 
-  if (!(await hasActiveRevenueCatFamilyEntitlement(preflightHousehold.ownerUserId))) {
+  if (!(await verifyActiveRevenueCatFamilyEntitlement(preflightHousehold.ownerUserId))) {
     throw new HouseholdError("This household does not have an active LinkDish Family plan.", 403);
   }
 
@@ -969,6 +1027,21 @@ export const acceptHouseholdInvite = async (
     }
 
     return withHouseholdLock(invite.householdId, async () => {
+      // Read again under the household lock: the owner may have canceled it (or it may have run
+      // out, or been used) while the plan was checked, and a canceled invite must not let anyone in.
+      const currentInvite = await getInviteByHash(inviteCodeHash);
+
+      if (
+        !currentInvite ||
+        currentInvite.id !== invite.id ||
+        currentInvite.householdId !== invite.householdId ||
+        currentInvite.acceptedAt ||
+        Date.parse(currentInvite.expiresAt) <= Date.now() ||
+        currentInvite.emailHash !== hashEmail(user.email)
+      ) {
+        throw new HouseholdError("That household invite is no longer valid.", 404);
+      }
+
       const household = await getHouseholdById(invite.householdId);
 
       if (!household) {
@@ -996,7 +1069,7 @@ export const acceptHouseholdInvite = async (
       await setStoreString(
         householdKeys.invite(inviteCodeHash),
         JSON.stringify({
-          ...invite,
+          ...currentInvite,
           acceptedAt: now
         }),
         {
@@ -1070,7 +1143,7 @@ export const removeHouseholdMember = async (
     throw new HouseholdError("Only the household owner can remove members.", 403);
   }
 
-  if (!(await hasActiveRevenueCatFamilyEntitlement(owner.id))) {
+  if (!(await verifyActiveRevenueCatFamilyEntitlement(owner.id))) {
     throw new HouseholdError("LinkDish Family is required to manage household members.", 403);
   }
 

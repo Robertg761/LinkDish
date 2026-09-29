@@ -7,6 +7,21 @@ library across web and mobile.
 - Product site: [linkdish.ca](https://linkdish.ca)
 - API: [api.linkdish.ca](https://api.linkdish.ca)
 
+## What it does
+
+- Saves recipes from websites, YouTube (including Shorts), Pinterest pins,
+  TikTok captions, pasted text and photos of cookbook pages.
+- Keeps a photo-first cookbook with ranked search, favorites, tags,
+  collections, ratings and a cook log, in light or dark mode.
+- Scales recipes by servings and converts between original, US and metric
+  units (including oven temperatures).
+- Cook mode with resumable sessions and timers that keep running across the app.
+- Weekly meal planner that turns a week into a shopping list grouped by aisle,
+  shared with a Family household.
+- Backups and imports from Paprika, Mela and JSON-LD files.
+
+See [docs/whats-new.md](docs/whats-new.md) for the current release notes.
+
 ## Repository
 
 This pnpm workspace contains:
@@ -46,6 +61,13 @@ pnpm dev:site
 pnpm dev:web
 pnpm dev:mobile
 pnpm dev:api
+```
+
+Check the web bundle budgets after a production build:
+
+```bash
+pnpm build:web
+pnpm --filter @linkdish/web size
 ```
 
 The static product site is served at `http://localhost:4173`; its analytics are

@@ -1,16 +1,17 @@
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import {
-  matchStepIngredients,
-  parseIngredientQuantity,
-  parseStepDurations,
-  scaleQuantity
+  convertTemperaturesInText,
+  createStepIngredientMatcher,
+  getDisplayIngredient,
+  getIngredientUnitSummary,
+  parseStepDurations
 } from "@linkdish/recipe-domain";
 import { AppButton, AppText } from "@linkdish/ui";
 import { decodeHtmlEntities } from "@linkdish/utils";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
 import * as StoreReview from "expo-store-review";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
   Image,
@@ -47,7 +48,7 @@ import { pressedOpacity } from "../../../theme/interactions";
 import { appColors } from "../../../theme/tokens";
 import { buildRecipeMetaLine } from "../recipeMetaLine";
 
-import type { Recipe } from "@linkdish/recipe-domain";
+import type { IngredientUnitsPreference, Recipe } from "@linkdish/recipe-domain";
 import type { GestureResponderEvent } from "react-native";
 
 const COOK_MODE_KEEP_AWAKE_TAG = "linkdish-cook-mode";
@@ -69,18 +70,22 @@ const DEFAULT_CUSTOM_SCALE = 1.5;
 const SCALE_OPTIONS = [0.5, 1, 2] as const;
 
 type ScaleMode = "0.5" | "1" | "2" | "custom";
-type UnitMode = "metric" | "original";
+/** Ingredient amounts as written, or converted to US or metric units. */
+type UnitMode = IngredientUnitsPreference;
 export type RecipeShoppingActionContext = {
   scaleFactor: number;
   unitMode: UnitMode;
 };
-type ParsedIngredientDisplay = ReturnType<typeof parseIngredientQuantity>;
 type IngredientDisplay = {
   ingredientIndex: number;
   key: string;
-  parsed: ParsedIngredientDisplay;
   text: string;
 };
+const UNIT_MODE_OPTIONS: ReadonlyArray<{ label: string; value: UnitMode }> = [
+  { label: "Original", value: "original" },
+  { label: "US", value: "us" },
+  { label: "Metric", value: "metric" }
+];
 type IngredientGroup = {
   key: string;
   section: string | null;
@@ -219,7 +224,6 @@ const groupIngredients = (ingredients: Recipe["ingredients"]) => {
     groups[groups.length - 1]?.ingredients.push({
       key: `${index}-${text}`,
       ingredientIndex: index,
-      parsed: parseIngredientQuantity(text),
       text
     });
   });
@@ -235,55 +239,40 @@ const getScaleFactor = (scaleMode: ScaleMode, customScale: number): number => {
   return Number(scaleMode);
 };
 
-const hasMetricAlternative = (ingredientGroups: IngredientGroup[]): boolean =>
-  ingredientGroups.some((group) =>
-    group.ingredients.some(
-      (ingredient) => ingredient.parsed.confident && ingredient.parsed.altQty != null
-    )
-  );
-
-const hasUnscalableIngredient = (ingredientGroups: IngredientGroup[]): boolean =>
-  ingredientGroups.some((group) =>
-    group.ingredients.some((ingredient) => !ingredient.parsed.confident)
-  );
-
-const getScaledIngredientText = (
-  ingredient: IngredientDisplay,
+/**
+ * Display text for every ingredient at the current scale and units, computed once per change
+ * (the domain's getDisplayIngredient). Lines that do not change keep their written text.
+ */
+const buildIngredientDisplays = (
+  ingredients: IngredientDisplay[],
   scaleFactor: number,
   unitMode: UnitMode
-): string => {
-  if (!ingredient.parsed.confident) {
-    return ingredient.text;
-  }
+) =>
+  ingredients.map((ingredient) =>
+    getDisplayIngredient(ingredient.text, {
+      keepOriginalText: true,
+      scale: scaleFactor,
+      units: unitMode
+    })
+  );
 
-  if (unitMode === "metric" && ingredient.parsed.altQty != null && ingredient.parsed.altUnit) {
-    return scaleQuantity(
-      {
-        ...ingredient.parsed,
-        altQty: null,
-        altUnit: null,
-        qty: ingredient.parsed.altQty,
-        unit: ingredient.parsed.altUnit
-      },
-      scaleFactor
-    );
-  }
-
-  if (scaleFactor === 1 && unitMode === "original") {
-    return ingredient.text;
-  }
-
-  return scaleQuantity(ingredient.parsed, scaleFactor);
-};
+/** Step text in the chosen units: "Preheat to 350°F (175°C)" reads "Preheat to 175°C" in metric. */
+const getStepDisplayText = (text: string, unitMode: UnitMode): string =>
+  unitMode === "original" ? text : convertTemperaturesInText(text, unitMode);
 
 export const getTimerRemainingSeconds = (deadlineMs: number, nowMs: number): number =>
   Math.max(0, Math.ceil((deadlineMs - nowMs) / 1000));
 
-const formatTimerRemaining = (remainingSeconds: number): string => {
-  const minutes = Math.floor(remainingSeconds / 60);
+/** "9:05", or "1:30:00" once a timer runs an hour or longer. */
+export const formatTimerRemaining = (remainingSeconds: number): string => {
+  const hours = Math.floor(remainingSeconds / 3600);
+  const minutes = Math.floor((remainingSeconds % 3600) / 60);
   const seconds = remainingSeconds % 60;
+  const paddedSeconds = String(seconds).padStart(2, "0");
 
-  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+  return hours > 0
+    ? `${hours}:${String(minutes).padStart(2, "0")}:${paddedSeconds}`
+    : `${minutes}:${paddedSeconds}`;
 };
 
 const formatScaleLabel = (scaleFactor: number): string =>
@@ -455,15 +444,16 @@ const ServingsScaleControls = ({
       ) : null}
       {hasAltUnits ? (
         <View style={styles.unitToggleRow}>
-          {(["original", "metric"] as const).map((mode) => {
-            const selected = unitMode === mode;
+          {UNIT_MODE_OPTIONS.map((option) => {
+            const selected = unitMode === option.value;
 
             return (
               <Pressable
-                accessibilityLabel={`Show ${mode === "metric" ? "metric" : "original"} ingredient units`}
+                accessibilityLabel={`Show ${option.value === "us" ? "US" : option.value} ingredient units`}
                 accessibilityRole="button"
-                key={mode}
-                onPress={() => onUnitModeChange(mode)}
+                accessibilityState={{ selected }}
+                key={option.value}
+                onPress={() => onUnitModeChange(option.value)}
                 style={({ pressed }) => [
                   styles.unitToggleOption,
                   selected && styles.unitToggleOptionSelected,
@@ -471,7 +461,7 @@ const ServingsScaleControls = ({
                 ]}
               >
                 <AppText style={[styles.unitToggleText, selected && styles.unitToggleTextSelected]}>
-                  {mode === "metric" ? "Metric" : "Original"}
+                  {option.label}
                 </AppText>
               </Pressable>
             );
@@ -517,8 +507,20 @@ export const RecipeResultCard = ({
     [ingredientGroups]
   );
   const scaleFactor = getScaleFactor(scaleMode, customScale);
-  const hasAltUnits = hasMetricAlternative(ingredientGroups);
-  const hasScalingHonestyNote = scaleFactor !== 1 && hasUnscalableIngredient(ingredientGroups);
+  const unitSummary = useMemo(() => getIngredientUnitSummary(flatIngredients), [flatIngredients]);
+  // Original / US / Metric is offered only when switching would change a line.
+  const hasAltUnits = unitSummary.canConvert || unitSummary.hasAlternateAmounts;
+  const hasScalingHonestyNote = scaleFactor !== 1 && unitSummary.hasUnscalableLines;
+  const ingredientDisplays = useMemo(
+    () => buildIngredientDisplays(flatIngredients, scaleFactor, unitMode),
+    [flatIngredients, scaleFactor, unitMode]
+  );
+  const ingredientTexts = useMemo(
+    () => ingredientDisplays.map((display) => display.text),
+    [ingredientDisplays]
+  );
+  const hasApproximateConversion =
+    unitMode !== "original" && ingredientDisplays.some((display) => display.approximate);
   const shoppingActionContext = useMemo(
     () => ({
       scaleFactor,
@@ -537,6 +539,8 @@ export const RecipeResultCard = ({
 
   const decodedSteps = useMemo(() => {
     const steps: CookStep[] = [];
+    // Ingredient matching is prepared once per recipe, then run per step.
+    const matchStep = createStepIngredientMatcher(flatIngredients);
     let currentSection: string | null = null;
     let pendingSection: string | null = null;
 
@@ -573,7 +577,7 @@ export const RecipeResultCard = ({
         durations: parseStepDurations(text),
         fallbackIndex: index + 1,
         index: steps.length + 1,
-        matchedIngredientIndexes: matchStepIngredients(text, flatIngredients),
+        matchedIngredientIndexes: matchStep(text),
         sectionLabel,
         text
       });
@@ -581,6 +585,10 @@ export const RecipeResultCard = ({
 
     return steps;
   }, [flatIngredients, recipe.steps]);
+  const stepTexts = useMemo(
+    () => decodedSteps.map((step) => getStepDisplayText(step.text, unitMode)),
+    [decodedSteps, unitMode]
+  );
 
   return (
     <Reanimated.View
@@ -624,6 +632,11 @@ export const RecipeResultCard = ({
             Some ingredients can't be scaled automatically and stay as written.
           </AppText>
         ) : null}
+        {hasApproximateConversion ? (
+          <AppText muted style={styles.scalingHonestyNote}>
+            Some converted amounts are approximate.
+          </AppText>
+        ) : null}
       </View>
 
       {renderedActionSlot ? <View style={styles.actionSlot}>{renderedActionSlot}</View> : null}
@@ -640,7 +653,7 @@ export const RecipeResultCard = ({
                 <View key={ingredient.key} style={styles.ingredientRow}>
                   <View style={styles.bullet} />
                   <AppText style={styles.listText}>
-                    {getScaledIngredientText(ingredient, scaleFactor, unitMode)}
+                    {ingredientTexts[ingredient.ingredientIndex] ?? ingredient.text}
                   </AppText>
                 </View>
               ))}
@@ -667,7 +680,7 @@ export const RecipeResultCard = ({
           }
         />
         <View style={styles.list}>
-          {decodedSteps.map((step) => (
+          {decodedSteps.map((step, stepPosition) => (
             <View key={`${step.index}-${step.fallbackIndex}`} style={styles.methodStepGroup}>
               {step.sectionLabel ? (
                 <AppText style={styles.methodSection}>{step.sectionLabel}</AppText>
@@ -678,7 +691,7 @@ export const RecipeResultCard = ({
                     {String(step.index)}
                   </AppText>
                 </View>
-                <AppText style={styles.listText}>{step.text}</AppText>
+                <AppText style={styles.listText}>{stepTexts[stepPosition] ?? step.text}</AppText>
               </View>
             </View>
           ))}
@@ -746,9 +759,10 @@ export const RecipeResultCard = ({
         onCookModeFinish={onCookModeFinish}
         onScaleModeChange={setScaleMode}
         onUnitModeChange={setUnitMode}
+        ingredientTexts={ingredientTexts}
         recipeTitle={decodedTitle}
-        scaleFactor={scaleFactor}
         scaleMode={scaleMode}
+        stepTexts={stepTexts}
         steps={decodedSteps}
         unitMode={unitMode}
         visible={isCookingModeVisible}
@@ -757,12 +771,129 @@ export const RecipeResultCard = ({
   );
 };
 
+/**
+ * The running timers under the cook-mode step. The one-second countdown lives here, so each
+ * tick re-renders only this strip instead of the whole cook-mode sheet (step card, ingredient
+ * list and every ingredient row). Timers that reach zero are reported once via `onComplete`.
+ */
+const CookModeActiveTimers = memo(function CookModeActiveTimers({
+  onComplete,
+  onDismiss,
+  timers,
+  visible
+}: {
+  onComplete: (timerIds: string[]) => void;
+  onDismiss: (timerId: string) => void;
+  timers: ActiveTimer[];
+  visible: boolean;
+}) {
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const activeTimerPulse = useSharedValue(0);
+  const runningTimerCount = timers.filter(
+    (timer) => !timer.completed && getTimerRemainingSeconds(timer.deadlineMs, nowMs) > 0
+  ).length;
+
+  useEffect(() => {
+    // A newly started timer shows its full time right away.
+    setNowMs(Date.now());
+  }, [timers]);
+
+  useEffect(() => {
+    if (!visible || runningTimerCount === 0) {
+      return;
+    }
+
+    const intervalId = setInterval(() => {
+      setNowMs(Date.now());
+    }, TIMER_TICK_INTERVAL_MS);
+
+    return () => {
+      clearInterval(intervalId);
+    };
+  }, [runningTimerCount, visible]);
+
+  useEffect(() => {
+    const newlyCompletedTimers = timers.filter(
+      (timer) => !timer.completed && getTimerRemainingSeconds(timer.deadlineMs, nowMs) <= 0
+    );
+
+    if (newlyCompletedTimers.length === 0) {
+      return;
+    }
+
+    newlyCompletedTimers.forEach(() => success());
+    activeTimerPulse.value = 0;
+    activeTimerPulse.value = withTiming(1, {
+      duration: 420,
+      easing: Easing.out(Easing.cubic),
+      reduceMotion: ReduceMotion.System
+    });
+    onComplete(newlyCompletedTimers.map((timer) => timer.id));
+  }, [activeTimerPulse, nowMs, onComplete, timers]);
+
+  const activeTimerPulseStyle = useAnimatedStyle(() => ({
+    opacity: 1 - activeTimerPulse.value * 0.08,
+    transform: [
+      {
+        scale: 1 + activeTimerPulse.value * 0.015
+      }
+    ]
+  }));
+
+  if (timers.length === 0) {
+    return null;
+  }
+
+  return (
+    <Reanimated.View style={[styles.activeTimerStack, activeTimerPulseStyle]}>
+      {timers.map((timer) => {
+        const remainingSeconds = getTimerRemainingSeconds(timer.deadlineMs, nowMs);
+        const completed = timer.completed || remainingSeconds <= 0;
+
+        return (
+          <Pressable
+            accessibilityLabel={`Dismiss ${timer.label} timer`}
+            accessibilityRole="button"
+            key={timer.id}
+            onPress={() => onDismiss(timer.id)}
+            style={({ pressed }) => [
+              styles.activeTimerChip,
+              completed && styles.activeTimerChipComplete,
+              pressed && styles.pressed
+            ]}
+          >
+            <MaterialCommunityIcons
+              color={completed ? appColors.canvas : appColors.accent}
+              name={completed ? "check" : "timer-outline"}
+              size={14}
+            />
+            <Text
+              maxFontSizeMultiplier={COOK_MODE_CONTROL_MAX_FONT_SCALE}
+              style={[styles.activeTimerChipText, completed && styles.activeTimerChipTextComplete]}
+            >
+              {completed ? "Done" : formatTimerRemaining(remainingSeconds)}
+            </Text>
+            <Text
+              maxFontSizeMultiplier={COOK_MODE_CONTROL_MAX_FONT_SCALE}
+              numberOfLines={1}
+              style={[styles.activeTimerLabel, completed && styles.activeTimerChipTextComplete]}
+            >
+              {timer.label}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </Reanimated.View>
+  );
+});
+
 const CookingModeModal = ({
   customScale,
   flatIngredients,
   hasAltUnits,
   hasScalingHonestyNote,
   ingredientGroups,
+  ingredientTexts,
   onAddIngredientsToShoppingList,
   onClose,
   onCookModeFinish,
@@ -770,8 +901,8 @@ const CookingModeModal = ({
   onScaleModeChange,
   onUnitModeChange,
   recipeTitle,
-  scaleFactor,
   scaleMode,
+  stepTexts,
   steps,
   unitMode,
   visible
@@ -781,6 +912,8 @@ const CookingModeModal = ({
   hasAltUnits: boolean;
   hasScalingHonestyNote: boolean;
   ingredientGroups: IngredientGroup[];
+  /** Display text per ingredient index at the current scale and units. */
+  ingredientTexts: string[];
   onAddIngredientsToShoppingList?: (() => void) | undefined;
   onClose: () => void;
   onCookModeFinish?: (() => void | Promise<void>) | undefined;
@@ -788,8 +921,9 @@ const CookingModeModal = ({
   onScaleModeChange: (mode: ScaleMode) => void;
   onUnitModeChange: (mode: UnitMode) => void;
   recipeTitle: string;
-  scaleFactor: number;
   scaleMode: ScaleMode;
+  /** Step text in the chosen units, by position in `steps`. */
+  stepTexts: string[];
   steps: CookStep[];
   unitMode: UnitMode;
   visible: boolean;
@@ -804,8 +938,8 @@ const CookingModeModal = ({
   const [activeTimers, setActiveTimers] = useState<ActiveTimer[]>([]);
   const [areHintsVisible, setAreHintsVisible] = useState(false);
   const [isLeaveConfirmationVisible, setIsLeaveConfirmationVisible] = useState(false);
-  const [nowMs, setNowMs] = useState(() => Date.now());
   const currentStep = steps[currentStepIndex];
+  const currentStepText = stepTexts[currentStepIndex] ?? currentStep?.text ?? "";
   const isFirstStep = currentStepIndex === 0;
   const isLastStep = currentStepIndex === steps.length - 1;
   const progressPercent = isFinaleVisible
@@ -819,7 +953,6 @@ const CookingModeModal = ({
   const progressFill = useSharedValue(progressPercent);
   const ingredientsReveal = useSharedValue(0);
   const keepAwakePulse = useSharedValue(0);
-  const activeTimerPulse = useSharedValue(0);
   const isStepTransitionAnimatingRef = useRef(false);
   const activeStepTransitionRef = useRef<ReturnType<typeof Animated.timing> | null>(null);
   const stepTransitionGenerationRef = useRef(0);
@@ -827,9 +960,6 @@ const CookingModeModal = ({
   const hasTrackedCookModeCompletionRef = useRef(false);
   const scrollRef = useRef<ScrollView>(null);
   const { width: modalWidth } = useWindowDimensions();
-  const runningTimerCount = activeTimers.filter(
-    (timer) => !timer.completed && getTimerRemainingSeconds(timer.deadlineMs, nowMs) > 0
-  ).length;
 
   const invalidateStepTransition = useCallback(() => {
     stepTransitionGenerationRef.current += 1;
@@ -891,7 +1021,6 @@ const CookingModeModal = ({
       setIsFinaleVisible(false);
       setKeepAwake(true);
       setActiveTimers([]);
-      setNowMs(Date.now());
       ingredientsReveal.value = 0;
       keepAwakePulse.value = 0;
 
@@ -939,44 +1068,14 @@ const CookingModeModal = ({
     });
   }, []);
 
-  useEffect(() => {
-    if (!visible || runningTimerCount === 0) {
-      return;
-    }
-
-    const intervalId = setInterval(() => {
-      setNowMs(Date.now());
-    }, TIMER_TICK_INTERVAL_MS);
-
-    return () => {
-      clearInterval(intervalId);
-    };
-  }, [runningTimerCount, visible]);
-
-  useEffect(() => {
-    const newlyCompletedTimers = activeTimers.filter(
-      (timer) => !timer.completed && getTimerRemainingSeconds(timer.deadlineMs, nowMs) <= 0
-    );
-
-    if (newlyCompletedTimers.length === 0) {
-      return;
-    }
-
-    newlyCompletedTimers.forEach(() => success());
-    activeTimerPulse.value = 0;
-    activeTimerPulse.value = withTiming(1, {
-      duration: 420,
-      easing: Easing.out(Easing.cubic),
-      reduceMotion: ReduceMotion.System
-    });
+  const markTimersCompleted = useCallback((timerIds: string[]) => {
+    const completedIds = new Set(timerIds);
     setActiveTimers((currentTimers) =>
       currentTimers.map((timer) =>
-        newlyCompletedTimers.some((completedTimer) => completedTimer.id === timer.id)
-          ? { ...timer, completed: true }
-          : timer
+        completedIds.has(timer.id) && !timer.completed ? { ...timer, completed: true } : timer
       )
     );
-  }, [activeTimerPulse, activeTimers, nowMs]);
+  }, []);
 
   useEffect(() => {
     ingredientsReveal.value = withTiming(isIngredientsExpanded ? 1 : 0, {
@@ -1019,7 +1118,6 @@ const CookingModeModal = ({
       const startedAtMs = Date.now();
       const timerId = `${currentStep?.fallbackIndex ?? currentStepIndex}-${durationIndex}-${startedAtMs}`;
 
-      setNowMs(startedAtMs);
       setActiveTimers((currentTimers) => [
         ...currentTimers,
         {
@@ -1048,13 +1146,15 @@ const CookingModeModal = ({
   }, [cancelStepTransition, onClose]);
 
   const handleRequestClose = useCallback(() => {
-    if (runningTimerCount > 0) {
+    const now = Date.now();
+
+    if (activeTimers.some((timer) => !timer.completed && timer.deadlineMs > now)) {
       confirmCloseWithTimers();
       return;
     }
 
     closeCookMode();
-  }, [closeCookMode, confirmCloseWithTimers, runningTimerCount]);
+  }, [activeTimers, closeCookMode, confirmCloseWithTimers]);
 
   useEffect(() => {
     if (!keepAwake) {
@@ -1321,15 +1421,6 @@ const CookingModeModal = ({
     ]
   }));
 
-  const activeTimerPulseStyle = useAnimatedStyle(() => ({
-    opacity: 1 - activeTimerPulse.value * 0.08,
-    transform: [
-      {
-        scale: 1 + activeTimerPulse.value * 0.015
-      }
-    ]
-  }));
-
   const matchedCurrentStepIngredients = currentStep
     ? currentStep.matchedIngredientIndexes
         .map((ingredientIndex) => flatIngredients[ingredientIndex])
@@ -1363,7 +1454,7 @@ const CookingModeModal = ({
               ingredient={ingredient}
               key={ingredient.key}
               onToggle={toggleIngredientChecked}
-              text={getScaledIngredientText(ingredient, scaleFactor, unitMode)}
+              text={ingredientTexts[ingredient.ingredientIndex] ?? ingredient.text}
             />
           ))}
         </View>
@@ -1399,56 +1490,10 @@ const CookingModeModal = ({
       <View style={styles.stepIngredientStrip}>
         {matchedCurrentStepIngredients.map((ingredient) => (
           <AppText muted key={ingredient.key} style={styles.stepIngredientLine}>
-            {getScaledIngredientText(ingredient, scaleFactor, unitMode)}
+            {ingredientTexts[ingredient.ingredientIndex] ?? ingredient.text}
           </AppText>
         ))}
       </View>
-    ) : null;
-
-  const renderActiveTimers = () =>
-    activeTimers.length > 0 ? (
-      <Reanimated.View style={[styles.activeTimerStack, activeTimerPulseStyle]}>
-        {activeTimers.map((timer) => {
-          const remainingSeconds = getTimerRemainingSeconds(timer.deadlineMs, nowMs);
-          const completed = timer.completed || remainingSeconds <= 0;
-
-          return (
-            <Pressable
-              accessibilityLabel={`Dismiss ${timer.label} timer`}
-              accessibilityRole="button"
-              key={timer.id}
-              onPress={() => dismissTimer(timer.id)}
-              style={({ pressed }) => [
-                styles.activeTimerChip,
-                completed && styles.activeTimerChipComplete,
-                pressed && styles.pressed
-              ]}
-            >
-              <MaterialCommunityIcons
-                color={completed ? appColors.canvas : appColors.accent}
-                name={completed ? "check" : "timer-outline"}
-                size={14}
-              />
-              <Text
-                maxFontSizeMultiplier={COOK_MODE_CONTROL_MAX_FONT_SCALE}
-                style={[
-                  styles.activeTimerChipText,
-                  completed && styles.activeTimerChipTextComplete
-                ]}
-              >
-                {completed ? "Done" : formatTimerRemaining(remainingSeconds)}
-              </Text>
-              <Text
-                maxFontSizeMultiplier={COOK_MODE_CONTROL_MAX_FONT_SCALE}
-                numberOfLines={1}
-                style={[styles.activeTimerLabel, completed && styles.activeTimerChipTextComplete]}
-              >
-                {timer.label}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </Reanimated.View>
     ) : null;
 
   const renderCookModeFinale = () => (
@@ -1538,7 +1583,7 @@ const CookingModeModal = ({
                   </AppText>
                 </View>
                 <AppText style={styles.cookModeStepText} variant="headline">
-                  {currentStep.text}
+                  {currentStepText}
                 </AppText>
                 {renderStepTimerChips()}
                 {renderMatchedIngredientStrip()}
@@ -1592,79 +1637,90 @@ const CookingModeModal = ({
           </ScrollView>
         </View>
 
-        {!isFinaleVisible ? (
+        {/* Running timers stay in the footer on the finale too: the strip owns the countdown and
+            the "timer done" haptic, so unmounting it there would silence a timer still running. */}
+        {!isFinaleVisible || activeTimers.length > 0 ? (
           <View style={styles.cookModeFooter}>
-            {areHintsVisible ? <CookModeHintCard onDismiss={dismissHints} /> : null}
-            {renderActiveTimers()}
-            <View style={styles.cookModeFooterRow}>
-              {!isFirstStep ? (
+            {!isFinaleVisible && areHintsVisible ? (
+              <CookModeHintCard onDismiss={dismissHints} />
+            ) : null}
+            <CookModeActiveTimers
+              onComplete={markTimersCompleted}
+              onDismiss={dismissTimer}
+              timers={activeTimers}
+              visible={visible}
+            />
+            {!isFinaleVisible ? (
+              <View style={styles.cookModeFooterRow}>
+                {!isFirstStep ? (
+                  <Pressable
+                    accessibilityLabel="Previous step"
+                    accessibilityRole="button"
+                    accessibilityState={{ disabled: isStepTransitionAnimating }}
+                    disabled={isStepTransitionAnimating}
+                    onPress={goToPreviousStep}
+                    style={({ pressed }) => [
+                      styles.arrowButton,
+                      styles.arrowButtonSecondary,
+                      pressed && styles.pressed
+                    ]}
+                  >
+                    <MaterialCommunityIcons color={appColors.accent} name="arrow-left" size={24} />
+                  </Pressable>
+                ) : (
+                  <View style={styles.arrowButtonSpacer} />
+                )}
+
+                <View style={styles.keepAwakeMiddleContainer}>
+                  <Reanimated.View style={keepAwakeIconStyle}>
+                    <MaterialCommunityIcons
+                      color={keepAwake ? appColors.accent : appColors.muted}
+                      name="brightness-5"
+                      size={18}
+                    />
+                  </Reanimated.View>
+                  <Text
+                    maxFontSizeMultiplier={COOK_MODE_CONTROL_MAX_FONT_SCALE}
+                    style={styles.keepAwakeMiddleText}
+                  >
+                    Keep awake
+                  </Text>
+                  <Switch
+                    accessibilityLabel="Keep screen awake"
+                    accessibilityHint="Stops the screen from sleeping while you cook."
+                    onValueChange={setKeepAwake}
+                    thumbColor={keepAwake ? appColors.accent : appColors.surface}
+                    trackColor={{ false: appColors.border, true: appColors.accentSoft }}
+                    value={keepAwake}
+                    style={styles.keepAwakeMiddleSwitch}
+                  />
+                </View>
+
                 <Pressable
-                  accessibilityLabel="Previous step"
+                  accessibilityLabel={isLastStep ? "Finish cooking" : "Next step"}
                   accessibilityRole="button"
                   accessibilityState={{ disabled: isStepTransitionAnimating }}
                   disabled={isStepTransitionAnimating}
-                  onPress={goToPreviousStep}
+                  onPress={() => goToNextStep()}
                   style={({ pressed }) => [
                     styles.arrowButton,
-                    styles.arrowButtonSecondary,
+                    styles.arrowButtonPrimary,
                     pressed && styles.pressed
                   ]}
                 >
-                  <MaterialCommunityIcons color={appColors.accent} name="arrow-left" size={24} />
+                  {isLastStep ? (
+                    <Text
+                      maxFontSizeMultiplier={COOK_MODE_CONTROL_MAX_FONT_SCALE}
+                      style={styles.finishButtonText}
+                    >
+                      Finish
+                    </Text>
+                  ) : (
+                    <MaterialCommunityIcons color={appColors.canvas} name="arrow-right" size={24} />
+                  )}
                 </Pressable>
-              ) : (
-                <View style={styles.arrowButtonSpacer} />
-              )}
-
-              <View style={styles.keepAwakeMiddleContainer}>
-                <Reanimated.View style={keepAwakeIconStyle}>
-                  <MaterialCommunityIcons
-                    color={keepAwake ? appColors.accent : appColors.muted}
-                    name="brightness-5"
-                    size={18}
-                  />
-                </Reanimated.View>
-                <Text
-                  maxFontSizeMultiplier={COOK_MODE_CONTROL_MAX_FONT_SCALE}
-                  style={styles.keepAwakeMiddleText}
-                >
-                  Keep awake
-                </Text>
-                <Switch
-                  accessibilityLabel="Keep screen awake"
-                  accessibilityHint="Stops the screen from sleeping while you cook."
-                  onValueChange={setKeepAwake}
-                  thumbColor={keepAwake ? appColors.accent : appColors.surface}
-                  trackColor={{ false: appColors.border, true: appColors.accentSoft }}
-                  value={keepAwake}
-                  style={styles.keepAwakeMiddleSwitch}
-                />
               </View>
-
-              <Pressable
-                accessibilityLabel={isLastStep ? "Finish cooking" : "Next step"}
-                accessibilityRole="button"
-                accessibilityState={{ disabled: isStepTransitionAnimating }}
-                disabled={isStepTransitionAnimating}
-                onPress={() => goToNextStep()}
-                style={({ pressed }) => [
-                  styles.arrowButton,
-                  styles.arrowButtonPrimary,
-                  pressed && styles.pressed
-                ]}
-              >
-                {isLastStep ? (
-                  <Text
-                    maxFontSizeMultiplier={COOK_MODE_CONTROL_MAX_FONT_SCALE}
-                    style={styles.finishButtonText}
-                  >
-                    Finish
-                  </Text>
-                ) : (
-                  <MaterialCommunityIcons color={appColors.canvas} name="arrow-right" size={24} />
-                )}
-              </Pressable>
-            </View>
+            ) : null}
           </View>
         ) : null}
       </SafeAreaView>

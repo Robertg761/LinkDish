@@ -1,0 +1,98 @@
+.library-filters {
+  min-width: 0;
+  margin: 0 calc(-1 * var(--page-gutter));
+}
+
+.library-filters-track {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px var(--page-gutter) 4px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  /* Fade the scrolled-off edges (a wide fade on the right, where the row continues) so a chip
+     cut by the screen edge reads as "more this way" rather than as a clipped label. */
+  mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 var(--page-gutter),
+    #000 calc(100% - var(--page-gutter) - 40px),
+    transparent 100%
+  );
+}
+
+.library-filters-track::-webkit-scrollbar {
+  display: none;
+}
+
+.library-filters-emoji {
+  margin-right: 5px;
+  font-size: 0.9375rem;
+  line-height: 1;
+}
+
+/* Desktop has no swipe, so the chips wrap instead of scrolling sideways. */
+@media (min-width: 1024px) {
+  .library-filters {
+    margin: 0;
+  }
+
+  .library-filters-track {
+    flex-wrap: wrap;
+    padding: 0;
+    overflow: visible;
+    mask-image: none;
+  }
+}
+
+.library-filters-clear,
+.library-filters-manage {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 0 14px;
+  border-radius: var(--radius-pill);
+  font-size: 0.875rem;
+  font-weight: 650;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.library-filters-clear {
+  padding: 0 12px 0 10px;
+  border: 1px solid transparent;
+  background: var(--color-tomato-soft);
+  color: var(--color-on-tomato-soft);
+}
+
+.library-filters-clear .num {
+  font-weight: 700;
+}
+
+@media (hover: hover) {
+  .library-filters-clear:hover {
+    border-color: color-mix(in srgb, var(--color-tomato) 35%, transparent);
+  }
+}
+
+.library-filters-manage {
+  border: 1px dashed var(--color-border-strong);
+  background: transparent;
+  color: var(--color-ink-muted);
+}
+
+@media (hover: hover) {
+  .library-filters-manage:hover {
+    border-style: solid;
+    background: var(--color-surface);
+    color: var(--color-ink);
+  }
+}

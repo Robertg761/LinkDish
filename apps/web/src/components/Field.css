@@ -1,17 +1,15 @@
 .field-container {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   width: 100%;
 }
 
 .field-label {
-  font-size: var(--text-label);
-  font-weight: 600;
-  letter-spacing: var(--text-label-letter-spacing);
-  line-height: var(--text-label-line-height);
-  text-transform: uppercase;
-  color: var(--color-accent);
+  color: var(--color-ink);
+  font-size: var(--text-small);
+  font-weight: 650;
+  line-height: var(--text-small-line-height);
 }
 
 .field-input-wrapper {
@@ -23,51 +21,108 @@
 
 .field-input {
   width: 100%;
-  background-color: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-input, 12px);
-  min-height: 54px;
+  min-height: 52px;
   padding: 0 16px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-input);
+  background-color: var(--color-surface);
+  color: var(--color-ink);
+  font-family: var(--font-family-sans);
   font-size: var(--text-body);
   line-height: var(--text-body-line-height);
-  font-family: var(--font-family-sans);
-  color: var(--color-text);
   transition:
     border-color var(--transition-fast),
-    box-shadow var(--transition-fast);
-  box-sizing: border-box;
+    box-shadow var(--transition-fast),
+    background-color var(--transition-fast);
+  appearance: none;
+}
+
+.field-textarea {
+  min-height: 112px;
+  padding: 14px 16px;
+  resize: vertical;
+}
+
+/* Grows with its text (field-sizing where supported, measured in JS otherwise). */
+.field-textarea.is-auto-grow {
+  overflow: hidden;
+  resize: none;
+  field-sizing: content;
+}
+
+/* A text field that wraps: a long title stays fully visible. */
+.field-textarea.is-single-line {
+  min-height: 52px;
+  padding: 13px 16px;
+  line-height: 1.5;
 }
 
 .field-input-with-right {
-  padding-right: 48px;
+  padding-right: 52px;
+}
+
+.field-input-with-leading {
+  padding-left: 44px;
 }
 
 .field-input::placeholder {
   color: var(--color-placeholder);
+  opacity: 1;
 }
 
-.field-input:focus {
-  border-color: var(--color-accent);
-  border-width: 1.5px;
+.field-input:hover:not(:disabled):not(:focus) {
+  border-color: var(--color-ink-subtle);
+}
+
+.field-input:focus,
+.field-input:focus-visible {
+  border-color: var(--color-primary);
+  outline: none;
   box-shadow: 0 0 0 3px var(--color-focus-ring-strong);
 }
 
-.field-input-error {
+.field-input:disabled {
+  background: var(--color-surface-sunken);
+  color: var(--color-ink-muted);
+  cursor: not-allowed;
+}
+
+.field-input-error,
+.field-input-error:hover:not(:disabled):not(:focus) {
   border-color: var(--color-danger);
+}
+
+.field-input-error:focus {
+  box-shadow: 0 0 0 3px var(--color-danger-soft);
+}
+
+.field-leading-icon {
+  position: absolute;
+  left: 15px;
+  color: var(--color-ink-muted);
+  pointer-events: none;
 }
 
 .field-right-element {
   position: absolute;
-  right: 14px;
+  right: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
+.field-hint {
+  color: var(--color-ink-muted);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line-height);
+}
+
 .field-error-message {
-  font-size: var(--text-small);
-  line-height: var(--text-small-line-height);
+  display: flex;
+  align-items: center;
+  gap: 6px;
   color: var(--color-danger);
-  margin-top: 4px;
-  display: block;
+  font-size: var(--text-small);
+  font-weight: 600;
+  line-height: var(--text-small-line-height);
 }

@@ -1,0 +1,239 @@
+.recipe-view {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+/* Shared chrome for recipe sections (not the RecipeCard component, which owns .recipe-card) */
+.recipe-panel {
+  padding: 18px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-card);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-xs);
+}
+
+.recipe-section-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.recipe-section-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--color-ink);
+  font-family: var(--font-family-serif);
+  font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+}
+
+.recipe-section-title .icon {
+  color: var(--color-primary);
+}
+
+.recipe-section-count {
+  color: var(--color-ink-subtle);
+  font-size: var(--text-caption);
+  font-weight: 650;
+}
+
+.recipe-section-link {
+  min-height: 32px;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: var(--color-primary);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--text-caption);
+  font-weight: 700;
+}
+
+.recipe-section-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.recipe-view-body {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+.recipe-view-ingredients-card {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px 16px 10px;
+}
+
+.recipe-view-ingredients-card .recipe-section-header {
+  margin-bottom: 0;
+}
+
+.recipe-view-main {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+}
+
+.recipe-view-method {
+  padding: 4px 2px 0;
+}
+
+.recipe-view-warnings {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--color-surface-subtle);
+  box-shadow: none;
+}
+
+.recipe-view-warnings .recipe-section-title {
+  font-size: 1.125rem;
+}
+
+.recipe-view-warnings ul {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding-left: 20px;
+  color: var(--color-ink-muted);
+  font-size: var(--text-small);
+}
+
+/* Phones: the ingredients card bleeds a little less than the page for a softer edge. */
+@media (max-width: 767.98px) {
+  .recipe-view-ingredients-card {
+    margin: 0 -4px;
+  }
+}
+
+/* Desktop: sticky ingredients beside the method. */
+@media (min-width: 1024px) {
+  .recipe-view {
+    gap: 40px;
+  }
+
+  .recipe-view-body {
+    display: grid;
+    grid-template-columns: minmax(300px, 380px) minmax(0, 1fr);
+    align-items: start;
+    gap: 48px;
+  }
+
+  /* Sticky only when the whole card fits (RecipeView measures it); never an inner scroll. */
+  .recipe-view-ingredients.is-sticky {
+    position: sticky;
+    top: calc(var(--app-sticky-top, 0px) + var(--topbar-height) + 16px);
+  }
+
+  .recipe-view-ingredients-card {
+    padding: 22px 20px 12px;
+  }
+
+  .recipe-view-method {
+    padding-top: 22px;
+  }
+
+  .recipe-section-title {
+    font-size: 1.75rem;
+  }
+
+  .recipe-view-warnings .recipe-section-title {
+    font-size: 1.125rem;
+  }
+}
+
+.screen-hidden-print-visible {
+  display: none;
+}
+
+/* ------------------------------------------------------------------------ */
+/* Print: a clean two-column recipe sheet.                                   */
+/* ------------------------------------------------------------------------ */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+
+  .print-target,
+  .print-target * {
+    visibility: visible;
+  }
+
+  .print-target {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    padding: 0 !important;
+    border: none !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    color: black;
+    font-size: 10.5pt;
+  }
+
+  .print-hide {
+    display: none !important;
+  }
+
+  .screen-hidden-print-visible {
+    display: block !important;
+  }
+
+  .recipe-view {
+    gap: 14px;
+  }
+
+  .recipe-panel {
+    padding: 0;
+    border: 0;
+    background: none;
+    box-shadow: none;
+  }
+
+  .recipe-view-body {
+    display: grid;
+    grid-template-columns: 34% minmax(0, 1fr);
+    align-items: start;
+    gap: 22px;
+  }
+
+  .recipe-view-ingredients {
+    position: static;
+  }
+
+  .recipe-view-ingredients-card {
+    margin: 0;
+    padding: 0;
+  }
+
+  .recipe-section-title {
+    font-size: 14pt;
+  }
+
+  .recipe-section-count {
+    display: none;
+  }
+
+  .recipe-view-method {
+    padding: 0;
+  }
+
+  .recipe-view-print-source {
+    margin-top: 12px;
+    color: black;
+    font-size: 8.5pt;
+  }
+}

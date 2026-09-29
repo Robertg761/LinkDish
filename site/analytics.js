@@ -1,4 +1,60 @@
 (function () {
+  var campaignSource = "linkdish.ca";
+
+  function pageCampaign() {
+    var slug = window.location.pathname.replace(/^\/+|\/+$/g, "").split("/")[0];
+
+    return slug ? slug.slice(0, 60) : "home";
+  }
+
+  function isAppHost(hostname) {
+    return hostname === "app.linkdish.ca" || hostname.endsWith(".app.linkdish.ca");
+  }
+
+  function isPlayHost(hostname) {
+    return hostname === "play.google.com" || hostname.endsWith(".play.google.com");
+  }
+
+  // Tag outbound links with where they were clicked (data-cta) so the web app and Google
+  // Play can attribute visits and installs. Runs everywhere (also on localhost) so links
+  // look the same in development; nothing is sent from here.
+  function decorateLinks() {
+    if (typeof document.querySelectorAll !== "function" || typeof URL !== "function") {
+      return;
+    }
+
+    Array.prototype.slice.call(document.querySelectorAll("a[data-cta]")).forEach(function (link) {
+      var url;
+
+      try {
+        url = new URL(link.getAttribute("href") || "", window.location.href);
+      } catch (_error) {
+        return;
+      }
+
+      var cta = link.getAttribute("data-cta") || "link";
+
+      if (isAppHost(url.hostname) && !url.searchParams.has("utm_source")) {
+        url.searchParams.set("utm_source", campaignSource);
+        url.searchParams.set("utm_medium", cta);
+        url.searchParams.set("utm_campaign", pageCampaign());
+        link.setAttribute("href", url.toString());
+      } else if (isPlayHost(url.hostname) && !url.searchParams.has("referrer")) {
+        url.searchParams.set(
+          "referrer",
+          "utm_source=" + campaignSource + "&utm_medium=" + cta + "&utm_campaign=" + pageCampaign()
+        );
+        link.setAttribute("href", url.toString());
+      }
+    });
+  }
+
+  try {
+    decorateLinks();
+  } catch (_error) {
+    // Attribution is best effort; links keep working without it.
+  }
+
   if (
     window.location.hostname === "localhost" ||
     window.location.hostname === "127.0.0.1" ||
@@ -143,12 +199,21 @@
     };
     var body = JSON.stringify({ events: [event] });
 
-    if (navigator.sendBeacon) {
-      navigator.sendBeacon(
-        apiBaseUrl + "/analytics/events",
-        new Blob([body], { type: "application/json" })
-      );
-      return;
+    // text/plain keeps the beacon a CORS "simple" request (no preflight; Chrome throws for a
+    // Blob type such as application/json) and the API parses the JSON text. A beacon the
+    // browser refuses or rejects falls back to a keepalive fetch.
+    try {
+      if (
+        navigator.sendBeacon &&
+        navigator.sendBeacon(
+          apiBaseUrl + "/analytics/events",
+          new Blob([body], { type: "text/plain;charset=UTF-8" })
+        )
+      ) {
+        return;
+      }
+    } catch (_error) {
+      // Fall through to fetch.
     }
 
     fetch(apiBaseUrl + "/analytics/events", {
@@ -160,6 +225,9 @@
       method: "POST"
     }).catch(function () {});
   }
+
+  // Lets site.js report form outcomes (hero paste hand-off, iPhone waitlist).
+  window.LinkDishAnalytics = { track: send };
 
   function pageEventName() {
     if (window.location.pathname.indexOf("/support") === 0) {
@@ -189,7 +257,13 @@
     }
 
     var href = link.getAttribute("href") || "";
-    var label = (link.textContent || "").trim().slice(0, 80);
+    var label = (link.textContent || "").replace(/\s+/g, " ").trim().slice(0, 80);
+    // data-cta names the placement ("hero-android", "plans-plus"), so two buttons with
+    // the same label can be told apart. The visible label is kept alongside it.
+    var properties = {
+      cta: (link.getAttribute("data-cta") || label).slice(0, 80),
+      label: label
+    };
     var targetUrl;
 
     try {
@@ -202,7 +276,7 @@
       targetUrl &&
       (targetUrl.hostname === "play.google.com" || targetUrl.hostname.endsWith(".play.google.com"))
     ) {
-      send("marketing_play_store_clicked", { cta: label });
+      send("marketing_play_store_clicked", properties);
       return;
     }
 
@@ -210,12 +284,16 @@
       targetUrl &&
       (targetUrl.hostname === "app.linkdish.ca" || targetUrl.hostname.endsWith(".app.linkdish.ca"))
     ) {
-      send("marketing_web_app_clicked", { cta: label });
+      send("marketing_web_app_clicked", properties);
       return;
     }
 
-    if (link.classList.contains("button") || link.classList.contains("info-link")) {
-      send("marketing_cta_clicked", { cta: label });
+    if (
+      link.hasAttribute("data-cta") ||
+      link.classList.contains("button") ||
+      link.classList.contains("info-link")
+    ) {
+      send("marketing_cta_clicked", properties);
     }
   });
 })();

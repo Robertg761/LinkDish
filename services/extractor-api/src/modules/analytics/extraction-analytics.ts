@@ -1,5 +1,5 @@
 import { getAuthenticatedUser } from "../auth/auth-service.js";
-import { getHeader } from "../request-identity.js";
+import { getHeader, isLiveCanaryRequest } from "../request-identity.js";
 
 import { hashAnalyticsUserId } from "./analytics-privacy.js";
 import { writeExtractionAnalyticsEvent } from "./analytics-store.js";
@@ -22,10 +22,6 @@ const getPlatform = (headers: RequestHeaders): AnalyticsPlatform => {
   return "backend";
 };
 
-const isLiveCanaryRequest = (headers: RequestHeaders): boolean =>
-  getHeader(headers, "x-linkdish-canary") != null ||
-  getHeader(headers, "x-linkdish-client-id") === "live-canary";
-
 export const recordDurableExtractionAnalyticsEvent = async (
   headers: RequestHeaders,
   event: AdminExtractionEventInput,
@@ -35,13 +31,21 @@ export const recordDurableExtractionAnalyticsEvent = async (
     return;
   }
 
-  const session = await getAuthenticatedUser(headers).catch(() => null);
+  /*
+   * Billing already resolved the signed-in account for most requests; reuse it
+   * instead of authenticating the request a second time (1-4 store reads and
+   * possibly a Clerk verification).
+   */
+  const accountUserId =
+    event.billing.accountUserId ??
+    (await getAuthenticatedUser(headers).catch(() => null))?.user.id ??
+    null;
 
   const anonymousId = getHeader(headers, "x-linkdish-client-id") ?? undefined;
   const sessionId = getHeader(headers, "x-linkdish-session-id") ?? undefined;
   const appVersion = getHeader(headers, "x-linkdish-app-version") ?? undefined;
   const buildNumber = getHeader(headers, "x-linkdish-build-number") ?? undefined;
-  const accountUserHash = session ? hashAnalyticsUserId(session.user.id) : undefined;
+  const accountUserHash = accountUserId ? hashAnalyticsUserId(accountUserId) : undefined;
 
   await writeExtractionAnalyticsEvent({
     extraction: event.extraction,

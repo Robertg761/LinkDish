@@ -26,9 +26,13 @@ describe("SAMPLE_RECIPES", () => {
   });
 
   it("keeps timer-friendly durations in the baked good steps", () => {
-    const bakedGood = SAMPLE_RECIPES.find((sample) => sample.id === "starter-brown-butter-berry-oat-bars");
+    const bakedGood = SAMPLE_RECIPES.find(
+      (sample) => sample.id === "starter-brown-butter-berry-oat-bars"
+    );
 
     expect(bakedGood).toBeDefined();
-    expect(bakedGood?.recipe.steps.map((step) => step.text).join(" ")).toMatch(/\b(?:4-6|8|25-30|30) minutes\b/);
+    expect(bakedGood?.recipe.steps.map((step) => step.text).join(" ")).toMatch(
+      /\b(?:4-6|8|25-30|30) minutes\b/
+    );
   });
 });

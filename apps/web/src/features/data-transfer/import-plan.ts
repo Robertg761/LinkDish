@@ -1,0 +1,720 @@
+/**
+ * Deciding what an import will do, before anything is written: which recipes are already in the
+ * cookbook, which ids they get, how many fit under the free limit, and how a LinkDish backup's
+ * collections and meal plan map onto this device. {@link buildImportPlan} is synchronous and pure
+ * so the writer can re-run it inside its IndexedDB transaction against fresh data (no awaits on
+ * non-IndexedDB work may happen inside a transaction): everything it knows about the cookbook comes
+ * from its context, never from the analysis the preview ran.
+ */
+import {
+  canonicalizeRecipeUrl,
+  recipeSiteTitleKey,
+  recipeUrlIdentity,
+  SAMPLE_RECIPES
+} from "@linkdish/recipe-domain";
+
+import {
+  generateDeterministicId,
+  getSourceHost,
+  LOCAL_LIMIT_FREE,
+  normalizeRecipeTags
+} from "../library/saved-recipe-store";
+
+import { isPersonalizedRecipe } from "./export-selection";
+import { isLinkDishInternalSourceUrl } from "./synthetic-url";
+
+import type { ImportSource } from "./import-formats";
+import type { ImportCandidate, ParsedImportFile } from "./import-sources";
+import type { WebCollection } from "../../data/collections-store";
+import type { MealPlanEntry, MealPlanSlot } from "../../data/meal-plan-store";
+import type { WebSavedRecipe } from "../library/saved-recipe-types";
+
+export type DuplicateMode = "skip" | "keep";
+
+const STARTER_ID_PREFIX = "starter-";
+const SAFE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,179}$/u;
+const MAX_COOK_LOG_ENTRIES = 100;
+const MAX_COLLECTION_NAME_LENGTH = 60;
+const MAX_COLLECTION_DESCRIPTION_LENGTH = 280;
+const MAX_MEAL_TITLE_LENGTH = 200;
+const MAX_MEAL_NOTE_LENGTH = 500;
+const DEFAULT_MEAL_SLOT: MealPlanSlot = "dinner";
+
+/** Ids of the starter recipes LinkDish seeds on first run. */
+export const KNOWN_STARTER_IDS: ReadonlySet<string> = new Set(
+  SAMPLE_RECIPES.map((sample) => sample.id)
+);
+
+export interface AnalyzedCandidate {
+  candidate: ImportCandidate;
+  /** SHA-256(sourceUrl + title), the id a normal save would use. */
+  deterministicId: string;
+  /** The id this recipe gets when nothing is in the way. */
+  preferredId: string;
+  /** A known starter recipe from a LinkDish backup (restored as a starter, outside the quota). */
+  starterId: string | null;
+  /**
+   * The cookbook recipe this one duplicated when the analysis ran, if any: what the preview
+   * shows. The import itself matches the recipes as stored when it is written (see
+   * ImportPlanContext.currentRecipes).
+   */
+  duplicateOfLocalId: string | null;
+  /** The earlier recipe in the same file this one duplicates, if any. */
+  duplicateOfIndex: number | null;
+  /** A LinkDish backup entry: the same recipe only as one with its id, never by link and title. */
+  matchById: boolean;
+}
+
+export interface ImportAnalysis {
+  parsed: ParsedImportFile;
+  items: AnalyzedCandidate[];
+  /** Personal recipes on this device when the analysis ran (starters excluded), for the preview. */
+  quotaUsed: number;
+  /** Collections each cookbook recipe belonged to when the analysis ran, for the preview. */
+  existingCollectionIds: ReadonlyMap<string, readonly string[]>;
+  /** Starters on this device nobody had made their own when the analysis ran, for the preview. */
+  untouchedStarterIds: ReadonlySet<string>;
+}
+
+interface ExistingIndexEntry {
+  id: string;
+  sourceUrl: string;
+  title: string;
+}
+
+/**
+ * Duplicate lookups in constant time: exact URL identity, then same site + same title (the two
+ * rules of `isLikelySameRecipe`), each a map key, so a big export from one site is not compared
+ * pair by pair.
+ */
+class RecipeIndex {
+  private readonly byIdentity = new Map<string, string>();
+  private readonly byCanonical = new Map<string, string>();
+  private readonly bySiteTitle = new Map<string, string>();
+
+  public add(entry: ExistingIndexEntry): void {
+    if (isLinkDishInternalSourceUrl(entry.sourceUrl)) {
+      // Made-up URLs are only equal when they are the same URL (every scan shares the host).
+      setIfAbsent(this.byCanonical, canonicalizeRecipeUrl(entry.sourceUrl), entry.id);
+      return;
+    }
+
+    setIfAbsent(this.byIdentity, recipeUrlIdentity(entry.sourceUrl), entry.id);
+    const siteTitle = recipeSiteTitleKey(entry);
+
+    if (siteTitle !== null) {
+      setIfAbsent(this.bySiteTitle, siteTitle, entry.id);
+    }
+  }
+
+  public find(sourceUrl: string, title: string): string | null {
+    if (isLinkDishInternalSourceUrl(sourceUrl)) {
+      return this.byCanonical.get(canonicalizeRecipeUrl(sourceUrl)) ?? null;
+    }
+
+    const exact = this.byIdentity.get(recipeUrlIdentity(sourceUrl));
+
+    if (exact) {
+      return exact;
+    }
+
+    const siteTitle = recipeSiteTitleKey({ sourceUrl, title });
+    return siteTitle === null ? null : (this.bySiteTitle.get(siteTitle) ?? null);
+  }
+}
+
+/** The first entry for a key wins (the earliest recipe in the file, or the cookbook's). */
+const setIfAbsent = (map: Map<string, string>, key: string, value: string): void => {
+  if (!map.has(key)) {
+    map.set(key, value);
+  }
+};
+
+const isStarterId = (id: string): boolean => id.startsWith(STARTER_ID_PREFIX);
+
+/**
+ * A stored starter recipe nobody has made their own (no notes, favorite, cooks, edits...):
+ * restoring a backup's version of it replaces it. The writer applies this rule again to the
+ * record as stored when it writes, so a starter personalized after the preview is kept.
+ */
+export const isUntouchedStarter = (recipe: WebSavedRecipe | undefined): recipe is WebSavedRecipe =>
+  Boolean(recipe?.isStarter && isStarterId(recipe.id) && !isPersonalizedRecipe(recipe));
+
+/** The collections each recipe belongs to (only recipes that belong to some). */
+export const collectionIdsByRecipe = (
+  recipes: readonly WebSavedRecipe[]
+): Map<string, readonly string[]> =>
+  new Map(
+    recipes.flatMap((recipe) =>
+      recipe.collectionIds?.length ? [[recipe.id, recipe.collectionIds] as const] : []
+    )
+  );
+
+/**
+ * Compares each candidate with the cookbook (and earlier candidates in the same file): same id,
+ * same deterministic id, or the same recipe per `isLikelySameRecipe`.
+ */
+export async function analyzeImport(
+  parsed: ParsedImportFile,
+  existing: readonly WebSavedRecipe[]
+): Promise<ImportAnalysis> {
+  const existingById = new Map(existing.map((recipe) => [recipe.id, recipe]));
+  const localIndex = new RecipeIndex();
+  const fileIndex = new RecipeIndex();
+  /** File position of the first LinkDish backup entry with each original id. */
+  const fileIndexByOriginalId = new Map<string, number>();
+
+  for (const recipe of existing) {
+    localIndex.add({ id: recipe.id, sourceUrl: recipe.sourceUrl, title: recipe.recipe.title });
+  }
+
+  const items: AnalyzedCandidate[] = [];
+
+  for (const candidate of parsed.candidates) {
+    const deterministicId = await generateDeterministicId(
+      candidate.sourceUrl,
+      candidate.recipe.title
+    );
+    const originalId =
+      candidate.originalId && SAFE_ID_PATTERN.test(candidate.originalId)
+        ? candidate.originalId
+        : null;
+    const starterId =
+      parsed.source === "linkdish" && originalId && KNOWN_STARTER_IDS.has(originalId)
+        ? originalId
+        : null;
+    // Unknown "starter-…" ids would dodge the free limit, so they get a regular id.
+    const preferredId =
+      starterId ?? (originalId && !isStarterId(originalId) ? originalId : deterministicId);
+
+    // A LinkDish backup names every recipe by its id: two entries are the same recipe only when
+    // the ids match. Look-alikes (a "Duplicate" copy, pasted-text imports with one title, pages
+    // of one site sharing a title) are distinct recipes the backup must bring back. Files from
+    // other apps have no such identity, so they are matched by link and title.
+    const matchById = parsed.source === "linkdish" && originalId !== null;
+    let duplicateOfLocalId: string | null;
+    let inFile: number | null;
+
+    if (matchById) {
+      duplicateOfLocalId = existingById.has(preferredId) ? preferredId : null;
+      inFile = fileIndexByOriginalId.get(originalId) ?? null;
+    } else {
+      const localById = existingById.get(preferredId) ?? existingById.get(deterministicId);
+      duplicateOfLocalId =
+        localById?.id ?? localIndex.find(candidate.sourceUrl, candidate.recipe.title);
+      const inFileId = fileIndex.find(candidate.sourceUrl, candidate.recipe.title);
+      inFile = inFileId === null ? null : Number(inFileId);
+    }
+
+    items.push({
+      candidate,
+      deterministicId,
+      preferredId,
+      starterId,
+      duplicateOfLocalId,
+      duplicateOfIndex: inFile,
+      matchById
+    });
+
+    if (matchById) {
+      if (!fileIndexByOriginalId.has(originalId)) {
+        fileIndexByOriginalId.set(originalId, candidate.index);
+      }
+    } else {
+      fileIndex.add({
+        id: String(candidate.index),
+        sourceUrl: candidate.sourceUrl,
+        title: candidate.recipe.title
+      });
+    }
+  }
+
+  return {
+    parsed,
+    items,
+    quotaUsed: existing.filter((recipe) => !isStarterId(recipe.id)).length,
+    existingCollectionIds: collectionIdsByRecipe(existing),
+    untouchedStarterIds: new Set(existing.filter(isUntouchedStarter).map((recipe) => recipe.id))
+  };
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Planning
+ * ---------------------------------------------------------------------------------------------- */
+
+export interface ImportPlanContext {
+  duplicateMode: DuplicateMode;
+  isPremium: boolean;
+  /** Ids stored right now. */
+  existingRecipeIds: ReadonlySet<string>;
+  /** Personal recipes stored right now (starters excluded). */
+  quotaUsed: number;
+  /** Starters stored right now that nobody has made their own (see {@link isUntouchedStarter}). */
+  untouchedStarterIds: ReadonlySet<string>;
+  /**
+   * Collections the stored recipes the import may match belong to right now (see
+   * {@link recipeIdsToRecheck}): a skipped duplicate still joins the backup's collections it is
+   * missing from.
+   */
+  existingCollectionIds: ReadonlyMap<string, readonly string[]>;
+  /**
+   * The cookbook's recipes as stored right now (the writer reads them in its transaction): each
+   * file recipe is matched against these, so a recipe another tab saved, edited into a match or
+   * edited away from one since the preview counts as it is now. Null for the preview, which shows
+   * the matches the analysis found.
+   */
+  currentRecipes: readonly WebSavedRecipe[] | null;
+  existingCollections: readonly WebCollection[];
+  existingMealPlan: readonly MealPlanEntry[];
+  now: string;
+  createId: () => string;
+}
+
+export interface ImportPlanCounts {
+  /** Recipes found in the file (readable ones). */
+  found: number;
+  /** New recipe records that will be written. */
+  imported: number;
+  /** Recipes already in the cookbook (or repeated in the file). */
+  duplicates: number;
+  /** Duplicates left out ("Skip duplicates"). */
+  skippedDuplicates: number;
+  /** Duplicates imported as a second copy ("Keep both"). */
+  keptDuplicates: number;
+  /** Recipes left out because the free cookbook is full. */
+  overLimit: number;
+  /** Starter recipes restored with their personal touches. */
+  restoredStarters: number;
+  collectionsCreated: number;
+  collectionsMatched: number;
+  mealPlanAdded: number;
+  mealPlanSkipped: number;
+}
+
+export interface ImportPlan {
+  /** New records, with `sourceImages` when the backup carried scans. */
+  recipes: WebSavedRecipe[];
+  /** Collections to add to recipes already in the cookbook. */
+  membershipAdditions: Array<{ recipeId: string; collectionIds: string[] }>;
+  collections: WebCollection[];
+  mealPlan: MealPlanEntry[];
+  counts: ImportPlanCounts;
+  /** Free space left before the import (Infinity for Plus and Family). */
+  remainingFreeSlots: number;
+  limitReached: boolean;
+}
+
+const EXTRACTION_BY_SOURCE: Record<ImportSource, WebSavedRecipe["extraction"]> = {
+  linkdish: { fetchMode: "http", provenance: ["jsonld"], strategy: "recipe-schema", warnings: [] },
+  mela: {
+    fetchMode: "http",
+    provenance: ["visible-text"],
+    strategy: "recipe-schema",
+    warnings: []
+  },
+  paprika: {
+    fetchMode: "http",
+    provenance: ["visible-text"],
+    strategy: "recipe-schema",
+    warnings: []
+  },
+  schema_org: {
+    fetchMode: "http",
+    provenance: ["jsonld"],
+    strategy: "recipe-schema",
+    warnings: []
+  }
+};
+
+const latest = (values: ReadonlyArray<string | undefined>): string | undefined =>
+  values.reduce<string | undefined>(
+    (max, value) => (value && (!max || value > max) ? value : max),
+    undefined
+  );
+
+/** A third-party import keeps the file's order in "recently updated" sorting. */
+const orderedTimestamp = (now: string, index: number): string => {
+  const time = Date.parse(now);
+  return Number.isFinite(time) ? new Date(time - index).toISOString() : now;
+};
+
+const toSavedRecord = (
+  item: AnalyzedCandidate,
+  id: string,
+  source: ImportSource,
+  now: string,
+  options: { isStarter: boolean; collectionIds: readonly string[] }
+): WebSavedRecipe => {
+  const { candidate } = item;
+  const cookLog = candidate.cookLog?.slice(-MAX_COOK_LOG_ENTRIES);
+  const tags = candidate.tags ? normalizeRecipeTags(candidate.tags) : [];
+  const updatedAt =
+    source === "linkdish"
+      ? (candidate.updatedAt ?? candidate.createdAt ?? now)
+      : orderedTimestamp(now, candidate.index);
+  const createdAt = candidate.createdAt ?? updatedAt;
+  const lastCookedAt = latest([candidate.lastCookedAt, ...(cookLog ?? []).map((e) => e.cookedAt)]);
+  const collectionIds = Array.from(new Set(options.collectionIds));
+
+  return {
+    id,
+    recipe: candidate.recipe,
+    sourceUrl: candidate.sourceUrl,
+    sourceHost: getSourceHost(candidate.sourceUrl),
+    createdAt: createdAt > updatedAt ? updatedAt : createdAt,
+    updatedAt,
+    extraction: candidate.extraction ?? EXTRACTION_BY_SOURCE[source],
+    timesCooked: Math.max(candidate.timesCooked ?? 0, cookLog?.length ?? 0),
+    sync: { status: "local_only" },
+    ...(options.isStarter ? { isStarter: true } : {}),
+    ...(candidate.notes ? { notes: candidate.notes } : {}),
+    ...(candidate.favorite ? { favorite: true } : {}),
+    ...(tags.length ? { tags } : {}),
+    ...(collectionIds.length ? { collectionIds } : {}),
+    ...(candidate.rating ? { rating: candidate.rating } : {}),
+    ...(cookLog?.length ? { cookLog } : {}),
+    ...(lastCookedAt ? { lastCookedAt } : {}),
+    ...(candidate.lastOpenedAt ? { lastOpenedAt: candidate.lastOpenedAt } : {}),
+    ...(candidate.preferredServings ? { preferredServings: candidate.preferredServings } : {}),
+    ...(candidate.sourceImages?.length ? { sourceImages: candidate.sourceImages } : {})
+  };
+};
+
+/** `preferred`, or a fresh id when it is taken (retrying guards against a repeating id source). */
+const uniqueId = (
+  preferred: string,
+  taken: ReadonlySet<string>,
+  createId: () => string
+): string => {
+  let id = preferred;
+
+  for (let attempt = 1; taken.has(id); attempt += 1) {
+    id = attempt < 4 ? createId() : `${createId()}-${attempt}`;
+  }
+
+  return id;
+};
+
+const normalizeName = (name: string): string => name.trim().replace(/\s+/gu, " ").toLowerCase();
+
+const cleanText = (value: string | null | undefined, maxLength: number): string | undefined => {
+  const cleaned = value?.trim().replace(/\s+/gu, " ").slice(0, maxLength).trim();
+  return cleaned || undefined;
+};
+
+/**
+ * What an import will write, given the analysis and the current state of this device. Pure and
+ * synchronous: the writer calls it again inside its transaction with freshly read state.
+ */
+export function buildImportPlan(analysis: ImportAnalysis, context: ImportPlanContext): ImportPlan {
+  const { parsed, items } = analysis;
+  const taken = new Set(context.existingRecipeIds);
+  const remainingFreeSlots = context.isPremium
+    ? Number.POSITIVE_INFINITY
+    : Math.max(0, LOCAL_LIMIT_FREE - context.quotaUsed);
+  let usedSlots = 0;
+
+  const counts: ImportPlanCounts = {
+    found: items.length,
+    imported: 0,
+    duplicates: 0,
+    skippedDuplicates: 0,
+    keptDuplicates: 0,
+    overLimit: 0,
+    restoredStarters: 0,
+    collectionsCreated: 0,
+    collectionsMatched: 0,
+    mealPlanAdded: 0,
+    mealPlanSkipped: 0
+  };
+
+  /* Collections (LinkDish backups): match by id, then by name; otherwise create. ------------ */
+  const collectionIdMap = new Map<string, string>();
+  const newCollections: WebCollection[] = [];
+  const collectionsById = new Map(context.existingCollections.map((c) => [c.id, c]));
+  const collectionsByName = new Map(
+    context.existingCollections.map((c) => [normalizeName(c.name), c])
+  );
+  const takenCollectionIds = new Set(collectionsById.keys());
+  let nextSortOrder =
+    context.existingCollections.reduce((max, c) => Math.max(max, c.sortOrder), -1) + 1;
+
+  const orderedCollections = [...parsed.collections].sort(
+    (left, right) =>
+      (left.sortOrder ?? Number.MAX_SAFE_INTEGER) - (right.sortOrder ?? Number.MAX_SAFE_INTEGER)
+  );
+
+  for (const collection of orderedCollections) {
+    const name = cleanText(collection.name, MAX_COLLECTION_NAME_LENGTH);
+
+    if (!name) {
+      continue;
+    }
+
+    const match = collectionsById.get(collection.id) ?? collectionsByName.get(normalizeName(name));
+
+    if (match) {
+      collectionIdMap.set(collection.id, match.id);
+      counts.collectionsMatched += 1;
+      continue;
+    }
+
+    const id = uniqueId(
+      SAFE_ID_PATTERN.test(collection.id) ? collection.id : context.createId(),
+      takenCollectionIds,
+      context.createId
+    );
+    takenCollectionIds.add(id);
+
+    const description = cleanText(collection.description, MAX_COLLECTION_DESCRIPTION_LENGTH);
+    const created: WebCollection = {
+      id,
+      name,
+      sortOrder: nextSortOrder,
+      createdAt: collection.createdAt ?? context.now,
+      updatedAt: collection.updatedAt ?? collection.createdAt ?? context.now,
+      ...(collection.emoji ? { emoji: collection.emoji } : {}),
+      ...(description ? { description } : {})
+    };
+    nextSortOrder += 1;
+    collectionIdMap.set(collection.id, id);
+    collectionsByName.set(normalizeName(name), created);
+    newCollections.push(created);
+  }
+
+  const collectionsForOriginal = new Map<string, string[]>();
+  for (const collection of parsed.collections) {
+    const mapped = collectionIdMap.get(collection.id);
+
+    if (!mapped) {
+      continue;
+    }
+
+    for (const recipeId of collection.recipeIds) {
+      const list = collectionsForOriginal.get(recipeId) ?? [];
+      list.push(mapped);
+      collectionsForOriginal.set(recipeId, list);
+    }
+  }
+
+  /* Recipes -------------------------------------------------------------------------------- */
+  // The cookbook as stored now, when there is a "now" (the writer's transaction): the recipe a
+  // file recipe matched in the preview may have been edited since, or another saved or edited
+  // into a match.
+  const current = context.currentRecipes;
+  const currentIndex = new RecipeIndex();
+  for (const recipe of current ?? []) {
+    currentIndex.add({ id: recipe.id, sourceUrl: recipe.sourceUrl, title: recipe.recipe.title });
+  }
+  /** The cookbook recipe `item` duplicates, as analyzed (the preview) or as stored now. */
+  const localDuplicateOf = (item: AnalyzedCandidate): string | null => {
+    // A LinkDish backup's entries only match by id.
+    if (item.matchById) {
+      return context.existingRecipeIds.has(item.preferredId) ? item.preferredId : null;
+    }
+
+    if (current === null) {
+      return item.duplicateOfLocalId && context.existingRecipeIds.has(item.duplicateOfLocalId)
+        ? item.duplicateOfLocalId
+        : null;
+    }
+
+    for (const id of [item.preferredId, item.deterministicId]) {
+      if (context.existingRecipeIds.has(id)) {
+        return id;
+      }
+    }
+
+    return currentIndex.find(item.candidate.sourceUrl, item.candidate.recipe.title);
+  };
+
+  const recipes: WebSavedRecipe[] = [];
+  /** Original (backup) id or file position → the local id the recipe ends up with. */
+  const localIdByOriginal = new Map<string, string>();
+  const localIdByIndex = new Map<number, string>();
+  const membershipAdditions = new Map<string, Set<string>>();
+  const restoredStarterIds = new Set<string>();
+
+  for (const item of items) {
+    const { candidate } = item;
+    const collectionIds = candidate.originalId
+      ? (collectionsForOriginal.get(candidate.originalId) ?? [])
+      : [];
+    const remember = (localId: string) => {
+      localIdByIndex.set(candidate.index, localId);
+      if (candidate.originalId) {
+        localIdByOriginal.set(candidate.originalId, localId);
+      }
+    };
+
+    // A starter from the backup: replace an untouched local copy, or restore a missing one. A
+    // local copy someone made their own is a duplicate like any other recipe.
+    if (
+      item.starterId &&
+      !restoredStarterIds.has(item.starterId) &&
+      (context.untouchedStarterIds.has(item.starterId) || !taken.has(item.starterId))
+    ) {
+      taken.add(item.starterId);
+      restoredStarterIds.add(item.starterId);
+      recipes.push(
+        toSavedRecord(item, item.starterId, parsed.source, context.now, {
+          isStarter: true,
+          collectionIds
+        })
+      );
+      remember(item.starterId);
+      counts.restoredStarters += 1;
+      continue;
+    }
+
+    const duplicateLocalId = localDuplicateOf(item);
+    const duplicateInFileId =
+      item.duplicateOfIndex === null ? null : (localIdByIndex.get(item.duplicateOfIndex) ?? null);
+    const isDuplicate =
+      duplicateLocalId !== null ||
+      item.duplicateOfIndex !== null ||
+      // Its id is taken (written by someone else since the analysis ran).
+      context.existingRecipeIds.has(item.preferredId);
+
+    if (isDuplicate) {
+      counts.duplicates += 1;
+
+      if (context.duplicateMode === "skip") {
+        counts.skippedDuplicates += 1;
+        const localId =
+          duplicateLocalId ??
+          duplicateInFileId ??
+          (context.existingRecipeIds.has(item.preferredId) ? item.preferredId : null);
+
+        if (localId) {
+          remember(localId);
+
+          // Restoring a backup onto a cookbook that already has the recipe still restores
+          // which collections it belongs to.
+          const current = new Set(context.existingCollectionIds.get(localId) ?? []);
+          const missing = collectionIds.filter((collectionId) => !current.has(collectionId));
+
+          if (missing.length && context.existingRecipeIds.has(localId)) {
+            const set = membershipAdditions.get(localId) ?? new Set<string>();
+            missing.forEach((collectionId) => set.add(collectionId));
+            membershipAdditions.set(localId, set);
+          }
+        }
+
+        continue;
+      }
+    }
+
+    if (usedSlots >= remainingFreeSlots) {
+      counts.overLimit += 1;
+      continue;
+    }
+
+    const id = uniqueId(
+      isDuplicate ? context.createId() : item.preferredId,
+      taken,
+      context.createId
+    );
+    taken.add(id);
+    usedSlots += 1;
+    recipes.push(
+      toSavedRecord(item, id, parsed.source, context.now, { isStarter: false, collectionIds })
+    );
+    remember(id);
+    counts.imported += 1;
+
+    if (isDuplicate) {
+      counts.keptDuplicates += 1;
+    }
+  }
+
+  // Collections that ended up with no recipes on this device are only created when they were
+  // empty in the backup too.
+  const usedCollectionIds = new Set<string>([
+    ...recipes.flatMap((recipe) => recipe.collectionIds ?? []),
+    ...Array.from(membershipAdditions.values()).flatMap((set) => Array.from(set))
+  ]);
+  const emptyInBackup = new Set(
+    parsed.collections
+      .filter((collection) => collection.recipeIds.length === 0)
+      .map((collection) => collectionIdMap.get(collection.id))
+  );
+  const collections = newCollections.filter(
+    (collection) => usedCollectionIds.has(collection.id) || emptyInBackup.has(collection.id)
+  );
+  counts.collectionsCreated = collections.length;
+
+  /* Meal plan (LinkDish backups) ---------------------------------------------------------- */
+  const existingMealIds = new Set(context.existingMealPlan.map((entry) => entry.id));
+  const mealKey = (entry: Pick<MealPlanEntry, "date" | "slot" | "recipeId" | "title">) =>
+    [entry.date, entry.slot, entry.recipeId ?? "", normalizeName(entry.title)].join("|");
+  const existingMealKeys = new Set(context.existingMealPlan.map(mealKey));
+  const titleByOriginal = new Map(
+    items
+      .filter((item) => item.candidate.originalId)
+      .map((item) => [item.candidate.originalId as string, item.candidate.recipe.title])
+  );
+  const mealPlan: MealPlanEntry[] = [];
+
+  for (const entry of parsed.mealPlan) {
+    if (existingMealIds.has(entry.id)) {
+      counts.mealPlanSkipped += 1;
+      continue;
+    }
+
+    const recipeId = entry.recipeId
+      ? (localIdByOriginal.get(entry.recipeId) ??
+        (context.existingRecipeIds.has(entry.recipeId) ? entry.recipeId : undefined))
+      : undefined;
+    const title =
+      cleanText(entry.title, MAX_MEAL_TITLE_LENGTH) ??
+      cleanText(entry.recipeId ? titleByOriginal.get(entry.recipeId) : undefined, 200) ??
+      "Planned meal";
+    const servings =
+      entry.servings != null && Number.isFinite(entry.servings) && entry.servings > 0
+        ? Math.round(entry.servings * 100) / 100
+        : undefined;
+    const note = cleanText(entry.note, MAX_MEAL_NOTE_LENGTH);
+    const id = uniqueId(
+      SAFE_ID_PATTERN.test(entry.id) ? entry.id : context.createId(),
+      existingMealIds,
+      context.createId
+    );
+
+    const restored: MealPlanEntry = {
+      id,
+      date: entry.date,
+      slot: entry.slot ?? DEFAULT_MEAL_SLOT,
+      title,
+      createdAt: entry.createdAt ?? entry.updatedAt ?? context.now,
+      updatedAt: entry.updatedAt ?? context.now,
+      ...(recipeId ? { recipeId } : {}),
+      ...(servings ? { servings } : {}),
+      ...(note ? { note } : {})
+    };
+    const key = mealKey(restored);
+
+    if (existingMealKeys.has(key)) {
+      counts.mealPlanSkipped += 1;
+      continue;
+    }
+
+    existingMealIds.add(id);
+    existingMealKeys.add(key);
+    mealPlan.push(restored);
+    counts.mealPlanAdded += 1;
+  }
+
+  return {
+    recipes,
+    membershipAdditions: Array.from(membershipAdditions.entries(), ([recipeId, set]) => ({
+      recipeId,
+      collectionIds: Array.from(set)
+    })),
+    collections,
+    mealPlan,
+    counts,
+    remainingFreeSlots,
+    limitReached: counts.overLimit > 0
+  };
+}

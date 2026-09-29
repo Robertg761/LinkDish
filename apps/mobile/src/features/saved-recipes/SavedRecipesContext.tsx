@@ -7,32 +7,45 @@ import React, {
   useEffect,
   useContext,
   useMemo,
+  useRef,
   useState,
   type PropsWithChildren
 } from "react";
+import { AppState } from "react-native";
 
 import { trackMobileEvent } from "../../analytics/client";
 import { mobileEnv } from "../../config/env";
+import { createDebouncedWriter } from "../../lib/debouncedWriter";
+import { isAccountChangedError } from "../account/account-changed-error";
 import { useAccount } from "../account/AccountContext";
 import { useBilling } from "../billing/BillingContext";
 import { billingPlans } from "../billing/plans";
 import { canSaveAnotherRecipe } from "../billing/store";
 
-import { persistRecipeSourceImages } from "./sourceImageFiles";
+import {
+  createScanVersion,
+  deleteRecipeSourceImageFiles,
+  persistRecipeSourceImages
+} from "./sourceImageFiles";
 import {
   cloneSavedRecipeRecord,
   createSavedRecipeRecord,
+  getOrphanedSourceImageUris,
   getQuotaSavedRecipeCount,
   getSavedRecipeRecordById,
   getSavedRecipeRecordBySourceUrl,
   incrementSavedRecipeTimesCooked,
   isDataUrlSourceImage,
   markSavedRecipeShared,
+  getOwnSharedRecipeId,
+  recordSharedLinkOwners,
   markSavedRecipeUnshared,
+  withOwnSharedLink,
   readSavedRecipeRecords,
   removeSavedRecipeRecord,
   serializeSavedRecipeRecords,
   savedRecipeRecordToSharedRecipeRequest,
+  setSavedRecipeFavorite,
   sharedRecipeToSavedRecipeRecord,
   starterRecipeSeedRecordToSavedRecipeRecord,
   successStateToSharedRecipeRequest,
@@ -43,20 +56,28 @@ import {
   type SavedRecipeUpdate
 } from "./store";
 
+import type { BillingTier } from "../billing/plans";
 import type { SuccessfulExtractionState } from "../recipe-results/types";
 import type { HouseholdDetails, SharedRecipe } from "@linkdish/api-contracts";
 
-interface SavedRecipesContextValue {
-  cloneRecipe: (id: string) => SaveRecipeResult & { recipeId?: string };
-  cloneSharedRecipe: (id: string) => SaveRecipeResult & { recipeId?: string };
+export interface SavedRecipesState {
   canUseSharedRecipeBook: boolean;
-  deleteSharedRecipe: (id: string) => Promise<SaveRecipeResult>;
   getSaveLimitStatus: (options?: { isExistingRecord?: boolean }) => SaveLimitStatus;
   getSavedRecipeById: (id: string) => SavedRecipeRecord | undefined;
   getSavedRecipeBySourceUrl: (sourceUrl: string) => SavedRecipeRecord | undefined;
   getSharedRecipeById: (id: string) => SharedRecipe | undefined;
   hasLoadedSavedRecipes: boolean;
   hasLoadedSharedRecipes: boolean;
+  savedRecipes: SavedRecipeRecord[];
+  sharedRecipeError: string | null;
+  sharedRecipes: SharedRecipe[];
+  shareMode: RecipeBookShareMode;
+}
+
+export interface SavedRecipesActions {
+  cloneRecipe: (id: string) => SaveRecipeResult & { recipeId?: string };
+  cloneSharedRecipe: (id: string) => SaveRecipeResult & { recipeId?: string };
+  deleteSharedRecipe: (id: string) => Promise<SaveRecipeResult>;
   incrementRecipeTimesCooked: (id: string) => boolean;
   refreshSharedRecipes: () => Promise<void>;
   removeRecipe: (id: string) => void;
@@ -67,23 +88,29 @@ interface SavedRecipesContextValue {
     state: SuccessfulExtractionState,
     target: "personal" | "family" | "both"
   ) => Promise<SaveRecipeResult & { recipeId?: string; sharedRecipeId?: string }>;
-  savedRecipes: SavedRecipeRecord[];
+  /** Hearts or un-hearts a personal recipe. Returns false when the recipe is gone. */
+  setRecipeFavorite: (id: string, favorite: boolean) => boolean;
   setShareMode: (mode: RecipeBookShareMode) => Promise<void>;
   shareAllPersonalRecipes: () => Promise<SaveRecipeResult>;
-  sharedRecipeError: string | null;
-  sharedRecipes: SharedRecipe[];
-  shareMode: RecipeBookShareMode;
   shareRecipe: (id: string) => Promise<SaveRecipeResult & { sharedRecipeId?: string }>;
   unshareRecipe: (id: string) => Promise<SaveRecipeResult>;
   updateRecipe: (id: string, update: SavedRecipeUpdate) => boolean;
   updateSharedRecipe: (id: string, update: SavedRecipeUpdate) => Promise<boolean>;
 }
 
-const SavedRecipesContext = createContext<SavedRecipesContextValue | null>(null);
+export type SavedRecipesContextValue = SavedRecipesState & SavedRecipesActions;
+
+const SavedRecipesStateContext = createContext<SavedRecipesState | null>(null);
+const SavedRecipesActionsContext = createContext<SavedRecipesActions | null>(null);
 const SAVED_RECIPES_STORAGE_KEY = "linkdish.savedRecipes";
 const SAVED_RECIPES_CORRUPT_BACKUP_STORAGE_KEY = "linkdish.savedRecipes.corrupt.v1";
 const STARTER_RECIPES_SEEDED_STORAGE_KEY = "linkdish.starterRecipesSeeded.v1";
 const RECIPE_BOOK_SHARE_MODE_STORAGE_KEY_PREFIX = "linkdish.recipeBookShareMode";
+/**
+ * Small edits (times cooked, a heart, a share flag) are written once they settle instead of
+ * re-serializing the whole cookbook on every tap; the write is flushed when the app backgrounds.
+ */
+export const SAVED_RECIPES_PERSIST_DEBOUNCE_MS = 400;
 
 const getRecipeBookShareModeStorageKey = (
   userId: string,
@@ -92,6 +119,26 @@ const getRecipeBookShareModeStorageKey = (
 
 const parseRecipeBookShareMode = (value: string | null): RecipeBookShareMode =>
   value === "selected" || value === "all" || value === "none" ? value : "none";
+
+/** Why a recipe saved just as someone else signed in (or out) wasn't shared with the Family. */
+const ACCOUNT_CHANGED_MESSAGE = "you switched accounts while it was saving.";
+
+/** Sharing (or unsharing) the whole book stopped because someone else signed in (or out). */
+const ACCOUNT_CHANGED_RESULT: SaveRecipeResult = {
+  allowed: false,
+  message: "You switched accounts, so the rest of your recipes were left as they were.",
+  saved: false
+};
+
+/** A Family change that finished after someone else signed in (or out): it isn't theirs. */
+const SWITCHED_ACCOUNT_RESULT: SaveRecipeResult = {
+  allowed: false,
+  message: "You switched accounts before this finished.",
+  saved: false
+};
+
+/** Shown while the Family state belongs to another account (stable, for memoized readers). */
+const NO_SHARED_RECIPES: SharedRecipe[] = [];
 
 const buildPartialShareMessage = (message?: string): string =>
   message
@@ -109,6 +156,35 @@ export interface SaveLimitStatus {
 export interface SaveRecipeResult extends SaveLimitStatus {
   saved: boolean;
 }
+
+const computeSaveLimitStatus = (
+  input: {
+    canUseSharedRecipeBook: boolean;
+    savedRecipes: SavedRecipeRecord[];
+    tier: BillingTier;
+  },
+  options?: { isExistingRecord?: boolean }
+): SaveLimitStatus => {
+  if (input.canUseSharedRecipeBook) {
+    return { allowed: true };
+  }
+
+  const allowed = canSaveAnotherRecipe(
+    input.tier,
+    getQuotaSavedRecipeCount(input.savedRecipes),
+    options?.isExistingRecord ?? false
+  );
+
+  if (allowed) {
+    return { allowed: true };
+  }
+
+  return {
+    allowed: false,
+    message: `Your free Cookbook holds up to ${billingPlans.free.limits.savedRecipes} personal recipes. Upgrade for unlimited saves.`,
+    reason: "save_limit_reached"
+  };
+};
 
 /**
  * Rewrites any scan photo that is still inlined as base64 onto the filesystem.
@@ -150,24 +226,43 @@ const getSharedRecipeErrorMessage = (error: unknown): string => {
 };
 
 export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
-  const { getAuthHeaders, isSignedIn, user } = useAccount();
+  const { getAuthHeaders, getAuthHeadersFor, isSignedIn, user } = useAccount();
   const { tier } = useBilling();
   const [hasLoadedSavedRecipes, setHasLoadedSavedRecipes] = useState(false);
-  const [hasLoadedSharedRecipes, setHasLoadedSharedRecipes] = useState(false);
+  const [hasLoadedSharedRecipesState, setHasLoadedSharedRecipes] = useState(false);
   const [savedRecipes, setSavedRecipes] = useState<SavedRecipeRecord[]>([]);
   const [hasUnreadableStoredRecipes, setHasUnreadableStoredRecipes] = useState(false);
-  const [sharedRecipes, setSharedRecipes] = useState<SharedRecipe[]>([]);
-  const [sharedRecipeError, setSharedRecipeError] = useState<string | null>(null);
+  const [sharedRecipesState, setSharedRecipes] = useState<SharedRecipe[]>([]);
+  const [sharedRecipeErrorState, setSharedRecipeError] = useState<string | null>(null);
   const [shareMode, setShareModeState] = useState<RecipeBookShareMode>("none");
-  const [activeHouseholdId, setActiveHouseholdId] = useState<HouseholdDetails["id"] | null>(null);
+  const [activeHouseholdIdState, setActiveHouseholdId] = useState<HouseholdDetails["id"] | null>(
+    null
+  );
+  /** The account the Family state above was loaded for (null: signed out). */
+  const [familyStateOwner, setFamilyStateOwner] = useState<string | null>(null);
+  const familyStateOwnerRef = useRef<string | null>(null);
+  const familyAccount = isSignedIn && user ? user.id : null;
+  // Another account signed in (a direct switch): the last one's Family recipes, household and
+  // error are never shown, not even for the renders before this account's refresh starts.
+  const familyStateIsCurrent = familyStateOwner === familyAccount;
+  const sharedRecipes = familyStateIsCurrent ? sharedRecipesState : NO_SHARED_RECIPES;
+  const sharedRecipeError = familyStateIsCurrent ? sharedRecipeErrorState : null;
+  const activeHouseholdId = familyStateIsCurrent ? activeHouseholdIdState : null;
+  const hasLoadedSharedRecipes = familyStateIsCurrent && hasLoadedSharedRecipesState;
   const [hasLoadedShareMode, setHasLoadedShareMode] = useState(false);
+  const savedRecipesRef = useRef<SavedRecipeRecord[]>([]);
+  /** Bumped by every Family refresh, so only the newest one lands. */
+  const sharedRefreshRef = useRef(0);
+  const lastWrittenCookbookRef = useRef<string | null>(null);
   const client = useMemo(
     () =>
       createExtractorApiClient({
         baseUrl: mobileEnv.apiBaseUrl,
-        getHeaders: getAuthHeaders
+        // Family requests go out only as the account this render is for: an action holds this
+        // client from its start, so one Clerk switches to meanwhile is never sent its changes.
+        getHeaders: user ? getAuthHeadersFor(user.id) : getAuthHeaders
       }),
-    [getAuthHeaders]
+    [getAuthHeaders, getAuthHeadersFor, user]
   );
   const shareModeStorageKey = useMemo(
     () =>
@@ -182,30 +277,92 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
     activeHouseholdId != null &&
     hasLoadedSharedRecipes &&
     sharedRecipeError == null;
-
-  const getSaveLimitStatus = (options?: { isExistingRecord?: boolean }): SaveLimitStatus => {
-    if (canUseSharedRecipeBook) {
-      return { allowed: true };
-    }
-
-    const allowed = canSaveAnotherRecipe(
-      tier,
-      getQuotaSavedRecipeCount(savedRecipes),
-      options?.isExistingRecord ?? false
-    );
-
-    if (allowed) {
-      return { allowed: true };
-    }
-
-    return {
-      allowed: false,
-      message: `Your free Cookbook holds up to ${billingPlans.free.limits.savedRecipes} personal recipes. Upgrade for unlimited saves.`,
-      reason: "save_limit_reached"
-    };
+  // Actions read the latest render's values through this ref, so their identities stay stable
+  // and the context value only changes when the cookbook itself does.
+  const latestRef = useRef({
+    canUseSharedRecipeBook,
+    client,
+    hasLoadedSharedRecipes,
+    isSignedIn,
+    sharedRecipes,
+    shareMode,
+    tier,
+    userId: user?.id
+  });
+  latestRef.current = {
+    canUseSharedRecipeBook,
+    client,
+    hasLoadedSharedRecipes,
+    isSignedIn,
+    sharedRecipes,
+    shareMode,
+    tier,
+    userId: user?.id
   };
 
+  /**
+   * The Family copy `record` links to, when that link is the signed-in account's own (see
+   * getOwnSharedRecipeId): the cookbook is this device's, but a link belongs to who shared it.
+   */
+  const ownSharedRecipeId = useCallback(
+    (record: Pick<SavedRecipeRecord, "sharedByUserId" | "sharedRecipeId">) => {
+      const { hasLoadedSharedRecipes: loaded, sharedRecipes: family, userId } = latestRef.current;
+      return getOwnSharedRecipeId(record, userId, loaded ? family : null);
+    },
+    []
+  );
+
+  /** Every cookbook change goes through here; the ref is always the latest list. */
+  const commitSavedRecipes = useCallback(
+    (update: (records: SavedRecipeRecord[]) => SavedRecipeRecord[]) => {
+      savedRecipesRef.current = update(savedRecipesRef.current);
+      setSavedRecipes(savedRecipesRef.current);
+    },
+    []
+  );
+
+  const writer = useMemo(
+    () =>
+      createDebouncedWriter<SavedRecipeRecord[]>(
+        async (records) => {
+          const serialized = serializeSavedRecipeRecords(records);
+
+          // An explicit save already wrote this exact cookbook; skip the redundant write.
+          if (serialized === lastWrittenCookbookRef.current) {
+            return;
+          }
+
+          await AsyncStorage.setItem(SAVED_RECIPES_STORAGE_KEY, serialized);
+          lastWrittenCookbookRef.current = serialized;
+        },
+        SAVED_RECIPES_PERSIST_DEBOUNCE_MS,
+        (error) => {
+          console.warn("Failed to persist saved recipes.", error);
+        }
+      ),
+    []
+  );
+
   const refreshSharedRecipes = useCallback(async () => {
+    // Only the newest refresh, for the account signed in now, lands: one started for another
+    // account (signed in before a direct switch) never shows its recipes or household here.
+    const refresh = ++sharedRefreshRef.current;
+    const startedFor = isSignedIn ? user?.id : undefined;
+    const stale = () =>
+      refresh !== sharedRefreshRef.current || latestRef.current.userId !== startedFor;
+
+    // The Family state belongs to this account from now on; another's is cleared first.
+    const owner = startedFor ?? null;
+
+    if (familyStateOwnerRef.current !== owner) {
+      setSharedRecipes([]);
+      setActiveHouseholdId(null);
+      setSharedRecipeError(null);
+    }
+
+    familyStateOwnerRef.current = owner;
+    setFamilyStateOwner(owner);
+
     if (!isSignedIn || !user) {
       setActiveHouseholdId(null);
       setSharedRecipes([]);
@@ -219,6 +376,11 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
 
     try {
       const householdResponse = await client.getHousehold();
+
+      if (stale()) {
+        return;
+      }
+
       nextHouseholdId = householdResponse.household?.id ?? null;
       setActiveHouseholdId(nextHouseholdId);
 
@@ -229,16 +391,28 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
       }
 
       const response = await client.getSharedRecipes();
+
+      if (stale()) {
+        return;
+      }
+
       setSharedRecipes(response.recipes);
       setSharedRecipeError(null);
     } catch (error) {
+      // Not sent: another account signed in first. Its own refresh follows.
+      if (stale() || isAccountChangedError(error)) {
+        return;
+      }
+
       if (!nextHouseholdId) {
         setActiveHouseholdId(null);
       }
       setSharedRecipes([]);
       setSharedRecipeError(getSharedRecipeErrorMessage(error));
     } finally {
-      setHasLoadedSharedRecipes(true);
+      if (!stale()) {
+        setHasLoadedSharedRecipes(true);
+      }
     }
   }, [client, isSignedIn, user]);
 
@@ -272,7 +446,7 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
           }
         }
 
-        const { records: migratedRecipes } = migrateLegacySourceImages(loadedRecipes);
+        const { didMigrate, records: migratedRecipes } = migrateLegacySourceImages(loadedRecipes);
         const shouldSeedStarterRecipes =
           status !== "corrupt" && migratedRecipes.length === 0 && storedSeeded !== "true";
         const hydratedRecipes = shouldSeedStarterRecipes
@@ -287,7 +461,12 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
           return;
         }
 
-        setSavedRecipes((current) =>
+        // What was just read needs no write-back; a migration or seeding does.
+        if (status === "ok" && !didMigrate && !shouldSeedStarterRecipes) {
+          lastWrittenCookbookRef.current = serializeSavedRecipeRecords(hydratedRecipes);
+        }
+
+        commitSavedRecipes((current) =>
           current.reduce(
             (accumulator, entry) => upsertSavedRecipeRecord(accumulator, entry),
             hydratedRecipes
@@ -307,7 +486,7 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [commitSavedRecipes]);
 
   useEffect(() => {
     let isMounted = true;
@@ -363,19 +542,31 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
       return;
     }
 
-    const persistSavedRecipes = async () => {
-      try {
-        await AsyncStorage.setItem(
-          SAVED_RECIPES_STORAGE_KEY,
-          serializeSavedRecipeRecords(savedRecipes)
-        );
-      } catch (error) {
-        console.warn("Failed to persist saved recipes.", error);
-      }
-    };
+    writer.schedule(savedRecipes);
+  }, [hasLoadedSavedRecipes, hasUnreadableStoredRecipes, savedRecipes, writer]);
 
-    void persistSavedRecipes();
-  }, [hasLoadedSavedRecipes, hasUnreadableStoredRecipes, savedRecipes]);
+  // Once this account's Family list shows whose copy a link from before sharers were recorded is,
+  // store that on the link, so it reads right wherever the list isn't at hand.
+  useEffect(() => {
+    if (hasLoadedSavedRecipes && hasLoadedSharedRecipes && sharedRecipes.length > 0) {
+      commitSavedRecipes((current) => recordSharedLinkOwners(current, sharedRecipes));
+    }
+  }, [commitSavedRecipes, hasLoadedSavedRecipes, hasLoadedSharedRecipes, sharedRecipes]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state !== "active") {
+        void writer.flush().catch((error: unknown) => {
+          console.warn("Failed to persist saved recipes.", error);
+        });
+      }
+    });
+
+    return () => {
+      subscription.remove();
+      void writer.flush().catch(() => undefined);
+    };
+  }, [writer]);
 
   useEffect(() => {
     if (!shareModeStorageKey || !hasLoadedShareMode) {
@@ -393,164 +584,267 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
     void persistShareMode();
   }, [hasLoadedShareMode, shareMode, shareModeStorageKey]);
 
-  const upsertSharedRecipe = (recipe: SharedRecipe) => {
+  const getLatestSaveLimitStatus = useCallback(
+    (options?: { isExistingRecord?: boolean }): SaveLimitStatus =>
+      computeSaveLimitStatus(
+        {
+          canUseSharedRecipeBook: latestRef.current.canUseSharedRecipeBook,
+          savedRecipes: savedRecipesRef.current,
+          tier: latestRef.current.tier
+        },
+        options
+      ),
+    []
+  );
+
+  const upsertSharedRecipe = useCallback((recipe: SharedRecipe) => {
     setSharedRecipes((current) => [recipe, ...current.filter((entry) => entry.id !== recipe.id)]);
-  };
+  }, []);
 
-  const removeSharedRecipeFromState = (sharedRecipeId: string) => {
-    setSharedRecipes((current) => current.filter((entry) => entry.id !== sharedRecipeId));
-    setSavedRecipes((current) =>
-      current.map((entry) =>
-        entry.sharedRecipeId === sharedRecipeId
-          ? {
-              ...entry,
-              sharedAt: undefined,
-              sharedRecipeId: undefined
-            }
-          : entry
-      )
-    );
-  };
+  const removeSharedRecipeFromState = useCallback(
+    (sharedRecipeId: string) => {
+      setSharedRecipes((current) => current.filter((entry) => entry.id !== sharedRecipeId));
+      commitSavedRecipes((current) =>
+        current.map((entry) =>
+          entry.sharedRecipeId === sharedRecipeId
+            ? {
+                ...entry,
+                sharedAt: undefined,
+                sharedRecipeId: undefined
+              }
+            : entry
+        )
+      );
+    },
+    [commitSavedRecipes]
+  );
 
-  const shareRecipeRecord = async (
-    record: SavedRecipeRecord
-  ): Promise<SaveRecipeResult & { sharedRecipeId?: string }> => {
-    if (record.isStarter) {
-      return {
-        allowed: true,
-        message: "Starter recipes stay local to your Cookbook.",
-        saved: false
-      };
-    }
+  const shareRecipeRecord = useCallback(
+    async (record: SavedRecipeRecord): Promise<SaveRecipeResult & { sharedRecipeId?: string }> => {
+      const { client: apiClient, isSignedIn: signedIn, userId: startedFor } = latestRef.current;
+      /** Someone else signed in (or out) while it shared: what it answers isn't theirs. */
+      const switched = () => latestRef.current.userId !== startedFor;
 
-    if (!isSignedIn) {
-      return {
-        allowed: false,
-        message: "Sign in to share recipes with your household.",
-        saved: false
-      };
-    }
+      if (record.isStarter) {
+        return {
+          allowed: true,
+          message: "Starter recipes stay local to your Cookbook.",
+          saved: false
+        };
+      }
 
-    try {
-      if (record.sharedRecipeId) {
-        const response = await client.updateSharedRecipe(record.sharedRecipeId, {
-          fetchMode: record.fetchMode,
-          notes: record.notes ?? null,
-          provenance: record.provenance as Parameters<
-            typeof client.updateSharedRecipe
-          >[1]["provenance"],
-          recipe: record.recipe,
-          strategy: record.strategy as Parameters<typeof client.updateSharedRecipe>[1]["strategy"],
-          warnings: record.warnings
-        });
+      if (!signedIn) {
+        return {
+          allowed: false,
+          message: "Sign in to share recipes with your household.",
+          saved: false
+        };
+      }
+
+      // Another account's link on this recipe isn't this one's to update: this account shares
+      // its own copy.
+      const ownId = ownSharedRecipeId(record);
+
+      try {
+        if (ownId) {
+          const response = await apiClient.updateSharedRecipe(ownId, {
+            fetchMode: record.fetchMode,
+            notes: record.notes ?? null,
+            provenance: record.provenance as Parameters<
+              typeof apiClient.updateSharedRecipe
+            >[1]["provenance"],
+            recipe: record.recipe,
+            strategy: record.strategy as Parameters<
+              typeof apiClient.updateSharedRecipe
+            >[1]["strategy"],
+            warnings: record.warnings
+          });
+
+          if (switched()) {
+            return SWITCHED_ACCOUNT_RESULT;
+          }
+
+          upsertSharedRecipe(response.recipe);
+          commitSavedRecipes((current) =>
+            markSavedRecipeShared(current, record.id, response.recipe)
+          );
+          setSharedRecipeError(null);
+
+          return {
+            allowed: true,
+            saved: true,
+            sharedRecipeId: response.recipe.id
+          };
+        }
+
+        const response = await apiClient.createSharedRecipe(
+          savedRecipeRecordToSharedRecipeRequest(record)
+        );
+
+        if (switched()) {
+          return SWITCHED_ACCOUNT_RESULT;
+        }
+
         upsertSharedRecipe(response.recipe);
-        setSavedRecipes((current) => markSavedRecipeShared(current, record.id, response.recipe));
+        commitSavedRecipes((current) => markSavedRecipeShared(current, record.id, response.recipe));
         setSharedRecipeError(null);
+
+        trackMobileEvent({
+          eventName: "family_shared",
+          routeOrScreen: "recipe",
+          properties: {
+            recipe_count: 1,
+            share_scope: "household"
+          }
+        });
 
         return {
           allowed: true,
           saved: true,
           sharedRecipeId: response.recipe.id
         };
+      } catch (error) {
+        if (switched() || isAccountChangedError(error)) {
+          return SWITCHED_ACCOUNT_RESULT;
+        }
+
+        const message = getSharedRecipeErrorMessage(error);
+        setSharedRecipeError(message);
+
+        return {
+          allowed: false,
+          message,
+          saved: false
+        };
+      }
+    },
+    [commitSavedRecipes, ownSharedRecipeId, upsertSharedRecipe]
+  );
+
+  const savePersonalRecipe = useCallback(
+    async (
+      state: SuccessfulExtractionState
+    ): Promise<SaveRecipeResult & { recipe?: SavedRecipeRecord; recipeId?: string }> => {
+      const existingRecord = getSavedRecipeRecordBySourceUrl(
+        savedRecipesRef.current,
+        state.recipe.sourceUrl
+      );
+      const saveGate = getLatestSaveLimitStatus({ isExistingRecord: existingRecord != null });
+
+      if (!saveGate.allowed) {
+        return {
+          ...saveGate,
+          saved: false
+        };
       }
 
-      const response = await client.createSharedRecipe(
-        savedRecipeRecordToSharedRecipeRequest(record)
-      );
-      upsertSharedRecipe(response.recipe);
-      setSavedRecipes((current) => markSavedRecipeShared(current, record.id, response.recipe));
-      setSharedRecipeError(null);
+      const createdRecord = createSavedRecipeRecord(state);
+      const recordId = existingRecord?.id ?? createdRecord.id;
+      // New files for this save's scans: the ones the stored record (or a clone) uses stay as
+      // they are unless the cookbook that points at the new ones is written.
+      const sourceImages = persistRecipeSourceImages(recordId, createdRecord.sourceImages, {
+        version: createScanVersion()
+      });
+      const writtenScanUris = (sourceImages ?? [])
+        .map((image) => image.uri)
+        .filter((uri) => !createdRecord.sourceImages?.some((image) => image.uri === uri));
+      const nextRecord: SavedRecipeRecord = {
+        ...createdRecord,
+        favorite: existingRecord?.favorite,
+        id: recordId,
+        sharedAt: existingRecord?.sharedAt,
+        sharedByUserId: existingRecord?.sharedByUserId,
+        sharedRecipeId: existingRecord?.sharedRecipeId,
+        sourceImages,
+        timesCooked: existingRecord?.timesCooked ?? createdRecord.timesCooked
+      };
+      const nextRecipes = upsertSavedRecipeRecord(savedRecipesRef.current, nextRecord);
+
+      // Persist before reporting success: a swallowed write failure used to leave
+      // the recipe looking saved until the next launch, when it was simply gone.
+      try {
+        await writer.writeNow(nextRecipes);
+      } catch (error) {
+        console.warn("Failed to persist saved recipes.", error);
+        // Nothing stored points at this save's scans: they go, so a retry leaves none behind.
+        deleteRecipeSourceImageFiles(writtenScanUris);
+
+        return {
+          allowed: true,
+          message: "This recipe could not be saved to your Cookbook. Please try again.",
+          reason: "persist_failed",
+          saved: false
+        };
+      }
+
+      setHasUnreadableStoredRecipes(false);
+
+      // Written as the cookbook was when the save began: a favorite, a cook, a Family share or a
+      // delete made to this recipe while it was written wins over that snapshot.
+      const latestRecord = getSavedRecipeRecordById(savedRecipesRef.current, recordId);
+
+      if (existingRecord && !latestRecord) {
+        // Its new scans go too, once the cookbook without it is written.
+        const orphanedScanUris = getOrphanedSourceImageUris(savedRecipesRef.current, [nextRecord]);
+        void writer.writeNow(savedRecipesRef.current).then(
+          () => deleteRecipeSourceImageFiles(orphanedScanUris),
+          (error: unknown) => console.warn("Failed to persist saved recipes.", error)
+        );
+
+        return {
+          allowed: true,
+          message: "This recipe was deleted from your Cookbook while it was saving.",
+          saved: false
+        };
+      }
+
+      const savedRecord: SavedRecipeRecord = latestRecord
+        ? {
+            ...nextRecord,
+            favorite: latestRecord.favorite,
+            sharedAt: latestRecord.sharedAt,
+            sharedByUserId: latestRecord.sharedByUserId,
+            sharedRecipeId: latestRecord.sharedRecipeId,
+            timesCooked: latestRecord.timesCooked
+          }
+        : nextRecord;
+      commitSavedRecipes((current) => upsertSavedRecipeRecord(current, savedRecord));
+
+      // The scans this recipe had before, now that nothing uses them (a clone may still).
+      if (existingRecord) {
+        deleteRecipeSourceImageFiles(
+          getOrphanedSourceImageUris(savedRecipesRef.current, [existingRecord])
+        );
+      }
 
       trackMobileEvent({
-        eventName: "family_shared",
+        eventName: "recipe_saved",
         routeOrScreen: "recipe",
         properties: {
-          recipe_count: 1,
-          share_scope: "household"
+          source_type: state.sourceImages?.length ? "image" : "url",
+          surface: "import_result"
         }
       });
 
       return {
         allowed: true,
-        saved: true,
-        sharedRecipeId: response.recipe.id
+        recipe: savedRecord,
+        recipeId: savedRecord.id,
+        saved: true
       };
-    } catch (error) {
-      const message = getSharedRecipeErrorMessage(error);
-      setSharedRecipeError(message);
+    },
+    [commitSavedRecipes, getLatestSaveLimitStatus, writer]
+  );
 
-      return {
-        allowed: false,
-        message,
-        saved: false
-      };
-    }
-  };
+  const shareAllPersonalRecipes = useCallback(async (): Promise<SaveRecipeResult> => {
+    const startedFor = latestRef.current.userId;
 
-  const savePersonalRecipe = async (
-    state: SuccessfulExtractionState
-  ): Promise<SaveRecipeResult & { recipe?: SavedRecipeRecord; recipeId?: string }> => {
-    const existingRecord = getSavedRecipeRecordBySourceUrl(savedRecipes, state.recipe.sourceUrl);
-    const saveGate = getSaveLimitStatus({ isExistingRecord: existingRecord != null });
-
-    if (!saveGate.allowed) {
-      return {
-        ...saveGate,
-        saved: false
-      };
-    }
-
-    const createdRecord = createSavedRecipeRecord(state);
-    const recordId = existingRecord?.id ?? createdRecord.id;
-    const nextRecord: SavedRecipeRecord = {
-      ...createdRecord,
-      id: recordId,
-      sharedAt: existingRecord?.sharedAt,
-      sharedRecipeId: existingRecord?.sharedRecipeId,
-      sourceImages: persistRecipeSourceImages(recordId, createdRecord.sourceImages),
-      timesCooked: existingRecord?.timesCooked ?? createdRecord.timesCooked
-    };
-
-    // Persist before reporting success: a swallowed write failure used to leave
-    // the recipe looking saved until the next launch, when it was simply gone.
-    try {
-      await AsyncStorage.setItem(
-        SAVED_RECIPES_STORAGE_KEY,
-        serializeSavedRecipeRecords(upsertSavedRecipeRecord(savedRecipes, nextRecord))
-      );
-    } catch (error) {
-      console.warn("Failed to persist saved recipes.", error);
-
-      return {
-        allowed: true,
-        message: "This recipe could not be saved to your Cookbook. Please try again.",
-        reason: "persist_failed",
-        saved: false
-      };
-    }
-
-    setHasUnreadableStoredRecipes(false);
-    setSavedRecipes((current) => upsertSavedRecipeRecord(current, nextRecord));
-
-    trackMobileEvent({
-      eventName: "recipe_saved",
-      routeOrScreen: "recipe",
-      properties: {
-        source_type: state.sourceImages?.length ? "image" : "url",
-        surface: "import_result"
+    for (const recipe of savedRecipesRef.current.filter((entry) => !entry.isStarter)) {
+      // Never carry on into the household of someone who signed in meanwhile.
+      if (latestRef.current.userId !== startedFor) {
+        return ACCOUNT_CHANGED_RESULT;
       }
-    });
 
-    return {
-      allowed: true,
-      recipe: nextRecord,
-      recipeId: nextRecord.id,
-      saved: true
-    };
-  };
-
-  const shareAllPersonalRecipes = async (): Promise<SaveRecipeResult> => {
-    for (const recipe of savedRecipes.filter((entry) => !entry.isStarter)) {
       const result = await shareRecipeRecord(recipe);
 
       if (!result.saved) {
@@ -562,32 +856,54 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
       allowed: true,
       saved: true
     };
-  };
+  }, [shareRecipeRecord]);
 
-  const unshareAllOwnedRecipes = async (): Promise<SaveRecipeResult> => {
-    if (!isSignedIn) {
+  const unshareAllOwnedRecipes = useCallback(async (): Promise<SaveRecipeResult> => {
+    const {
+      client: apiClient,
+      isSignedIn: signedIn,
+      sharedRecipes: currentShared,
+      userId
+    } = latestRef.current;
+
+    if (!signedIn) {
       return {
         allowed: true,
         saved: true
       };
     }
 
-    const ownedSharedRecipeIds = sharedRecipes
-      .filter((recipe) => recipe.ownerUserId === user?.id)
+    const ownedSharedRecipeIds = currentShared
+      .filter((recipe) => recipe.ownerUserId === userId)
       .map((recipe) => recipe.id);
 
     try {
       for (const sharedRecipeId of ownedSharedRecipeIds) {
-        await client.deleteSharedRecipe(sharedRecipeId);
+        // Never carry on as someone who signed in meanwhile.
+        if (latestRef.current.userId !== userId) {
+          return ACCOUNT_CHANGED_RESULT;
+        }
+
+        await apiClient.deleteSharedRecipe(sharedRecipeId);
       }
 
-      setSharedRecipes((current) => current.filter((recipe) => recipe.ownerUserId !== user?.id));
-      setSavedRecipes((current) =>
-        current.map((entry) => ({
-          ...entry,
-          sharedAt: undefined,
-          sharedRecipeId: undefined
-        }))
+      if (latestRef.current.userId !== userId) {
+        return ACCOUNT_CHANGED_RESULT;
+      }
+
+      setSharedRecipes((current) => current.filter((recipe) => recipe.ownerUserId !== userId));
+      // Only this account's links: another account's on this device stay that account's.
+      commitSavedRecipes((current) =>
+        current.map((entry) =>
+          getOwnSharedRecipeId(entry, userId, currentShared)
+            ? {
+                ...entry,
+                sharedAt: undefined,
+                sharedByUserId: undefined,
+                sharedRecipeId: undefined
+              }
+            : entry
+        )
       );
       setSharedRecipeError(null);
 
@@ -596,6 +912,10 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
         saved: true
       };
     } catch (error) {
+      if (latestRef.current.userId !== userId || isAccountChangedError(error)) {
+        return ACCOUNT_CHANGED_RESULT;
+      }
+
       const message = getSharedRecipeErrorMessage(error);
       setSharedRecipeError(message);
 
@@ -605,377 +925,639 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
         saved: false
       };
     }
-  };
+  }, [commitSavedRecipes]);
 
-  const syncSharedRecipeFromRecord = async (record: SavedRecipeRecord): Promise<void> => {
-    if (!record.sharedRecipeId || !isSignedIn) {
-      return;
-    }
+  const syncSharedRecipeFromRecord = useCallback(
+    async (record: SavedRecipeRecord): Promise<void> => {
+      const { client: apiClient, isSignedIn: signedIn, userId: startedFor } = latestRef.current;
+      const switched = () => latestRef.current.userId !== startedFor;
 
-    try {
-      const response = await client.updateSharedRecipe(record.sharedRecipeId, {
-        fetchMode: record.fetchMode,
-        notes: record.notes ?? null,
-        provenance: record.provenance as Parameters<
-          typeof client.updateSharedRecipe
-        >[1]["provenance"],
-        recipe: record.recipe,
-        strategy: record.strategy as Parameters<typeof client.updateSharedRecipe>[1]["strategy"],
-        warnings: record.warnings
-      });
-      upsertSharedRecipe(response.recipe);
-      setSavedRecipes((current) => markSavedRecipeShared(current, record.id, response.recipe));
-      setSharedRecipeError(null);
-    } catch (error) {
-      setSharedRecipeError(getSharedRecipeErrorMessage(error));
-    }
-  };
+      const ownId = ownSharedRecipeId(record);
 
-  return (
-    <SavedRecipesContext.Provider
-      value={{
-        cloneRecipe: (id) => {
-          const sourceRecord = getSavedRecipeRecordById(savedRecipes, id);
+      if (!ownId || !signedIn) {
+        return;
+      }
 
-          if (!sourceRecord) {
-            return {
-              allowed: false,
-              message: "This saved recipe is no longer available.",
-              saved: false
-            };
-          }
+      try {
+        const response = await apiClient.updateSharedRecipe(ownId, {
+          fetchMode: record.fetchMode,
+          notes: record.notes ?? null,
+          provenance: record.provenance as Parameters<
+            typeof apiClient.updateSharedRecipe
+          >[1]["provenance"],
+          recipe: record.recipe,
+          strategy: record.strategy as Parameters<
+            typeof apiClient.updateSharedRecipe
+          >[1]["strategy"],
+          warnings: record.warnings
+        });
 
-          const saveGate = getSaveLimitStatus();
+        // Someone else signed in (or out) meanwhile: the Family copy they see isn't this one.
+        if (switched()) {
+          return;
+        }
 
-          if (!saveGate.allowed) {
-            return {
-              ...saveGate,
-              saved: false
-            };
-          }
+        upsertSharedRecipe(response.recipe);
+        commitSavedRecipes((current) => markSavedRecipeShared(current, record.id, response.recipe));
+        setSharedRecipeError(null);
+      } catch (error) {
+        if (!switched() && !isAccountChangedError(error)) {
+          setSharedRecipeError(getSharedRecipeErrorMessage(error));
+        }
+      }
+    },
+    [commitSavedRecipes, ownSharedRecipeId, upsertSharedRecipe]
+  );
 
-          const clonedRecipe = cloneSavedRecipeRecord(savedRecipes, sourceRecord);
-          setSavedRecipes((current) => [clonedRecipe, ...current]);
+  const cloneRecipe = useCallback(
+    (id: string): SaveRecipeResult & { recipeId?: string } => {
+      const sourceRecord = getSavedRecipeRecordById(savedRecipesRef.current, id);
 
+      if (!sourceRecord) {
+        return {
+          allowed: false,
+          message: "This saved recipe is no longer available.",
+          saved: false
+        };
+      }
+
+      const saveGate = getLatestSaveLimitStatus();
+
+      if (!saveGate.allowed) {
+        return {
+          ...saveGate,
+          saved: false
+        };
+      }
+
+      const clonedRecipe = cloneSavedRecipeRecord(savedRecipesRef.current, sourceRecord);
+      commitSavedRecipes((current) => [clonedRecipe, ...current]);
+
+      return {
+        allowed: true,
+        recipeId: clonedRecipe.id,
+        saved: true
+      };
+    },
+    [commitSavedRecipes, getLatestSaveLimitStatus]
+  );
+
+  const cloneSharedRecipe = useCallback(
+    (id: string): SaveRecipeResult & { recipeId?: string } => {
+      const sourceRecord = latestRef.current.sharedRecipes.find((entry) => entry.id === id);
+
+      if (!sourceRecord) {
+        return {
+          allowed: false,
+          message: "This shared recipe is no longer available.",
+          saved: false
+        };
+      }
+
+      const saveGate = getLatestSaveLimitStatus();
+
+      if (!saveGate.allowed) {
+        return {
+          ...saveGate,
+          saved: false
+        };
+      }
+
+      const sourceSavedRecord = sharedRecipeToSavedRecipeRecord(sourceRecord);
+      const clonedRecipe = cloneSavedRecipeRecord(savedRecipesRef.current, sourceSavedRecord);
+      commitSavedRecipes((current) => [clonedRecipe, ...current]);
+
+      return {
+        allowed: true,
+        recipeId: clonedRecipe.id,
+        saved: true
+      };
+    },
+    [commitSavedRecipes, getLatestSaveLimitStatus]
+  );
+
+  const deleteSharedRecipe = useCallback(
+    async (id: string): Promise<SaveRecipeResult> => {
+      const startedFor = latestRef.current.userId;
+
+      try {
+        await latestRef.current.client.deleteSharedRecipe(id);
+
+        if (latestRef.current.userId !== startedFor) {
+          return SWITCHED_ACCOUNT_RESULT;
+        }
+
+        removeSharedRecipeFromState(id);
+        setSharedRecipeError(null);
+
+        return {
+          allowed: true,
+          saved: true
+        };
+      } catch (error) {
+        if (latestRef.current.userId !== startedFor || isAccountChangedError(error)) {
+          return SWITCHED_ACCOUNT_RESULT;
+        }
+
+        const message = getSharedRecipeErrorMessage(error);
+        setSharedRecipeError(message);
+
+        return {
+          allowed: false,
+          message,
+          saved: false
+        };
+      }
+    },
+    [removeSharedRecipeFromState]
+  );
+
+  const incrementRecipeTimesCooked = useCallback(
+    (id: string): boolean => {
+      if (!getSavedRecipeRecordById(savedRecipesRef.current, id)) {
+        return false;
+      }
+
+      commitSavedRecipes((current) => incrementSavedRecipeTimesCooked(current, id));
+      return true;
+    },
+    [commitSavedRecipes]
+  );
+
+  const setRecipeFavorite = useCallback(
+    (id: string, favorite: boolean): boolean => {
+      if (!getSavedRecipeRecordById(savedRecipesRef.current, id)) {
+        return false;
+      }
+
+      commitSavedRecipes((current) => setSavedRecipeFavorite(current, id, favorite));
+      return true;
+    },
+    [commitSavedRecipes]
+  );
+
+  const removeRecipe = useCallback(
+    (id: string) => {
+      const current = savedRecipesRef.current;
+      const removed = current.filter((entry) => entry.id === id);
+
+      if (removed.length === 0) {
+        return;
+      }
+
+      const remaining = removeSavedRecipeRecord(current, id);
+      const orphanedScanUris = getOrphanedSourceImageUris(remaining, removed);
+      commitSavedRecipes(() => remaining);
+
+      if (orphanedScanUris.length === 0) {
+        return;
+      }
+
+      // Write the removal first, so a crash can never leave a stored record pointing at scan
+      // files that were already deleted. Clones share their source's files, which
+      // getOrphanedSourceImageUris keeps.
+      void writer
+        .writeNow(remaining)
+        .then(() => {
+          deleteRecipeSourceImageFiles(orphanedScanUris);
+        })
+        .catch((error: unknown) => {
+          console.warn("Failed to persist saved recipes.", error);
+        });
+    },
+    [commitSavedRecipes, writer]
+  );
+
+  const saveRecipe = useCallback(
+    async (state: SuccessfulExtractionState) => {
+      const startedFor = latestRef.current.userId;
+      const result = await savePersonalRecipe(state);
+
+      // Shared as the account that saved it: never into the household of one that signed in (or
+      // with the share setting of one) while the cookbook was being written.
+      if (
+        result.saved &&
+        result.recipe &&
+        latestRef.current.userId === startedFor &&
+        latestRef.current.shareMode === "all"
+      ) {
+        const sharedResult = await shareRecipeRecord(result.recipe);
+
+        if (!sharedResult.saved) {
           return {
             allowed: true,
-            recipeId: clonedRecipe.id,
-            saved: true
-          };
-        },
-        cloneSharedRecipe: (id) => {
-          const sourceRecord = sharedRecipes.find((entry) => entry.id === id);
-
-          if (!sourceRecord) {
-            return {
-              allowed: false,
-              message: "This shared recipe is no longer available.",
-              saved: false
-            };
-          }
-
-          const saveGate = getSaveLimitStatus();
-
-          if (!saveGate.allowed) {
-            return {
-              ...saveGate,
-              saved: false
-            };
-          }
-
-          const sourceSavedRecord = sharedRecipeToSavedRecipeRecord(sourceRecord);
-          const clonedRecipe = cloneSavedRecipeRecord(savedRecipes, sourceSavedRecord);
-          setSavedRecipes((current) => [clonedRecipe, ...current]);
-
-          return {
-            allowed: true,
-            recipeId: clonedRecipe.id,
-            saved: true
-          };
-        },
-        canUseSharedRecipeBook,
-        deleteSharedRecipe: async (id) => {
-          try {
-            await client.deleteSharedRecipe(id);
-            removeSharedRecipeFromState(id);
-            setSharedRecipeError(null);
-
-            return {
-              allowed: true,
-              saved: true
-            };
-          } catch (error) {
-            const message = getSharedRecipeErrorMessage(error);
-            setSharedRecipeError(message);
-
-            return {
-              allowed: false,
-              message,
-              saved: false
-            };
-          }
-        },
-        getSaveLimitStatus,
-        getSavedRecipeById: (id) => getSavedRecipeRecordById(savedRecipes, id),
-        getSavedRecipeBySourceUrl: (sourceUrl) =>
-          getSavedRecipeRecordBySourceUrl(savedRecipes, sourceUrl),
-        getSharedRecipeById: (id) => sharedRecipes.find((entry) => entry.id === id),
-        hasLoadedSavedRecipes,
-        hasLoadedSharedRecipes,
-        incrementRecipeTimesCooked: (id) => {
-          const sourceRecord = getSavedRecipeRecordById(savedRecipes, id);
-
-          if (!sourceRecord) {
-            return false;
-          }
-
-          setSavedRecipes((current) => incrementSavedRecipeTimesCooked(current, id));
-          return true;
-        },
-        refreshSharedRecipes,
-        removeRecipe: (id) => {
-          setSavedRecipes((current) => removeSavedRecipeRecord(current, id));
-        },
-        saveRecipe: async (state) => {
-          const result = await savePersonalRecipe(state);
-
-          if (result.saved && result.recipe && shareMode === "all") {
-            const sharedResult = await shareRecipeRecord(result.recipe);
-
-            if (!sharedResult.saved) {
-              return {
-                allowed: true,
-                message: buildPartialShareMessage(sharedResult.message),
-                ...(result.recipeId ? { recipeId: result.recipeId } : {}),
-                saved: true
-              };
-            }
-          }
-
-          return {
-            allowed: result.allowed,
-            ...(result.message ? { message: result.message } : {}),
-            ...(result.reason ? { reason: result.reason } : {}),
+            message: buildPartialShareMessage(sharedResult.message),
             ...(result.recipeId ? { recipeId: result.recipeId } : {}),
-            saved: result.saved
+            saved: true
           };
-        },
-        saveRecipeToTargets: async (state, target) => {
-          if (target === "family") {
-            try {
-              const response = await client.createSharedRecipe(
-                successStateToSharedRecipeRequest(state)
-              );
-              upsertSharedRecipe(response.recipe);
-              setSharedRecipeError(null);
+        }
+      }
 
-              trackMobileEvent({
-                eventName: "family_shared",
-                routeOrScreen: "recipe",
-                properties: {
-                  recipe_count: 1,
-                  share_scope: "household"
-                }
-              });
+      return {
+        allowed: result.allowed,
+        ...(result.message ? { message: result.message } : {}),
+        ...(result.reason ? { reason: result.reason } : {}),
+        ...(result.recipeId ? { recipeId: result.recipeId } : {}),
+        saved: result.saved
+      };
+    },
+    [savePersonalRecipe, shareRecipeRecord]
+  );
 
-              return {
-                allowed: true,
-                saved: true,
-                sharedRecipeId: response.recipe.id
-              };
-            } catch (error) {
-              const message = getSharedRecipeErrorMessage(error);
-              setSharedRecipeError(message);
+  const saveRecipeToTargets = useCallback(
+    async (
+      state: SuccessfulExtractionState,
+      target: "personal" | "family" | "both"
+    ): Promise<SaveRecipeResult & { recipeId?: string; sharedRecipeId?: string }> => {
+      if (target === "family") {
+        const sharedFor = latestRef.current.userId;
 
-              return {
-                allowed: false,
-                message,
-                saved: false
-              };
+        try {
+          const response = await latestRef.current.client.createSharedRecipe(
+            successStateToSharedRecipeRequest(state)
+          );
+
+          if (latestRef.current.userId !== sharedFor) {
+            return SWITCHED_ACCOUNT_RESULT;
+          }
+
+          upsertSharedRecipe(response.recipe);
+          setSharedRecipeError(null);
+
+          trackMobileEvent({
+            eventName: "family_shared",
+            routeOrScreen: "recipe",
+            properties: {
+              recipe_count: 1,
+              share_scope: "household"
             }
-          }
-
-          const personalResult = await savePersonalRecipe(state);
-
-          if (!personalResult.saved || !personalResult.recipe) {
-            return {
-              allowed: personalResult.allowed,
-              ...(personalResult.message ? { message: personalResult.message } : {}),
-              ...(personalResult.reason ? { reason: personalResult.reason } : {}),
-              ...(personalResult.recipeId ? { recipeId: personalResult.recipeId } : {}),
-              saved: false
-            };
-          }
-
-          if (target === "both") {
-            const sharedResult = await shareRecipeRecord(personalResult.recipe);
-
-            if (!sharedResult.saved) {
-              return {
-                allowed: true,
-                message: buildPartialShareMessage(sharedResult.message),
-                ...(personalResult.recipeId ? { recipeId: personalResult.recipeId } : {}),
-                saved: true
-              };
-            }
-
-            return {
-              allowed: sharedResult.allowed,
-              ...(sharedResult.message ? { message: sharedResult.message } : {}),
-              ...(personalResult.recipeId ? { recipeId: personalResult.recipeId } : {}),
-              saved: sharedResult.saved,
-              ...(sharedResult.sharedRecipeId
-                ? { sharedRecipeId: sharedResult.sharedRecipeId }
-                : {})
-            };
-          }
-
-          if (shareMode === "all") {
-            const sharedResult = await shareRecipeRecord(personalResult.recipe);
-
-            if (!sharedResult.saved) {
-              return {
-                allowed: true,
-                message: buildPartialShareMessage(sharedResult.message),
-                ...(personalResult.recipeId ? { recipeId: personalResult.recipeId } : {}),
-                saved: true
-              };
-            }
-          }
+          });
 
           return {
             allowed: true,
+            saved: true,
+            sharedRecipeId: response.recipe.id
+          };
+        } catch (error) {
+          if (latestRef.current.userId !== sharedFor || isAccountChangedError(error)) {
+            return SWITCHED_ACCOUNT_RESULT;
+          }
+
+          const message = getSharedRecipeErrorMessage(error);
+          setSharedRecipeError(message);
+
+          return {
+            allowed: false,
+            message,
+            saved: false
+          };
+        }
+      }
+
+      const startedFor = latestRef.current.userId;
+      const personalResult = await savePersonalRecipe(state);
+
+      if (!personalResult.saved || !personalResult.recipe) {
+        return {
+          allowed: personalResult.allowed,
+          ...(personalResult.message ? { message: personalResult.message } : {}),
+          ...(personalResult.reason ? { reason: personalResult.reason } : {}),
+          ...(personalResult.recipeId ? { recipeId: personalResult.recipeId } : {}),
+          saved: false
+        };
+      }
+
+      // Someone else signed in (or out) while the cookbook was being written: the recipe is saved
+      // on this phone, but never shared into their household (or as a signed-out visitor).
+      if (latestRef.current.userId !== startedFor) {
+        return {
+          allowed: true,
+          ...(target === "both"
+            ? { message: buildPartialShareMessage(ACCOUNT_CHANGED_MESSAGE) }
+            : {}),
+          ...(personalResult.recipeId ? { recipeId: personalResult.recipeId } : {}),
+          saved: true
+        };
+      }
+
+      if (target === "both") {
+        const sharedResult = await shareRecipeRecord(personalResult.recipe);
+
+        if (!sharedResult.saved) {
+          return {
+            allowed: true,
+            message: buildPartialShareMessage(sharedResult.message),
             ...(personalResult.recipeId ? { recipeId: personalResult.recipeId } : {}),
             saved: true
           };
-        },
-        savedRecipes,
-        setShareMode: async (mode) => {
-          if (mode === "all") {
-            const result = await shareAllPersonalRecipes();
-
-            if (!result.saved) {
-              return;
-            }
-          }
-
-          if (mode === "none") {
-            const result = await unshareAllOwnedRecipes();
-
-            if (!result.saved) {
-              return;
-            }
-          }
-
-          setShareModeState(mode);
-        },
-        shareAllPersonalRecipes,
-        sharedRecipeError,
-        sharedRecipes,
-        shareMode,
-        shareRecipe: async (id) => {
-          const sourceRecord = getSavedRecipeRecordById(savedRecipes, id);
-
-          if (!sourceRecord) {
-            return {
-              allowed: false,
-              message: "This saved recipe is no longer available.",
-              saved: false
-            };
-          }
-
-          return shareRecipeRecord(sourceRecord);
-        },
-        unshareRecipe: async (id) => {
-          const sourceRecord = getSavedRecipeRecordById(savedRecipes, id);
-
-          if (!sourceRecord?.sharedRecipeId) {
-            setSavedRecipes((current) => markSavedRecipeUnshared(current, id));
-            return {
-              allowed: true,
-              saved: true
-            };
-          }
-
-          try {
-            await client.deleteSharedRecipe(sourceRecord.sharedRecipeId);
-            removeSharedRecipeFromState(sourceRecord.sharedRecipeId);
-            setSavedRecipes((current) => markSavedRecipeUnshared(current, id));
-            setSharedRecipeError(null);
-
-            return {
-              allowed: true,
-              saved: true
-            };
-          } catch (error) {
-            const message = getSharedRecipeErrorMessage(error);
-            setSharedRecipeError(message);
-
-            return {
-              allowed: false,
-              message,
-              saved: false
-            };
-          }
-        },
-        updateRecipe: (id, update) => {
-          const sourceRecord = getSavedRecipeRecordById(savedRecipes, id);
-
-          if (sourceRecord) {
-            const nextRecord = {
-              ...sourceRecord,
-              notes: update.notes,
-              recipe: update.recipe ?? sourceRecord.recipe,
-              updatedAt: update.updatedAt ?? new Date().toISOString()
-            };
-            setSavedRecipes((current) => updateSavedRecipeRecord(current, id, update));
-
-            if (nextRecord.sharedRecipeId) {
-              void syncSharedRecipeFromRecord(nextRecord);
-            }
-          }
-
-          return sourceRecord != null;
-        },
-        updateSharedRecipe: async (id, update) => {
-          const sourceRecord = sharedRecipes.find((entry) => entry.id === id);
-
-          if (!sourceRecord) {
-            return false;
-          }
-
-          try {
-            const payload: Parameters<typeof client.updateSharedRecipe>[1] = {
-              recipe: update.recipe,
-              warnings: sourceRecord.warnings
-            };
-
-            if ("notes" in update) {
-              payload.notes = update.notes ?? null;
-            }
-
-            const response = await client.updateSharedRecipe(id, payload);
-            upsertSharedRecipe(response.recipe);
-            setSharedRecipeError(null);
-            return true;
-          } catch (error) {
-            setSharedRecipeError(getSharedRecipeErrorMessage(error));
-            return false;
-          }
         }
-      }}
-    >
-      {children}
-    </SavedRecipesContext.Provider>
+
+        return {
+          allowed: sharedResult.allowed,
+          ...(sharedResult.message ? { message: sharedResult.message } : {}),
+          ...(personalResult.recipeId ? { recipeId: personalResult.recipeId } : {}),
+          saved: sharedResult.saved,
+          ...(sharedResult.sharedRecipeId ? { sharedRecipeId: sharedResult.sharedRecipeId } : {})
+        };
+      }
+
+      if (latestRef.current.shareMode === "all") {
+        const sharedResult = await shareRecipeRecord(personalResult.recipe);
+
+        if (!sharedResult.saved) {
+          return {
+            allowed: true,
+            message: buildPartialShareMessage(sharedResult.message),
+            ...(personalResult.recipeId ? { recipeId: personalResult.recipeId } : {}),
+            saved: true
+          };
+        }
+      }
+
+      return {
+        allowed: true,
+        ...(personalResult.recipeId ? { recipeId: personalResult.recipeId } : {}),
+        saved: true
+      };
+    },
+    [savePersonalRecipe, shareRecipeRecord, upsertSharedRecipe]
+  );
+
+  const setShareMode = useCallback(
+    async (mode: RecipeBookShareMode) => {
+      if (mode === "all") {
+        const result = await shareAllPersonalRecipes();
+
+        if (!result.saved) {
+          return;
+        }
+      }
+
+      if (mode === "none") {
+        const result = await unshareAllOwnedRecipes();
+
+        if (!result.saved) {
+          return;
+        }
+      }
+
+      setShareModeState(mode);
+    },
+    [shareAllPersonalRecipes, unshareAllOwnedRecipes]
+  );
+
+  const shareRecipe = useCallback(
+    async (id: string) => {
+      const sourceRecord = getSavedRecipeRecordById(savedRecipesRef.current, id);
+
+      if (!sourceRecord) {
+        return {
+          allowed: false,
+          message: "This saved recipe is no longer available.",
+          saved: false
+        };
+      }
+
+      return shareRecipeRecord(sourceRecord);
+    },
+    [shareRecipeRecord]
+  );
+
+  const unshareRecipe = useCallback(
+    async (id: string): Promise<SaveRecipeResult> => {
+      const sourceRecord = getSavedRecipeRecordById(savedRecipesRef.current, id);
+
+      const ownId = sourceRecord ? ownSharedRecipeId(sourceRecord) : undefined;
+
+      // Not shared by this account (another account's link stays that account's): nothing to do.
+      if (!ownId) {
+        return {
+          allowed: true,
+          saved: true
+        };
+      }
+
+      const startedFor = latestRef.current.userId;
+
+      try {
+        await latestRef.current.client.deleteSharedRecipe(ownId);
+
+        if (latestRef.current.userId !== startedFor) {
+          return SWITCHED_ACCOUNT_RESULT;
+        }
+
+        removeSharedRecipeFromState(ownId);
+        commitSavedRecipes((current) => markSavedRecipeUnshared(current, id));
+        setSharedRecipeError(null);
+
+        return {
+          allowed: true,
+          saved: true
+        };
+      } catch (error) {
+        if (latestRef.current.userId !== startedFor || isAccountChangedError(error)) {
+          return SWITCHED_ACCOUNT_RESULT;
+        }
+
+        const message = getSharedRecipeErrorMessage(error);
+        setSharedRecipeError(message);
+
+        return {
+          allowed: false,
+          message,
+          saved: false
+        };
+      }
+    },
+    [commitSavedRecipes, ownSharedRecipeId, removeSharedRecipeFromState]
+  );
+
+  const updateRecipe = useCallback(
+    (id: string, update: SavedRecipeUpdate): boolean => {
+      const sourceRecord = getSavedRecipeRecordById(savedRecipesRef.current, id);
+
+      if (sourceRecord) {
+        const nextRecord = {
+          ...sourceRecord,
+          notes: update.notes,
+          recipe: update.recipe ?? sourceRecord.recipe,
+          updatedAt: update.updatedAt ?? new Date().toISOString()
+        };
+        commitSavedRecipes((current) => updateSavedRecipeRecord(current, id, update));
+
+        if (nextRecord.sharedRecipeId) {
+          void syncSharedRecipeFromRecord(nextRecord);
+        }
+      }
+
+      return sourceRecord != null;
+    },
+    [commitSavedRecipes, syncSharedRecipeFromRecord]
+  );
+
+  const updateSharedRecipe = useCallback(
+    async (id: string, update: SavedRecipeUpdate): Promise<boolean> => {
+      const sourceRecord = latestRef.current.sharedRecipes.find((entry) => entry.id === id);
+
+      if (!sourceRecord) {
+        return false;
+      }
+
+      const startedFor = latestRef.current.userId;
+
+      try {
+        const apiClient = latestRef.current.client;
+        const payload: Parameters<typeof apiClient.updateSharedRecipe>[1] = {
+          recipe: update.recipe,
+          warnings: sourceRecord.warnings
+        };
+
+        if ("notes" in update) {
+          payload.notes = update.notes ?? null;
+        }
+
+        const response = await apiClient.updateSharedRecipe(id, payload);
+
+        // Someone else signed in (or out) meanwhile: this Family recipe isn't in their list.
+        if (latestRef.current.userId !== startedFor) {
+          return false;
+        }
+
+        upsertSharedRecipe(response.recipe);
+        setSharedRecipeError(null);
+        return true;
+      } catch (error) {
+        if (latestRef.current.userId === startedFor && !isAccountChangedError(error)) {
+          setSharedRecipeError(getSharedRecipeErrorMessage(error));
+        }
+
+        return false;
+      }
+    },
+    [upsertSharedRecipe]
+  );
+
+  const getSaveLimitStatus = useCallback(
+    (options?: { isExistingRecord?: boolean }) =>
+      computeSaveLimitStatus({ canUseSharedRecipeBook, savedRecipes, tier }, options),
+    [canUseSharedRecipeBook, savedRecipes, tier]
+  );
+  // The cookbook as the signed-in account sees it: another account's Family link on a recipe
+  // reads as not shared (it can't update or unshare that account's copy).
+  const visibleSavedRecipes = useMemo(() => {
+    const family = hasLoadedSharedRecipes ? sharedRecipes : null;
+    return savedRecipes.map((record) => withOwnSharedLink(record, user?.id, family));
+  }, [hasLoadedSharedRecipes, savedRecipes, sharedRecipes, user?.id]);
+  const getSavedRecipeById = useCallback(
+    (id: string) => getSavedRecipeRecordById(visibleSavedRecipes, id),
+    [visibleSavedRecipes]
+  );
+  const getSavedRecipeBySourceUrl = useCallback(
+    (sourceUrl: string) => getSavedRecipeRecordBySourceUrl(visibleSavedRecipes, sourceUrl),
+    [visibleSavedRecipes]
+  );
+  const getSharedRecipeById = useCallback(
+    (id: string) => sharedRecipes.find((entry) => entry.id === id),
+    [sharedRecipes]
+  );
+
+  const state = useMemo<SavedRecipesState>(
+    () => ({
+      canUseSharedRecipeBook,
+      getSaveLimitStatus,
+      getSavedRecipeById,
+      getSavedRecipeBySourceUrl,
+      getSharedRecipeById,
+      hasLoadedSavedRecipes,
+      hasLoadedSharedRecipes,
+      savedRecipes: visibleSavedRecipes,
+      sharedRecipeError,
+      sharedRecipes,
+      shareMode
+    }),
+    [
+      canUseSharedRecipeBook,
+      getSaveLimitStatus,
+      getSavedRecipeById,
+      getSavedRecipeBySourceUrl,
+      getSharedRecipeById,
+      hasLoadedSavedRecipes,
+      hasLoadedSharedRecipes,
+      sharedRecipeError,
+      sharedRecipes,
+      shareMode,
+      visibleSavedRecipes
+    ]
+  );
+
+  const actions = useMemo<SavedRecipesActions>(
+    () => ({
+      cloneRecipe,
+      cloneSharedRecipe,
+      deleteSharedRecipe,
+      incrementRecipeTimesCooked,
+      refreshSharedRecipes,
+      removeRecipe,
+      saveRecipe,
+      saveRecipeToTargets,
+      setRecipeFavorite,
+      setShareMode,
+      shareAllPersonalRecipes,
+      shareRecipe,
+      unshareRecipe,
+      updateRecipe,
+      updateSharedRecipe
+    }),
+    [
+      cloneRecipe,
+      cloneSharedRecipe,
+      deleteSharedRecipe,
+      incrementRecipeTimesCooked,
+      refreshSharedRecipes,
+      removeRecipe,
+      saveRecipe,
+      saveRecipeToTargets,
+      setRecipeFavorite,
+      setShareMode,
+      shareAllPersonalRecipes,
+      shareRecipe,
+      unshareRecipe,
+      updateRecipe,
+      updateSharedRecipe
+    ]
+  );
+
+  return (
+    <SavedRecipesActionsContext.Provider value={actions}>
+      <SavedRecipesStateContext.Provider value={state}>
+        {children}
+      </SavedRecipesStateContext.Provider>
+    </SavedRecipesActionsContext.Provider>
   );
 };
 
-export const useSavedRecipes = () => {
-  const context = useContext(SavedRecipesContext);
+/** Actions only: stable identities, no re-render when the cookbook changes. */
+export const useSavedRecipesActions = (): SavedRecipesActions => {
+  const actions = useContext(SavedRecipesActionsContext);
 
-  if (!context) {
+  if (!actions) {
+    throw new Error("useSavedRecipesActions must be used within SavedRecipesProvider.");
+  }
+
+  return actions;
+};
+
+export const useSavedRecipes = (): SavedRecipesContextValue => {
+  const state = useContext(SavedRecipesStateContext);
+  const actions = useContext(SavedRecipesActionsContext);
+  const value = useMemo(
+    () => (state && actions ? { ...state, ...actions } : null),
+    [actions, state]
+  );
+
+  if (!value) {
     throw new Error("useSavedRecipes must be used within SavedRecipesProvider.");
   }
 
-  return context;
+  return value;
 };

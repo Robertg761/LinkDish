@@ -1,7 +1,8 @@
-import { load } from "cheerio";
-
+import { parseDuration } from "../../../../../../../packages/recipe-domain/src/index.js";
+import { getParsedHtmlDocument, type ParsedHtmlDocument } from "../../html/parsed-html-document.js";
 import { getDomainAdapter } from "../../source-detection/domain-adapters.js";
 import { captureRecipeImage } from "../capture-recipe-image.js";
+import { htmlFragmentToText } from "../html-text.js";
 import {
   buildFieldProvenance,
   extractMinutesFromText,
@@ -9,7 +10,6 @@ import {
   extractNutritionFromText,
   extractSectionContent,
   extractSectionListItems,
-  parseIsoDurationToMinutes,
   parseServingsText,
   parseTextRecipeSignals,
   toIngredientLines,
@@ -17,25 +17,24 @@ import {
   uniqueNonEmptyText
 } from "../shared.js";
 
-import type { ExtractionCandidate, HtmlSourceDocument } from "../../types.js";
+import {
+  findJsonLdRecipe,
+  isJsonRecord,
+  readJsonLdAuthor,
+  readJsonLdDurationMinutes,
+  readJsonLdIngredientLines,
+  readJsonLdInstructionLines,
+  readJsonLdKeywords,
+  readJsonLdText,
+  readJsonLdTextList,
+  readJsonLdVideoUrl,
+  readJsonLdYield,
+  type JsonRecord
+} from "./json-ld.js";
 
-interface JsonLdRecipe {
-  name?: string;
-  recipeIngredient?: string[];
-  recipeInstructions?: Array<string | { text?: string; name?: string }> | string;
-  recipeYield?: string | string[];
-  prepTime?: string;
-  cookTime?: string;
-  nutrition?: {
-    calories?: string;
-    proteinContent?: string;
-    carbohydrateContent?: string;
-    fatContent?: string;
-    fiberContent?: string;
-    sugarContent?: string;
-    sodiumContent?: string;
-  };
-}
+import type { Recipe } from "../../../../../../../packages/recipe-domain/src/index.js";
+import type { ExtractionCandidate, HtmlSourceDocument } from "../../types.js";
+import type { CheerioAPI } from "cheerio";
 
 interface LooseNutritionShape {
   calories: string | null | undefined;
@@ -47,123 +46,63 @@ interface LooseNutritionShape {
   sodiumContent: string | null | undefined;
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null;
+/** The optional metadata fields a candidate can carry (all additive on the recipe contract). */
+type RecipeMetadata = Pick<
+  Recipe,
+  | "description"
+  | "totalTimeMinutes"
+  | "author"
+  | "siteName"
+  | "cuisine"
+  | "category"
+  | "keywords"
+  | "videoUrl"
+>;
 
-const extractJsonLdRecipe = (html: string): JsonLdRecipe | null => {
-  const $ = load(html);
-  const scripts = $('script[type="application/ld+json"]').toArray();
-  const candidates: JsonLdRecipe[] = [];
+type RecipeMetadataInput = {
+  [Key in keyof RecipeMetadata]-?: Exclude<RecipeMetadata[Key], undefined> | null;
+};
 
-  for (const script of scripts) {
-    const rawValue = $(script).text().trim();
+/* Only fields with a value are set, so recipes without metadata keep their previous shape. */
+const compactMetadata = (metadata: RecipeMetadataInput): RecipeMetadata => {
+  const compacted: RecipeMetadata = {};
 
-    if (!rawValue) {
-      continue;
-    }
-
-    try {
-      const parsed = JSON.parse(rawValue) as unknown;
-      const queue: Record<string, unknown>[] = [];
-
-      if (Array.isArray(parsed)) {
-        for (const entry of parsed) {
-          if (isRecord(entry)) {
-            queue.push(entry);
-          }
-        }
-      } else if (isRecord(parsed)) {
-        queue.push(parsed);
-      }
-
-      while (queue.length > 0) {
-        const current = queue.shift();
-
-        if (!current) {
-          continue;
-        }
-
-        if (Array.isArray(current["@graph"])) {
-          const graphEntries = current["@graph"] as unknown[];
-
-          for (const entry of graphEntries) {
-            if (isRecord(entry)) {
-              queue.push(entry);
-            }
-          }
-        }
-
-        const typeValue = current["@type"];
-        const types = Array.isArray(typeValue) ? typeValue : [typeValue];
-
-        if (types.some((type) => String(type).toLowerCase() === "recipe")) {
-          candidates.push(current as JsonLdRecipe);
-        }
-      }
-    } catch {
-      continue;
+  for (const [key, value] of Object.entries(metadata) as Array<
+    [keyof RecipeMetadataInput, RecipeMetadataInput[keyof RecipeMetadataInput]]
+  >) {
+    if (value != null && (!Array.isArray(value) || value.length > 0)) {
+      Object.assign(compacted, { [key]: value });
     }
   }
 
-  return (
-    candidates.sort((left, right) => {
-      const leftScore =
-        (left.recipeIngredient?.length ?? 0) +
-        normalizeRecipeInstructions(left.recipeInstructions).length;
-      const rightScore =
-        (right.recipeIngredient?.length ?? 0) +
-        normalizeRecipeInstructions(right.recipeInstructions).length;
-
-      return rightScore - leftScore;
-    })[0] ?? null
-  );
+  return compacted;
 };
 
-const normalizeRecipeInstructions = (
-  instructions: JsonLdRecipe["recipeInstructions"]
-): string[] => {
-  if (typeof instructions === "string") {
-    return instructions
-      .split(/\n+/)
-      .map((instruction) => instruction.trim())
-      .filter(Boolean);
-  }
-
-  if (!Array.isArray(instructions)) {
-    return [];
-  }
-
-  return uniqueNonEmptyText(
-    instructions.flatMap((instruction) => {
-      if (typeof instruction === "string") {
-        return [instruction];
-      }
-
-      if (
-        "itemListElement" in instruction &&
-        Array.isArray((instruction as { itemListElement?: unknown[] }).itemListElement)
-      ) {
-        return (
-          (instruction as { itemListElement?: Array<{ text?: string; name?: string }> })
-            .itemListElement ?? []
-        )
-          .map((entry) => entry.text ?? entry.name ?? "")
-          .filter(Boolean);
-      }
-
-      return [instruction.text ?? instruction.name ?? ""];
-    })
-  );
+const readMetaText = (value: string | undefined): string | null => {
+  const text = value ? htmlFragmentToText(value) : "";
+  return text.length > 0 ? text : null;
 };
 
-const toNullableNutritionValue = (value: string | null | undefined): string | null => {
-  const trimmed = value?.trim();
-  return trimmed && trimmed.length > 0 ? trimmed : null;
+const readPageDescription = (parsed: ParsedHtmlDocument, document: HtmlSourceDocument) =>
+  readMetaText(document.description ?? undefined) ??
+  readMetaText(parsed.metaContent("property", "og:description")) ??
+  readMetaText(parsed.metaContent("name", "description"));
+
+const readPageSiteName = (parsed: ParsedHtmlDocument) =>
+  readMetaText(parsed.metaContent("property", "og:site_name")) ??
+  readMetaText(parsed.metaContent("name", "application-name"));
+
+const readPageAuthor = (parsed: ParsedHtmlDocument): string | null => {
+  const author = readMetaText(parsed.metaContent("name", "author"));
+  return author && !/^https?:\/\//iu.test(author) ? author : null;
 };
 
-const normalizeNutrition = (
-  nutrition: JsonLdRecipe["nutrition"] | LooseNutritionShape | null | undefined
-) => {
+const toNullableNutritionValue = (value: unknown): string | null => {
+  const text = readJsonLdText(value);
+  return text && text.length > 0 ? text : null;
+};
+
+const normalizeNutrition = (nutrition: LooseNutritionShape | JsonRecord | null | undefined) => {
   if (!nutrition) {
     return null;
   }
@@ -183,66 +122,229 @@ const normalizeNutrition = (
   return hasAnyNutrition ? normalizedNutrition : null;
 };
 
-export const extractRecipeWebpage = (document: HtmlSourceDocument): ExtractionCandidate | null => {
-  const jsonLdRecipe = extractJsonLdRecipe(document.html);
-  const $ = load(document.html);
-  const pageTitle = $("h1").first().text().trim() || document.title || $("title").text().trim();
-  const adapter = getDomainAdapter(new URL(document.finalUrl).hostname.toLowerCase());
-  const image = captureRecipeImage(document.html, document.finalUrl);
+type CheerioSelection = ReturnType<CheerioAPI>;
+type CapturedImage = ReturnType<typeof captureRecipeImage>;
 
-  if (jsonLdRecipe) {
-    return {
-      recipe: {
-        title: jsonLdRecipe.name ?? pageTitle,
-        sourceUrl: document.finalUrl,
-        sourceType: "recipe-webpage",
-        image,
-        ingredients: toIngredientLines(jsonLdRecipe.recipeIngredient ?? []),
-        steps: toStepLines(normalizeRecipeInstructions(jsonLdRecipe.recipeInstructions)),
-        servings: parseServingsText(
-          Array.isArray(jsonLdRecipe.recipeYield)
-            ? jsonLdRecipe.recipeYield.join(", ")
-            : (jsonLdRecipe.recipeYield ?? null)
-        ),
-        prepTimeMinutes: parseIsoDurationToMinutes(jsonLdRecipe.prepTime),
-        cookTimeMinutes: parseIsoDurationToMinutes(jsonLdRecipe.cookTime),
-        nutrition: normalizeNutrition(jsonLdRecipe.nutrition)
-      },
-      strategy: "recipe-schema",
-      evidence: ["Detected Recipe JSON-LD on the page."],
-      warnings: [],
-      provenance: ["jsonld"],
-      fieldProvenance: buildFieldProvenance({
-        title: jsonLdRecipe.name ? "jsonld" : "visible-text",
-        ingredients: "jsonld",
-        steps: "jsonld",
-        servings: jsonLdRecipe.recipeYield ? "jsonld" : null,
-        prepTimeMinutes: jsonLdRecipe.prepTime ? "jsonld" : null,
-        cookTimeMinutes: jsonLdRecipe.cookTime ? "jsonld" : null,
-        nutrition: jsonLdRecipe.nutrition ? "jsonld" : null
-      }),
-      signals: {
-        requiredFieldsInferred: false,
-        titleConfidence: jsonLdRecipe.name ? "strong" : "weak",
-        timesFromStructuredMetadata:
-          Boolean(jsonLdRecipe.prepTime) || Boolean(jsonLdRecipe.cookTime),
-        recipeLike: true,
-        detectionConfidence: "high",
-        sectionCohesion: "strong",
-        transcriptQuality: "weak",
-        usedBrowserFallback: false,
-        blockedSourceSignals: document.blockedSignals.length
-      }
-    };
+interface IngredientGroup {
+  section: string | null;
+  count: number;
+}
+
+const collapseText = (value: string): string => value.replace(/\s+/g, " ").trim();
+
+/*
+ * JSON-LD recipeIngredient is a flat list, but recipe plugins group ingredients in the page
+ * ("For the cake", "For the frosting"). WP Recipe Maker and Tasty Recipes mark those groups up
+ * predictably, so their names become ingredient sections when the page's group sizes add up to
+ * exactly the structured list (otherwise the list stays flat rather than risk mislabelling).
+ */
+const readIngredientGroups = ($: CheerioAPI): IngredientGroup[] => {
+  const groups: IngredientGroup[] = [];
+
+  $(".wprm-recipe-ingredient-group").each((_, element) => {
+    const group = $(element);
+    const count = group.find(".wprm-recipe-ingredient").length;
+
+    if (count > 0) {
+      const name = collapseText(group.find(".wprm-recipe-group-name").first().text());
+      groups.push({ section: name || null, count });
+    }
+  });
+
+  if (groups.length > 0) {
+    return groups;
   }
 
-  const microdataRoot = $('[itemtype*="Recipe"]').first();
-  const microdataIngredients = uniqueNonEmptyText(
-    microdataRoot
-      .find('[itemprop="recipeIngredient"]')
-      .toArray()
-      .map((node) => $(node).text())
+  const tastyBody = $(".tasty-recipes-ingredients-body, .tasty-recipes-ingredients").first();
+  let section: string | null = null;
+
+  tastyBody.find("h3, h4, ul, ol").each((_, element) => {
+    const node = $(element);
+
+    if (node.is("h3, h4")) {
+      section = collapseText(node.text()) || null;
+      return;
+    }
+
+    const count = node.children("li").length;
+
+    if (count > 0) {
+      groups.push({ section, count });
+    }
+  });
+
+  return groups;
+};
+
+const stripTrailingColon = (value: string): string => value.replace(/:\s*$/u, "").trim();
+
+const withIngredientSections = (
+  ingredients: { text: string }[],
+  groups: IngredientGroup[]
+): { text: string; section?: string }[] => {
+  const total = groups.reduce((sum, group) => sum + group.count, 0);
+
+  if (!groups.some((group) => group.section) || total !== ingredients.length) {
+    return ingredients;
+  }
+
+  const sectioned: { text: string; section?: string }[] = [];
+  let index = 0;
+
+  for (const group of groups) {
+    const section = group.section ? stripTrailingColon(group.section) : "";
+
+    for (let offset = 0; offset < group.count; offset += 1) {
+      const ingredient = ingredients[index];
+      index += 1;
+
+      if (ingredient) {
+        sectioned.push(section ? { ...ingredient, section } : ingredient);
+      }
+    }
+  }
+
+  return sectioned;
+};
+
+/* Microdata times live in content= (meta), datetime= (time) or the element text. */
+const readMicrodataMinutes = (root: CheerioSelection, property: string): number | null => {
+  const element = root.find(`[itemprop="${property}"]`).first();
+
+  if (element.length === 0) {
+    return null;
+  }
+
+  return parseDuration(
+    element.attr("content") ?? element.attr("datetime") ?? collapseText(element.text())
   );
+};
+
+const readMicrodataText = (root: CheerioSelection, property: string): string | null => {
+  const element = root.find(`[itemprop="${property}"]`).first();
+
+  if (element.length === 0) {
+    return null;
+  }
+
+  const text = collapseText(element.attr("content") ?? element.text());
+  return text.length > 0 ? text : null;
+};
+
+const readMicrodataAuthor = (root: CheerioSelection): string | null => {
+  const author = root.find('[itemprop="author"]').first();
+
+  if (author.length === 0) {
+    return null;
+  }
+
+  const name = collapseText(
+    author.find('[itemprop="name"]').first().attr("content") ??
+      author.find('[itemprop="name"]').first().text() ??
+      ""
+  );
+  const text = name || collapseText(author.attr("content") ?? author.text());
+
+  return text.length > 0 && !/^https?:\/\//iu.test(text) ? text : null;
+};
+
+const extractFromJsonLd = (
+  document: HtmlSourceDocument,
+  parsed: ParsedHtmlDocument,
+  pageTitle: string,
+  image: CapturedImage
+): ExtractionCandidate | null => {
+  const match = findJsonLdRecipe(parsed.jsonLdBlocks);
+
+  if (!match) {
+    return null;
+  }
+
+  const { recipe: node } = match;
+  const name = readJsonLdText(node.name);
+  const recipeYield = readJsonLdYield(node.recipeYield);
+  const prepTimeMinutes = readJsonLdDurationMinutes(node.prepTime);
+  const cookTimeMinutes = readJsonLdDurationMinutes(node.cookTime);
+  const totalTimeMinutes = readJsonLdDurationMinutes(node.totalTime);
+  const nutrition = normalizeNutrition(isJsonRecord(node.nutrition) ? node.nutrition : null);
+  const ingredients = withIngredientSections(
+    toIngredientLines(readJsonLdIngredientLines(node.recipeIngredient ?? node.ingredients), {
+      structured: true
+    }),
+    readIngredientGroups(parsed.$)
+  );
+  const publisher = isJsonRecord(node.publisher) ? readJsonLdText(node.publisher.name) : null;
+
+  return {
+    recipe: {
+      title: name ?? pageTitle,
+      sourceUrl: document.finalUrl,
+      sourceType: "recipe-webpage",
+      image,
+      ingredients,
+      steps: toStepLines(readJsonLdInstructionLines(node.recipeInstructions), {
+        structured: true
+      }),
+      servings: parseServingsText(recipeYield),
+      prepTimeMinutes,
+      cookTimeMinutes,
+      nutrition,
+      ...compactMetadata({
+        description: readJsonLdText(node.description) ?? readPageDescription(parsed, document),
+        totalTimeMinutes,
+        author: readJsonLdAuthor(node.author) ?? readPageAuthor(parsed),
+        siteName: readPageSiteName(parsed) ?? match.siteName ?? publisher,
+        cuisine: readJsonLdTextList(node.recipeCuisine),
+        category: readJsonLdTextList(node.recipeCategory),
+        keywords: readJsonLdKeywords(node.keywords),
+        videoUrl: readJsonLdVideoUrl(node.video)
+      })
+    },
+    strategy: "recipe-schema",
+    evidence: ["Detected Recipe JSON-LD on the page."],
+    warnings: [],
+    provenance: ["jsonld"],
+    fieldProvenance: buildFieldProvenance({
+      title: name ? "jsonld" : "visible-text",
+      ingredients: "jsonld",
+      steps: "jsonld",
+      servings: recipeYield ? "jsonld" : null,
+      prepTimeMinutes: prepTimeMinutes == null ? null : "jsonld",
+      cookTimeMinutes: cookTimeMinutes == null ? null : "jsonld",
+      nutrition: nutrition ? "jsonld" : null
+    }),
+    signals: {
+      requiredFieldsInferred: false,
+      titleConfidence: name ? "strong" : "weak",
+      timesFromStructuredMetadata:
+        prepTimeMinutes != null || cookTimeMinutes != null || totalTimeMinutes != null,
+      recipeLike: true,
+      detectionConfidence: "high",
+      sectionCohesion: "strong",
+      transcriptQuality: "weak",
+      usedBrowserFallback: false,
+      blockedSourceSignals: document.blockedSignals.length
+    }
+  };
+};
+
+const extractFromMicrodata = (
+  document: HtmlSourceDocument,
+  parsed: ParsedHtmlDocument,
+  pageTitle: string,
+  image: CapturedImage
+): ExtractionCandidate | null => {
+  const { $ } = parsed;
+  const microdataRoot = $('[itemtype*="Recipe"]').first();
+
+  if (microdataRoot.length === 0) {
+    return null;
+  }
+
+  const microdataIngredients = microdataRoot
+    .find('[itemprop="recipeIngredient"], [itemprop="ingredients"]')
+    .toArray()
+    .map((node) => $(node).text());
   const microdataSteps = uniqueNonEmptyText(
     microdataRoot
       .find('[itemprop="recipeInstructions"]')
@@ -252,107 +354,129 @@ export const extractRecipeWebpage = (document: HtmlSourceDocument): ExtractionCa
         return text.split(/\n+/);
       })
   );
+  const microdataNutrition = normalizeNutrition({
+    calories: microdataRoot.find('[itemprop="calories"]').first().text().trim() || undefined,
+    proteinContent:
+      microdataRoot.find('[itemprop="proteinContent"]').first().text().trim() || undefined,
+    carbohydrateContent:
+      microdataRoot.find('[itemprop="carbohydrateContent"]').first().text().trim() || undefined,
+    fatContent: microdataRoot.find('[itemprop="fatContent"]').first().text().trim() || undefined,
+    fiberContent:
+      microdataRoot.find('[itemprop="fiberContent"]').first().text().trim() || undefined,
+    sugarContent:
+      microdataRoot.find('[itemprop="sugarContent"]').first().text().trim() || undefined,
+    sodiumContent:
+      microdataRoot.find('[itemprop="sodiumContent"]').first().text().trim() || undefined
+  });
+  const yieldText = microdataRoot.find('[itemprop="recipeYield"]').first().text().trim() || null;
+  /*
+   * totalTime is its own field: it used to be copied into both prep and cook when either was
+   * missing, which doubled the recipe's total in clients that add prep + cook.
+   */
+  const prepTimeMinutes = readMicrodataMinutes(microdataRoot, "prepTime");
+  const cookTimeMinutes = readMicrodataMinutes(microdataRoot, "cookTime");
+  const totalTimeMinutes = readMicrodataMinutes(microdataRoot, "totalTime");
+  const keywords = readMicrodataText(microdataRoot, "keywords");
 
-  if (microdataRoot.length > 0) {
-    const microdataNutrition = normalizeNutrition({
-      calories: microdataRoot.find('[itemprop="calories"]').first().text().trim() || undefined,
-      proteinContent:
-        microdataRoot.find('[itemprop="proteinContent"]').first().text().trim() || undefined,
-      carbohydrateContent:
-        microdataRoot.find('[itemprop="carbohydrateContent"]').first().text().trim() || undefined,
-      fatContent: microdataRoot.find('[itemprop="fatContent"]').first().text().trim() || undefined,
-      fiberContent:
-        microdataRoot.find('[itemprop="fiberContent"]').first().text().trim() || undefined,
-      sugarContent:
-        microdataRoot.find('[itemprop="sugarContent"]').first().text().trim() || undefined,
-      sodiumContent:
-        microdataRoot.find('[itemprop="sodiumContent"]').first().text().trim() || undefined
-    });
+  return {
+    recipe: {
+      title: microdataRoot.find('[itemprop="name"]').first().text().trim() || pageTitle,
+      sourceUrl: document.finalUrl,
+      sourceType: "recipe-webpage",
+      image,
+      ingredients: toIngredientLines(microdataIngredients, { structured: true }),
+      steps: toStepLines(microdataSteps, { structured: true }),
+      servings: parseServingsText(yieldText),
+      prepTimeMinutes,
+      cookTimeMinutes,
+      nutrition: microdataNutrition ?? extractNutritionFromText(microdataRoot.text()),
+      ...compactMetadata({
+        description:
+          readMicrodataText(microdataRoot, "description") ?? readPageDescription(parsed, document),
+        totalTimeMinutes,
+        author: readMicrodataAuthor(microdataRoot) ?? readPageAuthor(parsed),
+        siteName: readPageSiteName(parsed),
+        cuisine: readMicrodataText(microdataRoot, "recipeCuisine"),
+        category: readMicrodataText(microdataRoot, "recipeCategory"),
+        keywords: keywords ? readJsonLdKeywords(keywords) : null,
+        videoUrl: null
+      })
+    },
+    strategy: "recipe-schema",
+    evidence: ["Detected recipe microdata on the page."],
+    warnings: ["Recipe JSON-LD was unavailable, so microdata was used instead."],
+    provenance: ["microdata", ...(microdataNutrition ? [] : ["visible-text" as const])],
+    fieldProvenance: buildFieldProvenance({
+      title: "microdata",
+      ingredients: "microdata",
+      steps: "microdata",
+      servings: yieldText ? "microdata" : null,
+      prepTimeMinutes: prepTimeMinutes == null ? null : "microdata",
+      cookTimeMinutes: cookTimeMinutes == null ? null : "microdata",
+      nutrition: microdataNutrition
+        ? "microdata"
+        : microdataRoot.text().trim()
+          ? "visible-text"
+          : null
+    }),
+    signals: {
+      requiredFieldsInferred: false,
+      titleConfidence: "strong",
+      timesFromStructuredMetadata:
+        prepTimeMinutes != null || cookTimeMinutes != null || totalTimeMinutes != null,
+      recipeLike: true,
+      detectionConfidence: "high",
+      sectionCohesion: "strong",
+      transcriptQuality: "weak",
+      usedBrowserFallback: false,
+      blockedSourceSignals: document.blockedSignals.length
+    }
+  };
+};
 
-    return {
-      recipe: {
-        title: microdataRoot.find('[itemprop="name"]').first().text().trim() || pageTitle,
-        sourceUrl: document.finalUrl,
-        sourceType: "recipe-webpage",
-        image,
-        ingredients: toIngredientLines(microdataIngredients),
-        steps: toStepLines(microdataSteps),
-        servings: parseServingsText(
-          microdataRoot.find('[itemprop="recipeYield"]').first().text().trim() || null
-        ),
-        prepTimeMinutes:
-          parseIsoDurationToMinutes(microdataRoot.find('[itemprop="prepTime"]').attr("content")) ??
-          parseIsoDurationToMinutes(microdataRoot.find('[itemprop="totalTime"]').attr("content")),
-        cookTimeMinutes:
-          parseIsoDurationToMinutes(microdataRoot.find('[itemprop="cookTime"]').attr("content")) ??
-          parseIsoDurationToMinutes(microdataRoot.find('[itemprop="totalTime"]').attr("content")),
-        nutrition: microdataNutrition ?? extractNutritionFromText(microdataRoot.text())
-      },
-      strategy: "recipe-schema",
-      evidence: ["Detected recipe microdata on the page."],
-      warnings: ["Recipe JSON-LD was unavailable, so microdata was used instead."],
-      provenance: ["microdata", ...(microdataNutrition ? [] : ["visible-text" as const])],
-      fieldProvenance: buildFieldProvenance({
-        title: "microdata",
-        ingredients: "microdata",
-        steps: "microdata",
-        servings: microdataRoot.find('[itemprop="recipeYield"]').first().text().trim()
-          ? "microdata"
-          : null,
-        prepTimeMinutes: microdataRoot.find('[itemprop="prepTime"]').attr("content")
-          ? "microdata"
-          : null,
-        cookTimeMinutes:
-          microdataRoot.find('[itemprop="cookTime"]').attr("content") ||
-          microdataRoot.find('[itemprop="totalTime"]').attr("content")
-            ? "microdata"
-            : null,
-        nutrition: microdataNutrition
-          ? "microdata"
-          : microdataRoot.text().trim()
-            ? "visible-text"
-            : null
-      }),
-      signals: {
-        requiredFieldsInferred: false,
-        titleConfidence: "strong",
-        timesFromStructuredMetadata: true,
-        recipeLike: true,
-        detectionConfidence: "high",
-        sectionCohesion: "strong",
-        transcriptQuality: "weak",
-        usedBrowserFallback: false,
-        blockedSourceSignals: document.blockedSignals.length
-      }
-    };
+export const extractRecipeWebpage = (document: HtmlSourceDocument): ExtractionCandidate | null => {
+  const parsed = getParsedHtmlDocument(document);
+  const { $ } = parsed;
+  const pageTitle = parsed.firstHeadingText.trim() || document.title || parsed.titleText.trim();
+  const adapter = getDomainAdapter(new URL(document.finalUrl).hostname.toLowerCase());
+  const image = captureRecipeImage(parsed, document.finalUrl);
+  const structuredCandidate =
+    extractFromJsonLd(document, parsed, pageTitle, image) ??
+    extractFromMicrodata(document, parsed, pageTitle, image);
+
+  if (structuredCandidate) {
+    return structuredCandidate;
   }
 
   const adapterIngredientItems = adapter
-    ? extractItemsFromSelectors(document.html, adapter.selectors.ingredients)
+    ? extractItemsFromSelectors($, adapter.selectors.ingredients)
     : [];
-  const adapterStepItems = adapter
-    ? extractItemsFromSelectors(document.html, adapter.selectors.steps)
-    : [];
+  const adapterStepItems = adapter ? extractItemsFromSelectors($, adapter.selectors.steps) : [];
   const ingredientItems =
     adapterIngredientItems.length > 0
       ? adapterIngredientItems
       : [
-          ...extractSectionListItems(document.html, /ingredients?/i),
-          ...extractSectionContent(document.html, /ingredients?/i)
+          ...extractSectionListItems($, /ingredients?/i),
+          ...extractSectionContent($, /ingredients?/i)
         ];
   const stepItems =
     adapterStepItems.length > 0
       ? adapterStepItems
       : [
-          ...extractSectionListItems(document.html, /(instructions?|directions?|method)/i),
-          ...extractSectionContent(document.html, /(instructions?|directions?|method|steps?)/i)
+          ...extractSectionListItems($, /(instructions?|directions?|method)/i),
+          ...extractSectionContent($, /(instructions?|directions?|method|steps?)/i)
         ];
   const textSignals = parseTextRecipeSignals([...ingredientItems, ...stepItems]);
-  const combinedText = $.text();
 
   if (!textSignals.signals.recipeLike) {
     return null;
   }
+
+  const combinedText = $.text();
+  const yieldText = combinedText.match(/yield[:\s]+([^\n.]+)/i)?.[1];
+  const prepTimeMinutes = extractMinutesFromText(combinedText, "prep");
+  const cookTimeMinutes = extractMinutesFromText(combinedText, "cook");
+  const nutrition = extractNutritionFromText(combinedText);
 
   return {
     recipe: {
@@ -362,10 +486,20 @@ export const extractRecipeWebpage = (document: HtmlSourceDocument): ExtractionCa
       image,
       ingredients: toIngredientLines(ingredientItems),
       steps: toStepLines(stepItems),
-      servings: parseServingsText($.text().match(/yield[:\s]+([^\n.]+)/i)?.[1] ?? null),
-      prepTimeMinutes: extractMinutesFromText(combinedText, "prep"),
-      cookTimeMinutes: extractMinutesFromText(combinedText, "cook"),
-      nutrition: extractNutritionFromText(combinedText)
+      servings: parseServingsText(yieldText ?? null),
+      prepTimeMinutes,
+      cookTimeMinutes,
+      nutrition,
+      ...compactMetadata({
+        description: readPageDescription(parsed, document),
+        totalTimeMinutes: null,
+        author: readPageAuthor(parsed),
+        siteName: readPageSiteName(parsed),
+        cuisine: null,
+        category: null,
+        keywords: null,
+        videoUrl: null
+      })
     },
     strategy: "recipe-adapter-dom",
     evidence: [
@@ -379,10 +513,10 @@ export const extractRecipeWebpage = (document: HtmlSourceDocument): ExtractionCa
       title: "visible-text",
       ingredients: "visible-text",
       steps: "visible-text",
-      servings: $.text().match(/yield[:\s]+([^\n.]+)/i)?.[1] ? "visible-text" : null,
-      prepTimeMinutes: extractMinutesFromText(combinedText, "prep") == null ? null : "visible-text",
-      cookTimeMinutes: extractMinutesFromText(combinedText, "cook") == null ? null : "visible-text",
-      nutrition: extractNutritionFromText(combinedText) ? "visible-text" : null
+      servings: yieldText ? "visible-text" : null,
+      prepTimeMinutes: prepTimeMinutes == null ? null : "visible-text",
+      cookTimeMinutes: cookTimeMinutes == null ? null : "visible-text",
+      nutrition: nutrition ? "visible-text" : null
     }),
     signals: textSignals.signals
   };

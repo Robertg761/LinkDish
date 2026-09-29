@@ -1,7 +1,8 @@
 import { z } from "zod";
 
-import { buildFallbackInputText } from "./build-fallback-input.js";
+import { fallbackResponseReserveMs, minimumRetryBudgetMs } from "./budget.js";
 import { FallbackProviderError } from "./errors.js";
+import { loadFallbackInputBuilder } from "./load-fallback-input.js";
 
 import type {
   FallbackExtractionInput,
@@ -149,9 +150,9 @@ const toExtractionCandidate = (
 
 const getBase64Payload = (dataUrl: string): string => dataUrl.replace(/^data:[^;]+;base64,/iu, "");
 
-const buildGeminiParts = (input: FallbackExtractionInput) => [
+const buildGeminiParts = (input: FallbackExtractionInput, promptText: string) => [
   {
-    text: buildFallbackInputText(input)
+    text: promptText
   },
   ...(input.sourceDocument.kind === "image"
     ? input.sourceDocument.images.map((image) => ({
@@ -175,10 +176,54 @@ class AvailableGeminiFallbackExtractor implements FallbackRecipeExtractor {
     private readonly timeoutMs: number
   ) {}
 
+  /*
+   * Without a request deadline each attempt gets the full LLM_FALLBACK_TIMEOUT_MS.
+   * With one, an attempt only gets the time that is left (minus a small
+   * reserve), and the retry is skipped when too little remains, so two 30 s
+   * attempts can no longer run past the function's maxDuration.
+   */
+  private getAttemptTimeoutMs(input: FallbackExtractionInput, attempt: number): number | null {
+    if (!input.deadline) {
+      return this.timeoutMs;
+    }
+
+    const budgetMs = input.deadline.budgetMs(this.timeoutMs, fallbackResponseReserveMs);
+
+    if (budgetMs <= 0 || (attempt > 0 && budgetMs < minimumRetryBudgetMs)) {
+      return null;
+    }
+
+    return budgetMs;
+  }
+
   public async extract(input: FallbackExtractionInput): Promise<ExtractionCandidate | null> {
+    const { buildFallbackInputText } = await loadFallbackInputBuilder();
+    const promptText = buildFallbackInputText(input);
+
     for (let attempt = 0; attempt < this.maxAttempts; attempt += 1) {
+      const attemptTimeoutMs = this.getAttemptTimeoutMs(input, attempt);
+
+      if (attemptTimeoutMs === null) {
+        if (attempt === 0) {
+          throw new FallbackProviderError(
+            "Not enough request time left for the Gemini fallback.",
+            "fallback_failed"
+          );
+        }
+
+        break;
+      }
+
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs);
+      const timeoutId = setTimeout(() => controller.abort(), attemptTimeoutMs);
+      const abortFromDeadline = () => controller.abort();
+
+      if (input.deadline?.signal.aborted) {
+        controller.abort();
+      } else {
+        input.deadline?.signal.addEventListener("abort", abortFromDeadline, { once: true });
+      }
+
       const generationConfig = {
         ...(this.model.startsWith("gemini-3") ? {} : { temperature: 0 }),
         responseMimeType: "application/json",
@@ -198,7 +243,7 @@ class AvailableGeminiFallbackExtractor implements FallbackRecipeExtractor {
             body: JSON.stringify({
               contents: [
                 {
-                  parts: buildGeminiParts(input)
+                  parts: buildGeminiParts(input, promptText)
                 }
               ],
               generationConfig
@@ -238,6 +283,7 @@ class AvailableGeminiFallbackExtractor implements FallbackRecipeExtractor {
         return toExtractionCandidate(parsed.data, input);
       } finally {
         clearTimeout(timeoutId);
+        input.deadline?.signal.removeEventListener("abort", abortFromDeadline);
       }
     }
 

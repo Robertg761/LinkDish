@@ -136,7 +136,9 @@ const drawImageCover = (
   context.drawImage(image, cropX, cropY, cropWidth, cropHeight, x, y, width, height);
 };
 
-const loadShareCardImage = (imageUrl: string | null | undefined): Promise<HTMLImageElement | null> =>
+const loadShareCardImage = (
+  imageUrl: string | null | undefined
+): Promise<HTMLImageElement | null> =>
   new Promise((resolve) => {
     if (!imageUrl) {
       resolve(null);
@@ -191,9 +193,7 @@ export const drawShareCard = (
     image && (image.naturalWidth || image.width) && (image.naturalHeight || image.height)
   );
   const textX = hasImage ? INSET + IMAGE_PANEL_WIDTH + IMAGE_PANEL_GAP : TEXT_X;
-  const textMaxWidth = hasImage
-    ? CARD_WIDTH - textX - INSET - 54
-    : CARD_WIDTH - INSET * 2 - 100;
+  const textMaxWidth = hasImage ? CARD_WIDTH - textX - INSET - 54 : CARD_WIDTH - INSET * 2 - 100;
 
   context.fillStyle = COLORS.background;
   context.fillRect(0, 0, CARD_WIDTH, CARD_HEIGHT);

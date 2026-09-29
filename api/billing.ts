@@ -1,8 +1,10 @@
 import { ZodError } from "zod";
 
+import { billingUsageResponseSchema } from "../packages/api-contracts/src/index.js";
 import { extractorApiEnv } from "../services/extractor-api/src/config/env.js";
 import { corsJson, corsPreflight } from "../services/extractor-api/src/http/vercel-cors.js";
 import { getAuthenticatedUser } from "../services/extractor-api/src/modules/auth/auth-service.js";
+import { readBillingUsage } from "../services/extractor-api/src/modules/billing/enforce-billing.js";
 import { handleRevenueCatWebhook } from "../services/extractor-api/src/modules/billing/revenuecat-webhook-service.js";
 import {
   createWebBillingCheckoutUrl,
@@ -10,6 +12,12 @@ import {
   getWebBillingAvailability,
   WebBillingError
 } from "../services/extractor-api/src/modules/billing/web-billing-links.js";
+import {
+  checkPublicEndpointRateLimit,
+  RateLimitUnavailableError
+} from "../services/extractor-api/src/modules/rate-limit/enforce-rate-limit.js";
+
+import { getVercelRequestIdentity } from "./_lib/vercel-request-identity.js";
 
 export const config = {
   maxDuration: 30
@@ -75,12 +83,60 @@ export function OPTIONS(request: Request) {
   return corsPreflight(request);
 }
 
-export function GET(request: Request) {
-  if (getPath(request) !== "config") {
-    return jsonError(request, "Billing route not found.", 404);
+const billingUsageRateLimitPolicy = {
+  max: 60,
+  scope: "billing-usage",
+  windowMs: 60 * 1_000
+} as const;
+
+/*
+ * GET /billing/usage: the caller's import allowance, resolved the way /extract resolves it
+ * (install id or signed-in account, plan, household) but without counting anything.
+ */
+const getBillingUsage = async (request: Request): Promise<Response> => {
+  const identity = getVercelRequestIdentity(request);
+
+  try {
+    const rateLimit = await checkPublicEndpointRateLimit(
+      request.headers,
+      billingUsageRateLimitPolicy,
+      identity
+    );
+
+    if (!rateLimit.allowed) {
+      return corsJson(
+        request,
+        { message: "Too many billing usage requests." },
+        { headers: rateLimit.headers, status: 429 }
+      );
+    }
+
+    const usage = billingUsageResponseSchema.parse(
+      await readBillingUsage(request.headers, identity)
+    );
+
+    return corsJson(request, usage, { headers: { "cache-control": "no-store" } });
+  } catch (error) {
+    if (error instanceof RateLimitUnavailableError) {
+      return jsonError(request, "LinkDish could not check your allowance right now.", 503);
+    }
+
+    return errorResponse(request, error);
+  }
+};
+
+export async function GET(request: Request): Promise<Response> {
+  const path = getPath(request);
+
+  if (path === "config") {
+    return corsJson(request, getWebBillingAvailability());
   }
 
-  return corsJson(request, getWebBillingAvailability());
+  if (path === "usage") {
+    return getBillingUsage(request);
+  }
+
+  return jsonError(request, "Billing route not found.", 404);
 }
 
 export async function POST(request: Request) {

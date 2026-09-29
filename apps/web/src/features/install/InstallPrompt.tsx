@@ -1,129 +1,94 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 
+import { trackWebEvent } from "../../analytics/client";
+import { BrandMark } from "../../components/BrandMark";
 import { Button } from "../../components/Button";
-import { Card } from "../../components/Card";
 import { Icon } from "../../components/Icon";
-import { isStandaloneMode } from "../../platform/detect-installation";
-import { isIos } from "../../platform/detect-ios";
-import { safeGetItem, safeSetItem } from "../../platform/safe-storage";
+import { IconButton } from "../../components/IconButton";
+import { useInstallPrompt } from "../../platform/install-prompt";
+
+import {
+  dismissInstallPrompt,
+  useHasSavedRecipe,
+  useInstallPromptDismissed
+} from "./install-eligibility";
+
 import "./InstallPrompt.css";
 
-// Interface for beforeinstallprompt event
-interface BeforeInstallPromptEvent extends Event {
-  readonly platforms: string[];
-  readonly userChoice: Promise<{
-    outcome: "accepted" | "dismissed";
-    platform: string;
-  }>;
-  prompt(): Promise<void>;
-}
-
+/**
+ * A gentle install nudge shown on the import screen once someone has saved a recipe. Uses the
+ * install event captured at boot (platform/install-prompt), so it works even though this card
+ * mounts long after the browser offered the install, and follows the first save as it happens
+ * (the card stays mounted beside the import queue).
+ */
 export const InstallPrompt: React.FC = () => {
-  const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
-  const [showPrompt, setShowPrompt] = useState(false);
-  const [isDismissed, setIsDismissed] = useState(false);
-
-  useEffect(() => {
-    if (isStandaloneMode()) {
-      return;
-    }
-
-    const hasExtracted = safeGetItem("linkdish:web:has-extracted-recipe") === "true";
-    if (!hasExtracted) {
-      // Only show install education after user has successfully extracted at least one recipe
-      return;
-    }
-
-    const dismissed = safeGetItem("linkdish:web:install-prompt-dismissed") === "true";
-    if (dismissed) {
-      setIsDismissed(true);
-      return;
-    }
-
-    // Always show prompt for iOS manual flow if not standalone
-    if (isIos()) {
-      setShowPrompt(true);
-    }
-
-    const handleBeforeInstallPrompt = (e: Event) => {
-      e.preventDefault();
-      setDeferredPrompt(e as BeforeInstallPromptEvent);
-      setShowPrompt(true);
-    };
-
-    window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
-
-    return () => {
-      window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
-    };
-  }, []);
+  const { canInstall, isInstalled, platform, promptInstall } = useInstallPrompt();
+  const isDismissed = useInstallPromptDismissed();
+  const [hasPrompted, setHasPrompted] = useState(false);
+  // Only show install education after the user has saved at least one recipe.
+  const hasSavedRecipe = useHasSavedRecipe();
+  const isIosDevice = platform === "ios";
 
   const handleInstallClick = async () => {
-    if (!deferredPrompt) return;
-
-    const promptEvent = deferredPrompt;
-    setDeferredPrompt(null);
-
-    try {
-      await promptEvent.prompt();
-      const { outcome } = await promptEvent.userChoice;
-
-      if (outcome === "accepted") {
-        setShowPrompt(false);
-      }
-    } catch (err) {
-      console.warn("Install prompt failed:", err);
-    } finally {
-      setShowPrompt(false);
-    }
+    setHasPrompted(true);
+    trackWebEvent({
+      eventName: "web_install_cta_clicked",
+      routeOrScreen: window.location.pathname,
+      properties: { platform, surface: "install_prompt" }
+    });
+    await promptInstall();
   };
 
-  const handleDismiss = () => {
-    safeSetItem("linkdish:web:install-prompt-dismissed", "true");
-    setIsDismissed(true);
-    setShowPrompt(false);
-  };
+  const showPrompt =
+    !isInstalled && hasSavedRecipe && !isDismissed && !hasPrompted && (isIosDevice || canInstall);
 
-  if (!showPrompt || isDismissed) {
+  if (!showPrompt) {
     return null;
   }
 
   return (
-    <Card className="install-prompt-card animate-fade-in" variant="subtle">
-      <div className="install-prompt-header">
-        <Icon
-          name="cellphone-arrow-down"
-          size={28}
-          color="var(--color-accent)"
-          className="install-prompt-icon"
-        />
-        <div className="install-prompt-text-container">
-          <h4 className="install-prompt-title">Add LinkDish to Home Screen</h4>
+    <section aria-labelledby="install-prompt-title" className="install-prompt animate-fade-in">
+      <span className="install-prompt-mark" aria-hidden="true">
+        <BrandMark size={30} />
+      </span>
+      <div className="install-prompt-copy">
+        <h2 className="install-prompt-title" id="install-prompt-title">
+          Add LinkDish to your home screen
+        </h2>
+        {isIosDevice ? (
           <p className="install-prompt-desc">
-            Open LinkDish from your home screen and keep saved recipes close.
-          </p>
-        </div>
-        <button
-          className="install-prompt-close"
-          onClick={handleDismiss}
-          aria-label="Dismiss prompt"
-        >
-          <Icon name="close" size={20} />
-        </button>
-      </div>
-
-      <div className="install-prompt-actions">
-        {isIos() ? (
-          <p className="install-ios-instructions">
-            Tap <span className="share-icon">⎙</span> (Share) in Safari, then choose{" "}
-            <strong>Add to Home Screen</strong>.
+            Tap Share{" "}
+            <span className="install-prompt-glyph" role="img" aria-label="share">
+              <Icon name="share-up" size={14} strokeWidth={2.2} />
+            </span>{" "}
+            in Safari, then <strong>Add to Home Screen</strong>.
           </p>
         ) : (
-          <Button variant="primary" onClick={handleInstallClick} disabled={!deferredPrompt}>
-            Install App
-          </Button>
+          <p className="install-prompt-desc">
+            {platform === "android"
+              ? "Open it like an app and share recipes straight into LinkDish."
+              : "Open it in its own window, right from your dock or taskbar."}
+          </p>
         )}
       </div>
-    </Card>
+      {isIosDevice ? null : (
+        <Button
+          className="install-prompt-action"
+          disabled={!canInstall}
+          icon="smartphone-download"
+          onClick={() => void handleInstallClick()}
+          size="sm"
+        >
+          Install app
+        </Button>
+      )}
+      <IconButton
+        aria-label="Dismiss install tip"
+        className="install-prompt-close"
+        icon="x"
+        onClick={dismissInstallPrompt}
+        size="sm"
+      />
+    </section>
   );
 };

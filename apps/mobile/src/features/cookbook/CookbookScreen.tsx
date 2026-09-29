@@ -1,16 +1,24 @@
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { AppButton, AppText } from "@linkdish/ui";
-import { decodeHtmlEntities } from "@linkdish/utils";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { router, useLocalSearchParams, usePathname } from "expo-router";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import { router } from "expo-router";
+import React, {
+  memo,
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState
+} from "react";
 import {
+  FlatList,
   Image,
   Pressable,
-  ScrollView,
   StyleSheet,
   TextInput,
   View,
+  type ListRenderItem,
   type StyleProp,
   type ViewStyle
 } from "react-native";
@@ -32,19 +40,28 @@ import { useOptionalUpgradeMoment } from "../billing/UpgradeMomentContext";
 import { buildRecipeMetaLine } from "../recipe-results/recipeMetaLine";
 import { useSavedRecipes } from "../saved-recipes/SavedRecipesContext";
 import {
+  buildSavedRecipeSearchIndex,
+  buildSharedRecipeSearchIndex,
   getSharedRecipeOwnerLabel,
-  searchSavedRecipeRecords,
-  searchSharedRecipeRecords,
   type SavedRecipeRecord
 } from "../saved-recipes/store";
+
+import {
+  COOKBOOK_SORT_OPTIONS,
+  getSortDirectionLabel,
+  isCookbookSort,
+  isCookbookSortDirection,
+  normalizeRecipeText,
+  sortCookbookRecords,
+  type CookbookSort,
+  type CookbookSortDirection
+} from "./cookbookSort";
 
 import type { SharedRecipe } from "@linkdish/api-contracts";
 import type { Recipe } from "@linkdish/recipe-domain";
 import type { ComponentProps } from "react";
 
 type CookbookTab = "personal" | "family";
-type CookbookSort = "recent" | "az" | "mostCooked";
-type CookbookSortDirection = "forward" | "reverse";
 type PendingConfirmation = {
   cancelLabel: string;
   confirmLabel: string;
@@ -52,96 +69,36 @@ type PendingConfirmation = {
   onConfirm: () => void;
   title: string;
 };
+type CookbookListItem =
+  | { kind: "controls"; key: "controls" }
+  | { kind: "prelude"; key: "prelude" }
+  | { entry: SavedRecipeRecord; index: number; key: string; kind: "saved" }
+  | { entry: SharedRecipe; index: number; key: string; kind: "shared" };
 
 const ROW_ENTER_DURATION_MS = 220;
 const ROW_STAGGER_MS = 18;
 const ROW_STAGGER_CAP = 8;
 const COOKBOOK_SORT_STORAGE_KEY = "linkdish.cookbook.sort.v1";
 const COOKBOOK_SORT_DIRECTION_STORAGE_KEY = "linkdish.cookbook.sort-direction.v1";
-const COOKBOOK_SORT_OPTIONS: Array<{ label: string; value: CookbookSort }> = [
-  { label: "Recent", value: "recent" },
-  { label: "A–Z", value: "az" },
-  { label: "Most cooked", value: "mostCooked" }
-];
+const LOCKED_FAMILY_HINT_MS = 4000;
+/** The controls cell (index 1 after the title header) stays pinned while the list scrolls. */
+const STICKY_CONTROLS_INDICES = [1];
+const CONTROLS_ITEM: CookbookListItem = { key: "controls", kind: "controls" };
+const PRELUDE_ITEM: CookbookListItem = { key: "prelude", kind: "prelude" };
 
-const isCookbookSort = (value: string | null): value is CookbookSort =>
-  COOKBOOK_SORT_OPTIONS.some((option) => option.value === value);
-
-const isCookbookSortDirection = (value: string | null): value is CookbookSortDirection =>
-  value === "forward" || value === "reverse";
-
-const getRowEntering = (index: number) =>
+/**
+ * Entering animations for the first rows only, built once. They play when the list first
+ * mounts; rows mounted later (scrolling, searching, switching tabs) appear without motion.
+ * ReduceMotion.System skips them when the OS asks for reduced motion.
+ */
+const ROW_ENTERING_ANIMATIONS = Array.from({ length: ROW_STAGGER_CAP }, (_, index) =>
   FadeInDown.duration(ROW_ENTER_DURATION_MS)
-    .delay(Math.min(index, ROW_STAGGER_CAP) * ROW_STAGGER_MS)
+    .delay(index * ROW_STAGGER_MS)
     .easing(ReanimatedEasing.out(ReanimatedEasing.cubic))
-    .reduceMotion(ReduceMotion.System);
+    .reduceMotion(ReduceMotion.System)
+);
 
-const normalizeRecipeText = (value: string) => decodeHtmlEntities(value).replace(/\u00a0/gu, " ");
-
-const sortByTitle = <T extends { recipe: Pick<Recipe, "title"> }>(
-  records: T[],
-  direction: CookbookSortDirection
-) => {
-  const sortedRecords = [...records].sort((left, right) =>
-    normalizeRecipeText(left.recipe.title).localeCompare(normalizeRecipeText(right.recipe.title))
-  );
-
-  return direction === "reverse" ? sortedRecords.reverse() : sortedRecords;
-};
-
-const sortSavedRecipes = (
-  records: SavedRecipeRecord[],
-  sort: CookbookSort,
-  direction: CookbookSortDirection
-) => {
-  if (sort === "az") {
-    return sortByTitle(records, direction);
-  }
-
-  if (sort === "mostCooked") {
-    const sortedRecords = [...records].sort(
-      (left, right) =>
-        (right.timesCooked ?? 0) - (left.timesCooked ?? 0) ||
-        Date.parse(right.savedAt) - Date.parse(left.savedAt)
-    );
-
-    return direction === "reverse" ? sortedRecords.reverse() : sortedRecords;
-  }
-
-  const sortedRecords = [...records].sort(
-    (left, right) => Date.parse(right.savedAt) - Date.parse(left.savedAt)
-  );
-
-  return direction === "reverse" ? sortedRecords.reverse() : sortedRecords;
-};
-
-const sortSharedRecipes = (
-  records: SharedRecipe[],
-  sort: CookbookSort,
-  direction: CookbookSortDirection
-) => {
-  if (sort === "az") {
-    return sortByTitle(records, direction);
-  }
-
-  const sortedRecords = [...records].sort(
-    (left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt)
-  );
-
-  return direction === "reverse" ? sortedRecords.reverse() : sortedRecords;
-};
-
-const getSortDirectionLabel = (sort: CookbookSort, direction: CookbookSortDirection) => {
-  if (sort === "az") {
-    return direction === "forward" ? "A to Z" : "Z to A";
-  }
-
-  if (sort === "mostCooked") {
-    return direction === "forward" ? "Most cooked first" : "Least cooked first";
-  }
-
-  return direction === "forward" ? "Newest first" : "Oldest first";
-};
+const keyExtractor = (item: CookbookListItem) => item.key;
 
 const RecipeBookThumbnail = ({ recipe }: { recipe: Pick<Recipe, "image" | "title"> }) => {
   const imageUrl = buildProxiedRecipeImageUrl(recipe.image, 96);
@@ -208,12 +165,14 @@ const SegmentButton = ({
 
 const IconAction = ({
   accessibilityLabel,
+  accessibilityState,
   color = appColors.muted,
   disabled = false,
   name,
   onPress
 }: {
   accessibilityLabel: string;
+  accessibilityState?: { selected?: boolean };
   color?: string;
   disabled?: boolean;
   name: ComponentProps<typeof MaterialCommunityIcons>["name"];
@@ -222,6 +181,7 @@ const IconAction = ({
   <Pressable
     accessibilityLabel={accessibilityLabel}
     accessibilityRole="button"
+    {...(accessibilityState ? { accessibilityState } : {})}
     disabled={disabled}
     hitSlop={10}
     onPress={onPress}
@@ -235,10 +195,167 @@ const IconAction = ({
   </Pressable>
 );
 
+interface SavedRecipeRowProps {
+  canShare: boolean;
+  entering: (typeof ROW_ENTERING_ANIMATIONS)[number] | undefined;
+  entry: SavedRecipeRecord;
+  isLibraryReady: boolean;
+  onDuplicate: (id: string) => void;
+  onOpen: (id: string) => void;
+  onRemove: (id: string, title: string) => void;
+  onToggleFavorite: (id: string, favorite: boolean) => void;
+  onToggleShared: (id: string, isShared: boolean) => void;
+}
+
+const SavedRecipeRow = memo(function SavedRecipeRow({
+  canShare,
+  entering,
+  entry,
+  isLibraryReady,
+  onDuplicate,
+  onOpen,
+  onRemove,
+  onToggleFavorite,
+  onToggleShared
+}: SavedRecipeRowProps) {
+  const isFavorite = entry.favorite === true;
+  const showShare = canShare && !entry.isStarter;
+
+  return (
+    <View style={styles.rowFrame}>
+      <Reanimated.View {...(entering ? { entering } : {})} style={styles.recipeRow}>
+        <Pressable
+          onPress={() => onOpen(entry.id)}
+          style={({ pressed }) => [styles.recipePressable, pressed && styles.rowPressed]}
+        >
+          <RecipeBookThumbnail recipe={entry.recipe} />
+          <View style={styles.recipeContent}>
+            <View style={styles.recipeTitleRow}>
+              <AppText numberOfLines={2} style={styles.recipeTitle} variant="title">
+                {normalizeRecipeText(entry.recipe.title)}
+              </AppText>
+            </View>
+            <AppText muted numberOfLines={2} style={styles.recipeMeta}>
+              {buildRecipeMetaLine(entry.recipe, { compact: true })}
+            </AppText>
+            {entry.notes ? (
+              <AppText muted numberOfLines={1} style={styles.recipeMeta}>
+                {normalizeRecipeText(entry.notes)}
+              </AppText>
+            ) : null}
+            {entry.isStarter ? (
+              <View style={styles.starterChip}>
+                <AppText style={styles.starterChipText}>Starter recipe</AppText>
+              </View>
+            ) : null}
+          </View>
+        </Pressable>
+
+        <View style={[styles.recipeActions, showShare && styles.recipeActionsWide]}>
+          <IconAction
+            accessibilityLabel={isFavorite ? "Remove from favorites" : "Add to favorites"}
+            accessibilityState={{ selected: isFavorite }}
+            color={isFavorite ? appColors.tomato : appColors.muted}
+            name={isFavorite ? "heart" : "heart-outline"}
+            onPress={() => onToggleFavorite(entry.id, !isFavorite)}
+          />
+          <IconAction
+            accessibilityLabel="Duplicate recipe"
+            color={appColors.accent}
+            disabled={!isLibraryReady}
+            name="content-copy"
+            onPress={() => onDuplicate(entry.id)}
+          />
+          <IconAction
+            accessibilityLabel="Remove recipe"
+            name="bookmark-remove-outline"
+            onPress={() => onRemove(entry.id, entry.recipe.title)}
+          />
+          {showShare ? (
+            <IconAction
+              accessibilityLabel={entry.sharedRecipeId ? "Unshare recipe" : "Share recipe"}
+              name={
+                entry.sharedRecipeId
+                  ? "account-multiple-minus-outline"
+                  : "account-multiple-plus-outline"
+              }
+              onPress={() => onToggleShared(entry.id, entry.sharedRecipeId != null)}
+            />
+          ) : null}
+        </View>
+      </Reanimated.View>
+    </View>
+  );
+});
+
+interface SharedRecipeRowProps {
+  entering: (typeof ROW_ENTERING_ANIMATIONS)[number] | undefined;
+  entry: SharedRecipe;
+  isLibraryReady: boolean;
+  isOwnedByCurrentUser: boolean;
+  onDuplicate: (id: string) => void;
+  onOpen: (id: string) => void;
+  onUnshare: (id: string, title: string) => void;
+}
+
+const SharedRecipeRow = memo(function SharedRecipeRow({
+  entering,
+  entry,
+  isLibraryReady,
+  isOwnedByCurrentUser,
+  onDuplicate,
+  onOpen,
+  onUnshare
+}: SharedRecipeRowProps) {
+  return (
+    <View style={styles.rowFrame}>
+      <Reanimated.View {...(entering ? { entering } : {})} style={styles.recipeRow}>
+        <Pressable
+          onPress={() => onOpen(entry.id)}
+          style={({ pressed }) => [styles.recipePressable, pressed && styles.rowPressed]}
+        >
+          <RecipeBookThumbnail recipe={entry.recipe} />
+          <View style={styles.recipeContent}>
+            <View style={styles.recipeTitleRow}>
+              <AppText numberOfLines={2} style={styles.recipeTitle} variant="title">
+                {normalizeRecipeText(entry.recipe.title)}
+              </AppText>
+            </View>
+            <AppText muted numberOfLines={2} style={styles.recipeMeta}>
+              {buildRecipeMetaLine(entry.recipe, { compact: true })}
+            </AppText>
+            <AppText muted numberOfLines={1} style={styles.recipeMeta}>
+              Owned by {getSharedRecipeOwnerLabel(entry)}
+            </AppText>
+          </View>
+        </Pressable>
+
+        <View
+          style={[styles.sharedRecipeActions, isOwnedByCurrentUser && styles.recipeActionsWide]}
+        >
+          <MaterialCommunityIcons color={appColors.accent} name="chevron-right" size={18} />
+          <IconAction
+            accessibilityLabel="Save copy"
+            color={appColors.accent}
+            disabled={!isLibraryReady}
+            name="content-copy"
+            onPress={() => onDuplicate(entry.id)}
+          />
+          {isOwnedByCurrentUser ? (
+            <IconAction
+              accessibilityLabel="Unshare recipe"
+              name="account-multiple-minus-outline"
+              onPress={() => onUnshare(entry.id, entry.recipe.title)}
+            />
+          ) : null}
+        </View>
+      </Reanimated.View>
+    </View>
+  );
+});
+
 export const CookbookScreen = () => {
-  const pathname = usePathname();
-  const routeParams = useLocalSearchParams<{ savedId?: string; sharedId?: string }>();
-  const { user } = useAccount();
+  const { isSignedIn, user } = useAccount();
   const {
     canUseSharedRecipeBook,
     cloneRecipe,
@@ -248,6 +365,7 @@ export const CookbookScreen = () => {
     hasLoadedSharedRecipes,
     removeRecipe,
     savedRecipes,
+    setRecipeFavorite,
     setShareMode,
     sharedRecipeError,
     sharedRecipes,
@@ -267,65 +385,104 @@ export const CookbookScreen = () => {
   const [sortDirection, setSortDirection] = useState<CookbookSortDirection>("forward");
   const [isSortMenuOpen, setIsSortMenuOpen] = useState(false);
   const [isFamilySharingOpen, setIsFamilySharingOpen] = useState(false);
+  const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
   const [lockedFamilyHintVisible, setLockedFamilyHintVisible] = useState(false);
-  const [pendingConfirmation, setPendingConfirmation] = useState<PendingConfirmation | null>(null);
+  const [pendingConfirmation, setPendingConfirmation] = useState<{
+    account: string | null;
+    confirmation: PendingConfirmation;
+  } | null>(null);
+  /** Who a confirmation is for: one opened by another account (signed in since) isn't shown. */
+  const account = isSignedIn && user ? user.id : null;
+  const openConfirmation = useCallback(
+    (confirmation: PendingConfirmation) => setPendingConfirmation({ account, confirmation }),
+    [account]
+  );
+  const shownConfirmation =
+    pendingConfirmation?.account === account ? pendingConfirmation.confirmation : null;
+
+  // Another account (or none) signed in: the last one's confirmation is dropped, not kept hidden,
+  // so it can't come back when that account signs in again.
+  useEffect(() => {
+    setPendingConfirmation((current) => (current && current.account !== account ? null : current));
+  }, [account]);
+  const [animateFirstRows, setAnimateFirstRows] = useState(true);
   const emptyLibraryLine = useMemo(() => selectFlavorCopyLine(EMPTY_LIBRARY_LINES), []);
-  const activeSort = activeTab === "family" && sort === "mostCooked" ? "recent" : sort;
-  const filteredSavedRecipes = useMemo(
-    () => sortSavedRecipes(searchSavedRecipeRecords(savedRecipes, query), sort, sortDirection),
-    [query, savedRecipes, sort, sortDirection]
+  // Typing stays responsive: the list re-filters from a deferred copy of the query.
+  const deferredQuery = useDeferredValue(query);
+  const hasQuery = deferredQuery.trim().length > 0;
+  const activeSortOption = COOKBOOK_SORT_OPTIONS.find(
+    (option) => option.value === sort && (activeTab === "personal" || !option.personalOnly)
   );
-  const filteredSharedRecipes = useMemo(
-    () =>
-      sortSharedRecipes(searchSharedRecipeRecords(sharedRecipes, query), activeSort, sortDirection),
-    [activeSort, query, sharedRecipes, sortDirection]
+  const activeSort: CookbookSort = activeSortOption?.value ?? "recent";
+  const activeSortLabel = activeSortOption?.label ?? COOKBOOK_SORT_OPTIONS[0]!.label;
+  const isFamilyLocked =
+    hasLoadedSharedRecipes && !canUseSharedRecipeBook && sharedRecipes.length === 0;
+  const isFavoritesFilterOn = activeTab === "personal" && showFavoritesOnly;
+  const favoriteCount = useMemo(
+    () => savedRecipes.filter((entry) => entry.favorite === true).length,
+    [savedRecipes]
   );
-  const activeSortOption =
-    COOKBOOK_SORT_OPTIONS.find((option) => option.value === activeSort) ??
-    COOKBOOK_SORT_OPTIONS[0]!;
-  const sortDirectionLabel = getSortDirectionLabel(activeSort, sortDirection);
 
-  const toggleSortMenu = () => {
-    selectionTick();
-    dismissLockedFamilyHint();
-    setIsSortMenuOpen((current) => !current);
-  };
+  // The search index is built once per library change, and only while a search is active.
+  const savedSearchIndex = useMemo(
+    () => (hasQuery ? buildSavedRecipeSearchIndex(savedRecipes) : null),
+    [hasQuery, savedRecipes]
+  );
+  const sharedSearchIndex = useMemo(
+    () => (hasQuery ? buildSharedRecipeSearchIndex(sharedRecipes) : null),
+    [hasQuery, sharedRecipes]
+  );
+  const filteredSavedRecipes = useMemo(() => {
+    const matches = savedSearchIndex
+      ? savedSearchIndex.search(deferredQuery).map((result) => result.record)
+      : savedRecipes;
+    const visible = isFavoritesFilterOn
+      ? matches.filter((entry) => entry.favorite === true)
+      : matches;
 
-  const selectSort = (nextSort: CookbookSort) => {
-    sortPreferencesChangedRef.current = true;
-    selectionTick();
-    setSort(nextSort);
-    setIsSortMenuOpen(false);
-    void AsyncStorage.setItem(COOKBOOK_SORT_STORAGE_KEY, nextSort).catch(() => undefined);
-  };
-
-  const toggleSortDirection = () => {
-    sortPreferencesChangedRef.current = true;
-    selectionTick();
-    setSortDirection((currentDirection) => {
-      const nextDirection = currentDirection === "forward" ? "reverse" : "forward";
-      void AsyncStorage.setItem(COOKBOOK_SORT_DIRECTION_STORAGE_KEY, nextDirection).catch(
-        () => undefined
-      );
-      return nextDirection;
+    return sortCookbookRecords(visible, activeSort, sortDirection, {
+      getSavedAt: (entry) => entry.savedAt,
+      getTimesCooked: (entry) => entry.timesCooked ?? 0
     });
-  };
+  }, [
+    activeSort,
+    deferredQuery,
+    isFavoritesFilterOn,
+    savedRecipes,
+    savedSearchIndex,
+    sortDirection
+  ]);
+  const filteredSharedRecipes = useMemo(() => {
+    const matches = sharedSearchIndex
+      ? sharedSearchIndex.search(deferredQuery).map((result) => result.record)
+      : sharedRecipes;
 
-  const openImport = () => {
-    router.push("/import" as never);
-  };
+    return sortCookbookRecords(matches, activeSort, sortDirection, {
+      getSavedAt: (entry) => entry.createdAt
+    });
+  }, [activeSort, deferredQuery, sharedRecipes, sharedSearchIndex, sortDirection]);
+  const sortDirectionLabel = getSortDirectionLabel(activeSort, sortDirection);
+  const hasRows =
+    activeTab === "personal" ? filteredSavedRecipes.length > 0 : filteredSharedRecipes.length > 0;
 
-  const clearLockedFamilyHintTimer = () => {
+  useEffect(() => {
+    // Only the first rows of the first populated render animate in.
+    if (animateFirstRows && hasRows) {
+      setAnimateFirstRows(false);
+    }
+  }, [animateFirstRows, hasRows]);
+
+  const clearLockedFamilyHintTimer = useCallback(() => {
     if (lockedFamilyHintTimeoutRef.current) {
       clearTimeout(lockedFamilyHintTimeoutRef.current);
       lockedFamilyHintTimeoutRef.current = null;
     }
-  };
+  }, []);
 
-  const dismissLockedFamilyHint = () => {
+  const dismissLockedFamilyHint = useCallback(() => {
     clearLockedFamilyHintTimer();
     setLockedFamilyHintVisible(false);
-  };
+  }, [clearLockedFamilyHintTimer]);
 
   const showLockedFamilyHint = () => {
     warnHaptic();
@@ -334,10 +491,10 @@ export const CookbookScreen = () => {
     lockedFamilyHintTimeoutRef.current = setTimeout(() => {
       setLockedFamilyHintVisible(false);
       lockedFamilyHintTimeoutRef.current = null;
-    }, 4000);
+    }, LOCKED_FAMILY_HINT_MS);
   };
 
-  useEffect(() => () => clearLockedFamilyHintTimer(), []);
+  useEffect(() => () => clearLockedFamilyHintTimer(), [clearLockedFamilyHintTimer]);
 
   useEffect(() => {
     let isActive = true;
@@ -376,113 +533,172 @@ export const CookbookScreen = () => {
     };
   }, []);
 
-  const openSavedRecipe = (id: string) => {
-    if (pathname === "/recipe") {
-      router.replace({ pathname: "/recipe", params: { savedId: id } });
-      return;
-    }
+  const toggleSortMenu = () => {
+    selectionTick();
+    dismissLockedFamilyHint();
+    setIsSortMenuOpen((current) => !current);
+  };
 
+  const selectSort = (nextSort: CookbookSort) => {
+    sortPreferencesChangedRef.current = true;
+    selectionTick();
+    setSort(nextSort);
+    setIsSortMenuOpen(false);
+    void AsyncStorage.setItem(COOKBOOK_SORT_STORAGE_KEY, nextSort).catch(() => undefined);
+  };
+
+  const toggleSortDirection = () => {
+    sortPreferencesChangedRef.current = true;
+    selectionTick();
+    setSortDirection((currentDirection) => {
+      const nextDirection = currentDirection === "forward" ? "reverse" : "forward";
+      void AsyncStorage.setItem(COOKBOOK_SORT_DIRECTION_STORAGE_KEY, nextDirection).catch(
+        () => undefined
+      );
+      return nextDirection;
+    });
+  };
+
+  const toggleFavoritesFilter = () => {
+    selectionTick();
+    dismissLockedFamilyHint();
+    setShowFavoritesOnly((current) => !current);
+  };
+
+  const openImport = useCallback(() => {
+    router.push("/import" as never);
+  }, []);
+
+  const openSavedRecipe = useCallback((id: string) => {
     router.push({ pathname: "/recipe", params: { savedId: id } });
-  };
+  }, []);
 
-  const openSharedRecipe = (id: string) => {
-    if (pathname === "/recipe") {
-      router.replace({ pathname: "/recipe", params: { sharedId: id } });
-      return;
-    }
-
+  const openSharedRecipe = useCallback((id: string) => {
     router.push({ pathname: "/recipe", params: { sharedId: id } });
-  };
+  }, []);
 
-  const duplicateSavedRecipe = (id: string) => {
-    const result = cloneRecipe(id);
-
-    if (!result.saved || !result.recipeId) {
-      if (!result.allowed && result.reason === "save_limit_reached") {
-        showUpgradeMoment("save_limit");
-      }
-
-      return;
-    }
-
-    router.push({
-      pathname: "/recipe",
-      params: {
-        edit: "1",
-        savedId: result.recipeId
-      }
-    });
-  };
-
-  const duplicateSharedRecipe = (id: string) => {
-    const result = cloneSharedRecipe(id);
-
-    if (!result.saved || !result.recipeId) {
-      if (!result.allowed && result.reason === "save_limit_reached") {
-        showUpgradeMoment("save_limit");
-      }
-
-      return;
-    }
-
-    router.push({
-      pathname: "/recipe",
-      params: {
-        edit: "1",
-        savedId: result.recipeId
-      }
-    });
-  };
-
-  const removeSavedRecipe = (id: string, title: string) => {
-    setPendingConfirmation({
-      cancelLabel: "Cancel",
-      confirmLabel: "Remove",
-      message: `\u201c${title}\u201d will be removed from your cookbook.`,
-      onConfirm: () => {
-        warnHaptic();
-        removeRecipe(id);
-
-        if (pathname === "/recipe" && routeParams.savedId === id) {
-          router.replace("/");
+  const openDuplicateResult = useCallback(
+    (result: ReturnType<typeof cloneRecipe>) => {
+      if (!result.saved || !result.recipeId) {
+        if (!result.allowed && result.reason === "save_limit_reached") {
+          showUpgradeMoment("save_limit");
         }
-      },
-      title: "Remove recipe?"
-    });
-  };
 
-  const toggleRecipeShared = (id: string, isShared: boolean) => {
-    if (!isShared) {
-      void shareRecipe(id);
-      return;
-    }
+        return;
+      }
 
-    setPendingConfirmation({
-      cancelLabel: "Keep shared",
-      confirmLabel: "Unshare",
-      message: "Remove this recipe from the Family recipe book?",
-      onConfirm: () => {
-        void unshareRecipe(id);
-      },
-      title: "Unshare recipe?"
-    });
-  };
+      router.push({
+        pathname: "/recipe",
+        params: {
+          edit: "1",
+          savedId: result.recipeId
+        }
+      });
+    },
+    [showUpgradeMoment]
+  );
 
-  const removeSharedRecipe = (id: string, title: string) => {
-    setPendingConfirmation({
-      cancelLabel: "Keep shared",
-      confirmLabel: "Unshare",
-      message: `Remove "${title}" from the Family recipe book?`,
-      onConfirm: () => {
-        void deleteSharedRecipe(id).then((result) => {
-          if (result.saved && pathname === "/recipe" && routeParams.sharedId === id) {
-            router.replace("/");
-          }
-        });
-      },
-      title: "Unshare recipe?"
-    });
-  };
+  const duplicateSavedRecipe = useCallback(
+    (id: string) => openDuplicateResult(cloneRecipe(id)),
+    [cloneRecipe, openDuplicateResult]
+  );
+
+  const duplicateSharedRecipe = useCallback(
+    (id: string) => openDuplicateResult(cloneSharedRecipe(id)),
+    [cloneSharedRecipe, openDuplicateResult]
+  );
+
+  const removeSavedRecipe = useCallback(
+    (id: string, title: string) => {
+      openConfirmation({
+        cancelLabel: "Cancel",
+        confirmLabel: "Remove",
+        message: `“${title}” will be removed from your cookbook.`,
+        onConfirm: () => {
+          warnHaptic();
+          removeRecipe(id);
+        },
+        title: "Remove recipe?"
+      });
+    },
+    [openConfirmation, removeRecipe]
+  );
+
+  const toggleRecipeShared = useCallback(
+    (id: string, isShared: boolean) => {
+      if (!isShared) {
+        void shareRecipe(id);
+        return;
+      }
+
+      openConfirmation({
+        cancelLabel: "Keep shared",
+        confirmLabel: "Unshare",
+        message: "Remove this recipe from the Family recipe book?",
+        onConfirm: () => {
+          void unshareRecipe(id);
+        },
+        title: "Unshare recipe?"
+      });
+    },
+    [openConfirmation, shareRecipe, unshareRecipe]
+  );
+
+  const toggleFavorite = useCallback(
+    (id: string, favorite: boolean) => {
+      selectionTick();
+      setRecipeFavorite(id, favorite);
+    },
+    [setRecipeFavorite]
+  );
+
+  const removeSharedRecipe = useCallback(
+    (id: string, title: string) => {
+      openConfirmation({
+        cancelLabel: "Keep shared",
+        confirmLabel: "Unshare",
+        message: `Remove "${title}" from the Family recipe book?`,
+        onConfirm: () => {
+          void deleteSharedRecipe(id);
+        },
+        title: "Unshare recipe?"
+      });
+    },
+    [deleteSharedRecipe, openConfirmation]
+  );
+
+  const listItems = useMemo((): CookbookListItem[] => {
+    const hasPrelude =
+      activeTab === "personal" && (canUseSharedRecipeBook || sharedRecipeError != null);
+    const rows: CookbookListItem[] =
+      activeTab === "personal"
+        ? hasLoadedSavedRecipes
+          ? filteredSavedRecipes.map((entry, index) => ({
+              entry,
+              index,
+              key: `saved:${entry.id}`,
+              kind: "saved" as const
+            }))
+          : []
+        : hasLoadedSharedRecipes
+          ? filteredSharedRecipes.map((entry, index) => ({
+              entry,
+              index,
+              key: `shared:${entry.id}`,
+              kind: "shared" as const
+            }))
+          : [];
+
+    return [CONTROLS_ITEM, ...(hasPrelude ? [PRELUDE_ITEM] : []), ...rows];
+  }, [
+    activeTab,
+    canUseSharedRecipeBook,
+    filteredSavedRecipes,
+    filteredSharedRecipes,
+    hasLoadedSavedRecipes,
+    hasLoadedSharedRecipes,
+    sharedRecipeError
+  ]);
 
   const renderEmptyState = (message: string, ctaLabel = "Import a recipe") => (
     <View style={styles.emptyState}>
@@ -496,162 +712,340 @@ export const CookbookScreen = () => {
     </View>
   );
 
-  const renderSavedRecipes = () => {
+  const renderListMessage = (message: string) => (
+    <View style={styles.listMessage}>
+      <AppText muted>{message}</AppText>
+    </View>
+  );
+
+  const renderPersonalFooter = () => {
     if (!hasLoadedSavedRecipes) {
-      return (
-        <View style={styles.listMessage}>
-          <AppText muted>Loading your saved recipes...</AppText>
-        </View>
-      );
+      return renderListMessage("Loading your saved recipes...");
     }
 
     if (savedRecipes.length === 0) {
       return renderEmptyState(emptyLibraryLine);
     }
 
-    if (filteredSavedRecipes.length === 0) {
-      return (
-        <View style={styles.listMessage}>
-          <AppText muted>No saved recipes match this search.</AppText>
-        </View>
+    if (filteredSavedRecipes.length > 0) {
+      return null;
+    }
+
+    if (isFavoritesFilterOn && !hasQuery) {
+      return renderListMessage(
+        favoriteCount === 0
+          ? "No favorites yet. Tap the heart on a recipe to keep it here."
+          : "No favorites match this search."
       );
     }
 
-    return filteredSavedRecipes.map((entry, index) => (
-      <Reanimated.View entering={getRowEntering(index)} key={entry.id} style={styles.recipeRow}>
-        <Pressable
-          onPress={() => openSavedRecipe(entry.id)}
-          style={({ pressed }) => [styles.recipePressable, pressed && styles.rowPressed]}
-        >
-          <RecipeBookThumbnail recipe={entry.recipe} />
-          <View style={styles.recipeContent}>
-            <View style={styles.recipeTitleRow}>
-              <AppText numberOfLines={2} style={styles.recipeTitle} variant="title">
-                {normalizeRecipeText(entry.recipe.title)}
-              </AppText>
-            </View>
-            <AppText muted numberOfLines={2} style={styles.recipeMeta}>
-              {buildRecipeMetaLine(entry.recipe, { includeSourceType: false })}
-            </AppText>
-            {entry.notes ? (
-              <AppText muted numberOfLines={1} style={styles.recipeMeta}>
-                {normalizeRecipeText(entry.notes)}
-              </AppText>
-            ) : null}
-            {entry.isStarter ? (
-              <View style={styles.starterChip}>
-                <AppText style={styles.starterChipText}>Starter recipe</AppText>
-              </View>
-            ) : null}
-          </View>
-        </Pressable>
-
-        <View
-          style={[
-            styles.recipeActions,
-            canUseSharedRecipeBook && !entry.isStarter && styles.recipeActionsWide
-          ]}
-        >
-          <MaterialCommunityIcons color={appColors.accent} name="chevron-right" size={18} />
-          <IconAction
-            accessibilityLabel="Duplicate recipe"
-            color={appColors.accent}
-            disabled={!hasLoadedSavedRecipes}
-            name="content-copy"
-            onPress={() => duplicateSavedRecipe(entry.id)}
-          />
-          <IconAction
-            accessibilityLabel="Remove recipe"
-            name="bookmark-remove-outline"
-            onPress={() => removeSavedRecipe(entry.id, entry.recipe.title)}
-          />
-          {canUseSharedRecipeBook && !entry.isStarter ? (
-            <IconAction
-              accessibilityLabel={entry.sharedRecipeId ? "Unshare recipe" : "Share recipe"}
-              name={
-                entry.sharedRecipeId
-                  ? "account-multiple-minus-outline"
-                  : "account-multiple-plus-outline"
-              }
-              onPress={() => toggleRecipeShared(entry.id, entry.sharedRecipeId != null)}
-            />
-          ) : null}
-        </View>
-      </Reanimated.View>
-    ));
+    return renderListMessage(
+      isFavoritesFilterOn
+        ? "No favorites match this search."
+        : "No saved recipes match this search."
+    );
   };
 
-  const renderSharedRecipes = () => {
+  const renderFamilyFooter = () => {
     if (!hasLoadedSharedRecipes) {
-      return (
-        <View style={styles.listMessage}>
-          <AppText muted>Loading shared family recipes...</AppText>
-        </View>
-      );
+      return renderListMessage("Loading shared family recipes...");
     }
 
     if (sharedRecipes.length === 0) {
       return renderEmptyState(emptyLibraryLine);
     }
 
-    if (filteredSharedRecipes.length === 0) {
-      return (
-        <View style={styles.listMessage}>
-          <AppText muted>No shared recipes match this search.</AppText>
+    return filteredSharedRecipes.length === 0
+      ? renderListMessage("No shared recipes match this search.")
+      : null;
+  };
+
+  const renderControls = () => (
+    <View style={[styles.pinnedControls, styles.wideSection]}>
+      <View style={styles.tabGroup}>
+        <View style={styles.tabRow}>
+          <SegmentButton
+            active={activeTab === "personal"}
+            label="Personal"
+            onPress={() => {
+              dismissLockedFamilyHint();
+              setActiveTab("personal");
+            }}
+          />
+          <SegmentButton
+            active={activeTab === "family"}
+            locked={isFamilyLocked}
+            label="Family"
+            onPress={() => {
+              if (isFamilyLocked) {
+                showLockedFamilyHint();
+                return;
+              }
+
+              dismissLockedFamilyHint();
+              setActiveTab("family");
+            }}
+            style={isFamilyLocked ? styles.segmentButtonDisabled : undefined}
+          />
         </View>
-      );
-    }
 
-    return filteredSharedRecipes.map((entry, index) => {
-      const isOwnedByCurrentUser = entry.ownerUserId === user?.id;
+        {lockedFamilyHintVisible ? (
+          <AppText muted style={styles.lockedFamilyHint}>
+            {isSignedIn && user
+              ? "Join or create a household from the Household tab to share a Family cookbook."
+              : "Sign in from the Household tab to share a Family cookbook."}
+          </AppText>
+        ) : null}
+      </View>
 
-      return (
-        <Reanimated.View entering={getRowEntering(index)} key={entry.id} style={styles.recipeRow}>
-          <Pressable
-            onPress={() => openSharedRecipe(entry.id)}
-            style={({ pressed }) => [styles.recipePressable, pressed && styles.rowPressed]}
-          >
-            <RecipeBookThumbnail recipe={entry.recipe} />
-            <View style={styles.recipeContent}>
-              <View style={styles.recipeTitleRow}>
-                <AppText numberOfLines={2} style={styles.recipeTitle} variant="title">
-                  {normalizeRecipeText(entry.recipe.title)}
-                </AppText>
-              </View>
-              <AppText muted numberOfLines={2} style={styles.recipeMeta}>
-                {buildRecipeMetaLine(entry.recipe, { includeSourceType: false })}
-              </AppText>
-              <AppText muted numberOfLines={1} style={styles.recipeMeta}>
-                Owned by {getSharedRecipeOwnerLabel(entry)}
-              </AppText>
-            </View>
-          </Pressable>
+      <View style={styles.searchSortRow} testID="cookbook-search-sort-row">
+        <Pressable
+          onPress={() => searchInputRef.current?.focus()}
+          style={[styles.search, isSearchFocused && styles.searchFocused]}
+        >
+          <MaterialCommunityIcons
+            color={isSearchFocused ? appColors.accent : appColors.muted}
+            name="magnify"
+            size={18}
+          />
+          <TextInput
+            autoCapitalize="none"
+            autoCorrect={false}
+            onBlur={() => setIsSearchFocused(false)}
+            onChangeText={setQuery}
+            onFocus={() => {
+              dismissLockedFamilyHint();
+              setIsSearchFocused(true);
+            }}
+            placeholder={
+              activeTab === "family" ? "Search family recipes" : "Search personal recipes"
+            }
+            placeholderTextColor={appColors.placeholder}
+            ref={searchInputRef}
+            returnKeyType="search"
+            style={styles.searchInput}
+            value={query}
+          />
+        </Pressable>
 
-          <View style={[styles.recipeActions, isOwnedByCurrentUser && styles.recipeActionsWide]}>
-            <MaterialCommunityIcons color={appColors.accent} name="chevron-right" size={18} />
-            <IconAction
-              accessibilityLabel="Save copy"
-              color={appColors.accent}
-              disabled={!hasLoadedSavedRecipes}
-              name="content-copy"
-              onPress={() => duplicateSharedRecipe(entry.id)}
-            />
-            {isOwnedByCurrentUser ? (
-              <IconAction
-                accessibilityLabel="Unshare recipe"
-                name="account-multiple-minus-outline"
-                onPress={() => removeSharedRecipe(entry.id, entry.recipe.title)}
+        <View style={styles.sortControls}>
+          <View style={styles.sortControlGroup}>
+            <Pressable
+              accessibilityHint="Opens sorting options"
+              accessibilityLabel={`Sort recipes. Current: ${activeSortLabel}`}
+              accessibilityRole="button"
+              accessibilityState={{ expanded: isSortMenuOpen }}
+              onPress={toggleSortMenu}
+              style={({ pressed }) => [styles.sortControl, pressed && styles.rowPressed]}
+            >
+              <AppText style={styles.sortValue}>{activeSortLabel}</AppText>
+              <MaterialCommunityIcons
+                color={appColors.accent}
+                name={isSortMenuOpen ? "chevron-up" : "chevron-down"}
+                size={17}
               />
+            </Pressable>
+
+            {isSortMenuOpen ? (
+              <View accessibilityRole="menu" style={styles.sortMenu} testID="cookbook-sort-menu">
+                {COOKBOOK_SORT_OPTIONS.filter(
+                  (option) => activeTab === "personal" || !option.personalOnly
+                ).map((option) => {
+                  const isSelected = option.value === activeSort;
+
+                  return (
+                    <Pressable
+                      accessibilityLabel={`Sort by ${option.label}`}
+                      accessibilityRole="menuitem"
+                      accessibilityState={{ selected: isSelected }}
+                      key={option.value}
+                      onPress={() => selectSort(option.value)}
+                      style={({ pressed }) => [
+                        styles.sortMenuOption,
+                        isSelected && styles.sortMenuOptionSelected,
+                        pressed && styles.rowPressed
+                      ]}
+                    >
+                      <AppText
+                        style={[
+                          styles.sortMenuOptionText,
+                          isSelected && styles.sortMenuOptionActive
+                        ]}
+                      >
+                        {option.label}
+                      </AppText>
+                      {isSelected ? (
+                        <MaterialCommunityIcons color={appColors.accent} name="check" size={18} />
+                      ) : (
+                        <View style={styles.sortMenuCheckSpacer} />
+                      )}
+                    </Pressable>
+                  );
+                })}
+              </View>
             ) : null}
           </View>
-        </Reanimated.View>
-      );
-    });
+
+          <Pressable
+            accessibilityHint="Reverses the displayed recipe order"
+            accessibilityLabel={`Order: ${sortDirectionLabel}`}
+            accessibilityRole="button"
+            onPress={toggleSortDirection}
+            style={({ pressed }) => [styles.sortDirectionControl, pressed && styles.rowPressed]}
+          >
+            <MaterialCommunityIcons
+              color={appColors.accent}
+              name={sortDirection === "forward" ? "arrow-down" : "arrow-up"}
+              size={20}
+            />
+          </Pressable>
+        </View>
+      </View>
+
+      {activeTab === "personal" ? (
+        <View style={styles.filterRow}>
+          <Pressable
+            accessibilityLabel="Show favorites only"
+            accessibilityRole="button"
+            accessibilityState={{ selected: showFavoritesOnly }}
+            onPress={toggleFavoritesFilter}
+            style={({ pressed }) => [
+              styles.filterChip,
+              showFavoritesOnly && styles.filterChipActive,
+              pressed && styles.pressed
+            ]}
+            testID="cookbook-favorites-filter"
+          >
+            <MaterialCommunityIcons
+              color={showFavoritesOnly ? appColors.onAccent : appColors.tomato}
+              name={showFavoritesOnly ? "heart" : "heart-outline"}
+              size={15}
+            />
+            <AppText
+              style={[styles.filterChipText, showFavoritesOnly && styles.filterChipTextActive]}
+            >
+              {favoriteCount > 0 ? `Favorites · ${favoriteCount}` : "Favorites"}
+            </AppText>
+          </Pressable>
+        </View>
+      ) : null}
+    </View>
+  );
+
+  const renderPrelude = () => (
+    <View style={[styles.content, styles.wideSection]}>
+      {canUseSharedRecipeBook ? (
+        <View style={styles.familySharing}>
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => setIsFamilySharingOpen((current) => !current)}
+            style={({ pressed }) => [styles.familySharingHeader, pressed && styles.rowPressed]}
+          >
+            <View style={styles.familySharingTitle}>
+              <MaterialCommunityIcons
+                color={appColors.accent}
+                name="account-multiple-outline"
+                size={18}
+              />
+              <AppText style={styles.familySharingLabel} variant="title">
+                Family sharing
+              </AppText>
+            </View>
+            <MaterialCommunityIcons
+              color={appColors.muted}
+              name={isFamilySharingOpen ? "chevron-up" : "chevron-down"}
+              size={20}
+            />
+          </Pressable>
+
+          {isFamilySharingOpen ? (
+            <View style={styles.shareModeRow}>
+              {(["none", "selected", "all"] as const).map((mode) => (
+                <Pressable
+                  key={mode}
+                  onPress={() => {
+                    void setShareMode(mode);
+                  }}
+                  style={({ pressed }) => [
+                    styles.shareModeButton,
+                    shareMode === mode && styles.shareModeButtonActive,
+                    pressed && styles.pressed
+                  ]}
+                >
+                  <AppText
+                    style={[styles.shareModeText, shareMode === mode && styles.shareModeTextActive]}
+                  >
+                    {mode === "none" ? "Share none" : mode === "all" ? "Share all" : "Selected"}
+                  </AppText>
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
+        </View>
+      ) : null}
+
+      {sharedRecipeError ? renderListMessage(sharedRecipeError) : null}
+    </View>
+  );
+
+  const renderItem: ListRenderItem<CookbookListItem> = ({ item }) => {
+    switch (item.kind) {
+      case "controls":
+        return renderControls();
+      case "prelude":
+        return renderPrelude();
+      case "saved":
+        return (
+          <SavedRecipeRow
+            canShare={canUseSharedRecipeBook}
+            entering={
+              animateFirstRows && item.index < ROW_STAGGER_CAP
+                ? ROW_ENTERING_ANIMATIONS[item.index]
+                : undefined
+            }
+            entry={item.entry}
+            isLibraryReady={hasLoadedSavedRecipes}
+            onDuplicate={duplicateSavedRecipe}
+            onOpen={openSavedRecipe}
+            onRemove={removeSavedRecipe}
+            onToggleFavorite={toggleFavorite}
+            onToggleShared={toggleRecipeShared}
+          />
+        );
+      case "shared":
+        return (
+          <SharedRecipeRow
+            entering={
+              animateFirstRows && item.index < ROW_STAGGER_CAP
+                ? ROW_ENTERING_ANIMATIONS[item.index]
+                : undefined
+            }
+            entry={item.entry}
+            isLibraryReady={hasLoadedSavedRecipes}
+            isOwnedByCurrentUser={item.entry.ownerUserId === user?.id}
+            onDuplicate={duplicateSharedRecipe}
+            onOpen={openSharedRecipe}
+            onUnshare={removeSharedRecipe}
+          />
+        );
+    }
   };
 
   return (
     <View style={styles.screen}>
-      <ScrollView
+      <FlatList
+        ListFooterComponent={
+          <View style={[styles.content, styles.wideSection]}>
+            {activeTab === "personal" ? renderPersonalFooter() : renderFamilyFooter()}
+          </View>
+        }
+        ListHeaderComponent={
+          <View style={[styles.header, styles.wideSection]}>
+            <AppText style={styles.title} variant="display">
+              Cookbook
+            </AppText>
+          </View>
+        }
         contentContainerStyle={[
           styles.container,
           {
@@ -659,249 +1053,30 @@ export const CookbookScreen = () => {
             paddingTop: Math.max(insets.top, appSpacing.lg) + appSpacing.lg
           }
         ]}
+        data={listItems}
+        initialNumToRender={12}
+        keyExtractor={keyExtractor}
+        keyboardDismissMode="on-drag"
         keyboardShouldPersistTaps="handled"
-        stickyHeaderIndices={[1]}
+        maxToRenderPerBatch={10}
+        renderItem={renderItem}
         showsVerticalScrollIndicator={false}
-      >
-        <View style={[styles.header, styles.wideSection]}>
-          <AppText style={styles.title} variant="display">
-            Cookbook
-          </AppText>
-        </View>
-
-        <View style={[styles.pinnedControls, styles.wideSection]}>
-          <View style={styles.tabGroup}>
-            <View style={styles.tabRow}>
-              <SegmentButton
-                active={activeTab === "personal"}
-                label="Personal"
-                onPress={() => {
-                  dismissLockedFamilyHint();
-                  setActiveTab("personal");
-                }}
-              />
-              <SegmentButton
-                active={activeTab === "family"}
-                locked={
-                  hasLoadedSharedRecipes && !canUseSharedRecipeBook && sharedRecipes.length === 0
-                }
-                label="Family"
-                onPress={() => {
-                  if (
-                    hasLoadedSharedRecipes &&
-                    !canUseSharedRecipeBook &&
-                    sharedRecipes.length === 0
-                  ) {
-                    showLockedFamilyHint();
-                    return;
-                  }
-
-                  dismissLockedFamilyHint();
-                  setActiveTab("family");
-                }}
-                style={
-                  hasLoadedSharedRecipes && !canUseSharedRecipeBook && sharedRecipes.length === 0
-                    ? styles.segmentButtonDisabled
-                    : undefined
-                }
-              />
-            </View>
-
-            {lockedFamilyHintVisible ? (
-              <AppText muted style={styles.lockedFamilyHint}>
-                Sign in from the Household tab to share a Family cookbook.
-              </AppText>
-            ) : null}
-          </View>
-
-          <View style={styles.searchSortRow} testID="cookbook-search-sort-row">
-            <Pressable
-              onPress={() => searchInputRef.current?.focus()}
-              style={[styles.search, isSearchFocused && styles.searchFocused]}
-            >
-              <MaterialCommunityIcons
-                color={isSearchFocused ? appColors.accent : appColors.muted}
-                name="magnify"
-                size={18}
-              />
-              <TextInput
-                autoCapitalize="none"
-                autoCorrect={false}
-                onBlur={() => setIsSearchFocused(false)}
-                onChangeText={setQuery}
-                onFocus={() => {
-                  dismissLockedFamilyHint();
-                  setIsSearchFocused(true);
-                }}
-                placeholder={
-                  activeTab === "family" ? "Search family recipes" : "Search personal recipes"
-                }
-                placeholderTextColor={appColors.placeholder}
-                ref={searchInputRef}
-                style={styles.searchInput}
-                value={query}
-              />
-            </Pressable>
-
-            <View style={styles.sortControls}>
-              <View style={styles.sortControlGroup}>
-                <Pressable
-                  accessibilityHint="Opens sorting options"
-                  accessibilityLabel={`Sort recipes. Current: ${activeSortOption.label}`}
-                  accessibilityRole="button"
-                  accessibilityState={{ expanded: isSortMenuOpen }}
-                  onPress={toggleSortMenu}
-                  style={({ pressed }) => [styles.sortControl, pressed && styles.rowPressed]}
-                >
-                  <AppText style={styles.sortValue}>{activeSortOption.label}</AppText>
-                  <MaterialCommunityIcons
-                    color={appColors.accent}
-                    name={isSortMenuOpen ? "chevron-up" : "chevron-down"}
-                    size={17}
-                  />
-                </Pressable>
-
-                {isSortMenuOpen ? (
-                  <View
-                    accessibilityRole="menu"
-                    style={styles.sortMenu}
-                    testID="cookbook-sort-menu"
-                  >
-                    {COOKBOOK_SORT_OPTIONS.filter(
-                      (option) => activeTab === "personal" || option.value !== "mostCooked"
-                    ).map((option) => {
-                      const isSelected = option.value === activeSort;
-
-                      return (
-                        <Pressable
-                          accessibilityLabel={`Sort by ${option.label}`}
-                          accessibilityRole="menuitem"
-                          accessibilityState={{ selected: isSelected }}
-                          key={option.value}
-                          onPress={() => selectSort(option.value)}
-                          style={({ pressed }) => [
-                            styles.sortMenuOption,
-                            isSelected && styles.sortMenuOptionSelected,
-                            pressed && styles.rowPressed
-                          ]}
-                        >
-                          <AppText
-                            style={[
-                              styles.sortMenuOptionText,
-                              isSelected && styles.sortMenuOptionActive
-                            ]}
-                          >
-                            {option.label}
-                          </AppText>
-                          {isSelected ? (
-                            <MaterialCommunityIcons
-                              color={appColors.accent}
-                              name="check"
-                              size={18}
-                            />
-                          ) : (
-                            <View style={styles.sortMenuCheckSpacer} />
-                          )}
-                        </Pressable>
-                      );
-                    })}
-                  </View>
-                ) : null}
-              </View>
-
-              <Pressable
-                accessibilityHint="Reverses the displayed recipe order"
-                accessibilityLabel={`Order: ${sortDirectionLabel}`}
-                accessibilityRole="button"
-                onPress={toggleSortDirection}
-                style={({ pressed }) => [styles.sortDirectionControl, pressed && styles.rowPressed]}
-              >
-                <MaterialCommunityIcons
-                  color={appColors.accent}
-                  name={sortDirection === "forward" ? "arrow-down" : "arrow-up"}
-                  size={20}
-                />
-              </Pressable>
-            </View>
-          </View>
-        </View>
-
-        <View style={[styles.content, styles.wideSection]}>
-          {activeTab === "personal" && canUseSharedRecipeBook ? (
-            <View style={styles.familySharing}>
-              <Pressable
-                accessibilityRole="button"
-                onPress={() => setIsFamilySharingOpen((current) => !current)}
-                style={({ pressed }) => [styles.familySharingHeader, pressed && styles.rowPressed]}
-              >
-                <View style={styles.familySharingTitle}>
-                  <MaterialCommunityIcons
-                    color={appColors.accent}
-                    name="account-multiple-outline"
-                    size={18}
-                  />
-                  <AppText style={styles.familySharingLabel} variant="title">
-                    Family sharing
-                  </AppText>
-                </View>
-                <MaterialCommunityIcons
-                  color={appColors.muted}
-                  name={isFamilySharingOpen ? "chevron-up" : "chevron-down"}
-                  size={20}
-                />
-              </Pressable>
-
-              {isFamilySharingOpen ? (
-                <View style={styles.shareModeRow}>
-                  {(["none", "selected", "all"] as const).map((mode) => (
-                    <Pressable
-                      key={mode}
-                      onPress={() => {
-                        void setShareMode(mode);
-                      }}
-                      style={({ pressed }) => [
-                        styles.shareModeButton,
-                        shareMode === mode && styles.shareModeButtonActive,
-                        pressed && styles.pressed
-                      ]}
-                    >
-                      <AppText
-                        style={[
-                          styles.shareModeText,
-                          shareMode === mode && styles.shareModeTextActive
-                        ]}
-                      >
-                        {mode === "none" ? "Share none" : mode === "all" ? "Share all" : "Selected"}
-                      </AppText>
-                    </Pressable>
-                  ))}
-                </View>
-              ) : null}
-            </View>
-          ) : null}
-
-          {activeTab === "personal" && sharedRecipeError ? (
-            <View style={styles.listMessage}>
-              <AppText muted>{sharedRecipeError}</AppText>
-            </View>
-          ) : null}
-
-          {activeTab === "personal" ? renderSavedRecipes() : renderSharedRecipes()}
-        </View>
-      </ScrollView>
+        stickyHeaderIndices={STICKY_CONTROLS_INDICES}
+        windowSize={9}
+      />
       <AppDialog
         actions={
-          pendingConfirmation
+          shownConfirmation
             ? [
                 {
-                  label: pendingConfirmation.cancelLabel,
+                  label: shownConfirmation.cancelLabel,
                   onPress: () => setPendingConfirmation(null),
                   variant: "outline"
                 },
                 {
-                  label: pendingConfirmation.confirmLabel,
+                  label: shownConfirmation.confirmLabel,
                   onPress: () => {
-                    const action = pendingConfirmation.onConfirm;
+                    const action = shownConfirmation.onConfirm;
                     setPendingConfirmation(null);
                     action();
                   },
@@ -910,10 +1085,10 @@ export const CookbookScreen = () => {
               ]
             : []
         }
-        message={pendingConfirmation?.message ?? ""}
+        message={shownConfirmation?.message ?? ""}
         onRequestClose={() => setPendingConfirmation(null)}
-        title={pendingConfirmation?.title ?? ""}
-        visible={pendingConfirmation != null}
+        title={shownConfirmation?.title ?? ""}
+        visible={shownConfirmation != null}
       />
     </View>
   );
@@ -974,6 +1149,36 @@ const styles = StyleSheet.create({
     alignItems: "center",
     flexDirection: "row",
     gap: appSpacing.sm
+  },
+  filterChip: {
+    alignItems: "center",
+    alignSelf: "flex-start",
+    backgroundColor: appColors.canvas,
+    borderColor: appColors.border,
+    borderRadius: 999,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: 6,
+    minHeight: 34,
+    paddingHorizontal: appSpacing.md
+  },
+  filterChipActive: {
+    backgroundColor: appColors.tomato,
+    borderColor: appColors.tomato
+  },
+  filterChipText: {
+    color: appColors.text,
+    fontSize: 13,
+    fontWeight: "700",
+    lineHeight: 17
+  },
+  filterChipTextActive: {
+    color: appColors.onAccent
+  },
+  filterRow: {
+    flexDirection: "row",
+    gap: appSpacing.sm,
+    marginTop: appSpacing.md
   },
   header: {
     paddingHorizontal: appSpacing.lg,
@@ -1071,6 +1276,12 @@ const styles = StyleSheet.create({
     columnGap: appSpacing.sm,
     flexDirection: "row"
   },
+  rowFrame: {
+    alignSelf: "center",
+    maxWidth: 900,
+    paddingHorizontal: appSpacing.lg,
+    width: "100%"
+  },
   rowPressed: {
     opacity: pressedOpacity.subtle,
     transform: [{ scale: pressedScale.standard }]
@@ -1101,6 +1312,12 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 20,
     paddingVertical: 10
+  },
+  searchSortRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 10,
+    marginTop: appSpacing.xxl
   },
   segmentButton: {
     alignItems: "center",
@@ -1153,6 +1370,12 @@ const styles = StyleSheet.create({
   },
   shareModeTextActive: {
     color: appColors.canvas
+  },
+  sharedRecipeActions: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    width: 108
   },
   sortControl: {
     alignItems: "center",
@@ -1233,12 +1456,6 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     lineHeight: 18
   },
-  searchSortRow: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: 10,
-    marginTop: appSpacing.xxl
-  },
   starterChip: {
     alignSelf: "flex-start",
     backgroundColor: appColors.accentSoft,
@@ -1254,15 +1471,15 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     lineHeight: 14
   },
+  tabGroup: {
+    gap: appSpacing.sm
+  },
   tabRow: {
     backgroundColor: appColors.accentSoft,
     borderRadius: 19,
     flexDirection: "row",
     gap: appSpacing.xs,
     padding: appSpacing.xs
-  },
-  tabGroup: {
-    gap: appSpacing.sm
   },
   title: {
     color: appColors.text,

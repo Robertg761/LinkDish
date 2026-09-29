@@ -2,6 +2,7 @@ import { ZodError } from "zod";
 
 import { extractorApiEnv } from "../../../config/env.js";
 import { getAuthenticatedUser } from "../../auth/auth-service.js";
+import { readBillingUsage } from "../enforce-billing.js";
 import {
   createWebBillingCheckoutUrl,
   createWebBillingManagementUrl,
@@ -42,6 +43,18 @@ export const registerBillingRoutes = (app: FastifyInstance) => {
   app.get("/billing/config", async (_request, reply) =>
     reply.status(200).send(getWebBillingAvailability())
   );
+
+  app.get("/billing/usage", async (request, reply) => {
+    try {
+      return reply
+        .status(200)
+        .header("cache-control", "no-store")
+        .send(await readBillingUsage(request.headers, { remoteAddress: request.ip }));
+    } catch (error) {
+      request.log.error(error);
+      return reply.status(500).send({ message: "Unexpected billing error." });
+    }
+  });
 
   app.post("/billing/checkout", async (request, reply) => {
     if (!extractorApiEnv.HOUSEHOLDS_ENABLED) {

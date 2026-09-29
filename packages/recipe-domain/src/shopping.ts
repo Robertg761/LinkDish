@@ -1,6 +1,8 @@
 import { z } from "zod";
 
-export const MAX_SHOPPING_ITEM_TEXT_LENGTH = 200;
+import { MAX_SHOPPING_ITEM_TEXT_LENGTH } from "./limits.js";
+
+export { MAX_SHOPPING_ITEM_TEXT_LENGTH };
 
 export const shoppingQuantityRangeSchema = z
   .object({

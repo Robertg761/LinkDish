@@ -11,7 +11,7 @@ import { INVALID_RECIPE_URL_MESSAGE, isAllowedRecipeUrl } from "../../recipe-int
 import { restoreSavedRecipeState, type SavedRecipeRecord } from "../../saved-recipes/store";
 import { getDraftRecipeExtraction, saveDraftRecipeExtraction } from "../draftStore";
 
-import type { ExtractionUiState, SuccessfulExtractionState } from "../types";
+import type { ExtractionUiState, RecipeSourceImage, SuccessfulExtractionState } from "../types";
 import type { ExtractRecipeRequest } from "@linkdish/api-contracts";
 
 interface UseRecipeExtractionResult {
@@ -67,6 +67,12 @@ const buildRequestForAttempt = (
     ? { ...request, attempt: "fallback", ...(correlationId ? { correlationId } : {}) }
     : { ...request, attempt, ...(correlationId ? { correlationId } : {}) };
 
+/** The scans an image import sent, as in-memory `data:` images the screen can show and save. */
+const getRequestSourceImages = (request: ExtractRecipeRequest): RecipeSourceImage[] | undefined =>
+  "images" in request
+    ? request.images.map((image) => ({ mimeType: image.mimeType, uri: image.dataUrl }))
+    : undefined;
+
 const getSavedRecipeRestoreKey = (savedRecipe: SavedRecipeRecord): string =>
   [savedRecipe.id, savedRecipe.updatedAt ?? savedRecipe.savedAt, savedRecipe.recipe.sourceUrl].join(
     ":"
@@ -88,6 +94,15 @@ const getTransportFailureMessage = (error: unknown) => {
     "LinkDish could not reach the extraction service. Please try again in a moment.";
 
   if (!(error instanceof Error)) {
+    return fallbackMessage;
+  }
+
+  // api-client v2 reports transport failures as ExtractorApiError with a kind.
+  if (error instanceof ExtractorApiError && error.kind === "timeout") {
+    return "The extraction service took too long to answer. Please try again in a moment.";
+  }
+
+  if (error instanceof ExtractorApiError && error.kind === "network") {
     return fallbackMessage;
   }
 
@@ -136,6 +151,21 @@ const trackImportStarted = (
     properties: getImportEventProperties(request, requestSourceUrl, importSource)
   });
 };
+
+/**
+ * The "one free import left" upgrade moment (analytics trigger `fourth_import_monthly`, named
+ * when Free had 5 imports) fires on the successful import that leaves exactly one of the
+ * locally metered Free allowance. It used to require `monthlyImports === 5`, which never
+ * matched the current 3-import Free plan, so the moment could not fire.
+ */
+export const shouldShowLastFreeImportPrompt = (input: {
+  planId: string;
+  remainingImportsBeforeThisImport: number;
+  usesServerBillingGate: boolean;
+}): boolean =>
+  !input.usesServerBillingGate &&
+  input.planId === "free" &&
+  input.remainingImportsBeforeThisImport === 2;
 
 export const useRecipeExtraction = (
   source: RecipeExtractionSource,
@@ -351,11 +381,11 @@ export const useRecipeExtraction = (
         }
 
         if (response.status === "success") {
-          const shouldShowFourthImportPrompt =
-            !useServerBillingGate &&
-            plan.id === "free" &&
-            plan.limits.monthlyImports === 5 &&
-            remainingImports === 2;
+          const shouldShowFourthImportPrompt = shouldShowLastFreeImportPrompt({
+            planId: plan.id,
+            remainingImportsBeforeThisImport: remainingImports,
+            usesServerBillingGate: useServerBillingGate
+          });
 
           if (!useServerBillingGate) {
             spendImport();
@@ -382,13 +412,7 @@ export const useRecipeExtraction = (
           const successState: SuccessfulExtractionState = {
             state: "success",
             recipe: response.recipe,
-            sourceImages:
-              "images" in request
-                ? request.images?.map((image) => ({
-                    mimeType: image.mimeType,
-                    uri: image.dataUrl
-                  }))
-                : undefined,
+            sourceImages: getRequestSourceImages(request),
             strategy: response.extraction.strategy,
             warnings: response.extraction.warnings,
             fetchMode: response.extraction.fetchMode,
@@ -523,6 +547,7 @@ export const useRecipeExtraction = (
       return;
     }
 
+    const wasShowingSavedRecipe = restoredSavedRecipeKeyRef.current !== null;
     restoredSavedRecipeKeyRef.current = null;
 
     if (!extractionRequest || !requestSourceUrl) {
@@ -554,6 +579,16 @@ export const useRecipeExtraction = (
     }
 
     if (displayedRecipeUrlRef.current === requestSourceUrl) {
+      if (wasShowingSavedRecipe) {
+        // The saved copy of this recipe was removed and its scan files are deleted with it. Keep
+        // the recipe on screen, but show (and let a later save persist) this import's own scans
+        // instead of the saved record's files.
+        const requestSourceImages = getRequestSourceImages(extractionRequest);
+        setState((current) =>
+          current.state === "success" ? { ...current, sourceImages: requestSourceImages } : current
+        );
+      }
+
       return;
     }
 

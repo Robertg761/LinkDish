@@ -1,46 +1,64 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import React from "react";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { resetDataChangeFeedForTests, setDataChannelFactoryForTests } from "../../data/change-feed";
+import { resetCookSessionStoreForTests } from "../../data/cook-session-store";
+import { resetLibraryStoreForTests } from "../../data/library-store";
+import { offerAppInstall } from "../../platform/testing/install-offer";
+import { resetPreferencesForTests } from "../../preferences/preferences-store";
+import { getLinkDishWebDb, resetLinkDishWebDbForTests } from "../../storage/linkdish-db";
+import { fakeIdb } from "../../storage/testing/fake-idb";
+import { flushCookSessionWrites } from "../cook-mode/cook-session-writer";
+import { resetInstallEligibilityForTests } from "../install/install-eligibility";
+import { InstallPrompt } from "../install/InstallPrompt";
 import { saveRecipe, syncRecipeToHousehold } from "../library/saved-recipe-store";
+import { resetShoppingSyncForTests } from "../shopping/shopping-sync";
 
 import { ExtractResult } from "./ExtractResult";
 
+import type { ExtractResultProps } from "./ExtractResult";
+import type * as SavedRecipeStore from "../library/saved-recipe-store";
+import type { WebSavedRecipe } from "../library/saved-recipe-types";
 import type { Recipe } from "@linkdish/recipe-domain";
 
+vi.mock("idb", async () => (await import("../../storage/testing/fake-idb")).fakeIdbModule);
+
+vi.mock("../library/saved-recipe-store", async (importOriginal) => ({
+  ...(await importOriginal<typeof SavedRecipeStore>()),
+  forceSaveRecipe: vi.fn(),
+  saveRecipe: vi.fn(),
+  syncRecipeToHousehold: vi.fn()
+}));
+
+vi.mock("../../api/client", () => ({
+  apiBaseUrl: "/api",
+  apiClient: { getHousehold: vi.fn(() => Promise.resolve({ household: null })) },
+  isExtractorApiError: () => false
+}));
+
+vi.mock("../../analytics/client", () => ({
+  trackWebEvent: vi.fn(),
+  trackWebV2AnalyticsEvent: vi.fn()
+}));
+
 const authMocks = vi.hoisted(() => ({
-  user: {
-    billingPlan: "plus",
-    email: "cook@example.com",
-    id: "user_1"
-  } as {
+  user: { billingPlan: "plus", email: "cook@example.com", id: "user_1" } as {
     billingPlan?: "free" | "plus" | "family";
     email: string;
     id: string;
   }
 }));
 
-const upgradeMocks = vi.hoisted(() => ({
-  requestUpgradeSheet: vi.fn()
-}));
-
 vi.mock("../../auth/AuthProvider", () => ({
-  useAuth: () => ({
-    isAuthenticated: true,
-    user: authMocks.user
-  })
+  useAuth: () => ({ isAuthenticated: true, loading: false, user: authMocks.user })
 }));
 
-vi.mock("../library/saved-recipe-store", () => ({
-  forceSaveRecipe: vi.fn(),
-  saveRecipe: vi.fn(),
-  syncRecipeToHousehold: vi.fn()
-}));
+const upgradeMocks = vi.hoisted(() => ({ requestUpgradeSheet: vi.fn() }));
 
 vi.mock("../upgrade/UpgradeSheet", () => ({
-  useUpgradeSheet: () => ({
-    requestUpgradeSheet: upgradeMocks.requestUpgradeSheet
-  })
+  useUpgradeSheet: () => ({ requestUpgradeSheet: upgradeMocks.requestUpgradeSheet })
 }));
 
 const recipe: Recipe = {
@@ -70,173 +88,279 @@ const recipe: Recipe = {
   title: "Personal Rice"
 };
 
+const savedRecipe = (overrides: Partial<WebSavedRecipe> = {}): WebSavedRecipe => ({
+  createdAt: "2026-09-28T12:00:00.000Z",
+  extraction: {
+    fetchMode: "http",
+    provenance: ["jsonld"],
+    strategy: "recipe-schema",
+    warnings: []
+  },
+  id: "rice-id",
+  recipe,
+  sourceHost: "example.com",
+  sourceUrl: "https://example.com/rice",
+  sync: { status: "local_only" },
+  timesCooked: 0,
+  updatedAt: "2026-09-28T12:00:00.000Z",
+  ...overrides
+});
+
+const renderResult = (props: Partial<ExtractResultProps> = {}) => {
+  const onReset = vi.fn();
+  const onDiscard = vi.fn();
+  const onSaved = vi.fn();
+  const view = render(
+    <MemoryRouter initialEntries={["/import"]}>
+      <Routes>
+        <Route
+          element={
+            <ExtractResult
+              extraction={{
+                fetchMode: "http",
+                provenance: ["jsonld"],
+                strategy: "recipe-schema",
+                warnings: []
+              }}
+              onDiscard={onDiscard}
+              onReset={onReset}
+              onSaved={onSaved}
+              recipe={recipe}
+              sourceUrl="https://example.com/rice"
+              {...props}
+            />
+          }
+          path="/import"
+        />
+        <Route element={<p>Saved recipe page</p>} path="/recipes/:id" />
+      </Routes>
+    </MemoryRouter>
+  );
+
+  return { ...view, onDiscard, onReset, onSaved };
+};
+
+const saveButton = () => screen.getAllByRole("button", { name: "Save to cookbook" })[0]!;
+
 describe("ExtractResult", () => {
-  beforeEach(() => {
-    authMocks.user = {
-      billingPlan: "plus",
-      email: "cook@example.com",
-      id: "user_1"
-    };
+  beforeEach(async () => {
+    fakeIdb.reset();
+    localStorage.clear();
+    resetLinkDishWebDbForTests();
+    resetDataChangeFeedForTests();
+    resetLibraryStoreForTests();
+    resetCookSessionStoreForTests();
+    resetPreferencesForTests();
+    resetShoppingSyncForTests();
+    resetInstallEligibilityForTests();
+    setDataChannelFactoryForTests(() => null);
+    await getLinkDishWebDb();
+    authMocks.user = { billingPlan: "plus", email: "cook@example.com", id: "user_1" };
     vi.mocked(saveRecipe).mockReset();
     vi.mocked(syncRecipeToHousehold).mockReset();
+    vi.mocked(syncRecipeToHousehold).mockImplementation((saved) =>
+      Promise.resolve({ ...saved, sync: { status: "local_only" } })
+    );
     upgradeMocks.requestUpgradeSheet.mockReset();
-    localStorage.clear();
   });
 
-  const activeSpies: Array<{ mockRestore: () => void }> = [];
+  afterEach(async () => {
+    await flushCookSessionWrites();
+    vi.restoreAllMocks();
+  });
 
-  afterEach(() => {
-    activeSpies.splice(0).forEach((spy) => {
-      spy.mockRestore();
+  it("shows the recipe the LinkDish way, linked to its source", () => {
+    renderResult();
+
+    expect(screen.getByRole("heading", { level: 1, name: "Personal Rice" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "Open the original recipe on example.com" })
+    ).toHaveAttribute("href", "https://example.com/rice");
+    expect(screen.getByRole("heading", { name: "Ingredients" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Method" })).toBeInTheDocument();
+    expect(screen.getByText("Just imported")).toBeInTheDocument();
+  });
+
+  it("never links an unsafe source URL", () => {
+    renderResult({ sourceUrl: "javascript:alert(1)" });
+
+    expect(
+      screen.queryByRole("link", { name: /Open the original recipe/u })
+    ).not.toBeInTheDocument();
+  });
+
+  it("labels pasted text instead of linking to a made-up page", () => {
+    renderResult({ sourceUrl: "https://linkdish.app/text-imports/abc123" });
+
+    // The same words the recipe page uses once it's saved.
+    expect(screen.getByText("From pasted text")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /linkdish\.app/u })).not.toBeInTheDocument();
+  });
+
+  it("shows Saved as soon as the local write lands, with the household sync in the background", async () => {
+    let finishSync: ((recipe: WebSavedRecipe) => void) | undefined;
+    vi.mocked(syncRecipeToHousehold).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finishSync = resolve;
+        })
+    );
+    vi.mocked(saveRecipe).mockResolvedValue({ recipe: savedRecipe(), success: true });
+    const { onSaved } = renderResult();
+
+    fireEvent.click(saveButton());
+
+    expect(await screen.findByText("Saved to your cookbook")).toBeInTheDocument();
+    expect(onSaved).toHaveBeenCalledWith(expect.objectContaining({ id: "rice-id" }));
+    expect(saveRecipe).toHaveBeenCalledWith(
+      expect.objectContaining({ recipe, sourceUrl: "https://example.com/rice" }),
+      true
+    );
+    // No household is known for this account: nothing claims to be syncing to one.
+    expect(screen.queryByText(/household/iu)).not.toBeInTheDocument();
+
+    await act(async () => {
+      finishSync?.(savedRecipe({ sync: { sharedRecipeId: "s1", status: "synced" } }));
+      await Promise.resolve();
     });
+    expect(await screen.findByText("Shared with your household")).toBeInTheDocument();
   });
 
-  it("renders recipe details as a quiet meta line", () => {
-    render(
-      <ExtractResult
-        recipe={recipe}
-        sourceUrl="https://example.com/rice"
-        extraction={{
-          fetchMode: "http",
-          provenance: ["jsonld"],
-          strategy: "recipe-schema",
-          warnings: []
-        }}
-        onReset={vi.fn()}
-      />
-    );
+  it("offers the next steps once saved", async () => {
+    vi.mocked(saveRecipe).mockResolvedValue({ recipe: savedRecipe(), success: true });
+    renderResult();
 
-    expect(screen.getByText("Webpage · 4 servings · Prep 5 min · Cook 20 min")).toBeInTheDocument();
-    expect(screen.getByText("example.com")).toHaveAttribute("href", "https://example.com/rice");
-    expect(screen.getByRole("article", { name: "Personal Rice" }).closest(".card")).toBeNull();
-    expect(screen.getByRole("heading", { name: "Ingredients" }).closest(".card")).toBeNull();
-    expect(screen.getByRole("heading", { name: "Method" }).closest(".card")).toBeNull();
-    expect(screen.queryByText("Recipe Webpage")).not.toBeInTheDocument();
-    expect(screen.queryByText("Recipe Preview")).not.toBeInTheDocument();
-    expect(screen.queryByText("4 servings servings")).not.toBeInTheDocument();
-  });
+    fireEvent.click(saveButton());
 
-  it("does not render unsafe source URLs as links", () => {
-    render(
-      <ExtractResult
-        recipe={recipe}
-        sourceUrl="javascript:alert(1)"
-        extraction={{
-          fetchMode: "http",
-          provenance: ["jsonld"],
-          strategy: "recipe-schema",
-          warnings: []
-        }}
-        onReset={vi.fn()}
-      />
-    );
+    const banner = (await screen.findByText("Saved to your cookbook")).closest("section")!;
+    expect(screen.getAllByRole("button", { name: "Start cooking" }).length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: "Add to shopping list" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "More actions" })).toBeInTheDocument();
+    // One "Import another" (the card's), and no chip repeating the card.
+    expect(screen.queryByText("In your cookbook")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Import another" })).toHaveLength(1);
+    expect(within(banner).getByRole("button", { name: "Import another" })).toBeInTheDocument();
 
-    expect(screen.getByText("From Unknown source")).not.toHaveAttribute("href");
-    expect(screen.queryByRole("link", { name: "Unknown source" })).not.toBeInTheDocument();
+    fireEvent.click(within(banner).getByRole("button", { name: "Open recipe" }));
+    expect(await screen.findByText("Saved recipe page")).toBeInTheDocument();
   });
 
   it("opens the save-limit upgrade sheet when the free cookbook is full", async () => {
-    authMocks.user = {
-      billingPlan: "free",
-      email: "cook@example.com",
-      id: "user_1"
-    };
-    vi.mocked(saveRecipe).mockResolvedValue({
-      error: "limit_exceeded",
-      success: false
-    });
-
-    render(
-      <ExtractResult
-        recipe={recipe}
-        sourceUrl="https://example.com/rice"
-        extraction={{
-          fetchMode: "http",
-          provenance: ["jsonld"],
-          strategy: "recipe-schema",
-          warnings: []
-        }}
-        onReset={vi.fn()}
-      />
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: /save recipe/i }));
-
-    expect(
-      await screen.findByText(
-        "Your free cookbook is full - 15 recipes saved. Upgrade for unlimited saved recipes."
-      )
-    ).toBeInTheDocument();
-    await waitFor(() => {
-      expect(upgradeMocks.requestUpgradeSheet).toHaveBeenCalledWith("save_limit");
-    });
-  });
-
-  const savedRecipeFixture = {
-    createdAt: "2026-07-01T00:00:00.000Z",
-    extraction: {
-      fetchMode: "http" as const,
-      provenance: ["jsonld" as const],
-      strategy: "recipe-schema" as const,
-      warnings: []
-    },
-    id: "saved-1",
-    recipe,
-    sourceHost: "example.com",
-    sourceUrl: "https://example.com/rice",
-    sync: { status: "local_only" as const },
-    timesCooked: 0,
-    updatedAt: "2026-07-01T00:00:00.000Z"
-  };
-
-  const renderResult = (warnings: string[] = []) =>
-    render(
-      <ExtractResult
-        recipe={recipe}
-        sourceUrl="https://example.com/rice"
-        extraction={{
-          fetchMode: "http",
-          provenance: ["jsonld"],
-          strategy: "recipe-schema",
-          warnings
-        }}
-        onReset={vi.fn()}
-      />
-    );
-
-  it("reports a successful save even when localStorage refuses writes", async () => {
-    vi.mocked(saveRecipe).mockResolvedValue({ recipe: savedRecipeFixture, success: true });
-    vi.mocked(syncRecipeToHousehold).mockResolvedValue(savedRecipeFixture);
-    activeSpies.push(
-      vi.spyOn(window.localStorage, "setItem").mockImplementation(() => {
-        throw new DOMException("The quota has been exceeded.", "QuotaExceededError");
-      })
-    );
-
+    authMocks.user = { billingPlan: "free", email: "cook@example.com", id: "user_1" };
+    vi.mocked(saveRecipe).mockResolvedValue({ error: "limit_exceeded", success: false });
     renderResult();
 
-    fireEvent.click(screen.getByRole("button", { name: /save recipe/i }));
+    fireEvent.click(saveButton());
 
-    expect(await screen.findByRole("button", { name: /saved in library/i })).toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Your free cookbook is full");
+    expect(upgradeMocks.requestUpgradeSheet).toHaveBeenCalledWith("save_limit");
+    expect(saveRecipe).toHaveBeenCalledWith(expect.anything(), false);
+  });
+
+  it("offers to open or replace a copy that's already saved", async () => {
+    vi.mocked(saveRecipe).mockResolvedValue({ error: "duplicate_prompt", success: false });
+    renderResult();
+
+    fireEvent.click(saveButton());
+
+    expect(await screen.findByText("You saved this one before")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Replace it" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open my copy" })).toBeInTheDocument();
+  });
+
+  it("lets an install tip that is already on screen offer itself after the first save", async () => {
+    offerAppInstall();
+    vi.mocked(saveRecipe).mockResolvedValue({ recipe: savedRecipe(), success: true });
+    render(
+      <MemoryRouter initialEntries={["/import"]}>
+        <InstallPrompt />
+        <ExtractResult
+          extraction={{
+            fetchMode: "http",
+            provenance: ["jsonld"],
+            strategy: "recipe-schema",
+            warnings: []
+          }}
+          onDiscard={vi.fn()}
+          onReset={vi.fn()}
+          onSaved={vi.fn()}
+          recipe={recipe}
+          sourceUrl="https://example.com/rice"
+        />
+      </MemoryRouter>
+    );
+    expect(screen.queryByText("Add LinkDish to your home screen")).not.toBeInTheDocument();
+
+    fireEvent.click(saveButton());
+
+    expect(await screen.findByText("Saved to your cookbook")).toBeInTheDocument();
+    expect(screen.getByText("Add LinkDish to your home screen")).toBeInTheDocument();
+  });
+
+  it("reports a successful save even when localStorage refuses writes", async () => {
+    vi.spyOn(window.localStorage, "setItem").mockImplementation(() => {
+      throw new DOMException("QuotaExceededError");
+    });
+    vi.mocked(saveRecipe).mockResolvedValue({ recipe: savedRecipe(), success: true });
+    renderResult();
+
+    fireEvent.click(saveButton());
+
+    expect(await screen.findByText("Saved to your cookbook")).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("uses plain language when a save fails", async () => {
-    vi.mocked(saveRecipe).mockRejectedValue(new Error("db closed"));
-    activeSpies.push(vi.spyOn(console, "error").mockImplementation(() => undefined));
-
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.mocked(saveRecipe).mockRejectedValue(new Error("IndexedDB transaction aborted"));
     renderResult();
 
-    fireEvent.click(screen.getByRole("button", { name: /save recipe/i }));
+    fireEvent.click(saveButton());
 
     const alert = await screen.findByRole("alert");
-    expect(alert.textContent ?? "").not.toMatch(/indexeddb/i);
-    expect(alert).toHaveTextContent("We could not save this recipe on this device. Please try again.");
+    expect(alert.textContent ?? "").not.toMatch(/indexeddb/iu);
+    expect(alert).toHaveTextContent("We couldn't save that. Please try again.");
   });
 
-  it("keeps the extraction notes heading at the same level as the other sections", () => {
-    renderResult(["Servings were estimated."]);
+  it("asks before throwing away an unsaved import", async () => {
+    const { onDiscard, onReset } = renderResult();
 
-    expect(screen.getByRole("heading", { level: 2, name: "Extraction Notes" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Import another" }));
+    const dialog = await screen.findByRole("dialog", { name: "Keep this recipe?" });
+    expect(onReset).not.toHaveBeenCalled();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Discard" }));
+    expect(onDiscard).toHaveBeenCalledOnce();
+    expect(onReset).toHaveBeenCalledOnce();
+  });
+
+  it("can save on the way out", async () => {
+    vi.mocked(saveRecipe).mockResolvedValue({ recipe: savedRecipe(), success: true });
+    const { onReset } = renderResult();
+
+    fireEvent.click(screen.getByRole("button", { name: "Import another" }));
+    const dialog = await screen.findByRole("dialog", { name: "Keep this recipe?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save it" }));
+
+    await waitFor(() => expect(onReset).toHaveBeenCalledOnce());
+    expect(saveRecipe).toHaveBeenCalledOnce();
+  });
+
+  it("shows gentle notes instead of extractor jargon", () => {
+    renderResult({
+      confidenceScore: 0.55,
+      extraction: {
+        fetchMode: "http",
+        provenance: ["readability"],
+        strategy: "article-pattern",
+        warnings: ["Article extraction relies on pattern matching and may need fallback review."]
+      },
+      missingFields: ["servings"]
+    });
+
+    const notes = screen.getByRole("heading", { name: "Worth a double-check" }).closest("section")!;
+    expect(notes).toHaveTextContent("give the amounts a quick look");
+    expect(notes).toHaveTextContent("The page didn't mention how many it serves.");
+    expect(notes.textContent ?? "").not.toMatch(/extraction|fallback|pattern/iu);
   });
 });

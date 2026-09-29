@@ -2,12 +2,15 @@ import React, { useEffect, useId, useRef } from "react";
 import { createPortal } from "react-dom";
 
 import { Button } from "./Button";
+import { useBodyScrollLock } from "./use-body-scroll-lock";
 import "./ConfirmationDialog.css";
 
 interface ConfirmationDialogProps {
   cancelLabel?: string;
   confirmLabel: string;
   confirmLoading?: boolean;
+  /** "danger" (default) for destructive confirms, "primary" for neutral ones. */
+  confirmVariant?: "danger" | "primary" | undefined;
   message: React.ReactNode;
   onCancel: () => void;
   onConfirm: () => void;
@@ -19,6 +22,7 @@ export const ConfirmationDialog: React.FC<ConfirmationDialogProps> = ({
   cancelLabel = "Cancel",
   confirmLabel,
   confirmLoading = false,
+  confirmVariant = "danger",
   message,
   onCancel,
   onConfirm,
@@ -32,6 +36,7 @@ export const ConfirmationDialog: React.FC<ConfirmationDialogProps> = ({
   const onCancelRef = useRef(onCancel);
   confirmLoadingRef.current = confirmLoading;
   onCancelRef.current = onCancel;
+  useBodyScrollLock(visible);
 
   useEffect(() => {
     if (!visible) {
@@ -105,7 +110,11 @@ export const ConfirmationDialog: React.FC<ConfirmationDialogProps> = ({
           <Button disabled={confirmLoading} onClick={onCancel} variant="outline">
             {cancelLabel}
           </Button>
-          <Button loading={confirmLoading} onClick={onConfirm} variant="danger">
+          <Button
+            loading={confirmLoading}
+            onClick={onConfirm}
+            variant={confirmVariant === "danger" ? "danger" : "primary"}
+          >
             {confirmLabel}
           </Button>
         </div>

@@ -2,10 +2,14 @@ import { createStarterRecipeSeedRecords } from "@linkdish/recipe-domain";
 import { describe, expect, it } from "vitest";
 
 import {
+  buildSavedRecipeSearchIndex,
   cloneSavedRecipeRecord,
   createSharedRecipeSourceId,
   createSavedRecipeRecord,
+  getOrphanedSourceImageUris,
   getQuotaSavedRecipeCount,
+  getSavedRecipeRecordBySourceUrl,
+  setSavedRecipeFavorite,
   incrementSavedRecipeTimesCooked,
   savedRecipeRecordToSharedRecipeRequest,
   parseSavedRecipeRecords,
@@ -19,8 +23,11 @@ import {
   starterRecipeSeedRecordToSavedRecipeRecord,
   updateSavedRecipeRecord,
   upsertSavedRecipeRecord,
+  getOwnSharedRecipeId,
+  recordSharedLinkOwners,
   markSavedRecipeShared,
-  markSavedRecipeUnshared
+  markSavedRecipeUnshared,
+  withOwnSharedLink
 } from "./store";
 
 import type { SuccessfulExtractionState } from "../recipe-results/types";
@@ -406,7 +413,56 @@ describe("saved recipe store helpers", () => {
     const shared = markSavedRecipeShared([savedRecipe], savedRecipe.id, sharedRecipe);
 
     expect(shared[0]?.sharedRecipeId).toBe("shared_recipe_1");
-    expect(markSavedRecipeUnshared(shared, savedRecipe.id)[0]?.sharedRecipeId).toBeUndefined();
+    // The link belongs to the account that shared it, and survives a round trip through storage.
+    expect(shared[0]?.sharedByUserId).toBe("user_1");
+    expect(parseSavedRecipeRecords(serializeSavedRecipeRecords(shared))[0]?.sharedByUserId).toBe(
+      "user_1"
+    );
+    const unshared = markSavedRecipeUnshared(shared, savedRecipe.id)[0];
+    expect(unshared?.sharedRecipeId).toBeUndefined();
+    expect(unshared?.sharedByUserId).toBeUndefined();
+  });
+
+  it("lets only the account that shared a recipe use its Family link", () => {
+    const record = (sharedByUserId?: string) => ({
+      sharedByUserId,
+      sharedRecipeId: "copy_1"
+    });
+    const family = [{ id: "copy_1", ownerUserId: "user_1" }];
+
+    expect(getOwnSharedRecipeId(record("user_1"), "user_1", family)).toBe("copy_1");
+    expect(getOwnSharedRecipeId(record("user_1"), "user_2", family)).toBeUndefined();
+    expect(getOwnSharedRecipeId(record("user_1"), null, family)).toBeUndefined();
+    // Links from before the sharer was recorded: the account's Family list decides.
+    expect(getOwnSharedRecipeId(record(), "user_1", family)).toBe("copy_1");
+    expect(getOwnSharedRecipeId(record(), "user_2", family)).toBeUndefined();
+    expect(getOwnSharedRecipeId(record(), "user_2", [])).toBeUndefined();
+    // Until the list has loaded, such a link is nobody's.
+    expect(getOwnSharedRecipeId(record(), "user_1", null)).toBeUndefined();
+    expect(getOwnSharedRecipeId(record(), "user_2", null)).toBeUndefined();
+
+    const savedRecipe = {
+      ...createSavedRecipeRecord(buildSuccessState(), "2026-04-19T12:00:00.000Z"),
+      sharedAt: "2026-04-19T12:05:00.000Z",
+      sharedByUserId: "user_1",
+      sharedRecipeId: "copy_1"
+    };
+    expect(withOwnSharedLink(savedRecipe, "user_1", family)).toBe(savedRecipe);
+    expect(withOwnSharedLink(savedRecipe, "user_2", family)).toMatchObject({
+      sharedAt: undefined,
+      sharedRecipeId: undefined
+    });
+
+    // Once a list shows whose copy it is, that's recorded on the link; others are left alone.
+    const records = [
+      { ...savedRecipe, id: "a", sharedByUserId: undefined, sharedRecipeId: "copy_1" },
+      { ...savedRecipe, id: "b", sharedByUserId: undefined, sharedRecipeId: "gone_copy" },
+      { ...savedRecipe, id: "c", sharedByUserId: "user_3", sharedRecipeId: "copy_1" }
+    ];
+    const recorded = recordSharedLinkOwners(records, family);
+    expect(recorded.map((entry) => entry.sharedByUserId)).toEqual(["user_1", undefined, "user_3"]);
+    // Nothing to record: the same list back.
+    expect(recordSharedLinkOwners(recorded, family)).toBe(recorded);
   });
 
   it("searches shared recipes while preserving shared ownership metadata", () => {
@@ -458,5 +514,82 @@ describe("saved recipe store helpers", () => {
   it("drops invalid saved recipe payloads", () => {
     expect(parseSavedRecipeRecords('[{"savedAt":"2026-04-19T12:00:00.000Z"}]')).toEqual([]);
     expect(parseSavedRecipeRecords("not json")).toEqual([]);
+  });
+
+  it("reads favorites additively and round-trips them", () => {
+    const recipe = createSavedRecipeRecord(buildSuccessState(), "2026-04-19T12:00:00.000Z");
+    const legacyBlob = JSON.stringify([recipe]);
+
+    expect(parseSavedRecipeRecords(legacyBlob)[0]?.favorite).toBeUndefined();
+    expect(serializeSavedRecipeRecords(parseSavedRecipeRecords(legacyBlob))).not.toContain(
+      "favorite"
+    );
+
+    const favorited = setSavedRecipeFavorite([recipe], recipe.id, true);
+    const stored = parseSavedRecipeRecords(serializeSavedRecipeRecords(favorited));
+
+    expect(stored[0]?.favorite).toBe(true);
+    expect(setSavedRecipeFavorite(stored, recipe.id, false)[0]?.favorite).toBeUndefined();
+    expect(
+      parseSavedRecipeRecords(JSON.stringify([{ ...recipe, favorite: "yes" }]))[0]?.favorite
+    ).toBeUndefined();
+  });
+
+  it("does not copy the heart onto a duplicate", () => {
+    const recipe = {
+      ...createSavedRecipeRecord(buildSuccessState(), "2026-04-19T12:00:00.000Z"),
+      favorite: true
+    };
+
+    expect(cloneSavedRecipeRecord([recipe], recipe).favorite).toBeUndefined();
+  });
+
+  it("finds a saved recipe from a tracked or reformatted link to the same page", () => {
+    const soup = createSavedRecipeRecord(
+      buildSuccessState({
+        recipe: { ...buildSuccessState().recipe, sourceUrl: "https://www.example.com/soup/" }
+      }),
+      "2026-04-19T12:00:00.000Z"
+    );
+
+    expect(
+      getSavedRecipeRecordBySourceUrl([soup], "https://example.com/soup?utm_source=tiktok")?.id
+    ).toBe(soup.id);
+    expect(getSavedRecipeRecordBySourceUrl([soup], "https://example.com/stew")).toBeUndefined();
+  });
+
+  it("only reports scan files no remaining recipe uses", () => {
+    const scan = { mimeType: "image/jpeg" as const, uri: "file:///documents/recipe-scans/a-0.jpg" };
+    const onlyMine = {
+      mimeType: "image/jpeg" as const,
+      uri: "file:///documents/recipe-scans/a-1.jpg"
+    };
+    const original = {
+      ...createSavedRecipeRecord(buildSuccessState(), "2026-04-19T12:00:00.000Z"),
+      sourceImages: [scan, onlyMine]
+    };
+    const clone = { ...cloneSavedRecipeRecord([original], original), sourceImages: [scan] };
+    const external = {
+      ...createSavedRecipeRecord(buildSuccessState(), "2026-04-19T12:00:00.000Z"),
+      sourceImages: [{ mimeType: "image/png" as const, uri: "content://media/external/1" }]
+    };
+
+    expect(getOrphanedSourceImageUris([clone], [original])).toEqual([onlyMine.uri]);
+    expect(getOrphanedSourceImageUris([], [original, clone])).toEqual([scan.uri, onlyMine.uri]);
+    expect(getOrphanedSourceImageUris([], [external])).toEqual([]);
+  });
+
+  it("searches with the shared domain index and tolerates malformed stored recipes", () => {
+    const soup = createSavedRecipeRecord(buildSuccessState(), "2026-04-19T12:00:00.000Z");
+    const malformed = {
+      ...soup,
+      id: "broken",
+      recipe: { ...soup.recipe, ingredients: undefined, steps: [null], title: "Broken Chicken" }
+    } as unknown as typeof soup;
+
+    expect(searchSavedRecipeRecords([soup, malformed], "chick").map((entry) => entry.id)).toEqual([
+      "broken"
+    ]);
+    expect(buildSavedRecipeSearchIndex([soup, malformed]).size).toBe(2);
   });
 });

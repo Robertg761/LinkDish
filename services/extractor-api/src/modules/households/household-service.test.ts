@@ -366,7 +366,40 @@ describe("household-service", () => {
     });
 
     familyActive = false;
+    /* The owner's Family entitlement is cached until the next RevenueCat event for them. */
+    await expect(households.getActiveHouseholdQuotaForUser(member.id)).resolves.not.toBeNull();
+
+    const { invalidateRevenueCatEntitlementCache } =
+      await import("../billing/revenuecat-entitlements.js");
+    await invalidateRevenueCatEntitlementCache(owner.id);
     await expect(households.getActiveHouseholdQuotaForUser(member.id)).resolves.toBeNull();
+  });
+
+  it("serves household reads from the cached owner entitlement", async () => {
+    const fetchMock = vi.fn(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            subscriber: {
+              entitlements: { Family: { expires_date: "2099-01-01T00:00:00Z" } }
+            }
+          }),
+          { headers: { "content-type": "application/json" }, status: 200 }
+        )
+      )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const { auth, households } = await importHouseholdModules();
+    const owner = await createUser(auth, "owner@example.com");
+
+    await households.createHouseholdForOwner(owner);
+    const callsAfterCreate = fetchMock.mock.calls.length;
+
+    await households.getActiveHouseholdQuotaForUser(owner.id);
+    await households.getHouseholdSummaryForUser(owner.id);
+    await households.getSharedRecipesForUser(owner);
+
+    expect(fetchMock.mock.calls.length).toBe(callsAfterCreate);
   });
 
   it("reports active household members as effective Family accounts", async () => {
@@ -711,9 +744,7 @@ describe("household-service", () => {
 
     await expect(
       households.upsertShoppingItemsForUser(owner, {
-        items: [
-          buildShoppingItem("shopping_item_overflow", owner.id, "2026-07-04T13:00:00.000Z")
-        ]
+        items: [buildShoppingItem("shopping_item_overflow", owner.id, "2026-07-04T13:00:00.000Z")]
       })
     ).rejects.toMatchObject({
       message: "Household shopping lists can hold up to 300 items.",
@@ -856,6 +887,46 @@ describe("household-service", () => {
         email: member.email
       }
     });
+  });
+
+  it("doesn't let an invite canceled while it was being accepted add the member", async () => {
+    stubRevenueCatFamily(() => true);
+    const { auth, households } = await importHouseholdModules();
+    const entitlements = await import("../billing/revenuecat-entitlements.js");
+    const owner = await createUser(auth, "owner@example.com");
+    const member = await createUser(auth, "member@example.com");
+
+    await households.createHouseholdForOwner(owner);
+    const createdInvite = await households.createHouseholdInvite(owner, member.email);
+    const inviteCode = getLastInviteCode();
+
+    // The owner's plan is checked again as the invite is accepted, and RevenueCat is slow.
+    await entitlements.invalidateRevenueCatEntitlementCache(owner.id);
+    let answerRevenueCat: () => void = () => undefined;
+    const slowAnswer = new Promise<void>((resolve) => {
+      answerRevenueCat = resolve;
+    });
+    const fetchFamily = vi.mocked(fetch).getMockImplementation();
+    vi.mocked(fetch).mockImplementationOnce(async (...args) => {
+      await slowAnswer;
+      return fetchFamily!(...args);
+    });
+
+    const callsBefore = vi.mocked(fetch).mock.calls.length;
+    const accepting = households.acceptHouseholdInvite(member, inviteCode);
+    await vi.waitFor(() => expect(vi.mocked(fetch).mock.calls.length).toBeGreaterThan(callsBefore));
+
+    // Meanwhile the owner cancels the invite (it is gone once the cancel holds the household).
+    const canceling = households.cancelHouseholdInvite(owner, createdInvite.invite.id);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    answerRevenueCat();
+    await canceling;
+
+    await expect(accepting).rejects.toMatchObject({
+      message: "That household invite is no longer valid.",
+      statusCode: 404
+    });
+    expect(await households.getHouseholdSummaryForUser(member.id)).toEqual({ household: null });
   });
 
   it("deletes standalone account records", async () => {
