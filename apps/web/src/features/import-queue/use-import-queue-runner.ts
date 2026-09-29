@@ -88,7 +88,7 @@ const withQueueLock = async (task: () => Promise<void>): Promise<boolean> => {
 export function useImportQueueRunner(enabled = true): ImportQueueRunnerState {
   // Imports run only once requests carry the account (not while a cached Clerk user's session is
   // still loading), so they are neither billed as anonymous nor paused for the wrong limit.
-  const { credentialsReady, isAuthenticated, user } = useAuth();
+  const { credentialsKey, credentialsReady, isAuthenticated, user } = useAuth();
   const queue = useImportQueue();
   const [online, setOnline] = useState(isOnline);
   const [running, setRunning] = useState(false);
@@ -96,6 +96,13 @@ export function useImportQueueRunner(enabled = true): ImportQueueRunnerState {
   const [stall, setStall] = useState<StorageStall | null>(null);
   const controllerRef = useRef<AbortController | null>(null);
   const tier = getWebBillingTier(user);
+  /**
+   * Who the queue imports for, as requests carry it. A run works for one: when someone else signs
+   * in (or out), it stops at its next step and the next run works for them.
+   */
+  const account = `${credentialsKey ?? ""}|${isAuthenticated ? "in" : "out"}|${tier}`;
+  const accountRef = useRef(account);
+  accountRef.current = account;
   const queuedKey = useMemo(() => queuedKeyOf(queue.items), [queue.items]);
   const pendingIds = useMemo(() => pendingIdsOf(queue.items), [queue.items]);
   const hasQueued = queuedKey.length > 0;
@@ -118,10 +125,10 @@ export function useImportQueueRunner(enabled = true): ImportQueueRunnerState {
     []
   );
 
-  // A new plan (or signing in) may lift a limit pause.
+  // A new plan (or signing in, or another account) may lift a limit pause.
   useEffect(() => {
     setPaused((current) => (current === "offline" ? current : null));
-  }, [isAuthenticated, tier]);
+  }, [account]);
 
   useEffect(() => {
     if (
@@ -140,25 +147,32 @@ export function useImportQueueRunner(enabled = true): ImportQueueRunnerState {
     const controller = new AbortController();
     controllerRef.current = controller;
     setRunning(true);
+    const startedFor = account;
+    const isCurrent = () => accountRef.current === startedFor;
 
     void withQueueLock(async () => {
       // The worker (API client, save rules) loads only when there is something to import.
       const { runImportQueue } = await import("./import-queue-runner");
       const result = await runImportQueue({
         isAuthenticated,
+        isCurrent,
         signal: controller.signal,
         tier
       });
-      idleKeyRef.current = result.processed === 0 && !result.paused ? queuedKey : null;
 
       if (result.processed > 0) {
         // Imports finished in the background: the importer's allowance is out of date.
         invalidateImportUsage();
       }
 
-      if (!controller.signal.aborted) {
+      // A run for someone who has since signed out (or been replaced) says nothing about the queue
+      // for the account now signed in: that one runs next, without the last one's pause.
+      if (!controller.signal.aborted && isCurrent()) {
+        idleKeyRef.current = result.processed === 0 && !result.paused ? queuedKey : null;
         setPaused(result.paused);
         setStall(null);
+      } else {
+        idleKeyRef.current = null;
       }
     })
       .then((ran) => {
@@ -188,6 +202,7 @@ export function useImportQueueRunner(enabled = true): ImportQueueRunnerState {
         }
       });
   }, [
+    account,
     credentialsReady,
     enabled,
     hasQueued,

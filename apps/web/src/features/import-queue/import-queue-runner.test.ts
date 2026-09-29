@@ -1084,6 +1084,97 @@ describe("import queue runner", () => {
     expect((await getImportQueue())[0]).toMatchObject({ id: "stale", status: "done" });
   });
 
+  describe("when someone else signs in (or out) while it runs", () => {
+    /** The account the run started for, until `switchAccount` (someone else signs in or out). */
+    const account = () => {
+      let current = true;
+      return { isCurrent: () => current, switchAccount: () => (current = false) };
+    };
+
+    it("doesn't start an import once the account has changed", async () => {
+      await enqueueImport({ url: "https://a.com/soup" });
+      const { isCurrent, switchAccount } = account();
+      switchAccount();
+
+      await expect(runImportQueue(context({ isCurrent }))).resolves.toEqual({
+        paused: null,
+        processed: 0
+      });
+      expect(apiMocks.extractRecipe).not.toHaveBeenCalled();
+      expect(await statuses()).toEqual([["https://a.com/soup", "queued"]]);
+    });
+
+    it("doesn't charge the signed-out allowance for an import that finishes after signing in", async () => {
+      await enqueueImport({ url: "https://a.com/soup" });
+      await enqueueImport({ url: "https://b.com/stew" });
+      const { isCurrent, switchAccount } = account();
+      apiMocks.extractRecipe.mockImplementation(() => {
+        switchAccount();
+        return Promise.resolve(success("Soup", "https://a.com/soup"));
+      });
+
+      await expect(
+        runImportQueue(context({ isAuthenticated: false, isCurrent, tier: "free" }))
+      ).resolves.toEqual({ paused: null, processed: 0 });
+
+      expect(readWebBillingUsage()).toMatchObject({ imports: 0 });
+      // The run stops: the next link waits for a run as the account now signed in.
+      expect(apiMocks.extractRecipe).toHaveBeenCalledOnce();
+      const [soup, stew] = await getImportQueue();
+      // Paid for: the recipe waits with its link, for that run to save without importing it again.
+      expect(soup).toMatchObject({
+        pendingSave: { sourceUrl: "https://a.com/soup" },
+        status: "queued"
+      });
+      expect(stew?.status).toBe("queued");
+
+      await runImportQueue(context({ isAuthenticated: true, tier: "plus" }));
+
+      expect(apiMocks.extractRecipe).toHaveBeenCalledTimes(2);
+      expect(await statuses()).toEqual([
+        ["https://a.com/soup", "done"],
+        ["https://b.com/stew", "done"]
+      ]);
+    });
+
+    it("never shares a recipe into the household as an account that has signed out", async () => {
+      await enqueueImport({ url: "https://a.com/soup" });
+      apiMocks.getHousehold.mockResolvedValue({ household: { id: "household-1" } });
+      apiMocks.createSharedRecipe.mockResolvedValue({
+        recipe: { id: "shared-1", updatedAt: "2026-09-01T00:00:00.000Z" }
+      });
+      const { isCurrent, switchAccount } = account();
+      apiMocks.extractRecipe.mockImplementation(() => {
+        switchAccount();
+        return Promise.resolve(success("Soup", "https://a.com/soup"));
+      });
+
+      await runImportQueue(context({ isAuthenticated: true, isCurrent }));
+      // The next run, signed out, saves it on this device only.
+      await runImportQueue(context({ isAuthenticated: false, tier: "free" }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(await statuses()).toEqual([["https://a.com/soup", "done"]]);
+      expect(apiMocks.getHousehold).not.toHaveBeenCalled();
+      expect(apiMocks.createSharedRecipe).not.toHaveBeenCalled();
+    });
+
+    it("leaves AI help to the account now signed in", async () => {
+      await enqueueImport({ url: "https://www.instagram.com/p/abc" });
+      const { isCurrent, switchAccount } = account();
+      apiMocks.extractRecipe.mockImplementation(() => {
+        switchAccount();
+        return Promise.resolve({ reason: "needs_ai", status: "needs_retry" });
+      });
+
+      await runImportQueue(context({ isAuthenticated: false, isCurrent, tier: "free" }));
+
+      expect(apiMocks.extractRecipe).toHaveBeenCalledOnce();
+      expect(readWebBillingUsage()).toMatchObject({ imports: 0, strongExtractions: 0 });
+      expect(await statuses()).toEqual([["https://www.instagram.com/p/abc", "queued"]]);
+    });
+  });
+
   it("stops quietly when the page goes away", async () => {
     const controller = new AbortController();
     await enqueueImport({ url: "https://a.com/soup" });

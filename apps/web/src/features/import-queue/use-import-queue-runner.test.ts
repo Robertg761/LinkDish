@@ -21,9 +21,16 @@ import {
 
 vi.mock("idb", async () => (await import("../../storage/testing/fake-idb")).fakeIdbModule);
 
-vi.mock("../../auth/AuthProvider", () => ({
-  useAuth: () => ({ credentialsReady: true, isAuthenticated: true, user: null })
+const authMocks = vi.hoisted(() => ({
+  auth: {
+    credentialsKey: "clerk:user_1",
+    credentialsReady: true,
+    isAuthenticated: true,
+    user: null
+  }
 }));
+
+vi.mock("../../auth/AuthProvider", () => ({ useAuth: () => authMocks.auth }));
 
 const runnerMocks = vi.hoisted(() => ({
   heldLocks: [] as string[],
@@ -80,6 +87,12 @@ describe("useImportQueueRunner", () => {
       uuid += 1;
       return `00000000-0000-4000-8000-${String(uuid).padStart(12, "0")}`;
     });
+    authMocks.auth = {
+      credentialsKey: "clerk:user_1",
+      credentialsReady: true,
+      isAuthenticated: true,
+      user: null
+    };
     runnerMocks.heldLocks = [];
     runnerMocks.runImportQueue.mockReset();
     // The queue as the runner left it: nothing more to do until it changes.
@@ -127,6 +140,82 @@ describe("useImportQueueRunner", () => {
     renderHook(() => useImportQueueRunner());
 
     await waitFor(() => expect(getImportUsageGeneration()).toBe(before + 1));
+  });
+
+  describe("when someone else signs in (or out) while the queue runs", () => {
+    type RunContext = { isAuthenticated: boolean; isCurrent: () => boolean };
+    type RunResult = { paused: string | null; processed: number };
+
+    /** The first run waits until `finish` (as a long import would); later runs find nothing. */
+    const holdFirstRun = () => {
+      const runs: RunContext[] = [];
+      let finish: (result: RunResult) => void = () => undefined;
+      runnerMocks.runImportQueue.mockImplementation((context: RunContext) => {
+        runs.push(context);
+        return runs.length === 1
+          ? new Promise<RunResult>((resolve) => {
+              finish = resolve;
+            })
+          : Promise.resolve({ paused: null, processed: 0 });
+      });
+      return { finish: (result: RunResult) => finish(result), runs };
+    };
+
+    it("stops the run for the last account and works through the queue for the next", async () => {
+      const { finish, runs } = holdFirstRun();
+      const { rerender } = renderHook(() => useImportQueueRunner());
+      await waitFor(() => expect(runs).toHaveLength(1));
+      expect(runs[0]?.isCurrent()).toBe(true);
+
+      // Another account signs straight in (a cached user replaced once Clerk answers).
+      authMocks.auth = { ...authMocks.auth, credentialsKey: "clerk:user_2" };
+      rerender();
+
+      // The run for the last account learns it should stop, and stops with the queue as it was.
+      expect(runs[0]?.isCurrent()).toBe(false);
+      await act(async () => {
+        finish({ paused: null, processed: 0 });
+        await Promise.resolve();
+      });
+
+      await waitFor(() => expect(runs).toHaveLength(2));
+      expect(runs[1]?.isCurrent()).toBe(true);
+    });
+
+    it("works through the queue signed out once the account signs out mid-run", async () => {
+      const { finish, runs } = holdFirstRun();
+      const { rerender } = renderHook(() => useImportQueueRunner());
+      await waitFor(() => expect(runs).toHaveLength(1));
+
+      authMocks.auth = { ...authMocks.auth, credentialsKey: "session:", isAuthenticated: false };
+      rerender();
+
+      expect(runs[0]?.isCurrent()).toBe(false);
+      await act(async () => {
+        finish({ paused: null, processed: 0 });
+        await Promise.resolve();
+      });
+
+      await waitFor(() => expect(runs).toHaveLength(2));
+      expect(runs[1]).toMatchObject({ isAuthenticated: false });
+    });
+
+    it("doesn't hold the next account to the last account's limit", async () => {
+      const { finish, runs } = holdFirstRun();
+      const { rerender, result } = renderHook(() => useImportQueueRunner());
+      await waitFor(() => expect(runs).toHaveLength(1));
+
+      authMocks.auth = { ...authMocks.auth, credentialsKey: "clerk:user_2" };
+      rerender();
+      await act(async () => {
+        finish({ paused: "import_limit", processed: 0 });
+        await Promise.resolve();
+      });
+
+      await waitFor(() => expect(runs).toHaveLength(2));
+      await waitFor(() => expect(result.current.running).toBe(false));
+      expect(result.current.paused).toBeNull();
+    });
   });
 
   it("leaves the queue to the tab that already holds the lock", async () => {

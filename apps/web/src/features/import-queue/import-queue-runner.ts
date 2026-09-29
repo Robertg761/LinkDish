@@ -76,6 +76,12 @@ export interface QueueRunnerContext {
   signal: AbortSignal;
   /** Whose claims these are. Defaults to this tab's id. */
   owner?: string | undefined;
+  /**
+   * False once someone else signs in (or out), so requests no longer carry the account this run
+   * works for: the run stops at its next step and leaves the rest to a run for the new account.
+   * An import already under way finishes; its recipe waits with its item, for that run to save.
+   */
+  isCurrent?: (() => boolean) | undefined;
 }
 
 export type QueueItemOutcome =
@@ -107,6 +113,13 @@ const propertiesFor = (item: ImportQueueItem): ImportProperties => {
 };
 
 const isPaid = (tier: WebBillingTier) => tier !== "free";
+
+/** Requests still carry the account the run works for (see QueueRunnerContext.isCurrent). */
+const isCurrentAccount = (context: QueueRunnerContext): boolean => context.isCurrent?.() ?? true;
+
+/** Neither stopped nor working for an account that has signed out (or been replaced). */
+const mayGoOn = (context: QueueRunnerContext): boolean =>
+  !context.signal.aborted && isCurrentAccount(context);
 
 let tabOwnerId: string | undefined;
 
@@ -235,7 +248,8 @@ async function keepImportedRecipe(
     });
     markRecipeSaved();
 
-    if (isAuthenticated) {
+    // Shared as the account that imported it, never as one that signed in meanwhile.
+    if (isAuthenticated && isCurrentAccount(context)) {
       void syncRecipeToHousehold(saved.recipe).catch(() => undefined);
     }
   }
@@ -257,7 +271,7 @@ async function savePendingImport(
   pending: ImportQueuePendingSave,
   context: QueueRunnerContext
 ): Promise<QueueItemOutcome> {
-  const { owner, signal, tier } = context;
+  const { owner, tier } = context;
   const cookbook = await readCookbook();
   const id = await generateDeterministicId(pending.sourceUrl, pending.recipe.title);
   // Only a link is matched page by page: two texts from one page can be two recipes, so pasted
@@ -276,7 +290,7 @@ async function savePendingImport(
     return { reason: "save_limit", status: "paused" };
   }
 
-  if (signal.aborted) {
+  if (!mayGoOn(context)) {
     await retryImport(item.id, owner);
     return { status: "stopped" };
   }
@@ -342,7 +356,7 @@ export async function processImportQueueItem(
     return { reason: "import_limit", status: "paused" };
   }
 
-  if (signal.aborted) {
+  if (!mayGoOn(context)) {
     await retryImport(item.id, owner);
     return { status: "stopped" };
   }
@@ -405,6 +419,12 @@ export async function processImportQueueItem(
         return { message: NEEDS_AI_MESSAGE, status: "failed" };
       }
 
+      if (!isCurrentAccount(context)) {
+        // Someone else signed in (or out): AI help is theirs to spend, in their own run.
+        await release();
+        return { status: "stopped" };
+      }
+
       attempt = "fallback";
       properties = { ...properties, attempt };
       response = await extract(item, attempt, correlationId, signal);
@@ -426,7 +446,11 @@ export async function processImportQueueItem(
         routeOrScreen: IMPORT_ANALYTICS_ROUTE
       });
 
-      if (!isAuthenticated) {
+      // Someone signed in (or out) while it ran: whose import it was is no longer known, so the
+      // signed-out allowance isn't charged for it.
+      const current = isCurrentAccount(context);
+
+      if (!isAuthenticated && current) {
         spendWebImport(tier);
 
         if (attempt === "fallback") {
@@ -446,6 +470,14 @@ export async function processImportQueueItem(
         // As the importer saves it: the link, or the page pasted text came from.
         sourceUrl: item.url ?? item.sourceUrl ?? response.recipe.sourceUrl
       };
+
+      if (!current) {
+        // Paid for: the recipe waits with the item, for a run as the new account to save it (under
+        // that account's plan and household).
+        await holdImportForSave(item.id, imported, owner);
+        return { status: "stopped" };
+      }
+
       return await keepImportedRecipe(item, imported, context);
     }
 
@@ -530,7 +562,7 @@ export async function runImportQueue(context: QueueRunnerContext): Promise<Queue
   await recoverStaleImports().catch(() => 0);
   let processed = 0;
 
-  while (!context.signal.aborted) {
+  while (mayGoOn(context)) {
     if (!isOnline()) {
       return { paused: "offline", processed };
     }
