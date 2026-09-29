@@ -1177,7 +1177,9 @@ export async function syncRecipeToHousehold(
   }
 
   try {
-    const household = await apiClient.getHousehold();
+    // Asked only as the account sharing: another account's answer (Clerk switched meanwhile) would
+    // file this recipe under that account's household, or none.
+    const household = await asAccount(sharingFor, () => apiClient.getHousehold());
 
     if (accountChanged()) {
       return recipe;

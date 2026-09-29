@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 
+import { getRequestBinding } from "../../api/request-binding";
 import { publishCurrentAccount } from "../../auth/account-scope";
 import { resetDataChangeFeedForTests, subscribeDataChanges } from "../../data/change-feed";
 import {
@@ -997,6 +998,23 @@ describe("saved-recipe-store v4 behaviour", () => {
       expect(fakeIdb.record(SAVED_RECIPES_STORE_NAME, third!.id)).toMatchObject({
         sync: { sharedBy: "user_c" }
       });
+    });
+
+    it("asks which household to share into only as the account sharing", async () => {
+      const { recipe: saved } = await saveRecipe(createSaveInput(1), true);
+      publishCurrentAccount("user_a");
+      let askedFor: string | null | undefined;
+      apiMocks.getHousehold.mockImplementation(() => {
+        askedFor = getRequestBinding()?.account;
+        return Promise.resolve({ household: { id: "house_a" } });
+      });
+      apiMocks.createSharedRecipe.mockResolvedValue({
+        recipe: { id: "a_copy", ownerUserId: "user_a", updatedAt: "2026-09-04T00:00:00.000Z" }
+      });
+
+      await syncRecipeToHousehold((await getSavedRecipeById(saved!.id))!);
+
+      expect(askedFor).toBe("user_a");
     });
 
     it("updates the account's own link as before", async () => {
