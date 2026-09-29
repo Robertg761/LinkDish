@@ -424,14 +424,25 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
     account: string | null;
     canSync: boolean | undefined;
   } | null>(null);
-  const [confirm, setConfirm] = useState<"delete-synced" | "unshare" | null>(null);
+  /** The open delete or unshare confirmation, with the account it was opened for. */
+  const [confirmAsk, setConfirmAsk] = useState<{
+    account: string | null;
+    kind: "delete-synced" | "unshare";
+  } | null>(null);
   const [busy, setBusy] = useState<"delete" | "duplicate" | "sync" | "share-card" | null>(null);
   // The sheet goes by its account's household: another account signing in or out never sees it,
   // not even for a render (this screen stays up for a cookbook recipe), and it is closed for good.
   const shoppingSheet = shopping?.account === account ? shopping : null;
+  // Likewise a confirmation: removing the household copy was that account's.
+  const confirm = confirmAsk?.account === account ? confirmAsk.kind : null;
+  const setConfirm = useCallback(
+    (kind: "delete-synced" | "unshare" | null) => setConfirmAsk(kind ? { account, kind } : null),
+    [account]
+  );
 
   useEffect(() => {
     setShopping((current) => (current && current.account !== account ? null : current));
+    setConfirmAsk((current) => (current && current.account !== account ? null : current));
   }, [account]);
 
   useDocumentTitle(recipe.title);
@@ -739,6 +750,8 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
 
   const handleDelete = async () => {
     const deletingFor = account;
+    const householdCopy =
+      shared != null || (isAuthenticated && Boolean(record.sync?.sharedRecipeId));
     setBusy("delete");
 
     try {
@@ -768,6 +781,13 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
           }
         }
 
+        // Another account signed in (or out) meanwhile: the request may have gone out as it, and
+        // its household never had this recipe (not found), so the household copy may still be
+        // there. The recipe stays on this device until its household copy is known to be gone.
+        if (!isCurrentAccount(deletingFor)) {
+          return;
+        }
+
         // No Undo here (the household copy is already gone), so nothing to read back.
         await removeSavedRecipe(record.id, { snapshot: false });
         setConfirm(null);
@@ -780,7 +800,7 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
     } catch (error) {
       console.error("Delete failed:", error);
 
-      if (shared && !isCurrentAccount(deletingFor)) {
+      if (householdCopy && !isCurrentAccount(deletingFor)) {
         return;
       }
 

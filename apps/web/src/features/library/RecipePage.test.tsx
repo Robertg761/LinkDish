@@ -3,6 +3,7 @@ import React from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { ExtractorApiError } from "../../api/client";
 import { AppUpdatePrompt } from "../../app/AppUpdatePrompt";
 import { ToastProvider } from "../../components/Toast";
 import { resetDataChangeFeedForTests, setDataChannelFactoryForTests } from "../../data/change-feed";
@@ -636,6 +637,62 @@ describe("RecipePage saved route", () => {
 
     await waitFor(() => expect(apiMocks.deleteSharedRecipe).toHaveBeenCalled());
     expect(screen.queryByText("Cookbook route")).not.toBeInTheDocument();
+    expect(stored("recipe_local")).toBeDefined();
+  });
+
+  it("keeps a synced recipe when another account signs in before its household delete answers", async () => {
+    authMocks.user = { billingPlan: "family", email: "a@example.com", id: "user_1" };
+    let failRemoval: (error: unknown) => void = () => undefined;
+    apiMocks.deleteSharedRecipe.mockReturnValue(
+      new Promise((_resolve, reject) => {
+        failRemoval = reject;
+      })
+    );
+    await seed([savedRecipe({ sync: { sharedRecipeId: "shared_9", status: "synced" } })]);
+    const view = renderAt("/recipes/recipe_local");
+    await screen.findByRole("heading", { level: 1, name: "Weeknight Chili" });
+
+    fireEvent.click(within(openMenu()).getByRole("menuitem", { name: "Delete recipe" }));
+    fireEvent.click(
+      within(screen.getByRole("dialog", { name: "Delete recipe?" })).getByRole("button", {
+        name: "Delete"
+      })
+    );
+    await waitFor(() => expect(apiMocks.deleteSharedRecipe).toHaveBeenCalledWith("shared_9"));
+
+    // Another account signs straight in, so the request can go out as it: its household has no
+    // such recipe (not found), which says nothing about the first account's household copy.
+    authMocks.user = { billingPlan: "family", email: "other@example.com", id: "user_other" };
+    view.rerender(recipeTree("/recipes/recipe_local"));
+    await act(async () => {
+      failRemoval(new ExtractorApiError("Not found", 404));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+
+    expect(stored("recipe_local")).toBeDefined();
+    expect(screen.queryByText("Cookbook route")).not.toBeInTheDocument();
+    expect(screen.queryByText(/here and from your household/u)).not.toBeInTheDocument();
+  });
+
+  it("closes a Delete recipe? confirmation when the account that opened it signs out", async () => {
+    authMocks.user = { billingPlan: "family", email: "a@example.com", id: "user_1" };
+    await seed([savedRecipe({ sync: { sharedRecipeId: "shared_9", status: "synced" } })]);
+    const view = renderAt("/recipes/recipe_local");
+    await screen.findByRole("heading", { level: 1, name: "Weeknight Chili" });
+
+    fireEvent.click(within(openMenu()).getByRole("menuitem", { name: "Delete recipe" }));
+    expect(screen.getByRole("dialog", { name: "Delete recipe?" })).toBeVisible();
+
+    // Signed out (say, from another tab): removing the household copy was the account that left's.
+    authMocks.user = null;
+    view.rerender(recipeTree("/recipes/recipe_local"));
+    expect(screen.queryByRole("dialog", { name: "Delete recipe?" })).not.toBeInTheDocument();
+
+    // Nor does it come back when that account signs in again.
+    authMocks.user = { billingPlan: "family", email: "a@example.com", id: "user_1" };
+    view.rerender(recipeTree("/recipes/recipe_local"));
+    expect(screen.queryByRole("dialog", { name: "Delete recipe?" })).not.toBeInTheDocument();
+    expect(apiMocks.deleteSharedRecipe).not.toHaveBeenCalled();
     expect(stored("recipe_local")).toBeDefined();
   });
 

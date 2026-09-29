@@ -489,6 +489,7 @@ export const LibraryPage: React.FC = () => {
       return;
     }
 
+    const deletingFor = account;
     setDeletingSynced(true);
 
     try {
@@ -497,12 +498,22 @@ export const LibraryPage: React.FC = () => {
       } catch (error) {
         if (!isSharedRecipeNotFoundError(error)) {
           console.error("Could not delete from server:", error);
-          showToast({
-            message: "This recipe could not be deleted from your household. Please try again.",
-            tone: "danger"
-          });
+
+          if (isCurrentAccount(deletingFor)) {
+            showToast({
+              message: "This recipe could not be deleted from your household. Please try again.",
+              tone: "danger"
+            });
+          }
           return;
         }
+      }
+
+      // Another account signed in (or out) meanwhile: the request may have gone out as it, and
+      // its household never had this recipe (not found), so the household copy may still be
+      // there. The recipe stays on this device until its household copy is known to be gone.
+      if (!isCurrentAccount(deletingFor)) {
+        return;
       }
 
       shared.removeLocal(sharedRecipeId);

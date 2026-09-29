@@ -637,6 +637,46 @@ describe("LibraryPage", () => {
     expect(storedRecipe("chili")).toBeDefined();
   });
 
+  it("keeps a synced recipe when another account signs in before its household delete answers", async () => {
+    authMocks.user = { billingPlan: "family", email: "owner@example.com", id: "user_owner" };
+    let failRemoval: (error: unknown) => void = () => undefined;
+    apiMocks.deleteSharedRecipe.mockReturnValue(
+      new Promise((_resolve, reject) => {
+        failRemoval = reject;
+      })
+    );
+    seedRecipes([
+      makeRecipe("chili", {
+        extra: { sync: { sharedRecipeId: "shared_9", status: "synced" } },
+        title: "Chili"
+      })
+    ]);
+
+    const view = renderPage();
+    await screen.findByText("Chili");
+    fireEvent.click(within(openCardMenu("Chili")).getByRole("menuitem", { name: "Delete" }));
+    fireEvent.click(
+      within(await screen.findByRole("dialog", { name: "Delete shared recipe?" })).getByRole(
+        "button",
+        { name: "Delete everywhere" }
+      )
+    );
+    await waitFor(() => expect(apiMocks.deleteSharedRecipe).toHaveBeenCalledWith("shared_9"));
+
+    // Another account signs straight in, so the request can go out as it: its household has no
+    // such recipe (not found), which says nothing about the first account's Family copy.
+    authMocks.user = { billingPlan: "family", email: "next@example.com", id: "user_next" };
+    view.rerender(libraryTree());
+    await act(async () => {
+      failRemoval(new apiMocks.ExtractorApiError("Not found", 404));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+
+    expect(storedRecipe("chili")).toBeDefined();
+    expect(screen.getByText("Chili")).toBeInTheDocument();
+    expect(screen.queryByText(/Deleted “Chili”/u)).not.toBeInTheDocument();
+  });
+
   it("adds a household member's ingredients to the household list before the check answers", async () => {
     resetShoppingListStoreForTests();
     resetShoppingSyncForTests();
