@@ -3,6 +3,7 @@ import { useEffect, useSyncExternalStore } from "react";
 import { apiClient } from "../../api/client";
 import { isNetworkError, isOffline, isTimeoutError } from "../../api/error-message";
 import { getApiErrorKind } from "../../api/errors";
+import { asAccount, isAccountChangedError } from "../../api/request-binding";
 import { useAuth } from "../../auth/AuthProvider";
 import { safeGetItem, safeSetItem } from "../../platform/safe-storage";
 
@@ -389,8 +390,9 @@ export function refreshShoppingHousehold(options: { force?: boolean } = {}): Pro
   }
 
   householdInflightKey = credentialsKey;
-  const run = apiClient
-    .getHousehold()
+  // Asked only as this account: an answer for another one Clerk switches to meanwhile would be
+  // remembered as this account's household.
+  const run = asAccount(userId, () => apiClient.getHousehold())
     .then(
       (response) => {
         if (state.userId !== userId) {
@@ -413,6 +415,11 @@ export function refreshShoppingHousehold(options: { force?: boolean } = {}): Pro
         }
       },
       (error: unknown) => {
+        // Not sent: another account signed in first, and its own check follows.
+        if (isAccountChangedError(error)) {
+          return;
+        }
+
         householdCheckError = error;
 
         if (state.userId === userId && !state.modeResolved) {

@@ -2,6 +2,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ExtractorApiError } from "../../api/errors";
+import { AccountChangedError, getRequestBinding } from "../../api/request-binding";
 import { resetLinkDishWebDbForTests } from "../../storage/linkdish-db";
 import { fakeIdb } from "../../storage/testing/fake-idb";
 
@@ -256,6 +257,25 @@ describe("shopping-sync", () => {
     expect(
       JSON.parse(window.localStorage.getItem(SHOPPING_HOUSEHOLD_CACHE_KEY) ?? "{}")
     ).toMatchObject({ household: false, userId: "u1" });
+  });
+
+  it("checks the household only as the signed-in account, and remembers nothing it didn't hear", async () => {
+    cacheHousehold(true, 10 * 60_000);
+    let askedFor: string | null | undefined;
+    apiMocks.getHousehold.mockImplementation(() => {
+      askedFor = getRequestBinding()?.account;
+      // As the client does when another account signed in before the request's token was in hand.
+      return Promise.reject(new AccountChangedError());
+    });
+
+    setShoppingAccount({ isAuthenticated: true, loading: false, userId: "u1" });
+
+    expect(askedFor).toBe("u1");
+    await waitFor(() => expect(apiMocks.getHousehold).toHaveBeenCalledTimes(1));
+    // Not answered: this account's remembered household stays as it was.
+    expect(
+      JSON.parse(window.localStorage.getItem(SHOPPING_HOUSEHOLD_CACHE_KEY) ?? "{}")
+    ).toMatchObject({ household: true, householdId: "h1", userId: "u1" });
   });
 
   it("assumes the last account on this device while sign-in is still loading", () => {

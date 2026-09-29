@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { apiClient } from "../../api/client";
+import { asAccount, isAccountChangedError } from "../../api/request-binding";
 
 import type { HouseholdDetails, HouseholdMember } from "@linkdish/api-contracts";
 
@@ -49,14 +50,15 @@ export function useHouseholdSummary(
 
     let cancelled = false;
 
-    apiClient.getHousehold().then(
+    asAccount(account, () => apiClient.getHousehold()).then(
       (response) => {
         if (!cancelled) {
           setLoaded({ account, summary: { household: response.household, status: "ready" } });
         }
       },
-      () => {
-        if (!cancelled) {
+      (error: unknown) => {
+        // Not sent: another account signed in first, and asks for its own.
+        if (!cancelled && !isAccountChangedError(error)) {
           setLoaded({ account, summary: { household: null, status: "error" } });
         }
       }

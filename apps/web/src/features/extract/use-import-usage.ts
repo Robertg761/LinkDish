@@ -1,6 +1,8 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 
 import { apiClient } from "../../api/client";
+import { asAccount } from "../../api/request-binding";
+import { getCurrentAccount } from "../../auth/account-scope";
 import { useAuth } from "../../auth/AuthProvider";
 import { hasMonthlyQuotaFields } from "../billing/quota-copy";
 import { getRemainingImports, webBillingPlans } from "../billing/web-billing";
@@ -112,7 +114,10 @@ export function useImportUsageState(
     }
 
     const controller = new AbortController();
-    apiClient.getBillingUsage({ signal: controller.signal }).then(
+    // Asked only as the account signed in now, never as one Clerk switches to meanwhile.
+    asAccount(getCurrentAccount(), () =>
+      apiClient.getBillingUsage({ signal: controller.signal })
+    ).then(
       (response) => {
         if (!controller.signal.aborted) {
           answerSequence += 1;

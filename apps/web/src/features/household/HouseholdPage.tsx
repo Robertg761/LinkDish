@@ -4,7 +4,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { trackWebEvent } from "../../analytics/client";
 import { apiClient } from "../../api/client";
 import { getFriendlyErrorMessage } from "../../api/error-message";
-import { asAccount } from "../../api/request-binding";
+import { asAccount, isAccountChangedError } from "../../api/request-binding";
 import { getAccountScope, useIsCurrentAccount } from "../../auth/account-scope";
 import { useAuth } from "../../auth/AuthProvider";
 import { Badge } from "../../components/Badge";
@@ -125,7 +125,7 @@ const HouseholdView: React.FC<HouseholdViewProps> = ({ account, isCurrentAccount
     }
 
     try {
-      const response = await apiClient.getHousehold();
+      const response = await asAccount(account, () => apiClient.getHousehold());
 
       if (stale()) {
         return;
@@ -136,7 +136,8 @@ const HouseholdView: React.FC<HouseholdViewProps> = ({ account, isCurrentAccount
       setLoadState("ready");
     } catch (error) {
       // The page already shows this account's answer: keep it rather than an error in its place.
-      if (stale() || shownRef.current) {
+      // Not sent (another account signed in first) is no error of this account's either.
+      if (stale() || shownRef.current || isAccountChangedError(error)) {
         return;
       }
 

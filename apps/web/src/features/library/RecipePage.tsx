@@ -5,8 +5,8 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { trackWebEvent } from "../../analytics/client";
 import { apiClient, isExtractorApiError } from "../../api/client";
 import { getFriendlyErrorMessage } from "../../api/error-message";
-import { asAccount } from "../../api/request-binding";
-import { getAccountScope, useIsCurrentAccount } from "../../auth/account-scope";
+import { asAccount, isAccountChangedError } from "../../api/request-binding";
+import { getAccountScope, getCurrentAccount, useIsCurrentAccount } from "../../auth/account-scope";
 import { useAuth } from "../../auth/AuthProvider";
 import { AppTopBarActions } from "../../components/AppShell";
 import { Button, ButtonLink } from "../../components/Button";
@@ -300,7 +300,7 @@ const SharedRecipeRoute: React.FC<{ sharedId: string; isCurrentAccount: IsCurren
     // Ignore a slow response for a recipe we already navigated away from.
     let cancelled = false;
     setState({ status: "loading" });
-    apiClient.getSharedRecipes().then(
+    asAccount(getCurrentAccount(), () => apiClient.getSharedRecipes()).then(
       (response) => {
         if (!cancelled) {
           setState({
@@ -310,7 +310,8 @@ const SharedRecipeRoute: React.FC<{ sharedId: string; isCurrentAccount: IsCurren
         }
       },
       (error: unknown) => {
-        if (!cancelled) {
+        // Not sent: another account signed in first, and loads its own.
+        if (!cancelled && !isAccountChangedError(error)) {
           setState({ error, status: "error" });
         }
       }
@@ -523,7 +524,7 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
 
     if (isAuthenticated) {
       try {
-        const householdResponse = await apiClient.getHousehold();
+        const householdResponse = await asAccount(askedFor, () => apiClient.getHousehold());
         canSyncItems = Boolean(householdResponse.household);
       } catch {
         // Unknown: leave it to the sync layer.
