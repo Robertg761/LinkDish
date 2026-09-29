@@ -8,7 +8,11 @@ import {
   startCookTimer,
   updateCookSession
 } from "../../data/cook-session-store";
-import { getLinkDishWebDb, resetLinkDishWebDbForTests } from "../../storage/linkdish-db";
+import {
+  COOK_SESSIONS_STORE_NAME,
+  getLinkDishWebDb,
+  resetLinkDishWebDbForTests
+} from "../../storage/linkdish-db";
 import { fakeIdb } from "../../storage/testing/fake-idb";
 import { deleteSavedRecipe } from "../library/saved-recipe-store";
 
@@ -213,12 +217,39 @@ describe("kitchen timers", () => {
     ]);
   });
 
-  describe("when this tab deletes a recipe's cook session", () => {
+  describe("when this tab's stored timers change or can't be saved", () => {
     beforeEach(async () => {
       // Open the database up front (its upgrade waits on timers, which are fake here).
       const opening = getLinkDishWebDb();
       await vi.advanceTimersByTimeAsync(0);
       await opening;
+    });
+
+    it("still chimes for a timer whose first save failed", async () => {
+      vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      await hydrateKitchenTimers();
+      fakeIdb.failNextPut(
+        COOK_SESSIONS_STORE_NAME,
+        new DOMException("The quota has been exceeded.", "QuotaExceededError")
+      );
+
+      startKitchenTimer({
+        durationMs: 60_000,
+        label: "Boil",
+        recipeId: "r1",
+        recipeTitle: "Chili"
+      });
+      await flushAsync();
+      await flushCookSessionWrites().catch(() => undefined);
+      expect((await getCookSession("r1"))?.timers ?? []).toEqual([]);
+
+      // Only this tab knows the timer: it announces it when it runs out.
+      await vi.advanceTimersByTimeAsync(60_000);
+      await flushAsync();
+      await flushCookSessionWrites().catch(() => undefined);
+      await flushAsync();
+
+      expect(oscillatorStart).toHaveBeenCalled();
     });
 
     it("drops the deleted recipe's timers and keeps the others", async () => {

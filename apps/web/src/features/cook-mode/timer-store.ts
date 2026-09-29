@@ -76,6 +76,8 @@ let pendingWrites = 0;
 let reloadWanted = false;
 let reloading = false;
 let unsubscribeRemote: (() => void) | null = null;
+/** Timers this tab changed whose save failed: until one lands, only this tab knows them. */
+const unsavedTimerIds = new Set<string>();
 
 const emit = () => {
   listeners.forEach((listener) => listener());
@@ -135,6 +137,7 @@ const persistTimerChanges = (
   const removed = new Set(change.removedIds ?? []);
 
   // Saved timers are restored first, so the stored list this merges into is complete.
+  const savedIds = upserted.map((timer) => timer.id);
   void trackWrite(() =>
     (hydration ?? Promise.resolve()).then(() =>
       queueCookSessionUpdate(recipeId, (session) => {
@@ -153,9 +156,13 @@ const persistTimerChanges = (
         return { timers: next };
       })
     )
-  ).catch((error: unknown) => {
-    console.warn("Could not save kitchen timers.", error);
-  });
+  ).then(
+    () => savedIds.forEach((id) => unsavedTimerIds.delete(id)),
+    (error: unknown) => {
+      savedIds.forEach((id) => unsavedTimerIds.add(id));
+      console.warn("Could not save kitchen timers.", error);
+    }
+  );
 };
 
 const setTimers = (
@@ -332,8 +339,16 @@ const claimCompletion = (timer: KitchenTimer): Promise<boolean> =>
         return stored !== undefined && stored.doneAt == null;
       };
 
-      if (!isClaimable(await getCookSession(timer.recipeId))) {
-        return false;
+      const stored = await getCookSession(timer.recipeId);
+
+      if (!isClaimable(stored)) {
+        // Never saved (its first write failed): no other tab knows it, so this one announces it
+        // while it still counts it down.
+        return (
+          !stored?.timers.some((entry) => entry.id === timer.id) &&
+          unsavedTimerIds.has(timer.id) &&
+          timers.some((entry) => entry.id === timer.id)
+        );
       }
 
       let claimed = false;
@@ -579,5 +594,6 @@ export const resetKitchenTimersForTests = (): void => {
   reloading = false;
   unsubscribeRemote?.();
   unsubscribeRemote = null;
+  unsavedTimerIds.clear();
   emit();
 };
