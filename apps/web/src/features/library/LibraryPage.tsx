@@ -89,14 +89,17 @@ import {
   useRecipeSearchIndex,
   useSearchEngine
 } from "./components/use-library-search";
-import { isSharedRecipeNotFoundError, useSharedRecipes } from "./components/use-shared-recipes";
+import {
+  isSharedRecipeNotFoundError,
+  useRecordSharedLinkOwners,
+  useSharedRecipes
+} from "./components/use-shared-recipes";
 import {
   hasSeededStarterRecipes,
   LOCAL_LIMIT_FREE,
   restoreSavedRecipe,
   SavedRecipeLimitError,
   syncRecipeToHousehold,
-  recordSharedLinkOwners,
   withOwnSharedLink
 } from "./saved-recipe-store";
 
@@ -246,27 +249,7 @@ export const LibraryPage: React.FC = () => {
     [account, family, library.recipes]
   );
 
-  // Once the Family list shows whose copy such an old link is, store that, so the link reads right
-  // wherever the list isn't at hand.
-  useEffect(() => {
-    if (!family?.length) {
-      return;
-    }
-
-    const listed = new Set(family.map((copy) => copy.id));
-    const unrecorded = library.recipes.some(
-      (recipe) =>
-        recipe.sync?.sharedRecipeId !== undefined &&
-        recipe.sync.sharedBy === undefined &&
-        listed.has(recipe.sync.sharedRecipeId)
-    );
-
-    if (unrecorded) {
-      recordSharedLinkOwners(family).catch((error: unknown) => {
-        console.warn("Could not record who shared Family recipes:", error);
-      });
-    }
-  }, [family, library.recipes]);
+  useRecordSharedLinkOwners(family, library.recipes);
   const billingTier = getWebBillingTier(user);
   const isPremiumUser = isAuthenticated ? billingTier !== "free" : undefined;
   const canUseSharedRecipeBook = isAuthenticated && !shared.accessBlocked;

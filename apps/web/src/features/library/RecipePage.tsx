@@ -48,6 +48,11 @@ import { setShoppingAccount } from "../shopping/shopping-sync";
 import { useUpgradeSheet } from "../upgrade/UpgradeSheet";
 
 import {
+  hasUnverifiedSharedLink,
+  useRecordSharedLinkOwners,
+  useSharedRecipes
+} from "./components/use-shared-recipes";
+import {
   getSavedRecipeById,
   getSavedRecipeSourceImages,
   getSharedRecipeOwnerLabel,
@@ -173,13 +178,24 @@ const SavedRecipeRoute: React.FC<{ id: string; isCurrentAccount: IsCurrentAccoun
   isCurrentAccount
 }) => {
   const { recipes, retry, status } = useSavedRecipes();
-  const { isAuthenticated, user } = useAuth();
+  const { credentialsKey, isAuthenticated, user } = useAuth();
   const account = getAccountScope(isAuthenticated, user);
+  const found = useMemo(() => recipes.find((entry) => entry.id === id), [id, recipes]);
+  // A Family link from before sharers were recorded is checked against this account's Family list
+  // (loaded only then, as the Cookbook does), and the sharer stored once it shows.
+  const shared = useSharedRecipes(
+    isAuthenticated && found !== undefined && hasUnverifiedSharedLink(found),
+    user?.id,
+    credentialsKey
+  );
+  const family = shared.status === "ready" ? shared.recipes : null;
+  const foundList = useMemo(() => (found ? [found] : []), [found]);
+  useRecordSharedLinkOwners(family, foundList);
   // As this account sees it: another account's Family link on it reads as not shared.
-  const recipe = useMemo(() => {
-    const found = recipes.find((entry) => entry.id === id);
-    return found ? withOwnSharedLink(found, account) : undefined;
-  }, [account, id, recipes]);
+  const recipe = useMemo(
+    () => (found ? withOwnSharedLink(found, account, family) : undefined),
+    [account, family, found]
+  );
   const [sourceImages, setSourceImages] = useState<ExtractRecipeImage[] | undefined>();
   const openedRef = useRef<string | null>(null);
   const imageCount = recipe?.sourceImageCount ?? 0;

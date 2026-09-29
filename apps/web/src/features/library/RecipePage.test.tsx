@@ -30,6 +30,7 @@ import { resetKitchenTimersForTests } from "../cook-mode/timer-store";
 import { resetShoppingListStoreForTests } from "../shopping/shopping-list-store";
 import { resetShoppingSyncForTests, SHOPPING_HOUSEHOLD_CACHE_KEY } from "../shopping/shopping-sync";
 
+import { resetSharedRecipesCacheForTests } from "./components/use-shared-recipes";
 import { RecipePage } from "./RecipePage";
 import { LOCAL_LIMIT_FREE } from "./saved-recipe-store";
 
@@ -208,6 +209,7 @@ beforeEach(() => {
   resetPreferencesForTests();
   resetShoppingListStoreForTests();
   resetShoppingSyncForTests();
+  resetSharedRecipesCacheForTests();
   setDataChannelFactoryForTests(() => null);
   authMocks.user = null;
   Object.values(apiMocks).forEach((mock) => mock.mockReset());
@@ -601,6 +603,35 @@ describe("RecipePage saved route", () => {
     const confirm = screen.getByRole("dialog", { name: "Delete recipe?" });
     expect(apiMocks.deleteSharedRecipe).not.toHaveBeenCalled();
     fireEvent.click(within(confirm).getByRole("button", { name: "Delete" }));
+
+    expect(await screen.findByText("Cookbook route")).toBeInTheDocument();
+    expect(apiMocks.deleteSharedRecipe).toHaveBeenCalledWith("shared_9");
+    expect(stored("recipe_local")).toBeUndefined();
+  });
+
+  it("deletes the household copy of an old Family link opened directly, once its Family list shows it's this account's", async () => {
+    // Shared before sharers were recorded, and opened straight from a link (no Cookbook first).
+    authMocks.user = { billingPlan: "family", email: "a@example.com", id: "user_1" };
+    apiMocks.deleteSharedRecipe.mockResolvedValue(undefined);
+    apiMocks.getSharedRecipes.mockResolvedValue({
+      recipes: [{ ...sharedRecipe, id: "shared_9", ownerUserId: "user_1" }]
+    });
+    await seed([savedRecipe({ sync: { sharedRecipeId: "shared_9", status: "synced" } })]);
+    renderAt("/recipes/recipe_local");
+    await screen.findByRole("heading", { level: 1, name: "Weeknight Chili" });
+    await waitFor(() =>
+      expect(stored("recipe_local")?.sync).toMatchObject({
+        sharedBy: "user_1",
+        sharedRecipeId: "shared_9"
+      })
+    );
+
+    fireEvent.click(within(openMenu()).getByRole("menuitem", { name: "Delete recipe" }));
+    fireEvent.click(
+      within(screen.getByRole("dialog", { name: "Delete recipe?" })).getByRole("button", {
+        name: "Delete"
+      })
+    );
 
     expect(await screen.findByText("Cookbook route")).toBeInTheDocument();
     expect(apiMocks.deleteSharedRecipe).toHaveBeenCalledWith("shared_9");

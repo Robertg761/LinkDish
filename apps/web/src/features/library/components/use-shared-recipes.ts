@@ -2,7 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { apiClient, isExtractorApiError } from "../../../api/client";
 import { asAccount, isAccountChangedError } from "../../../api/request-binding";
+import { recordSharedLinkOwners } from "../saved-recipe-store";
 
+import type { WebSavedRecipe } from "../saved-recipe-types";
 import type { SharedRecipe } from "@linkdish/api-contracts";
 
 export const FAMILY_ACCESS_MESSAGE =
@@ -76,6 +78,37 @@ const fetchSharedRecipes = (key: string, account: string): Promise<SharedRecipe[
   inflight = { key, promise };
   return promise;
 };
+
+/** A saved recipe's Family link from before sharers were recorded: nobody's until verified. */
+export const hasUnverifiedSharedLink = (recipe: Pick<WebSavedRecipe, "sync">): boolean =>
+  recipe.sync?.sharedRecipeId !== undefined && recipe.sync.sharedBy === undefined;
+
+/**
+ * Once `family` (the signed-in account's Family list, null until it has loaded) shows whose copy
+ * one of `recipes`' links from before sharers were recorded is, stores that on the recipe, so the
+ * link reads right wherever the list isn't at hand.
+ */
+export function useRecordSharedLinkOwners(
+  family: readonly SharedRecipe[] | null,
+  recipes: readonly Pick<WebSavedRecipe, "sync">[]
+): void {
+  useEffect(() => {
+    if (!family?.length) {
+      return;
+    }
+
+    const listed = new Set(family.map((copy) => copy.id));
+    const unrecorded = recipes.some(
+      (recipe) => hasUnverifiedSharedLink(recipe) && listed.has(recipe.sync?.sharedRecipeId ?? "")
+    );
+
+    if (unrecorded) {
+      recordSharedLinkOwners(family).catch((error: unknown) => {
+        console.warn("Could not record who shared Family recipes:", error);
+      });
+    }
+  }, [family, recipes]);
+}
 
 export const resetSharedRecipesCacheForTests = (): void => {
   cache = null;
