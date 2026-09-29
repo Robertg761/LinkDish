@@ -17,12 +17,7 @@ import {
 import { toSavedRecipeListRecord } from "../library/saved-recipe-store";
 
 import { DataTransferError, isStorageFullError } from "./errors";
-import {
-  buildImportPlan,
-  collectionIdsByRecipe,
-  isUntouchedStarter,
-  recipeIdsToRecheck
-} from "./import-plan";
+import { buildImportPlan, collectionIdsByRecipe, isUntouchedStarter } from "./import-plan";
 
 import type { DuplicateMode, ImportAnalysis, ImportPlan } from "./import-plan";
 import type { ImportProgress } from "./import-sources";
@@ -87,30 +82,23 @@ export async function commitImport(
   let plan: ImportPlan;
 
   try {
-    const keys = (await recipesStore.getAllKeys()).map(String);
-    const existingRecipeIds = new Set(keys);
+    // The cookbook as stored now (the list records; scans live in their own store): duplicates
+    // are matched against it, not the preview's, so a recipe saved, edited into a match or edited
+    // away from one since then counts as it is now. A starter someone made their own is kept, and
+    // a duplicate taken out of a collection joins it again.
+    const current = (await recipesStore.getAll()) as WebSavedRecipe[];
+    const existingRecipeIds = new Set(current.map((recipe) => recipe.id));
     const existingCollections = (await collectionsStore.getAll()) as WebCollection[];
     const existingMealPlan = (await mealPlanStore.getAll()) as MealPlanEntry[];
-    // The recipes the plan looks at, as stored now: a starter someone made their own is kept, a
-    // duplicate taken out of a collection joins it again, one saved since the preview is skipped.
-    const rechecked = (
-      await Promise.all(
-        recipeIdsToRecheck(analysis, keys).map(
-          (id) => recipesStore.get(id) as Promise<WebSavedRecipe | undefined>
-        )
-      )
-    ).filter((recipe): recipe is WebSavedRecipe => recipe !== undefined);
 
     plan = buildImportPlan(analysis, {
       duplicateMode: options.duplicateMode,
       isPremium: options.isPremium,
       existingRecipeIds,
-      quotaUsed: keys.filter((key) => !key.startsWith(STARTER_ID_PREFIX)).length,
-      untouchedStarterIds: new Set(rechecked.filter(isUntouchedStarter).map((recipe) => recipe.id)),
-      existingCollectionIds: collectionIdsByRecipe(rechecked),
-      recipesSavedSinceAnalysis: rechecked.filter(
-        (recipe) => !analysis.analyzedRecipeIds.has(recipe.id)
-      ),
+      quotaUsed: current.filter((recipe) => !recipe.id.startsWith(STARTER_ID_PREFIX)).length,
+      untouchedStarterIds: new Set(current.filter(isUntouchedStarter).map((recipe) => recipe.id)),
+      existingCollectionIds: collectionIdsByRecipe(current),
+      currentRecipes: current,
       existingCollections,
       existingMealPlan,
       now: options.now?.() ?? new Date().toISOString(),

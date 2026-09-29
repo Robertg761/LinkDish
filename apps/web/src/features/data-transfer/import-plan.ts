@@ -53,7 +53,11 @@ export interface AnalyzedCandidate {
   preferredId: string;
   /** A known starter recipe from a LinkDish backup (restored as a starter, outside the quota). */
   starterId: string | null;
-  /** The cookbook recipe this one duplicated when the analysis ran, if any (re-checked on commit). */
+  /**
+   * The cookbook recipe this one duplicated when the analysis ran, if any: what the preview
+   * shows. The import itself matches the recipes as stored when it is written (see
+   * ImportPlanContext.currentRecipes).
+   */
   duplicateOfLocalId: string | null;
   /** The earlier recipe in the same file this one duplicates, if any. */
   duplicateOfIndex: number | null;
@@ -64,8 +68,6 @@ export interface AnalyzedCandidate {
 export interface ImportAnalysis {
   parsed: ParsedImportFile;
   items: AnalyzedCandidate[];
-  /** Ids of the recipes on this device when the analysis ran. */
-  analyzedRecipeIds: ReadonlySet<string>;
   /** Personal recipes on this device when the analysis ran (starters excluded), for the preview. */
   quotaUsed: number;
   /** Collections each cookbook recipe belonged to when the analysis ran, for the preview. */
@@ -149,27 +151,6 @@ export const collectionIdsByRecipe = (
   );
 
 /**
- * The stored recipes {@link buildImportPlan} looks at, of the ones in `storedIds`: each recipe a
- * candidate matched or would take the id of (which collections it is in, whether a starter is
- * still untouched), and each recipe saved since the analysis ran (another tab may have saved one
- * of the file's recipes meanwhile). The writer reads these inside its transaction.
- */
-export const recipeIdsToRecheck = (
-  analysis: ImportAnalysis,
-  storedIds: Iterable<string>
-): string[] => {
-  const matched = new Set(
-    analysis.items.flatMap((item) =>
-      item.duplicateOfLocalId ? [item.preferredId, item.duplicateOfLocalId] : [item.preferredId]
-    )
-  );
-
-  return Array.from(storedIds).filter(
-    (id) => matched.has(id) || !analysis.analyzedRecipeIds.has(id)
-  );
-};
-
-/**
  * Compares each candidate with the cookbook (and earlier candidates in the same file): same id,
  * same deterministic id, or the same recipe per `isLikelySameRecipe`.
  */
@@ -251,7 +232,6 @@ export async function analyzeImport(
   return {
     parsed,
     items,
-    analyzedRecipeIds: new Set(existingById.keys()),
     quotaUsed: existing.filter((recipe) => !isStarterId(recipe.id)).length,
     existingCollectionIds: collectionIdsByRecipe(existing),
     untouchedStarterIds: new Set(existing.filter(isUntouchedStarter).map((recipe) => recipe.id))
@@ -278,10 +258,12 @@ export interface ImportPlanContext {
    */
   existingCollectionIds: ReadonlyMap<string, readonly string[]>;
   /**
-   * Recipes stored now that were not when the analysis ran: a file recipe matching one of them by
-   * link and title is a duplicate too.
+   * The cookbook's recipes as stored right now (the writer reads them in its transaction): each
+   * file recipe is matched against these, so a recipe another tab saved, edited into a match or
+   * edited away from one since the preview counts as it is now. Null for the preview, which shows
+   * the matches the analysis found.
    */
-  recipesSavedSinceAnalysis: readonly WebSavedRecipe[];
+  currentRecipes: readonly WebSavedRecipe[] | null;
   existingCollections: readonly WebCollection[];
   existingMealPlan: readonly MealPlanEntry[];
   now: string;
@@ -516,20 +498,35 @@ export function buildImportPlan(analysis: ImportAnalysis, context: ImportPlanCon
   }
 
   /* Recipes -------------------------------------------------------------------------------- */
-  // A recipe saved since the analysis ran (by another tab) is matched by link and title like the
-  // rest of the cookbook was; a LinkDish backup's entries only match by id (checked below).
-  const savedSinceAnalysis = new RecipeIndex();
-  for (const recipe of context.recipesSavedSinceAnalysis) {
-    savedSinceAnalysis.add({
-      id: recipe.id,
-      sourceUrl: recipe.sourceUrl,
-      title: recipe.recipe.title
-    });
+  // The cookbook as stored now, when there is a "now" (the writer's transaction): the recipe a
+  // file recipe matched in the preview may have been edited since, or another saved or edited
+  // into a match.
+  const current = context.currentRecipes;
+  const currentIndex = new RecipeIndex();
+  for (const recipe of current ?? []) {
+    currentIndex.add({ id: recipe.id, sourceUrl: recipe.sourceUrl, title: recipe.recipe.title });
   }
-  const savedSinceAnalysisMatch = ({ candidate, matchById }: AnalyzedCandidate): string | null =>
-    matchById || context.recipesSavedSinceAnalysis.length === 0
-      ? null
-      : savedSinceAnalysis.find(candidate.sourceUrl, candidate.recipe.title);
+  /** The cookbook recipe `item` duplicates, as analyzed (the preview) or as stored now. */
+  const localDuplicateOf = (item: AnalyzedCandidate): string | null => {
+    // A LinkDish backup's entries only match by id.
+    if (item.matchById) {
+      return context.existingRecipeIds.has(item.preferredId) ? item.preferredId : null;
+    }
+
+    if (current === null) {
+      return item.duplicateOfLocalId && context.existingRecipeIds.has(item.duplicateOfLocalId)
+        ? item.duplicateOfLocalId
+        : null;
+    }
+
+    for (const id of [item.preferredId, item.deterministicId]) {
+      if (context.existingRecipeIds.has(id)) {
+        return id;
+      }
+    }
+
+    return currentIndex.find(item.candidate.sourceUrl, item.candidate.recipe.title);
+  };
 
   const recipes: WebSavedRecipe[] = [];
   /** Original (backup) id or file position → the local id the recipe ends up with. */
@@ -570,17 +567,14 @@ export function buildImportPlan(analysis: ImportAnalysis, context: ImportPlanCon
       continue;
     }
 
-    const duplicateLocalId =
-      item.duplicateOfLocalId && context.existingRecipeIds.has(item.duplicateOfLocalId)
-        ? item.duplicateOfLocalId
-        : savedSinceAnalysisMatch(item);
+    const duplicateLocalId = localDuplicateOf(item);
     const duplicateInFileId =
       item.duplicateOfIndex === null ? null : (localIdByIndex.get(item.duplicateOfIndex) ?? null);
     const isDuplicate =
       duplicateLocalId !== null ||
       item.duplicateOfIndex !== null ||
-      // Written by someone else since the analysis ran.
-      (!item.duplicateOfLocalId && context.existingRecipeIds.has(item.preferredId));
+      // Its id is taken (written by someone else since the analysis ran).
+      context.existingRecipeIds.has(item.preferredId);
 
     if (isDuplicate) {
       counts.duplicates += 1;

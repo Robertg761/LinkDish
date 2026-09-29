@@ -161,6 +161,68 @@ describe("imports written while another tab changes the cookbook", () => {
     ]);
   });
 
+  it("imports a recipe whose match another tab changed into a different recipe after the preview", async () => {
+    const link = "https://www.seriouseats.com/weeknight-tomato-soup";
+    await putSavedRecipe(
+      saved("mine", link, {
+        recipe: { ...(SAMPLE_RECIPES[0].recipe as Recipe), sourceUrl: link, title: "Tomato Soup" }
+      })
+    );
+    const prepared = await prepareImport(
+      fileFromBytes(await buildPaprikaExport([paprikaRecipe()]), "export.paprikarecipes")
+    );
+    expect(previewImport(prepared, settings).counts).toMatchObject({
+      duplicates: 1,
+      skippedDuplicates: 1
+    });
+
+    // Before Import is pressed, another tab makes that recipe a different one.
+    const other = await openOtherTab();
+    const otherLink = "https://example.com/lentil-stew";
+    await other.store.putSavedRecipe(
+      saved("mine", otherLink, {
+        recipe: {
+          ...(SAMPLE_RECIPES[0].recipe as Recipe),
+          sourceUrl: otherLink,
+          title: "Lentil Stew"
+        }
+      })
+    );
+
+    const result = await runImport(prepared, settings);
+
+    expect(result.plan.counts).toMatchObject({ duplicates: 0, imported: 1 });
+    expect(fakeIdb.records<WebSavedRecipe>(SAVED_RECIPES_STORE_NAME)).toHaveLength(2);
+  });
+
+  it("skips a recipe another tab edited into a match after the preview", async () => {
+    await putSavedRecipe(saved("mine", "https://example.com/lentil-stew"));
+    const prepared = await prepareImport(
+      fileFromBytes(await buildPaprikaExport([paprikaRecipe()]), "export.paprikarecipes")
+    );
+    expect(previewImport(prepared, settings).counts).toMatchObject({ duplicates: 0, imported: 1 });
+
+    // Before Import is pressed, another tab points the recipe at the file's page.
+    const other = await openOtherTab();
+    const link = "https://www.seriouseats.com/weeknight-tomato-soup";
+    await other.store.putSavedRecipe(
+      saved("mine", link, {
+        recipe: {
+          ...(SAMPLE_RECIPES[0].recipe as Recipe),
+          sourceUrl: link,
+          title: "Weeknight Tomato Soup"
+        }
+      })
+    );
+
+    const result = await runImport(prepared, settings);
+
+    expect(result.plan.counts).toMatchObject({ duplicates: 1, imported: 0, skippedDuplicates: 1 });
+    expect(fakeIdb.records<WebSavedRecipe>(SAVED_RECIPES_STORE_NAME).map((r) => r.id)).toEqual([
+      "mine"
+    ]);
+  });
+
   it("still restores a backup's recipe when another tab saves a look-alike after the preview", async () => {
     await putSavedRecipe(saved("soup", "https://example.com/soup", { notes: "first pot" }));
     const file = await backupFile();

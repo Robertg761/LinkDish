@@ -174,7 +174,7 @@ export const previewImport = (
     quotaUsed: prepared.analysis.quotaUsed,
     untouchedStarterIds: prepared.analysis.untouchedStarterIds,
     existingCollectionIds: prepared.analysis.existingCollectionIds,
-    recipesSavedSinceAnalysis: [],
+    currentRecipes: null,
     existingCollections: prepared.existingCollections,
     existingMealPlan: prepared.existingMealPlan,
     now: new Date().toISOString(),
