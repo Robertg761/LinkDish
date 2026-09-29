@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  findCaptionSourceUrl,
   getImportHost,
   getTextInputProblem,
   isSocialImportUrl,
@@ -65,6 +66,39 @@ describe("parseLinkList", () => {
   it("caps a batch", () => {
     const text = Array.from({ length: 40 }, (_, index) => `https://site.com/r${index}`).join("\n");
     expect(parseLinkList(text)).toHaveLength(MAX_BATCH_LINKS);
+  });
+});
+
+describe("findCaptionSourceUrl", () => {
+  const link = "https://www.instagram.com/p/NOODLES/";
+
+  it("finds the one written-out link in a caption", () => {
+    expect(findCaptionSourceUrl(`Sesame noodles (${link}).\n200 g noodles`)).toBe(link);
+    expect(findCaptionSourceUrl("From www.example.com/noodles!\n200 g noodles")).toBe(
+      "https://www.example.com/noodles"
+    );
+    // The same link twice is still one link.
+    expect(findCaptionSourceUrl(`${link}\nSesame noodles\n${link}?utm_source=ig`)).toBe(link);
+  });
+
+  it("doesn't take a missing space for a site", () => {
+    const caption =
+      "Garlic pasta\n200 g spaghetti\nToss with a pinch of salt.Enjoy! tsp.salt/pepper";
+
+    expect(parseLinkList(caption)).toEqual(["https://salt.enjoy/", "https://tsp.salt/pepper"]);
+    expect(findCaptionSourceUrl(caption)).toBeUndefined();
+    expect(findCaptionSourceUrl(`${caption}\n${link}`)).toBe(link);
+  });
+
+  it("leaves it out when it's unclear which link, or the API wouldn't take it", () => {
+    expect(findCaptionSourceUrl("Sesame noodles\n200 g noodles")).toBeUndefined();
+    expect(
+      findCaptionSourceUrl(`Sesame noodles ${link}\nSauce: https://example.com/chili-oil`)
+    ).toBeUndefined();
+    expect(findCaptionSourceUrl("Noodles https://cook:secret@example.com/noodles")).toBeUndefined();
+    expect(
+      findCaptionSourceUrl(`Noodles https://example.com/noodles?${"x".repeat(2_100)}`)
+    ).toBeUndefined();
   });
 });
 

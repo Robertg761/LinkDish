@@ -1,3 +1,4 @@
+import { extractRecipeTextRequestSchema } from "@linkdish/api-contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { trackWebEvent, trackWebV2AnalyticsEvent } from "../../analytics/client";
@@ -957,6 +958,109 @@ describe("import queue runner", () => {
 
       expect(apiMocks.extractRecipeFromText).toHaveBeenCalledOnce();
       expect(savedFrom(link).map((recipe) => recipe.recipe.title)).toEqual(["Sesame noodles"]);
+    });
+
+    it("imports the text without a link the API wouldn't take (a sign-in in it, or too long)", async () => {
+      const madeUp = "https://linkdish.app/text-imports/abc";
+      // Like the real client: the request is checked against the API contract before it's sent.
+      apiMocks.extractRecipeFromText.mockImplementation((request) => {
+        const parsed = extractRecipeTextRequestSchema.safeParse(request);
+
+        return parsed.success
+          ? Promise.resolve(success("Sesame noodles", parsed.data.sourceUrl ?? madeUp))
+          : Promise.reject(
+              new apiMocks.ExtractorApiError("Input is invalid.", 0, parsed.error, "validation")
+            );
+      });
+
+      for (const badLink of [
+        "https://cook:secret@example.com/noodles",
+        `https://example.com/noodles?${"x".repeat(2_100)}`
+      ]) {
+        await enqueueImport({ sourceUrl: badLink, text: `Sesame noodles, from ${badLink}\n...` });
+      }
+
+      await expect(runImportQueue(context())).resolves.toEqual({ paused: null, processed: 2 });
+
+      expect((await getImportQueue()).map((item) => item.status)).toEqual(["done", "done"]);
+      for (const [request] of apiMocks.extractRecipeFromText.mock.calls) {
+        expect(request).not.toHaveProperty("sourceUrl");
+      }
+      expect(savedFrom(madeUp)).toHaveLength(1);
+    });
+
+    /** The recipe the API reads from a paste: the text's lines after the first are its ingredients. */
+    const readFromThePaste =
+      (title: string) =>
+      (request: { text: string; sourceUrl?: string }): Promise<unknown> => {
+        const response = success(
+          title,
+          request.sourceUrl ?? "https://linkdish.app/text-imports/abc"
+        );
+        response.recipe.ingredients = request.text
+          .split("\n")
+          .slice(1)
+          .map((line) => ({ text: line }));
+        return Promise.resolve(response);
+      };
+    const cutOff = `Sesame noodles ${link}\n200 g noodles`;
+    const corrected = `Sesame noodles ${link}\n200 g noodles\n1 tbsp chili oil`;
+    /** Each saved recipe's title and ingredients, by title. */
+    const ingredientsFrom = (sourceUrl: string) =>
+      savedFrom(sourceUrl)
+        .sort((left, right) => left.recipe.title.localeCompare(right.recipe.title))
+        .map((recipe) => [recipe.recipe.title, recipe.recipe.ingredients.map(({ text }) => text)]);
+
+    it("keeps a corrected paste of the same caption as a copy instead of dropping it", async () => {
+      await enqueueImport({ sourceUrl: link, text: cutOff });
+      await enqueueImport({ sourceUrl: link, text: corrected });
+      // The same paste again: its recipe is the corrected one, which is saved by now.
+      await enqueueImport({ sourceUrl: link, text: corrected });
+      apiMocks.extractRecipeFromText.mockImplementation(readFromThePaste("Sesame noodles"));
+
+      await expect(runImportQueue(context())).resolves.toEqual({ paused: null, processed: 3 });
+
+      expect(apiMocks.extractRecipeFromText).toHaveBeenCalledTimes(3);
+      expect(ingredientsFrom(link)).toEqual([
+        ["Sesame noodles", ["200 g noodles"]],
+        ["Sesame noodles (copy)", ["200 g noodles", "1 tbsp chili oil"]]
+      ]);
+      const copyId = await generateDeterministicId(link, "Sesame noodles (copy)");
+      expect((await getImportQueue()).map((item) => item.recipeId)).toEqual([
+        await generateDeterministicId(link, "Sesame noodles"),
+        copyId,
+        copyId
+      ]);
+    });
+
+    it("keeps a corrected paste that waits for room as a copy once there is room", async () => {
+      fakeIdb.seed(
+        SAVED_RECIPES_STORE_NAME,
+        Array.from({ length: 13 }, (_, index) => saved(`r${index}`, `https://x.com/${index}`))
+      );
+      await enqueueImport({ sourceUrl: link, text: cutOff });
+      await enqueueImport({ sourceUrl: link, text: corrected });
+      apiMocks.extractRecipeFromText
+        .mockImplementationOnce(readFromThePaste("Sesame noodles"))
+        .mockImplementationOnce(async (request) => {
+          // Another tab takes the last free slot while the corrected paste is imported.
+          fakeIdb.seed(SAVED_RECIPES_STORE_NAME, [saved("r14", "https://x.com/14")]);
+          return readFromThePaste("Sesame noodles")(request);
+        });
+      const signedIn = context({ owner: "tab-a", tier: "free" });
+
+      await expect(runImportQueue(signedIn)).resolves.toEqual({
+        paused: "save_limit",
+        processed: 1
+      });
+      await deleteSavedRecipe("r0");
+      await expect(runImportQueue(signedIn)).resolves.toEqual({ paused: null, processed: 1 });
+
+      expect(apiMocks.extractRecipeFromText).toHaveBeenCalledTimes(2);
+      expect(ingredientsFrom(link)).toEqual([
+        ["Sesame noodles", ["200 g noodles"]],
+        ["Sesame noodles (copy)", ["200 g noodles", "1 tbsp chili oil"]]
+      ]);
     });
   });
 

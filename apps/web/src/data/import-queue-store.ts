@@ -121,21 +121,27 @@ const normalizeUrl = (url: string | undefined): string | undefined => {
   }
 };
 
+/** Mirrors the length limit of httpUrlSchema in @linkdish/recipe-domain. */
+const MAX_SOURCE_URL_LENGTH = 2_048;
+
 /**
  * A pasted text's source link, as the importer sends it (trimmed, otherwise as given, so the
- * recipe gets the same id it would have online). Only a web link; anything else is left off
- * rather than keeping the text out of the queue.
+ * recipe gets the same id it would have online). Only a link the API takes (httpUrlSchema: a web
+ * link without a sign-in in it, 2,048 characters at most); anything else is left off rather than
+ * keeping the text out of the queue, or failing it on every try.
  */
 const toSourceUrl = (sourceUrl: string | undefined): string | undefined => {
   const trimmed = sourceUrl?.trim();
 
-  if (!trimmed) {
+  if (!trimmed || trimmed.length > MAX_SOURCE_URL_LENGTH) {
     return undefined;
   }
 
   try {
-    const { protocol } = new URL(trimmed);
-    return protocol === "http:" || protocol === "https:" ? trimmed : undefined;
+    const { password, protocol, username } = new URL(trimmed);
+    return (protocol === "http:" || protocol === "https:") && !username && !password
+      ? trimmed
+      : undefined;
   } catch {
     return undefined;
   }

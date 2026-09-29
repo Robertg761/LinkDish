@@ -146,6 +146,26 @@ describe("import-queue-store", () => {
         await enqueueImport({ sourceUrl: "https://other.com/x", url: link })
       ).not.toHaveProperty("sourceUrl");
     });
+
+    it("queues the text without a link the API wouldn't take (a sign-in in it, or too long)", async () => {
+      for (const sourceUrl of [
+        "https://cook:secret@example.com/noodles",
+        "https://cook@example.com/noodles",
+        `https://example.com/noodles?${"x".repeat(2_100)}`
+      ]) {
+        const item = await enqueueImport({ sourceUrl, text: caption });
+
+        expect(item).toMatchObject({ status: "queued", text: caption });
+        expect(item).not.toHaveProperty("sourceUrl");
+      }
+
+      // The longest link it takes is kept.
+      const longest = `https://example.com/noodles?q=${"x".repeat(2_048 - 30)}`;
+      expect(longest).toHaveLength(2_048);
+      expect(await enqueueImport({ sourceUrl: longest, text: caption })).toMatchObject({
+        sourceUrl: longest
+      });
+    });
   });
 
   it("queues a link once when two tabs add it at the same moment", async () => {

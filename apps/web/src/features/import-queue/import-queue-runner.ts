@@ -39,6 +39,7 @@ import { markRecipeSaved } from "../install/install-eligibility";
 import {
   assertCanAddSavedRecipe,
   generateDeterministicId,
+  getUniqueCopyTitle,
   SavedRecipeLimitError,
   saveRecipe,
   syncRecipeToHousehold
@@ -48,6 +49,7 @@ import type { WebBillingTier } from "../billing/web-billing";
 import type { SaveRecipeInput } from "../library/saved-recipe-store";
 import type { WebSavedRecipe } from "../library/saved-recipe-types";
 import type { ExtractRecipeResponse } from "@linkdish/api-contracts";
+import type { Recipe } from "@linkdish/recipe-domain";
 import type { V2AnalyticsImportProperties } from "@linkdish/utils";
 
 /**
@@ -143,6 +145,29 @@ const readCookbook = async (): Promise<readonly WebSavedRecipe[]> => {
   return cookbook.data;
 };
 
+/** What makes two imports the same recipe: the same ingredients and steps, whatever it's called. */
+const recipeContent = (recipe: Recipe): string =>
+  JSON.stringify([
+    recipe.ingredients.map(({ section, text }) => [section ?? null, text.trim()]),
+    recipe.steps.map(({ text }) => text.trim())
+  ]);
+
+/**
+ * The saved recipe a pasted text's import already is: one from the same page with the same
+ * ingredients and steps. Text is never matched by its page alone (one page can hold several
+ * recipes), nor by name: a corrected paste of a caption reads as the same name, but isn't the
+ * same recipe.
+ */
+const findSavedPaste = (
+  imported: ImportQueuePendingSave,
+  cookbook: readonly WebSavedRecipe[]
+): WebSavedRecipe | undefined => {
+  const content = recipeContent(imported.recipe);
+  return cookbook.find(
+    (recipe) => recipe.sourceUrl === imported.sourceUrl && recipeContent(recipe.recipe) === content
+  );
+};
+
 /**
  * Whether the cookbook has room for one more recipe. Only a full cookbook says no; anything else
  * (storage that can't be read) throws, and stops the run.
@@ -165,6 +190,10 @@ const hasRoomToSave = async (tier: WebBillingTier): Promise<boolean> => {
  * tab took the last free slot since the room check), the item goes back in the queue with the
  * recipe, in the same write that lets it go: the import is paid for, so making room saves it as
  * it is, never importing it again.
+ *
+ * A link's recipe saved already finishes the item. So does pasted text's, but a different recipe
+ * under the same name from that page (a corrected paste of a caption) is paid for too, and is
+ * kept as a copy: online the cook would choose between the two, and nobody is asked here.
  */
 async function keepImportedRecipe(
   item: ImportQueueItem,
@@ -172,12 +201,25 @@ async function keepImportedRecipe(
   context: QueueRunnerContext
 ): Promise<QueueItemOutcome> {
   const { isAuthenticated, owner, tier } = context;
-  const input: SaveRecipeInput = {
+  let input: SaveRecipeInput = {
     extraction: imported.extraction,
     recipe: imported.recipe,
     sourceUrl: imported.sourceUrl
   };
-  const saved = await saveRecipe(input, isPaid(tier));
+  let saved = await saveRecipe(input, isPaid(tier));
+
+  if (saved.error === "duplicate_prompt" && !item.url) {
+    const same = findSavedPaste(imported, await readCookbook());
+
+    if (same) {
+      await markImportDone(item.id, { recipeId: same.id }, owner);
+      return { duplicate: true, recipeId: same.id, status: "done" };
+    }
+
+    const title = await getUniqueCopyTitle(input.recipe.title);
+    input = { ...input, recipe: { ...input.recipe, title } };
+    saved = await saveRecipe(input, isPaid(tier));
+  }
 
   if (saved.error === "limit_exceeded") {
     await holdImportForSave(item.id, imported, owner);
@@ -218,10 +260,11 @@ async function savePendingImport(
   const { owner, signal, tier } = context;
   const cookbook = await readCookbook();
   const id = await generateDeterministicId(pending.sourceUrl, pending.recipe.title);
-  // Only a link is matched page by page: two texts from one page can be two recipes.
-  const existing =
-    cookbook.find((recipe) => recipe.id === id) ??
-    (item.url ? findSavedDuplicate(item.url, cookbook) : undefined);
+  // Only a link is matched page by page: two texts from one page can be two recipes, so pasted
+  // text is matched by its recipe (see findSavedPaste).
+  const existing = item.url
+    ? (cookbook.find((recipe) => recipe.id === id) ?? findSavedDuplicate(item.url, cookbook))
+    : findSavedPaste(pending, cookbook);
 
   if (existing) {
     await markImportDone(item.id, { recipeId: existing.id }, owner);
@@ -271,7 +314,7 @@ export async function processImportQueueItem(
   // 1. Already saved? Nothing to import, nothing spent. (An unreadable cookbook throws: importing
   // now could spend one on a recipe we have.) Pasted text is imported as it is online, even with
   // the page it came from (that page can hold more than one recipe): saving it finds the same
-  // recipe from that page by its id.
+  // recipe from that page (see keepImportedRecipe).
   if (item.url) {
     const existing = findSavedDuplicate(item.url, await readCookbook());
 

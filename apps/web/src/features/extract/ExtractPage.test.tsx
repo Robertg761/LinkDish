@@ -738,6 +738,54 @@ describe("ExtractPage", () => {
     expect(apiMocks.extractRecipe).not.toHaveBeenCalled();
   });
 
+  it("doesn't take a missing space in a caption for its source, online or offline", async () => {
+    const madeUp = "https://linkdish.app/text-imports/made-up";
+    // "salt.Enjoy" is a sentence without its space, not a site.
+    const typo = "Garlic pasta\n200 g spaghetti\n3 cloves garlic\nToss with a pinch of salt.Enjoy!";
+    const link = "https://www.instagram.com/p/GARLIC/";
+    apiMocks.extractRecipeFromText.mockImplementation((request) =>
+      Promise.resolve(
+        success({
+          recipe: { ...recipe, sourceUrl: request.sourceUrl ?? madeUp, title: "Garlic Pasta" }
+        })
+      )
+    );
+    const importText = (text: string) => {
+      fireEvent.change(screen.getByRole("textbox", { name: "Recipe text" }), {
+        target: { value: text }
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Get the recipe" }));
+    };
+    networkMocks.online = false;
+    renderPage();
+    fireEvent.click(screen.getByRole("radio", { name: "Text" }));
+
+    importText(typo);
+
+    expect(await screen.findByRole("heading", { name: "Saved for later" })).toBeVisible();
+    expect(fakeIdb.records<ImportQueueItem>(IMPORT_QUEUE_STORE_NAME)[0]).not.toHaveProperty(
+      "sourceUrl"
+    );
+
+    goOnline();
+
+    await waitFor(() =>
+      expect(fakeIdb.records<ImportQueueItem>(IMPORT_QUEUE_STORE_NAME)[0]?.status).toBe("done")
+    );
+    expect(apiMocks.extractRecipeFromText.mock.calls[0]?.[0]).not.toHaveProperty("sourceUrl");
+    expect(fakeIdb.records<WebSavedRecipe>(SAVED_RECIPES_STORE_NAME)[0]).toMatchObject({
+      sourceUrl: madeUp
+    });
+
+    // Online, the same caption with its post's link: the link is its source, the typo isn't.
+    fireEvent.click(screen.getByRole("button", { name: "Got it" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Text" }));
+    importText(`${typo}\n${link}`);
+
+    await screen.findByRole("heading", { level: 1, name: "Garlic Pasta" });
+    expect(apiMocks.extractRecipeFromText.mock.calls[1]?.[0]).toMatchObject({ sourceUrl: link });
+  });
+
   it("adds several pasted links to the import queue", async () => {
     networkMocks.online = false;
     renderPage();
