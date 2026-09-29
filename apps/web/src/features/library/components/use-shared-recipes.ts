@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { apiClient, isExtractorApiError } from "../../../api/client";
+import { asAccount, isAccountChangedError } from "../../../api/request-binding";
 
 import type { SharedRecipe } from "@linkdish/api-contracts";
 
@@ -58,13 +59,14 @@ let cache: { userId: string; recipes: SharedRecipe[] } | null = null;
  */
 let inflight: { key: string; promise: Promise<SharedRecipe[]> } | null = null;
 
-const fetchSharedRecipes = (key: string): Promise<SharedRecipe[]> => {
+const fetchSharedRecipes = (key: string, account: string): Promise<SharedRecipe[]> => {
   if (inflight && inflight.key === key) {
     return inflight.promise;
   }
 
-  const promise = apiClient
-    .getSharedRecipes()
+  // Sent only as the account it's for: one Clerk switches to meanwhile never has its list taken
+  // (and cached) as this one's.
+  const promise = asAccount(account, () => apiClient.getSharedRecipes())
     .then((response) => response.recipes)
     .finally(() => {
       if (inflight?.promise === promise) {
@@ -124,7 +126,7 @@ export function useSharedRecipes(
     }
 
     try {
-      const list = await fetchSharedRecipes(`${credentialsKey}|${userId ?? ""}`);
+      const list = await fetchSharedRecipes(`${credentialsKey}|${userId ?? ""}`, userId ?? "");
 
       if (request !== requestRef.current) {
         return;
@@ -140,7 +142,8 @@ export function useSharedRecipes(
       setError(null);
       setAccessBlocked(false);
     } catch (err) {
-      if (request !== requestRef.current) {
+      // Not sent: another account signed in first, and its own load follows.
+      if (request !== requestRef.current || isAccountChangedError(err)) {
         return;
       }
 

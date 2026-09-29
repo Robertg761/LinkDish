@@ -1,6 +1,8 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { AccountChangedError, getRequestBinding } from "../../../api/request-binding";
+
 import { resetSharedRecipesCacheForTests, useSharedRecipes } from "./use-shared-recipes";
 
 import type { SharedRecipe } from "@linkdish/api-contracts";
@@ -97,6 +99,33 @@ describe("useSharedRecipes", () => {
     });
     await waitFor(() => expect(result.current.recipes).toEqual([otherRecipe]));
     expect(result.current.status).toBe("ready");
+  });
+
+  it("asks for the list only as the account it's for, and keeps nothing it wasn't sent for", async () => {
+    let sentFor: string | null | undefined;
+    // As the real client does when Clerk switched to another account before the token was read.
+    apiMocks.getSharedRecipes.mockImplementationOnce(() => {
+      sentFor = getRequestBinding()?.account;
+      return Promise.reject(new AccountChangedError());
+    });
+    const { rerender, result } = renderHook(
+      ({ userId }: { userId: string }) => useSharedRecipes(true, userId, `clerk:${userId}`),
+      { initialProps: { userId: "user_1" } }
+    );
+
+    await waitFor(() => expect(sentFor).toBe("user_1"));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    // Not this account's failure to show: the next account's own load follows.
+    expect(result.current.status).toBe("loading");
+    expect(result.current.error).toBeNull();
+    expect(console.error).not.toHaveBeenCalled();
+
+    apiMocks.getSharedRecipes.mockResolvedValue({ recipes: [sharedRecipe] });
+    rerender({ userId: "user_2" });
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    expect(result.current.recipes).toEqual([sharedRecipe]);
   });
 
   it("hides the last account's locked or failed state from the next account", async () => {
