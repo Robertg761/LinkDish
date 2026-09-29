@@ -355,6 +355,16 @@ describe("CookbookScreen navigation and sharing", () => {
     };
     expect(dialogProps.visible).toBe(false);
     expect(dialogProps.actions).toEqual([]);
+
+    // The first account signs in again: its old confirmation doesn't come back by itself.
+    accountState.user = { id: "user_1" };
+    act(() => {
+      renderer!.update(<CookbookScreen />);
+    });
+
+    expect(
+      (renderer!.root.findByType("AppDialog" as never).props as { visible: boolean }).visible
+    ).toBe(false);
     expect(savedRecipesState.removeRecipe).not.toHaveBeenCalled();
   });
 

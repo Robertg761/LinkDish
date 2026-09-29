@@ -399,6 +399,12 @@ export const CookbookScreen = () => {
   );
   const shownConfirmation =
     pendingConfirmation?.account === account ? pendingConfirmation.confirmation : null;
+
+  // Another account (or none) signed in: the last one's confirmation is dropped, not kept hidden,
+  // so it can't come back when that account signs in again.
+  useEffect(() => {
+    setPendingConfirmation((current) => (current && current.account !== account ? null : current));
+  }, [account]);
   const [animateFirstRows, setAnimateFirstRows] = useState(true);
   const emptyLibraryLine = useMemo(() => selectFlavorCopyLine(EMPTY_LIBRARY_LINES), []);
   // Typing stays responsive: the list re-filters from a deferred copy of the query.

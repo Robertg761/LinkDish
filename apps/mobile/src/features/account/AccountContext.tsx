@@ -102,6 +102,15 @@ export const AccountProvider = ({ children }: PropsWithChildren) => {
   const [isAccountBusy, setIsAccountBusy] = useState(false);
   const [sessionToken, setSessionToken] = useState<string | null>(null);
   const [user, setUser] = useState<AccountUser | null>(null);
+  /** The Clerk session `user` was loaded for (null: not loaded through Clerk). */
+  const [userClerkSessionId, setUserClerkSessionId] = useState<string | null>(null);
+  const clerkSessionId = clerkSession.isSignedIn ? clerkSession.sessionId : null;
+  // Clerk switched straight to another session (or ended it) while `user` is the last one's, and
+  // requests already carry the new session's token: nobody is shown (or acted for) as signed in
+  // until the new session's account is loaded.
+  const switchingAccount =
+    user !== null && userClerkSessionId !== null && clerkSessionId !== userClerkSessionId;
+  const accountUser = switchingAccount ? null : user;
 
   const applySessionToken = useCallback(async (nextSessionToken: string | null) => {
     if (nextSessionToken) {
@@ -174,6 +183,7 @@ export const AccountProvider = ({ children }: PropsWithChildren) => {
         }).getSession();
 
         setUser(session.authenticated ? session.user : null);
+        setUserClerkSessionId(session.authenticated ? clerkSession.sessionId : null);
         return;
       }
 
@@ -201,6 +211,7 @@ export const AccountProvider = ({ children }: PropsWithChildren) => {
 
       setSessionToken(storedSessionToken);
       setUser(session.user);
+      setUserClerkSessionId(null);
     },
     [applySessionToken, clerkSession]
   );
@@ -242,13 +253,26 @@ export const AccountProvider = ({ children }: PropsWithChildren) => {
     };
   }, [clerkSession.isLoaded, loadAccountSession, loadAuthConfig]);
 
+  // Load the account of the session Clerk switched to (or let the last one go).
+  useEffect(() => {
+    if (!switchingAccount) {
+      return;
+    }
+
+    void loadAccountSession().catch((error: unknown) => {
+      console.warn("Failed to load the LinkDish account for the new session.", error);
+      setAccountError(getAccountErrorMessage(error));
+      setUser(null);
+    });
+  }, [clerkSessionId, loadAccountSession, switchingAccount]);
+
   const value = useMemo<AccountContextValue>(
     () => ({
       accountError,
       authMode: authConfig.authMode,
       clearAccountError: () => setAccountError(null),
       deleteAccount: async (confirmEmail) => {
-        if (!user) {
+        if (!accountUser) {
           return;
         }
 
@@ -272,11 +296,11 @@ export const AccountProvider = ({ children }: PropsWithChildren) => {
       },
       getAuthHeaders,
       getAuthToken,
-      hasLoadedAccount,
+      hasLoadedAccount: hasLoadedAccount && !switchingAccount,
       isAccountBusy,
       isClerkSignInEnabled: hasClerkPublishableKey && authConfig.clerkEnabled,
       isEmailCodeSignInEnabled: authConfig.emailCodeEnabled,
-      isSignedIn: Boolean(user),
+      isSignedIn: Boolean(accountUser),
       logout: async () => {
         setAccountError(null);
         setIsAccountBusy(true);
@@ -401,6 +425,7 @@ export const AccountProvider = ({ children }: PropsWithChildren) => {
 
               await applySessionToken(simulation.sessionToken);
               setUser(simulation.user);
+              setUserClerkSessionId(null);
             } catch (error) {
               setAccountError(getAccountErrorMessage(error));
               throw error;
@@ -414,7 +439,7 @@ export const AccountProvider = ({ children }: PropsWithChildren) => {
             return Promise.reject(error);
           },
       updateProfile: async (profile) => {
-        if (!user) {
+        if (!accountUser) {
           return;
         }
 
@@ -426,7 +451,7 @@ export const AccountProvider = ({ children }: PropsWithChildren) => {
             await createClientWithHeaders(getAuthHeaders).updateAccountProfile(profile);
           setUser({
             ...response.user,
-            billingPlan: response.user.billingPlan ?? user.billingPlan
+            billingPlan: response.user.billingPlan ?? accountUser.billingPlan
           });
         } catch (error) {
           setAccountError(getAccountErrorMessage(error));
@@ -435,7 +460,7 @@ export const AccountProvider = ({ children }: PropsWithChildren) => {
           setIsAccountBusy(false);
         }
       },
-      user,
+      user: accountUser,
       verifyCode: async (email, code, profile) => {
         setAccountError(null);
         setIsAccountBusy(true);
@@ -449,6 +474,7 @@ export const AccountProvider = ({ children }: PropsWithChildren) => {
           preferLegacySessionRef.current = true;
           await applySessionToken(response.sessionToken);
           setUser(response.user);
+          setUserClerkSessionId(null);
         } catch (error) {
           setAccountError(getAccountErrorMessage(error));
           throw error;
@@ -464,11 +490,12 @@ export const AccountProvider = ({ children }: PropsWithChildren) => {
       clerkSession,
       getAuthHeaders,
       getAuthToken,
+      accountUser,
       hasLoadedAccount,
       isAccountBusy,
       loadAccountSession,
       sessionToken,
-      user
+      switchingAccount
     ]
   );
 
