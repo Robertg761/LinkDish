@@ -366,6 +366,82 @@ describe("AccountContext", () => {
     expect(latestAccount?.isSignedIn).toBe(true);
   });
 
+  it("keeps a profile save's failure from the account that signed in since", async () => {
+    const getSession = vi.fn().mockResolvedValue({
+      authenticated: true,
+      expiresAt: "2026-08-09T10:00:00.000Z",
+      user: { email: "first@example.com", id: "user_first" }
+    });
+    let failProfile: (error: unknown) => void = () => undefined;
+    const updateAccountProfile = vi.fn().mockReturnValue(
+      new Promise((_resolve, reject) => {
+        failProfile = reject;
+      })
+    );
+    mocks.createExtractorApiClient.mockReturnValue(
+      createMockClient({
+        getAuthConfig: vi.fn().mockResolvedValue({
+          authMode: "clerk_beta",
+          clerkEnabled: true,
+          emailCodeEnabled: true
+        }),
+        getSession,
+        updateAccountProfile
+      })
+    );
+    clerkSessionState.getToken.mockResolvedValue("first-token");
+    clerkSessionState.isSignedIn = true;
+    clerkSessionState.sessionId = "sess_first";
+    let renderer: ReturnType<typeof create>;
+
+    await act(async () => {
+      renderer = create(
+        <AccountProvider>
+          <Probe />
+        </AccountProvider>
+      );
+      await flushAsyncWork();
+    });
+
+    let saving: Promise<void> | undefined;
+    await act(async () => {
+      saving = latestAccount?.updateProfile({ displayName: "First Cook" });
+      await flushAsyncWork();
+    });
+
+    // Clerk switches to another account, whose account loads before the save fails.
+    getSession.mockResolvedValue({
+      authenticated: true,
+      expiresAt: "2026-08-09T10:00:00.000Z",
+      user: { email: "next@example.com", id: "user_next" }
+    });
+    clerkSessionState.getToken.mockResolvedValue("next-token");
+    clerkSessionState.sessionId = "sess_next";
+    await act(async () => {
+      renderer!.update(
+        <AccountProvider>
+          <Probe />
+        </AccountProvider>
+      );
+      await flushAsyncWork();
+    });
+    expect(latestAccount?.user?.id).toBe("user_next");
+
+    let rejection: unknown;
+    await act(async () => {
+      failProfile(new Error("Network request failed"));
+      await saving?.catch((error: unknown) => {
+        rejection = error;
+      });
+      await flushAsyncWork();
+    });
+
+    // The one who saved still hears about it; the account now signed in isn't shown the error.
+    expect(rejection).toBeInstanceOf(Error);
+    expect(latestAccount?.accountError).toBeNull();
+    expect(latestAccount?.user?.id).toBe("user_next");
+  });
+
   it("keeps a stored session token when startup session refresh fails", async () => {
     const getSession = vi.fn().mockRejectedValue(new Error("Network request failed"));
     const client = createMockClient({
@@ -595,6 +671,77 @@ describe("AccountContext", () => {
     });
     expect(mocks.deleteItemAsync).toHaveBeenCalledWith("linkdish.account.sessionToken");
     expect(latestAccount?.user).toBeNull();
+  });
+
+  it("doesn't sign out an account that signed in while the last one was being deleted", async () => {
+    const getSession = vi.fn().mockResolvedValue({
+      authenticated: true,
+      expiresAt: "2026-08-09T10:00:00.000Z",
+      user: { email: "first@example.com", id: "user_first" }
+    });
+    let finishDelete: (value: unknown) => void = () => undefined;
+    const deleteAccount = vi.fn().mockReturnValue(
+      new Promise((resolve) => {
+        finishDelete = resolve;
+      })
+    );
+    mocks.createExtractorApiClient.mockReturnValue(
+      createMockClient({
+        deleteAccount,
+        getAuthConfig: vi.fn().mockResolvedValue({
+          authMode: "clerk_beta",
+          clerkEnabled: true,
+          emailCodeEnabled: true
+        }),
+        getSession
+      })
+    );
+    clerkSessionState.getToken.mockResolvedValue("first-token");
+    clerkSessionState.isSignedIn = true;
+    clerkSessionState.sessionId = "sess_first";
+    let renderer: ReturnType<typeof create>;
+
+    await act(async () => {
+      renderer = create(
+        <AccountProvider>
+          <Probe />
+        </AccountProvider>
+      );
+      await flushAsyncWork();
+    });
+
+    let deleting: Promise<void> | undefined;
+    await act(async () => {
+      deleting = latestAccount?.deleteAccount("first@example.com");
+      await flushAsyncWork();
+    });
+
+    // Clerk switches to another account, whose account loads before the delete answers.
+    getSession.mockResolvedValue({
+      authenticated: true,
+      expiresAt: "2026-08-09T10:00:00.000Z",
+      user: { email: "next@example.com", id: "user_next" }
+    });
+    clerkSessionState.getToken.mockResolvedValue("next-token");
+    clerkSessionState.sessionId = "sess_next";
+    await act(async () => {
+      renderer!.update(
+        <AccountProvider>
+          <Probe />
+        </AccountProvider>
+      );
+      await flushAsyncWork();
+    });
+
+    await act(async () => {
+      finishDelete({ status: "deleted" });
+      await deleting;
+      await flushAsyncWork();
+    });
+
+    expect(clerkSessionState.signOut).not.toHaveBeenCalled();
+    expect(latestAccount?.user?.id).toBe("user_next");
+    expect(latestAccount?.isSignedIn).toBe(true);
   });
 
   it("clears the local session token even when server logout fails", async () => {

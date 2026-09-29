@@ -111,6 +111,9 @@ export const AccountProvider = ({ children }: PropsWithChildren) => {
   const switchingAccount =
     user !== null && userClerkSessionId !== null && clerkSessionId !== userClerkSessionId;
   const accountUser = switchingAccount ? null : user;
+  /** Who is shown as signed in now, for work that finishes after an account switch. */
+  const accountUserRef = useRef(accountUser);
+  accountUserRef.current = accountUser;
 
   const applySessionToken = useCallback(async (nextSessionToken: string | null) => {
     if (nextSessionToken) {
@@ -279,8 +282,17 @@ export const AccountProvider = ({ children }: PropsWithChildren) => {
         setAccountError(null);
         setIsAccountBusy(true);
 
+        const deletingFor = accountUser.id;
+
         try {
           await createClientWithHeaders(getAuthHeaders).deleteAccount({ confirmEmail });
+
+          // Another account signed in meanwhile: it stays signed in (the deleted account's
+          // session is gone with it).
+          if (accountUserRef.current?.id !== deletingFor) {
+            return;
+          }
+
           if (clerkSession.isSignedIn) {
             await clerkSession.signOut();
           }
@@ -288,7 +300,9 @@ export const AccountProvider = ({ children }: PropsWithChildren) => {
           await applySessionToken(null);
           setUser(null);
         } catch (error) {
-          setAccountError(getAccountErrorMessage(error));
+          if (accountUserRef.current?.id === deletingFor) {
+            setAccountError(getAccountErrorMessage(error));
+          }
           throw error;
         } finally {
           setIsAccountBusy(false);
@@ -462,7 +476,11 @@ export const AccountProvider = ({ children }: PropsWithChildren) => {
               : current
           );
         } catch (error) {
-          setAccountError(getAccountErrorMessage(error));
+          // The caller still hears about it, but the account shown now isn't told the last
+          // one's profile couldn't be saved.
+          if (accountUserRef.current?.id === updatedFor) {
+            setAccountError(getAccountErrorMessage(error));
+          }
           throw error;
         } finally {
           setIsAccountBusy(false);
