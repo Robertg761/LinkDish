@@ -95,8 +95,9 @@ const getBillingAttempt = (payload: ExtractRecipeAnyRequest): "primary" | "fallb
  * Billing authorization and the extraction start together: URL validation, the
  * cache lookup and the page fetch overlap the billing lookups, and the
  * extraction is cancelled (its fetch aborted) if billing denies. Anything that
- * costs money or real CPU waits for billing's answer. Usage is still committed
- * before responding, exactly as before; analytics run after the response.
+ * costs money or real CPU waits for billing's answer, which reserves the allowance
+ * (see authorizeExtractionRequest): it is kept for a success and given back for
+ * anything else, before responding; analytics run after the response.
  */
 export const runExtractRequestPipeline = async (
   input: ExtractRequestPipelineInput
@@ -164,7 +165,17 @@ export const runExtractRequestPipeline = async (
     };
   }
 
-  const { response: extractionResponse, logContext } = await extraction;
+  let extracted: Awaited<typeof extraction>;
+
+  try {
+    extracted = await extraction;
+  } catch (error) {
+    // Nothing was imported: the allowance reserved for it goes back.
+    await billing.releaseUsage?.();
+    throw error;
+  }
+
+  const { response: extractionResponse, logContext } = extracted;
   const committed = billing.commitUsageWithQuota
     ? await billing.commitUsageWithQuota(extractionResponse)
     : { logContext: await billing.commitUsage(extractionResponse), quota: null };

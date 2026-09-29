@@ -42,6 +42,12 @@ interface CommittedUsage {
 interface BillingAuthorizationResult {
   allowed: boolean;
   response?: ExtractRecipeResponse;
+  /**
+   * Gives back the allowance reserved for this request when it ends without a response to commit
+   * (the extraction threw). commitUsage already does this for a response that isn't a success.
+   * Optional so test doubles of the authorization keep working.
+   */
+  releaseUsage?: () => Promise<void>;
   commitUsage: (
     response: ExtractRecipeResponse
   ) => Promise<BillingAuthorizationResult["logContext"]>;
@@ -206,44 +212,6 @@ const getQuotaFailureMessage = (plan: QuotaPlan, quotaKind: QuotaKind): string =
   return `You have used this month's ${plan.id === "family" ? "LinkDish Family" : "LinkDish Plus"} recipe allowance.`;
 };
 
-const incrementWithUpstash = async (key: string, ttlSeconds?: number): Promise<number> => {
-  if (!extractorApiEnv.UPSTASH_REDIS_REST_URL || !extractorApiEnv.UPSTASH_REDIS_REST_TOKEN) {
-    throw new Error("Upstash Redis REST is not configured.");
-  }
-
-  const commands: unknown[][] = [["INCR", key]];
-
-  if (ttlSeconds != null) {
-    commands.push(["EXPIRE", key, String(ttlSeconds), "NX"]);
-  }
-
-  const response = await fetch(`${extractorApiEnv.UPSTASH_REDIS_REST_URL}/multi-exec`, {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${extractorApiEnv.UPSTASH_REDIS_REST_TOKEN}`,
-      "content-type": "application/json"
-    },
-    body: JSON.stringify(commands)
-  });
-
-  if (!response.ok) {
-    throw new Error(`Upstash quota increment failed with ${response.status}.`);
-  }
-
-  const body = (await response.json()) as UpstashResponse[];
-  const incrementResult = body[0];
-
-  if (incrementResult?.error) {
-    throw new Error(incrementResult.error);
-  }
-
-  if (typeof incrementResult?.result !== "number") {
-    throw new Error("Upstash quota increment returned an invalid response.");
-  }
-
-  return incrementResult.result;
-};
-
 const readWithUpstash = async (key: string): Promise<number> => {
   if (!extractorApiEnv.UPSTASH_REDIS_REST_URL || !extractorApiEnv.UPSTASH_REDIS_REST_TOKEN) {
     throw new Error("Upstash Redis REST is not configured.");
@@ -279,18 +247,6 @@ const readWithUpstash = async (key: string): Promise<number> => {
   }
 
   return Math.max(0, Math.floor(parsedValue));
-};
-
-const incrementInMemory = (key: string, ttlSeconds?: number): number => {
-  const now = Date.now();
-  const nextValue = (inMemoryQuotaCounts.get(key, now) ?? 0) + 1;
-  inMemoryQuotaCounts.set(
-    key,
-    nextValue,
-    ttlSeconds === undefined ? null : now + ttlSeconds * 1_000,
-    now
-  );
-  return nextValue;
 };
 
 const getMonthlyUsageKey = (quotaIdentityKey: string, quotaKind: QuotaKind): string =>
@@ -335,14 +291,6 @@ const readUsageKey = async (key: string): Promise<number> => {
   }
 
   return readInMemory(key);
-};
-
-const incrementUsageKey = async (key: string, ttlSeconds?: number): Promise<number> => {
-  if (extractorApiEnv.UPSTASH_REDIS_REST_URL && extractorApiEnv.UPSTASH_REDIS_REST_TOKEN) {
-    return incrementWithUpstash(key, ttlSeconds);
-  }
-
-  return incrementInMemory(key, ttlSeconds);
 };
 
 const readUsage = async (
@@ -405,26 +353,209 @@ const readUsage = async (
   };
 };
 
-const incrementUsage = async (
+/*
+ * Admission is a reservation: the allowance a request needs is counted, atomically, before the
+ * extraction starts, and given back if it doesn't succeed. Reading the counts and counting only
+ * after a success let parallel requests with one import left all pass the check (and all count).
+ *
+ * Each quota kind the request needs is a gate, open while any of its counters is under its
+ * limit (a grandfathered free account has a lifetime and a monthly counter, and may use either);
+ * the reservation passes only when every gate is open, and then counts every counter, as a
+ * committed import always has.
+ */
+interface QuotaCounter {
+  key: string;
+  limit: number;
+  /** Expiry for a new counter (a monthly one ends with its month); null never expires. */
+  ttlSeconds: number | null;
+}
+
+type QuotaGate = QuotaCounter[];
+
+const getQuotaGate = (
   plan: QuotaPlan,
   quotaIdentityKey: string,
   quotaKind: QuotaKind
-): Promise<QuotaUsageEntry> => {
+): QuotaGate => {
   if (plan.id === "free" && extractorApiEnv.LINKDISH_MONTHLY_METERING) {
-    await Promise.all([
-      incrementUsageKey(getLifetimeUsageKey(quotaIdentityKey, quotaKind)),
-      incrementUsageKey(
-        getMonthlyUsageKey(quotaIdentityKey, quotaKind),
-        getSecondsUntilNextPeriod()
-      )
-    ]);
-    return readUsage(plan, quotaIdentityKey, quotaKind);
+    return [
+      {
+        key: getLifetimeUsageKey(quotaIdentityKey, quotaKind),
+        limit: extractorApiEnv.FREE_LIFETIME_IMPORT_LIMIT,
+        ttlSeconds: null
+      },
+      {
+        key: getMonthlyUsageKey(quotaIdentityKey, quotaKind),
+        limit: extractorApiEnv.FREE_MONTHLY_IMPORT_LIMIT,
+        ttlSeconds: getSecondsUntilNextPeriod()
+      }
+    ];
   }
 
-  const key = getUsageKey(plan, quotaIdentityKey, quotaKind);
+  return [
+    {
+      key: getUsageKey(plan, quotaIdentityKey, quotaKind),
+      limit: getQuotaLimit(plan, quotaKind),
+      ttlSeconds: plan.id === "free" ? null : getSecondsUntilNextPeriod()
+    }
+  ];
+};
 
-  await incrementUsageKey(key, plan.id === "free" ? undefined : getSecondsUntilNextPeriod());
-  return readUsage(plan, quotaIdentityKey, quotaKind);
+/*
+ * KEYS: every counter, gate by gate. ARGV: the gate count, then per gate its counter count and,
+ * per counter, its limit and expiry (0: none). Returns 1 and counts every counter when every gate
+ * has a counter under its limit; otherwise returns 0 and counts nothing.
+ */
+const reserveQuotaScript = `-- linkdish_reserve_quota_v1
+local argi = 2
+local keyi = 1
+local counters = {}
+for gate = 1, tonumber(ARGV[1]) do
+  local count = tonumber(ARGV[argi])
+  argi = argi + 1
+  local open = false
+  for counter = 1, count do
+    local key = KEYS[keyi]
+    local limit = tonumber(ARGV[argi])
+    local ttl = tonumber(ARGV[argi + 1])
+    keyi = keyi + 1
+    argi = argi + 2
+    table.insert(counters, { key, ttl })
+    if (tonumber(redis.call('GET', key)) or 0) < limit then
+      open = true
+    end
+  end
+  if not open then
+    return 0
+  end
+end
+for _, counter in ipairs(counters) do
+  redis.call('INCR', counter[1])
+  if counter[2] > 0 then
+    redis.call('EXPIRE', counter[1], counter[2], 'NX')
+  end
+end
+return 1`;
+
+/* Gives back one count on each counter (never below zero, never recreating an expired one). */
+const releaseQuotaScript = `-- linkdish_release_quota_v1
+for _, key in ipairs(KEYS) do
+  local value = tonumber(redis.call('GET', key))
+  if value and value > 0 then
+    redis.call('DECR', key)
+  end
+end
+return 1`;
+
+const evalWithUpstash = async (
+  script: string,
+  keys: string[],
+  args: string[]
+): Promise<unknown> => {
+  if (!extractorApiEnv.UPSTASH_REDIS_REST_URL || !extractorApiEnv.UPSTASH_REDIS_REST_TOKEN) {
+    throw new Error("Upstash Redis REST is not configured.");
+  }
+
+  const response = await fetch(extractorApiEnv.UPSTASH_REDIS_REST_URL, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${extractorApiEnv.UPSTASH_REDIS_REST_TOKEN}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify(["EVAL", script, String(keys.length), ...keys, ...args])
+  });
+
+  if (!response.ok) {
+    throw new Error(`Upstash quota script failed with ${response.status}.`);
+  }
+
+  const body = (await response.json()) as UpstashResponse;
+
+  if (body.error) {
+    throw new Error(body.error);
+  }
+
+  return body.result;
+};
+
+/* The in-process equivalent of reserveQuotaScript (one process: nothing runs in between). */
+const reserveInMemory = (gates: QuotaGate[]): boolean => {
+  const now = Date.now();
+  const allOpen = gates.every((gate) =>
+    gate.some((counter) => (inMemoryQuotaCounts.get(counter.key, now) ?? 0) < counter.limit)
+  );
+
+  if (!allOpen) {
+    return false;
+  }
+
+  gates.flat().forEach((counter) => {
+    const current = inMemoryQuotaCounts.get(counter.key, now);
+    inMemoryQuotaCounts.set(
+      counter.key,
+      (current ?? 0) + 1,
+      counter.ttlSeconds === null ? null : now + counter.ttlSeconds * 1_000,
+      now
+    );
+  });
+  return true;
+};
+
+const releaseInMemory = (gates: QuotaGate[]): void => {
+  const now = Date.now();
+
+  gates.flat().forEach((counter) => {
+    const current = inMemoryQuotaCounts.get(counter.key, now);
+
+    if (current !== undefined && current > 0) {
+      inMemoryQuotaCounts.set(
+        counter.key,
+        current - 1,
+        counter.ttlSeconds === null ? null : now + counter.ttlSeconds * 1_000,
+        now
+      );
+    }
+  });
+};
+
+const isUpstashConfigured = (): boolean =>
+  Boolean(extractorApiEnv.UPSTASH_REDIS_REST_URL && extractorApiEnv.UPSTASH_REDIS_REST_TOKEN);
+
+/** Counts the request against every gate at once, or (a gate is full) counts nothing. */
+const reserveUsage = async (gates: QuotaGate[]): Promise<boolean> => {
+  if (!isUpstashConfigured()) {
+    return reserveInMemory(gates);
+  }
+
+  const counters = gates.flat();
+  const args = [
+    String(gates.length),
+    ...gates.flatMap((gate) => [
+      String(gate.length),
+      ...gate.flatMap((counter) => [String(counter.limit), String(counter.ttlSeconds ?? 0)])
+    ])
+  ];
+  const result = await evalWithUpstash(
+    reserveQuotaScript,
+    counters.map((counter) => counter.key),
+    args
+  );
+
+  return Number(result) === 1;
+};
+
+/** Gives back what reserveUsage counted, for a request that didn't import anything. */
+const releaseUsage = async (gates: QuotaGate[]): Promise<void> => {
+  if (!isUpstashConfigured()) {
+    releaseInMemory(gates);
+    return;
+  }
+
+  await evalWithUpstash(
+    releaseQuotaScript,
+    gates.flat().map((counter) => counter.key),
+    []
+  );
 };
 
 /* The allowance that runs out first (a fallback import needs both imports and strong extractions). */
@@ -615,16 +746,67 @@ export const authorizeExtractionRequest = async (
       quotaLimit: primaryUsage?.quotaLimit ?? getQuotaLimit(plan, quotaKind)
     };
 
+    // Reserve the allowance before anything is spent: a parallel request that took the last one
+    // since the counts above were read is refused here, as if it had been read that way.
+    const gates = requiredQuotaKinds.map((requiredQuotaKind) =>
+      getQuotaGate(plan, quotaIdentityKey, requiredQuotaKind)
+    );
+
+    if (!(await reserveUsage(gates))) {
+      const refusedEntries = await Promise.all(
+        requiredQuotaKinds.map((requiredQuotaKind) =>
+          readUsage(plan, quotaIdentityKey, requiredQuotaKind)
+        )
+      );
+      const refused =
+        refusedEntries.find((entry) => entry.quotaCount >= entry.quotaLimit) ??
+        refusedEntries.find((entry) => entry.quotaKind === quotaKind) ??
+        refusedEntries[0];
+      const refusedLogContext = {
+        ...logContext,
+        meteringMode: refused?.meteringMode ?? logContext.meteringMode,
+        quotaCount: refused?.quotaCount ?? logContext.quotaCount,
+        quotaKind: refused?.quotaKind ?? quotaKind,
+        quotaLimit: refused?.quotaLimit ?? logContext.quotaLimit
+      };
+
+      return {
+        allowed: false,
+        response: failureResponse(
+          getQuotaFailureMessage(plan, refused?.quotaKind ?? quotaKind),
+          refused?.quota
+        ),
+        commitUsage: (response) => noopCommitUsage(response, refusedLogContext),
+        logContext: refusedLogContext
+      };
+    }
+
+    /** Settled once: a success keeps the reservation, anything else gives it back. */
+    let settled = false;
+    const giveBack = async () => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      await releaseUsage(gates).catch((error: unknown) => {
+        console.error(error);
+      });
+    };
+
     const commitUsageWithQuota = async (
       response: ExtractRecipeResponse
     ): Promise<CommittedUsage> => {
       if (response.status !== "success") {
+        await giveBack();
         return { logContext, quota: null };
       }
 
+      settled = true;
+      // Counted when it was reserved: read the allowance that leaves.
       const committedEntries = await Promise.all(
         requiredQuotaKinds.map((requiredQuotaKind) =>
-          incrementUsage(plan, quotaIdentityKey, requiredQuotaKind)
+          readUsage(plan, quotaIdentityKey, requiredQuotaKind)
         )
       );
       const committedPrimaryUsage =
@@ -645,7 +827,8 @@ export const authorizeExtractionRequest = async (
       allowed: true,
       commitUsage: async (response) => (await commitUsageWithQuota(response)).logContext,
       commitUsageWithQuota,
-      logContext
+      logContext,
+      releaseUsage: giveBack
     };
   } catch (error) {
     console.error(error);

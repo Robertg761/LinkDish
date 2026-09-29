@@ -112,6 +112,129 @@ describe("committed quota", () => {
   });
 });
 
+describe("reserved quota", () => {
+  const failure = {
+    status: "failure",
+    reason: "parse_failed",
+    userMessage: "No recipe."
+  } as const;
+
+  it("admits only one of two parallel imports when one is left", async () => {
+    const { authorizeExtractionRequest } = await importBillingModule({
+      FREE_LIFETIME_IMPORT_LIMIT: "1"
+    });
+    const headers = { "x-linkdish-client-id": "parallel-user" };
+    const address = identity("203.0.113.80");
+
+    const [first, second] = await Promise.all([
+      authorizeExtractionRequest(headers, "primary", address),
+      authorizeExtractionRequest(headers, "primary", address)
+    ]);
+
+    expect([first.allowed, second.allowed].sort()).toEqual([false, true]);
+    const refused = first.allowed ? second : first;
+    expect(refused.response).toMatchObject({ reason: "plan_limit", status: "failure" });
+  });
+
+  it("counts a successful import once, and refuses the next one past the limit", async () => {
+    const { authorizeExtractionRequest } = await importBillingModule({
+      FREE_LIFETIME_IMPORT_LIMIT: "1"
+    });
+    const headers = { "x-linkdish-client-id": "success-user" };
+    const address = identity("203.0.113.81");
+
+    const authorization = await authorizeExtractionRequest(headers, "primary", address);
+    const committed = await authorization.commitUsageWithQuota?.(success);
+    const next = await authorizeExtractionRequest(headers, "primary", address);
+
+    expect(committed?.quota).toMatchObject({ limit: 1, remaining: 0 });
+    expect(next.allowed).toBe(false);
+  });
+
+  it("gives the allowance back when the import fails or never finishes", async () => {
+    const { authorizeExtractionRequest } = await importBillingModule({
+      FREE_LIFETIME_IMPORT_LIMIT: "1"
+    });
+    const headers = { "x-linkdish-client-id": "returned-user" };
+    const address = identity("203.0.113.82");
+
+    const failed = await authorizeExtractionRequest(headers, "primary", address);
+    await failed.commitUsage(failure);
+    const threw = await authorizeExtractionRequest(headers, "primary", address);
+    expect(threw.allowed).toBe(true);
+    await threw.releaseUsage?.();
+    // Settled once: a second release (or a commit after it) gives nothing more back.
+    await threw.releaseUsage?.();
+    await threw.commitUsage(failure);
+
+    const [next, parallel] = await Promise.all([
+      authorizeExtractionRequest(headers, "primary", address),
+      authorizeExtractionRequest(headers, "primary", address)
+    ]);
+    expect([next.allowed, parallel.allowed].sort()).toEqual([false, true]);
+  });
+
+  it("reserves every allowance a fallback import needs, or none of them", async () => {
+    const { authorizeExtractionRequest } = await importBillingModule({
+      FREE_LIFETIME_IMPORT_LIMIT: "1"
+    });
+    const headers = { "x-linkdish-client-id": "fallback-user" };
+    const address = identity("203.0.113.83");
+
+    const primary = await authorizeExtractionRequest(headers, "primary", address);
+    await primary.commitUsage(success);
+    // The import allowance is spent: the fallback is refused and takes no strong extraction.
+    const fallback = await authorizeExtractionRequest(headers, "fallback", address);
+    expect(fallback.allowed).toBe(false);
+  });
+
+  it("reserves through one Upstash script, and refuses when it reports a full allowance", async () => {
+    vi.resetModules();
+    const bodies: unknown[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string, init?: { body?: string }) => {
+        if (init?.body) {
+          bodies.push(JSON.parse(init.body));
+          return Promise.resolve(new Response(JSON.stringify({ result: 0 })));
+        }
+
+        return Promise.resolve(
+          new Response(JSON.stringify({ result: input.includes("/get/") ? "0" : null }))
+        );
+      })
+    );
+    for (const [key, value] of Object.entries({
+      BILLING_ENFORCEMENT_ENABLED: "true",
+      FREE_LIFETIME_IMPORT_LIMIT: "3",
+      UPSTASH_REDIS_REST_TOKEN: "token",
+      UPSTASH_REDIS_REST_URL: "https://upstash.test"
+    })) {
+      vi.stubEnv(key, value);
+    }
+    const { authorizeExtractionRequest } = await import("./enforce-billing.js");
+
+    const authorization = await authorizeExtractionRequest(
+      { "x-linkdish-client-id": "upstash-user" },
+      "primary",
+      identity("203.0.113.84")
+    );
+
+    expect(authorization.allowed).toBe(false);
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0]).toEqual([
+      "EVAL",
+      expect.stringContaining("linkdish_reserve_quota_v1"),
+      "1",
+      expect.stringContaining(":lifetime:imports:"),
+      "1",
+      "1",
+      "3",
+      "0"
+    ]);
+  });
+});
+
 describe("readBillingUsage", () => {
   it("reads the current allowance without counting an import", async () => {
     const { authorizeExtractionRequest, readBillingUsage } = await importBillingModule();
