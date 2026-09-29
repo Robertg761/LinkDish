@@ -7,6 +7,7 @@ import { asAccount, isAccountChangedError } from "../../api/request-binding";
 import { getCurrentAccount } from "../../auth/account-scope";
 import { isCachedUserPremium } from "../../auth/auth-cache";
 import { emitDataChange } from "../../data/change-feed";
+import { discardCookSessionWrites } from "../../data/cook-session-write-guard";
 import { safeGetItem, safeSetItem } from "../../platform/safe-storage";
 import { runLinkDishTransaction } from "../../storage/idb-transaction";
 import {
@@ -1288,6 +1289,9 @@ export async function deleteSavedRecipe(
   id: string,
   { snapshot = true }: { snapshot?: boolean } = {}
 ): Promise<WebSavedRecipe | undefined> {
+  // Cook-session changes this tab made for the recipe and hasn't saved yet would create its
+  // session again after this delete: they are dropped.
+  discardCookSessionWrites(id);
   const removed = snapshot ? await deleteReadingSnapshot(id) : await deleteRecipeUnread(id);
 
   emitDataChange({ topic: "savedRecipes", deletedIds: [id] });

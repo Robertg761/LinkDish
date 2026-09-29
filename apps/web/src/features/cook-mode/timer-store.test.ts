@@ -331,6 +331,41 @@ describe("kitchen timers", () => {
 
       expect(getKitchenTimers().map((timer) => timer.id)).toEqual([kept]);
     });
+
+    it("doesn't bring a deleted recipe's timers back from changes still waiting to be saved", async () => {
+      await hydrateKitchenTimers();
+      const id = startKitchenTimer({
+        durationMs: 60_000,
+        label: "Boil",
+        recipeId: "r1",
+        recipeTitle: "Chili"
+      });
+      pauseKitchenTimer(id);
+
+      // Deleted before either change is saved.
+      await deleteSavedRecipe("r1", { snapshot: false });
+      await flushAsync();
+      await flushCookSessionWrites();
+      await flushAsync();
+      await flushCookSessionWrites();
+      await flushAsync();
+
+      expect(await getCookSession("r1")).toBeUndefined();
+      expect(getKitchenTimers()).toEqual([]);
+
+      // A timer started for it afterwards (the delete undone, say) is saved as usual.
+      startKitchenTimer({
+        durationMs: 30_000,
+        label: "Stir",
+        recipeId: "r1",
+        recipeTitle: "Chili"
+      });
+      await flushAsync();
+      await flushCookSessionWrites();
+      expect((await getCookSession("r1"))?.timers).toEqual([
+        expect.objectContaining({ label: "Stir" })
+      ]);
+    });
   });
 
   describe("with the app open in another tab", () => {

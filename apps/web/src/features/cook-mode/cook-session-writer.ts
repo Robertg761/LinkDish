@@ -1,4 +1,5 @@
 import { endCookSession, updateCookSession } from "../../data/cook-session-store";
+import { getCookSessionWriteGeneration } from "../../data/cook-session-write-guard";
 
 import type { CookSession, CookSessionPatch } from "../../data/cook-session-store";
 
@@ -24,10 +25,21 @@ const enqueue = <Result>(recipeId: string, task: () => Promise<Result>): Promise
   return next;
 };
 
+/**
+ * Queues a change to the recipe's cook session. It is dropped if the recipe is deleted before it
+ * lands (see cook-session-write-guard); `generation` is when the change was made, for a caller
+ * that queues it later.
+ */
 export const queueCookSessionUpdate = (
   recipeId: string,
-  patch: CookSessionPatch | ((session: CookSession) => CookSessionPatch)
-): Promise<CookSession> => enqueue(recipeId, () => updateCookSession(recipeId, patch));
+  patch: CookSessionPatch | ((session: CookSession) => CookSessionPatch),
+  { generation = getCookSessionWriteGeneration(recipeId) }: { generation?: number } = {}
+): Promise<CookSession> =>
+  enqueue(recipeId, () =>
+    updateCookSession(recipeId, patch, Date.now(), {
+      isCurrent: () => getCookSessionWriteGeneration(recipeId) === generation
+    })
+  );
 
 /**
  * Ends a cook for the recipe: forgets the step and ticked ingredients, but keeps the session

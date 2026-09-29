@@ -214,7 +214,12 @@ export async function saveCookSession(
 export async function updateCookSession(
   recipeId: string,
   patch: CookSessionPatch | ((session: CookSession) => CookSessionPatch),
-  now: number = Date.now()
+  now: number = Date.now(),
+  /**
+   * Checked in the write's own transaction, after any delete before it: false writes nothing
+   * (the recipe was deleted since the change was made) and hands back the session as stored.
+   */
+  { isCurrent }: { isCurrent?: (() => boolean) | undefined } = {}
 ): Promise<CookSession> {
   const db = await getLinkDishWebDb();
   const tx = db.transaction(COOK_SESSIONS_STORE_NAME, "readwrite");
@@ -222,6 +227,11 @@ export async function updateCookSession(
   const stored = (await store.get(recipeId)) as CookSession | undefined;
   const current =
     stored && !isCookSessionExpired(stored, now) ? stored : createEmptyCookSession(recipeId, now);
+
+  if (isCurrent && !isCurrent()) {
+    await tx.done;
+    return current;
+  }
   const changes = typeof patch === "function" ? patch(current) : patch;
   const next = sanitizeSession({
     ...current,

@@ -10,6 +10,7 @@ import {
   resumeCookTimer,
   startCookTimer
 } from "../../data/cook-session-store";
+import { getCookSessionWriteGeneration } from "../../data/cook-session-write-guard";
 
 import { queueCookSessionUpdate } from "./cook-session-writer";
 import {
@@ -136,25 +137,31 @@ const persistTimerChanges = (
   const upserted = change.upserted ?? [];
   const removed = new Set(change.removedIds ?? []);
 
-  // Saved timers are restored first, so the stored list this merges into is complete.
+  // Saved timers are restored first, so the stored list this merges into is complete. The change
+  // is made now, though queued after that: if its recipe is deleted meanwhile, it is dropped.
   const savedIds = upserted.map((timer) => timer.id);
+  const generation = getCookSessionWriteGeneration(recipeId);
   void trackWrite(() =>
     (hydration ?? Promise.resolve()).then(() =>
-      queueCookSessionUpdate(recipeId, (session) => {
-        const replacements = new Map(upserted.map((timer) => [timer.id, toStoredTimer(timer)]));
-        const next: CookTimerState[] = session.timers
-          .filter((stored) => !removed.has(stored.id))
-          .map((stored) => replacements.get(stored.id) ?? stored);
-        const storedIds = new Set(session.timers.map((stored) => stored.id));
+      queueCookSessionUpdate(
+        recipeId,
+        (session) => {
+          const replacements = new Map(upserted.map((timer) => [timer.id, toStoredTimer(timer)]));
+          const next: CookTimerState[] = session.timers
+            .filter((stored) => !removed.has(stored.id))
+            .map((stored) => replacements.get(stored.id) ?? stored);
+          const storedIds = new Set(session.timers.map((stored) => stored.id));
 
-        replacements.forEach((timer, id) => {
-          if (!storedIds.has(id)) {
-            next.push(timer);
-          }
-        });
+          replacements.forEach((timer, id) => {
+            if (!storedIds.has(id)) {
+              next.push(timer);
+            }
+          });
 
-        return { timers: next };
-      })
+          return { timers: next };
+        },
+        { generation }
+      )
     )
   ).then(
     () => savedIds.forEach((id) => unsavedTimerIds.delete(id)),
