@@ -498,6 +498,51 @@ describe("ExtractPage", () => {
     expect(screen.getByText("0 of 3 free imports left")).toBeInTheDocument();
   });
 
+  it("charges a finished import to the account that started it", async () => {
+    let finish: (value: unknown) => void = () => undefined;
+    apiMocks.extractRecipe.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        })
+    );
+    renderPage();
+    pasteLink("https://example.com/recipe");
+    await waitFor(() => expect(apiMocks.extractRecipe).toHaveBeenCalledOnce());
+
+    // The account signs out while its import is still running.
+    act(() => {
+      authMocks.user = null;
+      authMocks.version += 1;
+      authMocks.listeners.forEach((listener) => listener());
+    });
+    await act(async () => {
+      finish(
+        success({
+          quota: {
+            limit: 3,
+            meteringMode: "free_lifetime",
+            monthlyLimit: null,
+            remaining: 0,
+            remainingThisMonth: null,
+            resetsAt: null
+          }
+        })
+      );
+      await Promise.resolve();
+    });
+    await screen.findByRole("heading", { level: 1, name: "Weeknight Rice" });
+
+    // The API already metered the signed-in start: the on-device allowance is untouched, and
+    // the former account's "0 left" isn't shown to the signed-out cook.
+    const usage = JSON.parse(localStorage.getItem("linkdish:web:billing-usage:v2") ?? "{}") as {
+      imports?: number;
+    };
+    expect(usage.imports ?? 0).toBe(0);
+    expect(screen.queryByText("0 of 3 free imports left")).not.toBeInTheDocument();
+    expect(upgradeMocks.requestUpgradeSheet).not.toHaveBeenCalled();
+  });
+
   it("stops at the on-device allowance for signed-out cooks without calling the API", async () => {
     authMocks.user = null;
     localStorage.setItem(

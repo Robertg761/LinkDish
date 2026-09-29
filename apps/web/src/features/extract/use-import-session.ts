@@ -96,6 +96,8 @@ interface ActiveImport {
   request: ImportRequest;
   controller: AbortController;
   terminal: boolean;
+  /** Who started it: its allowance and quota belong to them, whoever is signed in by the end. */
+  startedBy: { credentialsKey: string | null; isAuthenticated: boolean; tier: WebBillingTier };
 }
 
 const TRANSIENT_RETRY_DELAY_MS = 750;
@@ -194,15 +196,15 @@ export interface ImportSession {
 }
 
 export function useImportSession(): ImportSession {
-  const { credentialsReady, isAuthenticated, user } = useAuth();
+  const { credentialsKey, credentialsReady, isAuthenticated, user } = useAuth();
   const { requestUpgradeSheet } = useUpgradeSheet();
   const [phase, setPhase] = useState<ImportPhase>({ status: "idle" });
   const [quota, setQuota] = useState<QuotaStatus | null>(null);
   const activeRef = useRef<ActiveImport | null>(null);
   const lastRequestRef = useRef<{ request: ImportRequest; source: ImportEntrySource } | null>(null);
   const mountedRef = useRef(true);
-  const authRef = useRef({ credentialsReady, isAuthenticated, user });
-  authRef.current = { credentialsReady, isAuthenticated, user };
+  const authRef = useRef({ credentialsKey, credentialsReady, isAuthenticated, user });
+  authRef.current = { credentialsKey, credentialsReady, isAuthenticated, user };
   const authWaitersRef = useRef<Array<() => void>>([]);
   const upgradeRef = useRef(requestUpgradeSheet);
   upgradeRef.current = requestUpgradeSheet;
@@ -285,6 +287,11 @@ export function useImportSession(): ImportSession {
         correlationId: createWebAnalyticsId(),
         properties,
         request,
+        startedBy: {
+          credentialsKey: authRef.current.credentialsKey,
+          isAuthenticated: authRef.current.isAuthenticated,
+          tier: getWebBillingTier(authRef.current.user)
+        },
         terminal: false
       };
       activeRef.current = active;
@@ -363,6 +370,11 @@ export function useImportSession(): ImportSession {
 
   const tierNow = (): WebBillingTier => getWebBillingTier(authRef.current.user);
 
+  /** The account that started `active` is still the one signed in. */
+  const stillStartedBy = (active: ActiveImport): boolean =>
+    authRef.current.isAuthenticated === active.startedBy.isAuthenticated &&
+    authRef.current.credentialsKey === active.startedBy.credentialsKey;
+
   /** The signed-out allowance; signed-in imports are metered by the API. */
   const checkLocalAllowance = (needsStrong: boolean): ImportProblem | null => {
     if (authRef.current.isAuthenticated) {
@@ -388,9 +400,15 @@ export function useImportSession(): ImportSession {
   );
 
   const canAutoRunFallback = (
+    active: ActiveImport,
     request: Extract<ImportRequest, { kind: "url" }>,
     response: ExtractRecipeNeedsRetry
   ): boolean => {
+    // Another account signed in meanwhile: don't spend its allowance on this import on its own.
+    if (!stillStartedBy(active)) {
+      return false;
+    }
+
     const recovery = response.recovery;
 
     if (recovery && (!recovery.allowFallback || recovery.suggestedAction === "try_another_url")) {
@@ -433,16 +451,18 @@ export function useImportSession(): ImportSession {
         routeOrScreen: IMPORT_ANALYTICS_ROUTE
       });
 
-      if (!authRef.current.isAuthenticated) {
-        const tier = tierNow();
-        spendWebImport(tier);
+      // Charged to whoever started it: a signed-in start was metered by the API, even if the
+      // account signed out since, and a signed-out start uses the on-device allowance.
+      if (!active.startedBy.isAuthenticated) {
+        spendWebImport(active.startedBy.tier);
 
         if (attempt === "fallback") {
-          spendWebStrongExtraction(tier);
+          spendWebStrongExtraction(active.startedBy.tier);
         }
       }
 
-      if (response.quota) {
+      // The quota is the starting account's; never show it to an account that signed in since.
+      if (response.quota && stillStartedBy(active)) {
         setQuota(response.quota);
 
         if (hasMonthlyQuotaFields(response.quota) && response.quota.remainingThisMonth === 1) {
@@ -469,7 +489,7 @@ export function useImportSession(): ImportSession {
       });
 
       if (request.kind === "url" && attempt === "primary") {
-        if (canAutoRunFallback(request, response)) {
+        if (canAutoRunFallback(active, request, response)) {
           await runAttempt(active, "fallback", { auto: true });
           return;
         }
@@ -504,7 +524,7 @@ export function useImportSession(): ImportSession {
       routeOrScreen: IMPORT_ANALYTICS_ROUTE
     });
 
-    if (response.quota) {
+    if (response.quota && stillStartedBy(active)) {
       setQuota(response.quota);
     }
 
