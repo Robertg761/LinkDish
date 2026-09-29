@@ -4,6 +4,7 @@ import { Button } from "../../components/Button";
 import { Icon } from "../../components/Icon";
 
 import {
+  findCaptionSourceUrl,
   getTextInputProblem,
   MAX_IMPORT_TEXT_CHARS,
   measureImportText,
@@ -83,7 +84,8 @@ export const ImportTextPanel: React.FC<ImportTextPanelProps> = ({
     }
 
     // A caption that includes its post's link keeps that link as the recipe's source.
-    onImport(value, links.length === 1 ? { sourceUrl: links[0] } : {});
+    const sourceUrl = findCaptionSourceUrl(value);
+    onImport(value, sourceUrl ? { sourceUrl } : {});
   };
 
   const errorText =

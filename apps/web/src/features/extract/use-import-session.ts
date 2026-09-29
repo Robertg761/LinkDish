@@ -565,7 +565,13 @@ export function useImportSession(): ImportSession {
 
     try {
       const item = await enqueueImport(
-        request.kind === "url" ? { source, url: request.url } : { source, text: request.text }
+        request.kind === "url"
+          ? { source, url: request.url }
+          : {
+              source,
+              text: request.text,
+              ...(request.sourceUrl ? { sourceUrl: request.sourceUrl } : {})
+            }
       );
       trackWebEvent({
         eventName: "import_queued_offline",

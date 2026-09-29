@@ -12,6 +12,8 @@ export const MAX_IMPORT_TEXT_CHARS = 20_000;
 export const MAX_IMPORT_PHOTOS = 4;
 /** More than this in one paste is almost certainly not a list of recipes. */
 export const MAX_BATCH_LINKS = 25;
+/** Mirrors the length limit of httpUrlSchema in @linkdish/recipe-domain. */
+const MAX_API_LINK_LENGTH = 2_048;
 
 /** "seriouseats.com/recipe", "m.allrecipes.com/x?y=1" — a host with a dot and an optional path. */
 const BARE_HOST_PATTERN =
@@ -98,6 +100,47 @@ export const parseLinkList = (input: string): string[] => {
   }
 
   return links;
+};
+
+/** Whether the API takes this as a link (httpUrlSchema): http(s), no sign-in in it, not too long. */
+const isApiLink = (value: string): boolean => {
+  if (value.length > MAX_API_LINK_LENGTH) {
+    return false;
+  }
+
+  try {
+    const url = new URL(value);
+    return (
+      (url.protocol === "http:" || url.protocol === "https:") && !url.username && !url.password
+    );
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * The page a pasted caption came from: its one written-out link (https://… or www.…), as the
+ * importer sends it. A bare "word.word" doesn't count ("…a pinch of salt.Enjoy!" is a missing
+ * space, not a site), and there is none when it has several links or the API wouldn't take it.
+ */
+export const findCaptionSourceUrl = (text: string): string | undefined => {
+  const links = new Map<string, string>();
+
+  for (const token of text.split(/\s+/u)) {
+    const url = token ? extractFirstUrl(token) : null;
+    const key = url ? canonicalizeRecipeUrl(url) : null;
+
+    if (url && key && !links.has(key)) {
+      links.set(key, url);
+    }
+
+    if (links.size > 1) {
+      return undefined;
+    }
+  }
+
+  const [only] = links.values();
+  return only && isApiLink(only) ? only : undefined;
 };
 
 /** "seriouseats.com" for a link, without www./m. */

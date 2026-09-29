@@ -131,12 +131,27 @@ vi.mock("../upgrade/UpgradeSheet", () => ({
   useUpgradeSheet: () => ({ requestUpgradeSheet: upgradeMocks.requestUpgradeSheet })
 }));
 
-const networkMocks = vi.hoisted(() => ({ online: true }));
+type NetworkListeners = { onOffline?: () => void; onOnline?: () => void };
+
+const networkMocks = vi.hoisted(() => ({ listeners: new Set<NetworkListeners>(), online: true }));
 
 vi.mock("../../platform/detect-network", () => ({
-  addNetworkListeners: () => () => undefined,
+  addNetworkListeners: (listeners: NetworkListeners) => {
+    networkMocks.listeners.add(listeners);
+    return () => {
+      networkMocks.listeners.delete(listeners);
+    };
+  },
   isOnline: () => networkMocks.online
 }));
+
+/** The browser's `online` event: the connection is back. */
+const goOnline = () => {
+  networkMocks.online = true;
+  act(() => {
+    networkMocks.listeners.forEach((listeners) => listeners.onOnline?.());
+  });
+};
 
 const recipe: Recipe = {
   confidence: {
@@ -282,6 +297,7 @@ describe("ExtractPage", () => {
     authMocks.user = { billingPlan: "free", email: "cook@example.com", id: "user_1" };
     authMocks.credentialsReady = true;
     networkMocks.online = true;
+    networkMocks.listeners.clear();
     upgradeMocks.requestUpgradeSheet.mockClear();
     vi.mocked(trackWebEvent).mockClear();
     vi.mocked(trackWebV2AnalyticsEvent).mockClear();
@@ -665,6 +681,109 @@ describe("ExtractPage", () => {
         url: "https://example.com/for-later"
       })
     ]);
+  });
+
+  it("keeps a pasted caption's link as its source through the offline queue", async () => {
+    const link = "https://example.com/noodles";
+    const text = `Sesame noodles, from ${link}\n200 g noodles\n2 tbsp sesame paste\nToss and serve.`;
+    // The API names the recipe's source after the link it's given, or makes one up without it.
+    apiMocks.extractRecipeFromText.mockImplementation((request) =>
+      Promise.resolve(
+        success({
+          recipe: {
+            ...recipe,
+            sourceUrl: request.sourceUrl ?? "https://linkdish.app/text-imports/made-up",
+            title: "Sesame Noodles"
+          }
+        })
+      )
+    );
+    networkMocks.online = false;
+    renderPage();
+
+    fireEvent.click(screen.getByRole("radio", { name: "Text" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Recipe text" }), {
+      target: { value: text }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Get the recipe" }));
+
+    expect(await screen.findByRole("heading", { name: "Saved for later" })).toBeVisible();
+    const [queued] = fakeIdb.records<ImportQueueItem>(IMPORT_QUEUE_STORE_NAME);
+    expect(queued).toMatchObject({ sourceUrl: link, status: "queued", text });
+    // Still pasted text: the link doesn't turn it into a link import.
+    expect(queued).not.toHaveProperty("url");
+
+    goOnline();
+
+    await waitFor(() =>
+      expect(fakeIdb.records<ImportQueueItem>(IMPORT_QUEUE_STORE_NAME)[0]?.status).toBe("done")
+    );
+    expect(apiMocks.extractRecipe).not.toHaveBeenCalled();
+    expect(apiMocks.extractRecipeFromText).toHaveBeenCalledOnce();
+    expect(apiMocks.extractRecipeFromText.mock.calls[0]?.[0]).toMatchObject({
+      attempt: "fallback",
+      sourceUrl: link,
+      text
+    });
+    const [kept] = fakeIdb.records<WebSavedRecipe>(SAVED_RECIPES_STORE_NAME);
+    expect(kept).toMatchObject({ sourceHost: "example.com", sourceUrl: link });
+    expect(kept?.recipe.title).toBe("Sesame Noodles");
+
+    // Importing that page later finds the recipe instead of spending an import on it again.
+    fireEvent.click(screen.getByRole("button", { name: "Got it" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Link" }));
+    pasteLink(link);
+
+    expect(await screen.findByRole("heading", { name: "Already in your cookbook" })).toBeVisible();
+    expect(apiMocks.extractRecipe).not.toHaveBeenCalled();
+  });
+
+  it("doesn't take a missing space in a caption for its source, online or offline", async () => {
+    const madeUp = "https://linkdish.app/text-imports/made-up";
+    // "salt.Enjoy" is a sentence without its space, not a site.
+    const typo = "Garlic pasta\n200 g spaghetti\n3 cloves garlic\nToss with a pinch of salt.Enjoy!";
+    const link = "https://www.instagram.com/p/GARLIC/";
+    apiMocks.extractRecipeFromText.mockImplementation((request) =>
+      Promise.resolve(
+        success({
+          recipe: { ...recipe, sourceUrl: request.sourceUrl ?? madeUp, title: "Garlic Pasta" }
+        })
+      )
+    );
+    const importText = (text: string) => {
+      fireEvent.change(screen.getByRole("textbox", { name: "Recipe text" }), {
+        target: { value: text }
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Get the recipe" }));
+    };
+    networkMocks.online = false;
+    renderPage();
+    fireEvent.click(screen.getByRole("radio", { name: "Text" }));
+
+    importText(typo);
+
+    expect(await screen.findByRole("heading", { name: "Saved for later" })).toBeVisible();
+    expect(fakeIdb.records<ImportQueueItem>(IMPORT_QUEUE_STORE_NAME)[0]).not.toHaveProperty(
+      "sourceUrl"
+    );
+
+    goOnline();
+
+    await waitFor(() =>
+      expect(fakeIdb.records<ImportQueueItem>(IMPORT_QUEUE_STORE_NAME)[0]?.status).toBe("done")
+    );
+    expect(apiMocks.extractRecipeFromText.mock.calls[0]?.[0]).not.toHaveProperty("sourceUrl");
+    expect(fakeIdb.records<WebSavedRecipe>(SAVED_RECIPES_STORE_NAME)[0]).toMatchObject({
+      sourceUrl: madeUp
+    });
+
+    // Online, the same caption with its post's link: the link is its source, the typo isn't.
+    fireEvent.click(screen.getByRole("button", { name: "Got it" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Text" }));
+    importText(`${typo}\n${link}`);
+
+    await screen.findByRole("heading", { level: 1, name: "Garlic Pasta" });
+    expect(apiMocks.extractRecipeFromText.mock.calls[1]?.[0]).toMatchObject({ sourceUrl: link });
   });
 
   it("adds several pasted links to the import queue", async () => {
