@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { getAccountScope, useIsCurrentAccount } from "../../auth/account-scope";
 import { useAuth } from "../../auth/AuthProvider";
 import {
   getImportQueueSnapshot,
@@ -89,6 +90,8 @@ export function useImportQueueRunner(enabled = true): ImportQueueRunnerState {
   // Imports run only once requests carry the account (not while a cached Clerk user's session is
   // still loading), so they are neither billed as anonymous nor paused for the wrong limit.
   const { credentialsReady, isAuthenticated, user } = useAuth();
+  const account = getAccountScope(isAuthenticated, user);
+  const isCurrentAccount = useIsCurrentAccount(account);
   const queue = useImportQueue();
   const [online, setOnline] = useState(isOnline);
   const [running, setRunning] = useState(false);
@@ -118,10 +121,10 @@ export function useImportQueueRunner(enabled = true): ImportQueueRunnerState {
     []
   );
 
-  // A new plan (or signing in) may lift a limit pause.
+  // A new plan, or another account (signing in or out), may lift a limit pause.
   useEffect(() => {
     setPaused((current) => (current === "offline" ? current : null));
-  }, [isAuthenticated, tier]);
+  }, [account, tier]);
 
   useEffect(() => {
     if (
@@ -139,6 +142,7 @@ export function useImportQueueRunner(enabled = true): ImportQueueRunnerState {
 
     const controller = new AbortController();
     controllerRef.current = controller;
+    const startedFor = account;
     setRunning(true);
 
     void withQueueLock(async () => {
@@ -146,10 +150,15 @@ export function useImportQueueRunner(enabled = true): ImportQueueRunnerState {
       const { runImportQueue } = await import("./import-queue-runner");
       const result = await runImportQueue({
         isAuthenticated,
+        isCurrent: () => isCurrentAccount(startedFor),
         signal: controller.signal,
         tier
       });
-      idleKeyRef.current = result.processed === 0 && !result.paused ? queuedKey : null;
+      // Another account signed in (or out) mid-run: the run stopped for it to take over, and
+      // what paused the last account (its limit) doesn't pause this one.
+      const sameAccount = isCurrentAccount(startedFor);
+      idleKeyRef.current =
+        sameAccount && result.processed === 0 && !result.paused ? queuedKey : null;
 
       if (result.processed > 0) {
         // Imports finished in the background: the importer's allowance is out of date.
@@ -157,7 +166,10 @@ export function useImportQueueRunner(enabled = true): ImportQueueRunnerState {
       }
 
       if (!controller.signal.aborted) {
-        setPaused(result.paused);
+        if (sameAccount) {
+          setPaused(result.paused);
+        }
+
         setStall(null);
       }
     })
@@ -188,10 +200,12 @@ export function useImportQueueRunner(enabled = true): ImportQueueRunnerState {
         }
       });
   }, [
+    account,
     credentialsReady,
     enabled,
     hasQueued,
     isAuthenticated,
+    isCurrentAccount,
     online,
     paused,
     pendingIds,

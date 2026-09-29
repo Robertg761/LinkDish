@@ -74,6 +74,12 @@ export interface QueueRunnerContext {
   isAuthenticated: boolean;
   tier: WebBillingTier;
   signal: AbortSignal;
+  /**
+   * False once another account has signed in (or out) since the run started. A link already
+   * importing finishes for the account that started it; the run then stops, so the next link is
+   * imported, and charged, by a run for the account signed in now.
+   */
+  isCurrent?: (() => boolean) | undefined;
   /** Whose claims these are. Defaults to this tab's id. */
   owner?: string | undefined;
 }
@@ -342,7 +348,8 @@ export async function processImportQueueItem(
     return { reason: "import_limit", status: "paused" };
   }
 
-  if (signal.aborted) {
+  // Another account signed in since the run started: this link is imported (and charged) for it.
+  if (signal.aborted || context.isCurrent?.() === false) {
     await retryImport(item.id, owner);
     return { status: "stopped" };
   }
@@ -387,6 +394,19 @@ export async function processImportQueueItem(
         properties: { ...properties, attempt, retry_reason: response.reason },
         routeOrScreen: IMPORT_ANALYTICS_ROUTE
       });
+
+      // Another account signed in meanwhile: AI help isn't spent for it on its own. The link
+      // waits for a run of that account, which starts it again.
+      if (context.isCurrent?.() === false) {
+        trackWebV2AnalyticsEvent({
+          correlationId,
+          name: "import_abandoned",
+          properties: { ...properties, abandonment_reason: "queue_stopped", attempt },
+          routeOrScreen: IMPORT_ANALYTICS_ROUTE
+        });
+        await release();
+        return { status: "stopped" };
+      }
 
       const recovery = response.recovery;
       const allowAi =
@@ -530,7 +550,7 @@ export async function runImportQueue(context: QueueRunnerContext): Promise<Queue
   await recoverStaleImports().catch(() => 0);
   let processed = 0;
 
-  while (!context.signal.aborted) {
+  while (!context.signal.aborted && context.isCurrent?.() !== false) {
     if (!isOnline()) {
       return { paused: "offline", processed };
     }

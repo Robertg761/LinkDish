@@ -37,6 +37,16 @@ export const isCheckoutCancelledError = (error: unknown): boolean =>
   "errorCode" in error &&
   (error as { errorCode?: unknown }).errorCode === USER_CANCELLED_ERROR_CODE;
 
+/**
+ * Stops before the checkout opens when another account signed in while it was being prepared
+ * (the SDK and offerings load first): the purchase would go to the account that started it.
+ */
+const ensureStillCurrent = (isCurrent: (() => boolean) | undefined) => {
+  if (isCurrent && !isCurrent()) {
+    throw new Error("Another account signed in before checkout opened.");
+  }
+};
+
 const loadPurchasesModule = (): Promise<RevenueCatPurchasesModule> => {
   purchasesModulePromise ??= import("@revenuecat/purchases-js");
   return purchasesModulePromise;
@@ -86,16 +96,20 @@ const getCheckoutPackage = async (
 };
 
 export const startRevenueCatWebSdkCheckout = async ({
+  isCurrent,
   period,
   plan,
   user
 }: {
+  /** False once another account has signed in: the checkout then never opens. */
+  isCurrent?: (() => boolean) | undefined;
   period: BillingPeriod;
   plan: PaidBillingPlan;
   user: AccountUser;
 }): Promise<void> => {
   const purchases = await getPurchasesForUser(user);
   const checkoutPackage = await getCheckoutPackage(purchases, plan, period);
+  ensureStillCurrent(isCurrent);
 
   await purchases.purchase({
     customerEmail: user.email,
@@ -117,12 +131,16 @@ const getFoundingCheckoutPackage = async (purchases: PurchasesInstance): Promise
 };
 
 export const startRevenueCatWebSdkFoundingCheckout = async ({
+  isCurrent,
   user
 }: {
+  /** False once another account has signed in: the checkout then never opens. */
+  isCurrent?: (() => boolean) | undefined;
   user: AccountUser;
 }): Promise<void> => {
   const purchases = await getPurchasesForUser(user);
   const checkoutPackage = await getFoundingCheckoutPackage(purchases);
+  ensureStillCurrent(isCurrent);
 
   await purchases.purchase({
     customerEmail: user.email,

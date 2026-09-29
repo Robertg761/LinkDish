@@ -4,6 +4,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { apiClient } from "../../api/client";
 import { getFriendlyErrorMessage } from "../../api/error-message";
 import { isExtractorApiError } from "../../api/errors";
+import { getAccountScope, useIsCurrentAccount } from "../../auth/account-scope";
 import { useAuth } from "../../auth/AuthProvider";
 import { Badge } from "../../components/Badge";
 import { Button, ButtonLink } from "../../components/Button";
@@ -358,11 +359,15 @@ const SignInView: React.FC<{ destination: string | null }> = ({ destination }) =
   );
 };
 
-const ProfileSheet: React.FC<{ user: AccountUser; open: boolean; onClose: () => void }> = ({
-  user,
-  open,
-  onClose
-}) => {
+interface ProfileSheetProps {
+  user: AccountUser;
+  open: boolean;
+  onClose: () => void;
+  /** Whether an account is still the one signed in (checked when a save answers). */
+  isCurrentAccount: (account: string | null) => boolean;
+}
+
+const ProfileSheet: React.FC<ProfileSheetProps> = ({ user, open, onClose, isCurrentAccount }) => {
   const { refreshUser } = useAuth();
   const { showToast } = useToast();
   const [displayName, setDisplayName] = useState(user.displayName ?? "");
@@ -386,6 +391,7 @@ const ProfileSheet: React.FC<{ user: AccountUser; open: boolean; onClose: () => 
   const customSelected = Boolean(avatarEmoji) && !PROFILE_EMOJI_OPTIONS.includes(avatarEmoji);
 
   const save = async () => {
+    const savedFor = user.id;
     setSaving(true);
     setError("");
 
@@ -394,11 +400,19 @@ const ProfileSheet: React.FC<{ user: AccountUser; open: boolean; onClose: () => 
         avatarEmoji: avatarEmoji.trim() || null,
         displayName: displayName.trim() || null
       });
+
+      // Another account signed in meanwhile: the saved profile (and its toast) was the last one's.
+      if (!isCurrentAccount(savedFor)) {
+        return;
+      }
+
       await refreshUser();
       showToast({ message: "Profile saved", tone: "success" });
       onClose();
     } catch (failure) {
-      setError(getFriendlyErrorMessage(failure, "save"));
+      if (isCurrentAccount(savedFor)) {
+        setError(getFriendlyErrorMessage(failure, "save"));
+      }
     } finally {
       setSaving(false);
     }
@@ -749,7 +763,9 @@ export const AccountPage: React.FC = () => {
   const { user, isAuthenticated, loading, logout } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const [profileOpen, setProfileOpen] = useState(false);
+  const isCurrentAccount = useIsCurrentAccount(getAccountScope(isAuthenticated, user));
+  /** The account the profile editor was opened for: it stays closed for any other. */
+  const [profileOpenFor, setProfileOpenFor] = useState<string | null>(null);
   const [signingOut, setSigningOut] = useState(false);
   const destination = getPostSignInDestination(searchParams);
   useDocumentTitle(isAuthenticated ? "You" : "Sign in");
@@ -799,7 +815,7 @@ export const AccountPage: React.FC = () => {
           aria-label="Edit profile"
           className="account-profile-edit"
           icon="pencil"
-          onClick={() => setProfileOpen(true)}
+          onClick={() => setProfileOpenFor(user.id)}
           size="sm"
           variant="secondary"
         >
@@ -831,9 +847,16 @@ export const AccountPage: React.FC = () => {
         </Button>
       </div>
 
-      <DeleteAccount user={user} />
+      {/* Keyed by account: a draft or confirmation typed for one never carries to the next. */}
+      <DeleteAccount key={`delete:${user.id}`} user={user} />
 
-      <ProfileSheet onClose={() => setProfileOpen(false)} open={profileOpen} user={user} />
+      <ProfileSheet
+        isCurrentAccount={isCurrentAccount}
+        key={`profile:${user.id}`}
+        onClose={() => setProfileOpenFor(null)}
+        open={profileOpenFor === user.id}
+        user={user}
+      />
     </div>
   );
 };

@@ -637,7 +637,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const deleteAccount = useCallback(
     async (email: string) => {
+      const deleting = userRef.current?.id;
       await apiClient.deleteAccount({ confirmEmail: email });
+
+      // Another account signed in (or out) while the deletion was on its way: signing out now
+      // would sign out that account, not the deleted one.
+      if (userRef.current?.id !== deleting) {
+        return;
+      }
+
       await logout();
     },
     [logout]

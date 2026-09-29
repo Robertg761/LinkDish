@@ -37,7 +37,8 @@ vi.mock("../../api/client", () => ({
 
 const authState = vi.hoisted(() => ({
   isAuthenticated: true,
-  plan: "free" as "free" | "plus" | "family"
+  plan: "free" as "free" | "plus" | "family",
+  userId: "user_1"
 }));
 
 vi.mock("../../auth/AuthProvider", () => ({
@@ -45,7 +46,7 @@ vi.mock("../../auth/AuthProvider", () => ({
     isAuthenticated: authState.isAuthenticated,
     refreshUser: vi.fn(),
     user: authState.isAuthenticated
-      ? { billingPlan: authState.plan, email: "cook@example.com", id: "user_1" }
+      ? { billingPlan: authState.plan, email: "cook@example.com", id: authState.userId }
       : null
   })
 }));
@@ -83,14 +84,15 @@ const TriggerButtons = () => {
   );
 };
 
-const renderUpgradeHarness = () =>
-  render(
-    <MemoryRouter>
-      <UpgradeSheetProvider>
-        <TriggerButtons />
-      </UpgradeSheetProvider>
-    </MemoryRouter>
-  );
+const upgradeHarness = () => (
+  <MemoryRouter>
+    <UpgradeSheetProvider>
+      <TriggerButtons />
+    </UpgradeSheetProvider>
+  </MemoryRouter>
+);
+
+const renderUpgradeHarness = () => render(upgradeHarness());
 
 const assign = vi.fn();
 
@@ -115,6 +117,7 @@ describe("UpgradeSheetProvider", () => {
     });
     authState.isAuthenticated = true;
     authState.plan = "free";
+    authState.userId = "user_1";
     libraryMocks.recipes = cookbookOf(15);
     resetWebBillingAvailabilityForTests();
     resetCheckoutSessionForTests();
@@ -247,6 +250,38 @@ describe("UpgradeSheetProvider", () => {
       "/account?upgrade=family"
     );
     await waitFor(() => expect(apiMocks.getWebBillingAvailability).toHaveBeenCalled());
+  });
+
+  it("closes a sheet opened for one account when another signs in", async () => {
+    const view = renderUpgradeHarness();
+
+    fireEvent.click(screen.getByRole("button", { name: "import_limit" }));
+    expect(
+      await screen.findByRole("dialog", { name: "More room for the recipes worth keeping." })
+    ).toBeInTheDocument();
+
+    // Clerk answers with a different (free) account than the cached one.
+    authState.userId = "user_2";
+    view.rerender(upgradeHarness());
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    // The new account can still be offered a sheet of its own.
+    fireEvent.click(screen.getByRole("button", { name: "family_share_no_plan" }));
+    expect(
+      await screen.findByRole("dialog", { name: "Share the kitchen with Family." })
+    ).toBeInTheDocument();
+
+    authState.isAuthenticated = false;
+    view.rerender(upgradeHarness());
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    // Signing back in doesn't bring back a sheet that closed on the way out.
+    authState.isAuthenticated = true;
+    view.rerender(upgradeHarness());
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
   it("stays quiet for paid plans", () => {

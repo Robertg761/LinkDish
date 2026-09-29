@@ -5,6 +5,7 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { trackWebEvent } from "../../analytics/client";
 import { apiClient, isExtractorApiError } from "../../api/client";
 import { getFriendlyErrorMessage } from "../../api/error-message";
+import { getAccountScope, useIsCurrentAccount } from "../../auth/account-scope";
 import { useAuth } from "../../auth/AuthProvider";
 import { AppTopBarActions } from "../../components/AppShell";
 import { Button, ButtonLink } from "../../components/Button";
@@ -101,13 +102,24 @@ const isNotFoundError = (error: unknown): boolean =>
 /** /recipes/:id (your cookbook) and /recipes/shared/:sharedId (a household recipe). */
 export const RecipePage: React.FC = () => {
   const { id, sharedId } = useParams<{ id?: string; sharedId?: string }>();
+  const { isAuthenticated, user } = useAuth();
+  // Checked here, above the screens: a family recipe's screen goes away when another account
+  // signs in, and what its requests answer afterwards must not land on that account.
+  const isCurrentAccount = useIsCurrentAccount(getAccountScope(isAuthenticated, user));
 
   return sharedId ? (
-    <SharedRecipeRoute key={`shared:${sharedId}`} sharedId={sharedId} />
+    <SharedRecipeRoute
+      isCurrentAccount={isCurrentAccount}
+      key={`shared:${sharedId}`}
+      sharedId={sharedId}
+    />
   ) : (
-    <SavedRecipeRoute key={`saved:${id ?? ""}`} id={id ?? ""} />
+    <SavedRecipeRoute isCurrentAccount={isCurrentAccount} key={`saved:${id ?? ""}`} id={id ?? ""} />
   );
 };
+
+/** Whether an account (captured when some work started) is still the one signed in. */
+type IsCurrentAccount = (account: string | null) => boolean;
 
 const RecipePageShell: React.FC<{ children: React.ReactNode; className?: string }> = ({
   children,
@@ -154,7 +166,10 @@ const RecipeNotFound: React.FC<{ shared?: boolean }> = ({ shared = false }) => (
   </RecipePageShell>
 );
 
-const SavedRecipeRoute: React.FC<{ id: string }> = ({ id }) => {
+const SavedRecipeRoute: React.FC<{ id: string; isCurrentAccount: IsCurrentAccount }> = ({
+  id,
+  isCurrentAccount
+}) => {
   const { recipes, retry, status } = useSavedRecipes();
   const recipe = useMemo(() => recipes.find((entry) => entry.id === id), [id, recipes]);
   const [sourceImages, setSourceImages] = useState<ExtractRecipeImage[] | undefined>();
@@ -218,7 +233,14 @@ const SavedRecipeRoute: React.FC<{ id: string }> = ({ id }) => {
     return <RecipeNotFound />;
   }
 
-  return <RecipeScreen kind="saved" record={recipe} sourceImages={sourceImages} />;
+  return (
+    <RecipeScreen
+      isCurrentAccount={isCurrentAccount}
+      kind="saved"
+      record={recipe}
+      sourceImages={sourceImages}
+    />
+  );
 };
 
 type SharedState =
@@ -227,7 +249,10 @@ type SharedState =
   | { status: "error"; error: unknown }
   | { status: "ready"; shared: SharedRecipe | null };
 
-const SharedRecipeRoute: React.FC<{ sharedId: string }> = ({ sharedId }) => {
+const SharedRecipeRoute: React.FC<{ sharedId: string; isCurrentAccount: IsCurrentAccount }> = ({
+  sharedId,
+  isCurrentAccount
+}) => {
   const { credentialsKey, isAuthenticated, loading: authLoading } = useAuth();
   const [loaded, setLoaded] = useState<{ key: string | null; state: SharedState }>({
     key: null,
@@ -242,6 +267,16 @@ const SharedRecipeRoute: React.FC<{ sharedId: string }> = ({ sharedId }) => {
     loaded.key === credentialsKey || loaded.state.status === "signed-out"
       ? loaded.state
       : { status: "loading" };
+  /** An owner's edit, kept only while what's shown is still the answer for these credentials. */
+  const applyEdit = useCallback(
+    (next: SharedRecipe) =>
+      setLoaded((current) =>
+        current.key === credentialsKey
+          ? { key: credentialsKey, state: { shared: next, status: "ready" } }
+          : current
+      ),
+    [credentialsKey]
+  );
   const [reloadToken, setReloadToken] = useState(0);
   const openedRef = useRef(false);
 
@@ -341,8 +376,9 @@ const SharedRecipeRoute: React.FC<{ sharedId: string }> = ({ sharedId }) => {
 
   return (
     <RecipeScreen
+      isCurrentAccount={isCurrentAccount}
       kind="shared"
-      onSharedChange={(next) => setState({ shared: next, status: "ready" })}
+      onSharedChange={applyEdit}
       record={sharedRecipeToWebSavedRecipe(state.shared)}
       shared={state.shared}
     />
@@ -353,14 +389,15 @@ const SharedRecipeRoute: React.FC<{ sharedId: string }> = ({ sharedId }) => {
  * Screen
  * ---------------------------------------------------------------------------------------------- */
 
-type RecipeScreenProps =
+type RecipeScreenProps = { isCurrentAccount: IsCurrentAccount } & (
   | { kind: "saved"; record: WebSavedRecipe; sourceImages?: ExtractRecipeImage[] | undefined }
   | {
       kind: "shared";
       record: WebSavedRecipe;
       shared: SharedRecipe;
       onSharedChange: (shared: SharedRecipe) => void;
-    };
+    }
+);
 
 const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
   const { record } = props;
@@ -370,6 +407,9 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { credentialsKey, isAuthenticated, loading: authLoading, user } = useAuth();
+  const { isCurrentAccount } = props;
+  /** Who is signed in for this render: household answers and actions belong to them. */
+  const account = getAccountScope(isAuthenticated, user);
   const { requestUpgradeSheet } = useUpgradeSheet();
   const { showToast } = useToast();
   const isDesktop = useMediaQuery(RAIL_MEDIA_QUERY);
@@ -451,22 +491,30 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
   /* ----------------------------------- actions ----------------------------------- */
 
   const openShoppingSheet = useCallback(async () => {
-    setShoppingCanSync(isAuthenticated ? undefined : false);
+    const askedFor = account;
     // Offline (or when the check fails) a household member's items must still be marked for the
     // household list: the sheet then falls back to the shopping sync layer's (cached) mode.
+    let canSyncItems: boolean | undefined = isAuthenticated ? undefined : false;
     setShoppingAccount({ credentialsKey, isAuthenticated, loading: authLoading, userId: user?.id });
 
     if (isAuthenticated) {
       try {
         const householdResponse = await apiClient.getHousehold();
-        setShoppingCanSync(Boolean(householdResponse.household));
+        canSyncItems = Boolean(householdResponse.household);
       } catch {
         // Unknown: leave it to the sync layer.
       }
     }
 
+    // Another account signed in while the household was checked: the answer, and the sheet it
+    // was for, belonged to the last one.
+    if (!isCurrentAccount(askedFor)) {
+      return;
+    }
+
+    setShoppingCanSync(canSyncItems);
     setShoppingOpen(true);
-  }, [authLoading, credentialsKey, isAuthenticated, user?.id]);
+  }, [account, authLoading, credentialsKey, isAuthenticated, isCurrentAccount, user?.id]);
 
   const handleShare = async () => {
     const title = recipe.title;
@@ -668,11 +716,18 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
   };
 
   const handleDelete = async () => {
+    const deletingFor = account;
     setBusy("delete");
 
     try {
       if (shared) {
         await apiClient.deleteSharedRecipe(shared.id);
+
+        // Another account signed in meanwhile: the family recipe (and its toast) was the last one's.
+        if (!isCurrentAccount(deletingFor)) {
+          return;
+        }
+
         setConfirm(null);
         showToast({ message: `“${recipe.title}” is no longer shared.` });
         void navigate("/");
@@ -702,6 +757,11 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
       await deleteLocalWithUndo();
     } catch (error) {
       console.error("Delete failed:", error);
+
+      if (shared && !isCurrentAccount(deletingFor)) {
+        return;
+      }
+
       setConfirm(null);
       showToast({
         message: getFriendlyErrorMessage(
@@ -727,10 +787,17 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
 
   const handleSaveEdits = async (values: RecipeEditorValues) => {
     if (shared && props.kind === "shared") {
+      const editedFor = account;
       const response = await apiClient.updateSharedRecipe(shared.id, {
         notes: values.notes,
         recipe: values.recipe
       });
+
+      // Another account signed in meanwhile: the edited recipe is the last one's household's.
+      if (!isCurrentAccount(editedFor)) {
+        return;
+      }
+
       props.onSharedChange(response.recipe);
       showToast({ icon: "check-circle", message: "Family recipe updated.", tone: "success" });
       return;

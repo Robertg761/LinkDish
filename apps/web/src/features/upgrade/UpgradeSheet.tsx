@@ -3,12 +3,14 @@ import React, {
   Suspense,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useRef,
   useState
 } from "react";
 
 import { trackWebEvent } from "../../analytics/client";
+import { getAccountScope } from "../../auth/account-scope";
 import { useAuth } from "../../auth/AuthProvider";
 import { lazyWithRetry } from "../../platform/lazy";
 import { OptionalChunkBoundary } from "../../platform/OptionalChunkBoundary";
@@ -66,7 +68,19 @@ interface UpgradeSheetProviderProps {
 
 export const UpgradeSheetProvider: React.FC<UpgradeSheetProviderProps> = ({ children }) => {
   const { isAuthenticated, user } = useAuth();
-  const [activeTrigger, setActiveTrigger] = useState<UpgradeSheetTrigger | null>(null);
+  const account = getAccountScope(isAuthenticated, user);
+  /** The open sheet, with the account it was opened for. */
+  const [active, setActive] = useState<{
+    account: string | null;
+    trigger: UpgradeSheetTrigger;
+  } | null>(null);
+  // A sheet belongs to the account it was opened for (its limit, its checkout): another account
+  // signing in or out never sees it, not even for a render, and it is closed for good.
+  const activeTrigger = active?.account === account ? active.trigger : null;
+
+  useEffect(() => {
+    setActive((current) => (current && current.account !== account ? null : current));
+  }, [account]);
   const viewedTriggersRef = useRef<Set<UpgradeSheetTrigger>>(new Set());
   const currentPlan = getWebBillingTier(user);
 
@@ -81,7 +95,7 @@ export const UpgradeSheetProvider: React.FC<UpgradeSheetProviderProps> = ({ chil
       }
 
       markViewedTrigger(trigger, viewedTriggersRef.current);
-      setActiveTrigger(trigger);
+      setActive({ account, trigger });
       trackWebEvent({
         eventName: "upgrade_viewed",
         routeOrScreen: window.location.pathname,
@@ -91,7 +105,7 @@ export const UpgradeSheetProvider: React.FC<UpgradeSheetProviderProps> = ({ chil
       });
       return true;
     },
-    [activeTrigger, currentPlan]
+    [account, activeTrigger, currentPlan]
   );
 
   const contextValue = useMemo(
@@ -102,7 +116,7 @@ export const UpgradeSheetProvider: React.FC<UpgradeSheetProviderProps> = ({ chil
   );
 
   const dismiss = useCallback(() => {
-    setActiveTrigger(null);
+    setActive(null);
   }, []);
 
   return (

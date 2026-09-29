@@ -11,37 +11,53 @@ export interface HouseholdSummary {
   household: HouseholdDetails | null;
 }
 
+const IDLE: HouseholdSummary = { household: null, status: "idle" };
+const LOADING: HouseholdSummary = { household: null, status: "loading" };
+
 /**
  * The signed-in person's household, read once per account. Used by money screens to tell whose
  * subscription a Family plan comes from. `idle` when signed out; `error` when it couldn't be read.
+ * It waits while the request would not carry the account yet (`credentialsKey` is null) and asks
+ * again when the credentials change. Its answer is kept with the account it was asked for, so
+ * another account (signing straight in, or out) never sees it, not even for a render.
  */
 export function useHouseholdSummary(
   enabled: boolean,
-  userId: string | undefined
+  userId: string | undefined,
+  /** `useAuth().credentialsKey`. */
+  credentialsKey: string | null
 ): HouseholdSummary {
-  const [summary, setSummary] = useState<HouseholdSummary>({
-    household: null,
-    status: enabled ? "loading" : "idle"
-  });
+  const account = enabled ? (userId ?? "") : null;
+  const [loaded, setLoaded] = useState<{ account: string | null; summary: HouseholdSummary }>(
+    () => ({ account, summary: account === null ? IDLE : LOADING })
+  );
 
   useEffect(() => {
-    if (!enabled) {
-      setSummary({ household: null, status: "idle" });
+    if (account === null) {
+      setLoaded((current) =>
+        current.account === null ? current : { account: null, summary: IDLE }
+      );
+      return;
+    }
+
+    // The same account asking again (new credentials) keeps its answer until the next arrives.
+    setLoaded((current) => (current.account === account ? current : { account, summary: LOADING }));
+
+    if (credentialsKey === null) {
       return;
     }
 
     let cancelled = false;
-    setSummary({ household: null, status: "loading" });
 
     apiClient.getHousehold().then(
       (response) => {
         if (!cancelled) {
-          setSummary({ household: response.household, status: "ready" });
+          setLoaded({ account, summary: { household: response.household, status: "ready" } });
         }
       },
       () => {
         if (!cancelled) {
-          setSummary({ household: null, status: "error" });
+          setLoaded({ account, summary: { household: null, status: "error" } });
         }
       }
     );
@@ -49,9 +65,13 @@ export function useHouseholdSummary(
     return () => {
       cancelled = true;
     };
-  }, [enabled, userId]);
+  }, [account, credentialsKey]);
 
-  return summary;
+  if (loaded.account !== account) {
+    return account === null ? IDLE : LOADING;
+  }
+
+  return loaded.summary;
 }
 
 export const getHouseholdOwner = (household: HouseholdDetails | null): HouseholdMember | null =>

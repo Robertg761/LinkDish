@@ -53,6 +53,7 @@ const authMocks = vi.hoisted(() => ({
 
 vi.mock("../../auth/AuthProvider", () => ({
   useAuth: () => ({
+    credentialsKey: `session:${authMocks.user?.id ?? ""}`,
     isAuthenticated: Boolean(authMocks.user),
     loginWithGoogle: authMocks.loginWithGoogle,
     refreshUser: authMocks.refreshUser,
@@ -105,15 +106,26 @@ const planCard = (name: string) => {
   return within(card);
 };
 
-const renderPricing = (entry = "/pricing") =>
-  render(
-    <MemoryRouter initialEntries={[entry]}>
-      <Routes>
-        <Route path="/pricing" element={<PricingPage />} />
-        <Route path="/account" element={<h1>Account sign-in</h1>} />
-      </Routes>
-    </MemoryRouter>
-  );
+const pricingTree = (entry = "/pricing") => (
+  <MemoryRouter initialEntries={[entry]}>
+    <Routes>
+      <Route path="/pricing" element={<PricingPage />} />
+      <Route path="/account" element={<h1>Account sign-in</h1>} />
+    </Routes>
+  </MemoryRouter>
+);
+
+const renderPricing = (entry = "/pricing") => render(pricingTree(entry));
+
+const deferred = <T,>() => {
+  let reject!: (reason: unknown) => void;
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((settle, fail) => {
+    resolve = settle;
+    reject = fail;
+  });
+  return { promise, reject, resolve };
+};
 
 const assign = vi.fn();
 
@@ -356,6 +368,106 @@ describe("PricingPage", () => {
       )
     ).toBeVisible();
     expect(screen.queryByRole("button", { name: "Manage billing" })).not.toBeInTheDocument();
+  });
+
+  it("never opens the last account's billing for the account that signed in since", async () => {
+    const portal = deferred<{ url: string }>();
+    authMocks.user = { billingPlan: "family", email: "sam@example.com", id: "user_owner" };
+    apiClientMocks.getHousehold.mockResolvedValue({
+      household: { ...memberHousehold, role: "owner" }
+    });
+    apiClientMocks.getWebBillingAvailability.mockResolvedValue(
+      availability({ managementPortalAvailable: true })
+    );
+    apiClientMocks.createWebBillingPortal.mockReturnValue(portal.promise);
+
+    const view = renderPricing();
+    fireEvent.click(await planCard("Family").findByRole("button", { name: "Manage billing" }));
+    await waitFor(() => expect(apiClientMocks.createWebBillingPortal).toHaveBeenCalled());
+
+    // Clerk answers with a different account than the cached one.
+    authMocks.user = { billingPlan: "free", email: "bo@example.com", id: "user_b" };
+    apiClientMocks.getHousehold.mockResolvedValue({ household: null });
+    view.rerender(pricingTree());
+
+    expect(screen.queryByRole("button", { name: "Manage billing" })).not.toBeInTheDocument();
+    const plus = planCard("Plus").getByRole("button", { name: "Upgrade to Plus" });
+    expect(plus).toBeEnabled();
+    expect(plus).not.toHaveAttribute("aria-busy");
+
+    await act(async () => {
+      portal.resolve({ url: "https://billing.stripe.com/p/session/sam" });
+      await portal.promise;
+    });
+
+    expect(assign).not.toHaveBeenCalled();
+  });
+
+  it("never sends the next account to a checkout the last one started", async () => {
+    const checkout = deferred<{ url: string }>();
+    apiClientMocks.createWebBillingCheckout.mockReturnValue(checkout.promise);
+
+    const view = renderPricing();
+    await waitForCheckoutReady();
+    fireEvent.click(planCard("Plus").getByRole("button", { name: "Upgrade to Plus" }));
+    await waitFor(() => expect(apiClientMocks.createWebBillingCheckout).toHaveBeenCalled());
+    expect(planCard("Plus").getByRole("button", { name: "Upgrade to Plus" })).toHaveAttribute(
+      "aria-busy",
+      "true"
+    );
+
+    authMocks.user = { billingPlan: "free", email: "bo@example.com", id: "user_b" };
+    view.rerender(pricingTree());
+
+    const plus = planCard("Plus").getByRole("button", { name: "Upgrade to Plus" });
+    expect(plus).toBeEnabled();
+    expect(plus).not.toHaveAttribute("aria-busy");
+
+    await act(async () => {
+      checkout.resolve({ url: "https://pay.rev.cat/test/user_family" });
+      await checkout.promise;
+    });
+
+    expect(assign).not.toHaveBeenCalled();
+    expect(sessionStorage.getItem(CHECKOUT_SESSION_STORAGE_KEY)).toBeNull();
+    expect(planCard("Plus").getByRole("button", { name: "Upgrade to Plus" })).toBeEnabled();
+  });
+
+  it("keeps the last account's checkout trouble to itself", async () => {
+    const checkout = deferred<{ url: string }>();
+    apiClientMocks.createWebBillingCheckout
+      .mockRejectedValueOnce(
+        new ExtractorApiError("Extractor API request failed.", 503, {
+          message: "Web checkout is not enabled yet."
+        })
+      )
+      .mockReturnValueOnce(checkout.promise);
+
+    const view = renderPricing();
+    await waitForCheckoutReady();
+    fireEvent.click(planCard("Plus").getByRole("button", { name: "Upgrade to Plus" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Online checkout isn't available right now."
+    );
+
+    authMocks.user = { billingPlan: "free", email: "bo@example.com", id: "user_b" };
+    view.rerender(pricingTree());
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+    // A failure that lands after the switch isn't shown to the new account either.
+    fireEvent.click(planCard("Plus").getByRole("button", { name: "Upgrade to Plus" }));
+    await waitFor(() => expect(apiClientMocks.createWebBillingCheckout).toHaveBeenCalledTimes(2));
+    authMocks.user = { billingPlan: "free", email: "cy@example.com", id: "user_c" };
+    view.rerender(pricingTree());
+
+    await act(async () => {
+      checkout.reject(new ExtractorApiError("Extractor API request failed.", 503, {}));
+      await checkout.promise.catch(() => undefined);
+    });
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(assign).not.toHaveBeenCalled();
   });
 
   it("offers the founding deal to free accounts only when it is available", async () => {

@@ -12,6 +12,7 @@ import { useNavigate } from "react-router-dom";
 import { trackWebEvent } from "../../analytics/client";
 import { apiClient } from "../../api/client";
 import { getFriendlyErrorMessage } from "../../api/error-message";
+import { getAccountScope, useIsCurrentAccount } from "../../auth/account-scope";
 import { useAuth } from "../../auth/AuthProvider";
 import { ErrorState } from "../../components/ErrorState";
 import { PageHeader } from "../../components/PageHeader";
@@ -178,6 +179,8 @@ export const LibraryPage: React.FC = () => {
   const library = useSavedRecipes();
   const { collections } = useCollections();
   const shared = useSharedRecipes(isAuthenticated, user?.id, credentialsKey);
+  const account = getAccountScope(isAuthenticated, user);
+  const isCurrentAccount = useIsCurrentAccount(account);
   const showShortcutHint = useMediaQuery("(hover: hover) and (pointer: fine)");
   const compactSearch = useMediaQuery("(max-width: 479px)");
   const searchInputRef = useRef<HTMLInputElement | null>(null);
@@ -892,10 +895,15 @@ export const LibraryPage: React.FC = () => {
           <OptionalChunkBoundary name="Family cookbook">
             <Suspense fallback={<LibrarySkeleton view={view} />}>
               <FamilyCookbook
+                account={account}
                 direction={direction}
                 engine={engine}
                 highlight={highlight}
+                isCurrentAccount={isCurrentAccount}
                 isPremiumUser={isPremiumUser}
+                // Keyed by account: a confirmation opened for one account's family recipe
+                // never stays open for the next.
+                key={account ?? "signed-out"}
                 onClearSearch={clearSearch}
                 onDirectionToggle={toggleDirection}
                 onSaveLimit={offerSaveLimitUpgrade}

@@ -21,8 +21,17 @@ import {
 
 vi.mock("idb", async () => (await import("../../storage/testing/fake-idb")).fakeIdbModule);
 
+const authState = vi.hoisted(() => ({
+  isAuthenticated: true,
+  user: null as { billingPlan: "free" | "plus"; email: string; id: string } | null
+}));
+
 vi.mock("../../auth/AuthProvider", () => ({
-  useAuth: () => ({ credentialsReady: true, isAuthenticated: true, user: null })
+  useAuth: () => ({
+    credentialsReady: true,
+    isAuthenticated: authState.isAuthenticated,
+    user: authState.user
+  })
 }));
 
 const runnerMocks = vi.hoisted(() => ({
@@ -81,6 +90,8 @@ describe("useImportQueueRunner", () => {
       return `00000000-0000-4000-8000-${String(uuid).padStart(12, "0")}`;
     });
     runnerMocks.heldLocks = [];
+    authState.isAuthenticated = true;
+    authState.user = null;
     runnerMocks.runImportQueue.mockReset();
     // The queue as the runner left it: nothing more to do until it changes.
     runnerMocks.runImportQueue.mockImplementation(() => {
@@ -117,6 +128,54 @@ describe("useImportQueueRunner", () => {
     await expect(runnerMocks.runImportQueue.mock.results[0]?.value).resolves.toMatchObject({
       heldLocks: [IMPORT_QUEUE_LOCK_NAME]
     });
+  });
+
+  it("hands the queue to an account that signs in mid-run, without the last one's pause", async () => {
+    authState.isAuthenticated = false;
+    let firstRun: { isCurrent?: () => boolean } | undefined;
+    let finishRun: (result: { paused: string | null; processed: number }) => void = () => undefined;
+    runnerMocks.runImportQueue.mockImplementationOnce(
+      (context: { isCurrent?: () => boolean }) =>
+        new Promise((resolve) => {
+          firstRun = context;
+          finishRun = resolve;
+        })
+    );
+
+    const { rerender } = renderHook(() => useImportQueueRunner());
+    await waitFor(() => expect(runnerMocks.runImportQueue).toHaveBeenCalledOnce());
+    expect(firstRun?.isCurrent?.()).toBe(true);
+
+    authState.isAuthenticated = true;
+    authState.user = { billingPlan: "plus", email: "a@example.com", id: "user_a" };
+    rerender();
+    expect(firstRun?.isCurrent?.()).toBe(false);
+
+    // The signed-out allowance ran out: that's no reason to pause the account now signed in.
+    await act(async () => {
+      finishRun({ paused: "import_limit", processed: 0 });
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(runnerMocks.runImportQueue).toHaveBeenCalledTimes(2));
+    expect(runnerMocks.runImportQueue.mock.calls[1]?.[0]).toMatchObject({
+      isAuthenticated: true,
+      tier: "plus"
+    });
+  });
+
+  it("lifts one account's plan-limit pause when another account signs in", async () => {
+    authState.user = { billingPlan: "plus", email: "a@example.com", id: "user_a" };
+    runnerMocks.runImportQueue.mockResolvedValueOnce({ paused: "import_limit", processed: 0 });
+
+    const { rerender, result } = renderHook(() => useImportQueueRunner());
+    await waitFor(() => expect(result.current.paused).toBe("import_limit"));
+
+    authState.user = { billingPlan: "plus", email: "b@example.com", id: "user_b" };
+    rerender();
+
+    expect(result.current.paused).toBeNull();
+    await waitFor(() => expect(runnerMocks.runImportQueue).toHaveBeenCalledTimes(2));
   });
 
   it("tells the importer's allowance to refresh once the queue has imported something", async () => {
