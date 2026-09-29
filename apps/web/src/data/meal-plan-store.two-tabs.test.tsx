@@ -1,15 +1,23 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { MEAL_PLAN_STORE_NAME, resetLinkDishWebDbForTests } from "../storage/linkdish-db";
+import {
+  getLinkDishWebDb,
+  MEAL_PLAN_STORE_NAME,
+  resetLinkDishWebDbForTests
+} from "../storage/linkdish-db";
 import { fakeIdb } from "../storage/testing/fake-idb";
 import { isolateFakeIdbTransactions } from "../storage/testing/fake-idb-isolation";
+import { holdNextWrite } from "../storage/testing/held-write";
 import { createChannelPair } from "../storage/testing/two-tabs";
 
 import { resetDataChangeFeedForTests, setDataChannelFactoryForTests } from "./change-feed";
 import {
   addMealPlanEntry,
+  getMealPlanSnapshot,
+  loadMealPlan,
   moveMealPlanEntry,
+  removeMealPlanEntryOptimistic,
   resetMealPlanStoreForTests,
   updateMealPlanEntry,
   useMealPlanRange
@@ -54,6 +62,7 @@ describe("meal-plan writes from two tabs", () => {
 
   afterEach(() => {
     setDataChannelFactoryForTests(() => null);
+    vi.restoreAllMocks();
   });
 
   it("keeps a note added in one tab while the other moves the meal", async () => {
@@ -111,5 +120,32 @@ describe("meal-plan writes from two tabs", () => {
 
     // Whichever landed first, the removal wins: a move never recreates a deleted entry.
     expect(storedEntry(entry.id)).toBeUndefined();
+  });
+
+  it("keeps the other tab's removal when a removal here fails", async () => {
+    // The test setup's `randomUUID` always answers the same id.
+    vi.spyOn(crypto, "randomUUID").mockReturnValueOnce("00000000-0000-4000-8000-000000000002");
+    const tacos = await addMealPlanEntry({ date: "2026-09-29", slot: "dinner", title: "Tacos" });
+    const other = await openOtherTab();
+    const [here, there] = createChannelPair();
+    setDataChannelFactoryForTests(() => here);
+    other.feed.setDataChannelFactoryForTests(() => there);
+    await loadMealPlan();
+    const titlesShown = () => getMealPlanSnapshot().data.map((shown) => shown.title);
+    const held = holdNextWrite(await getLinkDishWebDb(), "delete");
+
+    const removing = removeMealPlanEntryOptimistic(entry.id);
+    await held.started;
+    expect(titlesShown()).toEqual(["Tacos"]);
+
+    // The other tab removes Tacos while this tab's removal is pending; this tab re-reads the plan.
+    await other.store.removeMealPlanEntry(tacos.id);
+    await waitFor(() => expect(titlesShown()).not.toContain("Tacos"));
+    held.fail(new Error("disk full"));
+    await expect(removing).rejects.toThrow("disk full");
+
+    expect(titlesShown()).toEqual(["Lemony pasta"]);
+    expect(storedEntry(tacos.id)).toBeUndefined();
+    expect(storedEntry(entry.id)).toMatchObject({ title: "Lemony pasta" });
   });
 });

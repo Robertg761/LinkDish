@@ -5,7 +5,13 @@ import { getLinkDishWebDb, MEAL_PLAN_STORE_NAME } from "../storage/linkdish-db";
 
 import { emitDataChange } from "./change-feed";
 import { getDateKeyRange, isDateKey } from "./date-keys";
-import { createResourceStore, toViewStatus, upsertById, useResource } from "./resource-store";
+import {
+  createOptimisticRecordChange,
+  createResourceStore,
+  toViewStatus,
+  upsertById,
+  useResource
+} from "./resource-store";
 
 /**
  * The weekly meal plan: entries on a calendar day and slot, optionally pointing at a saved recipe
@@ -239,42 +245,40 @@ export async function removeMealPlanEntry(id: string): Promise<void> {
   emitDataChange({ deletedIds: [id], topic: "mealPlan" });
 }
 
-/** Optimistic variants for UIs: the cache updates first and rolls back if the write fails. */
-export async function removeMealPlanEntryOptimistic(id: string): Promise<void> {
-  const previous = mealPlanResource.getSnapshot().data;
-  mealPlanResource.update((current) => current.filter((entry) => entry.id !== id));
+const readMealPlanEntry = async (id: string): Promise<MealPlanEntry | undefined> => {
+  const db = await getLinkDishWebDb();
+  return (await db.get(MEAL_PLAN_STORE_NAME, id)) as MealPlanEntry | undefined;
+};
 
-  try {
-    await removeMealPlanEntry(id);
-  } catch (error) {
-    mealPlanResource.update(() => previous);
-    throw error;
-  }
-}
+/**
+ * Optimistic variants for UIs: the cache updates first, and if the write fails only that entry
+ * is rolled back (other changes that landed meanwhile, here or in another tab, are kept).
+ */
+const changeEntryOptimistically = createOptimisticRecordChange(mealPlanResource, {
+  getId: (entry) => entry.id,
+  order: (entries) => entries.sort(compareMealPlanEntries),
+  read: readMealPlanEntry
+});
 
-export async function moveMealPlanEntryOptimistic(
-  id: string,
-  target: { date: string; slot?: MealPlanSlot | undefined }
-): Promise<MealPlanEntry | undefined> {
-  const previous = mealPlanResource.getSnapshot().data;
-  assertDate(target.date);
-  mealPlanResource.update((current) =>
-    current
-      .map((entry) =>
-        entry.id === id
-          ? { ...entry, date: target.date, ...(target.slot ? { slot: target.slot } : {}) }
-          : entry
-      )
-      .sort(compareMealPlanEntries)
+export const removeMealPlanEntryOptimistic = (id: string): Promise<void> =>
+  changeEntryOptimistically(
+    id,
+    () => undefined,
+    () => removeMealPlanEntry(id)
   );
 
-  try {
-    return await moveMealPlanEntry(id, target);
-  } catch (error) {
-    mealPlanResource.update(() => previous);
-    throw error;
-  }
-}
+export const moveMealPlanEntryOptimistic = async (
+  id: string,
+  target: { date: string; slot?: MealPlanSlot | undefined }
+): Promise<MealPlanEntry | undefined> => {
+  assertDate(target.date);
+
+  return changeEntryOptimistically(
+    id,
+    (entry) => ({ ...entry, date: target.date, ...(target.slot ? { slot: target.slot } : {}) }),
+    () => moveMealPlanEntry(id, target)
+  );
+};
 
 /** Groups entries into one bucket per day of the range (empty days included). */
 export const groupMealPlanByDay = (

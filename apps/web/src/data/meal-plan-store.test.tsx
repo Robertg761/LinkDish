@@ -1,8 +1,13 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { resetLinkDishWebDbForTests } from "../storage/linkdish-db";
+import {
+  getLinkDishWebDb,
+  MEAL_PLAN_STORE_NAME,
+  resetLinkDishWebDbForTests
+} from "../storage/linkdish-db";
 import { fakeIdb } from "../storage/testing/fake-idb";
+import { holdNextWrite } from "../storage/testing/held-write";
 
 import { resetDataChangeFeedForTests, setDataChannelFactoryForTests } from "./change-feed";
 import {
@@ -14,15 +19,21 @@ import {
 } from "./date-keys";
 import {
   addMealPlanEntry,
+  compareMealPlanEntries,
   getMealPlanEntriesInRange,
+  getMealPlanSnapshot,
+  loadMealPlan,
   MealPlanValidationError,
   moveMealPlanEntry,
   moveMealPlanEntryOptimistic,
   removeMealPlanEntry,
+  removeMealPlanEntryOptimistic,
   resetMealPlanStoreForTests,
   updateMealPlanEntry,
   useMealPlanRange
 } from "./meal-plan-store";
+
+import type { MealPlanEntry } from "./meal-plan-store";
 
 vi.mock("idb", async () => (await import("../storage/testing/fake-idb")).fakeIdbModule);
 
@@ -141,5 +152,112 @@ describe("meal-plan-store", () => {
     const { result } = renderHook(() => useMealPlanRange("next week", 7));
     await waitFor(() => expect(result.current.status).toBe("ready"));
     expect(result.current.days).toEqual([]);
+  });
+});
+
+describe("optimistic meal-plan changes", () => {
+  const describeEntries = (entries: readonly MealPlanEntry[]) =>
+    entries.map((entry) => `${entry.title} ${entry.date} ${entry.slot}`);
+  const shown = () => describeEntries(getMealPlanSnapshot().data);
+  const stored = () =>
+    describeEntries(
+      fakeIdb.records<MealPlanEntry>(MEAL_PLAN_STORE_NAME).sort(compareMealPlanEntries)
+    );
+  const plan = (date: string, title: string) => addMealPlanEntry({ date, slot: "dinner", title });
+
+  beforeEach(() => {
+    fakeIdb.reset();
+    resetLinkDishWebDbForTests();
+    resetDataChangeFeedForTests();
+    resetMealPlanStoreForTests();
+    setDataChannelFactoryForTests(() => null);
+    let uuid = 0;
+    vi.spyOn(crypto, "randomUUID").mockImplementation(() => {
+      uuid += 1;
+      return `00000000-0000-4000-8000-${String(uuid).padStart(12, "0")}`;
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("rolls back only the failed removal, keeping changes saved meanwhile", async () => {
+    const soup = await plan("2026-09-28", "Soup");
+    const tacos = await plan("2026-09-29", "Tacos");
+    const curry = await plan("2026-09-30", "Curry");
+    await loadMealPlan();
+    const held = holdNextWrite(await getLinkDishWebDb(), "delete");
+
+    const removing = removeMealPlanEntryOptimistic(soup.id);
+    await held.started;
+    expect(shown()).toEqual(["Tacos 2026-09-29 dinner", "Curry 2026-09-30 dinner"]);
+
+    // While that delete is pending, other changes are saved (and shown).
+    await removeMealPlanEntryOptimistic(tacos.id);
+    await moveMealPlanEntryOptimistic(curry.id, { date: "2026-10-01", slot: "lunch" });
+    held.fail(new Error("disk full"));
+    await expect(removing).rejects.toThrow("disk full");
+
+    expect(shown()).toEqual(["Soup 2026-09-28 dinner", "Curry 2026-10-01 lunch"]);
+    expect(stored()).toEqual(shown());
+  });
+
+  it("rolls back only the failed move, keeping changes saved meanwhile", async () => {
+    const soup = await plan("2026-09-28", "Soup");
+    const tacos = await plan("2026-09-29", "Tacos");
+    await loadMealPlan();
+    const held = holdNextWrite(await getLinkDishWebDb(), "transaction");
+
+    const moving = moveMealPlanEntryOptimistic(soup.id, { date: "2026-10-02" });
+    await held.started;
+    expect(shown()).toEqual(["Tacos 2026-09-29 dinner", "Soup 2026-10-02 dinner"]);
+
+    await removeMealPlanEntryOptimistic(tacos.id);
+    await plan("2026-09-30", "Pie");
+    held.fail(new Error("disk full"));
+    await expect(moving).rejects.toThrow("disk full");
+
+    expect(shown()).toEqual(["Soup 2026-09-28 dinner", "Pie 2026-09-30 dinner"]);
+    expect(stored()).toEqual(shown());
+  });
+
+  it("keeps a newer change to the entry, and settles on storage once that fails too", async () => {
+    const soup = await plan("2026-09-28", "Soup");
+    await loadMealPlan();
+    const db = await getLinkDishWebDb();
+
+    const firstHeld = holdNextWrite(db, "transaction");
+    const firstMove = moveMealPlanEntryOptimistic(soup.id, { date: "2026-09-29" });
+    await firstHeld.started;
+    const secondHeld = holdNextWrite(db, "transaction");
+    const secondMove = moveMealPlanEntryOptimistic(soup.id, { date: "2026-09-30" });
+    await secondHeld.started;
+
+    firstHeld.fail(new Error("disk full"));
+    await expect(firstMove).rejects.toThrow("disk full");
+    expect(shown()).toEqual(["Soup 2026-09-30 dinner"]);
+
+    // The second move's rollback would show the first move, which never saved either.
+    secondHeld.fail(new Error("disk full"));
+    await expect(secondMove).rejects.toThrow("disk full");
+    await waitFor(() => expect(shown()).toEqual(["Soup 2026-09-28 dinner"]));
+    expect(stored()).toEqual(shown());
+  });
+
+  it("does not bring back an entry deleted while its failed removal was pending", async () => {
+    const soup = await plan("2026-09-28", "Soup");
+    await plan("2026-09-29", "Tacos");
+    await loadMealPlan();
+    const held = holdNextWrite(await getLinkDishWebDb(), "delete");
+
+    const removing = removeMealPlanEntryOptimistic(soup.id);
+    await held.started;
+    await removeMealPlanEntry(soup.id);
+    held.fail(new Error("disk full"));
+    await expect(removing).rejects.toThrow("disk full");
+
+    await waitFor(() => expect(shown()).toEqual(["Tacos 2026-09-29 dinner"]));
+    expect(stored()).toEqual(shown());
   });
 });
