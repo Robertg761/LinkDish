@@ -9,6 +9,8 @@ import {
   getAppUpdateSnapshot,
   holdAutoApplyUpdate,
   markUpdateReady,
+  MAX_REGISTER_ATTEMPTS,
+  REGISTER_RETRY_MS,
   resetAppUpdateForTests,
   shouldAutoApplyUpdate,
   startAppUpdates,
@@ -19,6 +21,7 @@ import { AppUpdatePrompt } from "./AppUpdatePrompt";
 
 interface RegisterOptions {
   onNeedRefresh?: () => void;
+  onRegisterError?: (error: unknown) => void;
   onRegisteredSW?: (url: string, registration: ServiceWorkerRegistration | undefined) => void;
 }
 
@@ -164,6 +167,81 @@ describe("app update prompt", () => {
 
     expect(pwa.updateSW).not.toHaveBeenCalled();
     expect(shouldAutoApplyUpdate(Date.now() + UNDO_UPDATE_HOLD_MS)).toBe(true);
+  });
+
+  describe("when registering the service worker fails", () => {
+    beforeEach(() => {
+      vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    });
+
+    const failRegistration = () => {
+      act(() => {
+        pwa.options?.onRegisterError?.(new TypeError("Failed to fetch"));
+      });
+    };
+
+    it("registers again as soon as the connection comes back", async () => {
+      await register();
+      failRegistration();
+
+      await act(async () => {
+        window.dispatchEvent(new Event("online"));
+        await Promise.resolve();
+      });
+
+      expect(pwa.registerSW).toHaveBeenCalledTimes(2);
+      // Registered now: no further tries pile up.
+      vi.useFakeTimers();
+      vi.advanceTimersByTime(REGISTER_RETRY_MS * 2 ** MAX_REGISTER_ATTEMPTS);
+      window.dispatchEvent(new Event("online"));
+      await Promise.resolve();
+      expect(pwa.registerSW).toHaveBeenCalledTimes(2);
+    });
+
+    it("tries again by itself after a while, waiting longer each time, then gives up", async () => {
+      vi.useFakeTimers();
+      await register();
+
+      for (let attempt = 1; attempt < MAX_REGISTER_ATTEMPTS; attempt += 1) {
+        failRegistration();
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(REGISTER_RETRY_MS * 2 ** (attempt - 1) - 1);
+        });
+        expect(pwa.registerSW).toHaveBeenCalledTimes(attempt);
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(1);
+        });
+        expect(pwa.registerSW).toHaveBeenCalledTimes(attempt + 1);
+      }
+
+      // e.g. a private window, where it never works.
+      failRegistration();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(REGISTER_RETRY_MS * 2 ** MAX_REGISTER_ATTEMPTS);
+      });
+      expect(pwa.registerSW).toHaveBeenCalledTimes(MAX_REGISTER_ATTEMPTS);
+    });
+
+    it("tries again when the update checker itself couldn't be loaded", async () => {
+      const load = vi
+        .fn()
+        .mockRejectedValueOnce(new TypeError("Failed to fetch dynamically imported module"))
+        .mockImplementation(() => import("virtual:pwa-register"));
+
+      await act(async () => {
+        await startAppUpdates(load);
+      });
+      expect(pwa.registerSW).not.toHaveBeenCalled();
+
+      await act(async () => {
+        window.dispatchEvent(new Event("online"));
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(load).toHaveBeenCalledTimes(2);
+      expect(pwa.registerSW).toHaveBeenCalledOnce();
+    });
   });
 
   it("checks for new versions hourly in long-lived tabs", async () => {
