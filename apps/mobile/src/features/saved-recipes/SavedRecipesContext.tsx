@@ -22,7 +22,11 @@ import { useBilling } from "../billing/BillingContext";
 import { billingPlans } from "../billing/plans";
 import { canSaveAnotherRecipe } from "../billing/store";
 
-import { deleteRecipeSourceImageFiles, persistRecipeSourceImages } from "./sourceImageFiles";
+import {
+  createScanVersion,
+  deleteRecipeSourceImageFiles,
+  persistRecipeSourceImages
+} from "./sourceImageFiles";
 import {
   cloneSavedRecipeRecord,
   createSavedRecipeRecord,
@@ -727,6 +731,14 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
 
       const createdRecord = createSavedRecipeRecord(state);
       const recordId = existingRecord?.id ?? createdRecord.id;
+      // New files for this save's scans: the ones the stored record (or a clone) uses stay as
+      // they are unless the cookbook that points at the new ones is written.
+      const sourceImages = persistRecipeSourceImages(recordId, createdRecord.sourceImages, {
+        version: createScanVersion()
+      });
+      const writtenScanUris = (sourceImages ?? [])
+        .map((image) => image.uri)
+        .filter((uri) => !createdRecord.sourceImages?.some((image) => image.uri === uri));
       const nextRecord: SavedRecipeRecord = {
         ...createdRecord,
         favorite: existingRecord?.favorite,
@@ -734,7 +746,7 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
         sharedAt: existingRecord?.sharedAt,
         sharedByUserId: existingRecord?.sharedByUserId,
         sharedRecipeId: existingRecord?.sharedRecipeId,
-        sourceImages: persistRecipeSourceImages(recordId, createdRecord.sourceImages),
+        sourceImages,
         timesCooked: existingRecord?.timesCooked ?? createdRecord.timesCooked
       };
       const nextRecipes = upsertSavedRecipeRecord(savedRecipesRef.current, nextRecord);
@@ -745,6 +757,8 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
         await writer.writeNow(nextRecipes);
       } catch (error) {
         console.warn("Failed to persist saved recipes.", error);
+        // Nothing stored points at this save's scans: they go, so a retry leaves none behind.
+        deleteRecipeSourceImageFiles(writtenScanUris);
 
         return {
           allowed: true,
@@ -761,6 +775,13 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
       const latestRecord = getSavedRecipeRecordById(savedRecipesRef.current, recordId);
 
       if (existingRecord && !latestRecord) {
+        // Its new scans go too, once the cookbook without it is written.
+        const orphanedScanUris = getOrphanedSourceImageUris(savedRecipesRef.current, [nextRecord]);
+        void writer.writeNow(savedRecipesRef.current).then(
+          () => deleteRecipeSourceImageFiles(orphanedScanUris),
+          (error: unknown) => console.warn("Failed to persist saved recipes.", error)
+        );
+
         return {
           allowed: true,
           message: "This recipe was deleted from your Cookbook while it was saving.",
@@ -779,6 +800,13 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
           }
         : nextRecord;
       commitSavedRecipes((current) => upsertSavedRecipeRecord(current, savedRecord));
+
+      // The scans this recipe had before, now that nothing uses them (a clone may still).
+      if (existingRecord) {
+        deleteRecipeSourceImageFiles(
+          getOrphanedSourceImageUris(savedRecipesRef.current, [existingRecord])
+        );
+      }
 
       trackMobileEvent({
         eventName: "recipe_saved",

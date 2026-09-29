@@ -25,7 +25,8 @@ const getScanDirectory = (): Directory => {
 const writeScanFile = (
   recordId: string,
   image: RecipeSourceImage,
-  index: number
+  index: number,
+  version: string | undefined
 ): RecipeSourceImage | null => {
   const payload = dataUrlPattern.exec(image.uri)?.groups?.payload;
 
@@ -35,7 +36,7 @@ const writeScanFile = (
 
   const file = new File(
     getScanDirectory(),
-    `${recordId}-${index}.${fileExtensions[image.mimeType]}`
+    `${recordId}-${version ? `${version}-` : ""}${index}.${fileExtensions[image.mimeType]}`
   );
 
   file.create({ intermediates: true, overwrite: true });
@@ -58,10 +59,15 @@ const writeScanFile = (
  *
  * A scan that cannot be written is dropped rather than inlined: losing one photo
  * is far better than losing the recipe (and every other recipe in the blob).
+ *
+ * With a `version`, the files get names of their own, so the ones a stored record (or a clone
+ * of it) already uses are never overwritten before the cookbook that points at the new ones is
+ * written.
  */
 export const persistRecipeSourceImages = (
   recordId: string,
-  images: RecipeSourceImage[] | undefined
+  images: RecipeSourceImage[] | undefined,
+  options: { version?: string | undefined } = {}
 ): RecipeSourceImage[] | undefined => {
   if (!images || images.length === 0) {
     return undefined;
@@ -74,7 +80,7 @@ export const persistRecipeSourceImages = (
       }
 
       try {
-        return writeScanFile(recordId, image, index);
+        return writeScanFile(recordId, image, index, options.version);
       } catch (error) {
         console.warn("Failed to store a scanned recipe image.", error);
         return null;
@@ -112,3 +118,7 @@ export const deleteRecipeSourceImageFiles = (uris: readonly string[]): number =>
 
   return deleted;
 };
+
+/** A fresh name part for one save's scan files (see persistRecipeSourceImages). */
+export const createScanVersion = (): string =>
+  `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;

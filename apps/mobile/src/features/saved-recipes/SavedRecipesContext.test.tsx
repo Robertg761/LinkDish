@@ -55,6 +55,8 @@ const analyticsMocks = vi.hoisted(() => ({
 const fileSystemMocks = vi.hoisted(() => ({
   deleted: [] as string[],
   existing: new Set<string>(),
+  /** When set, a written file exists afterwards (so it can be seen to be deleted). */
+  trackWrites: false,
   writes: [] as Array<{ content: string; uri: string }>
 }));
 
@@ -120,6 +122,10 @@ vi.mock("expo-file-system", () => {
 
     public write(content: string) {
       fileSystemMocks.writes.push({ content, uri: this.uri });
+
+      if (fileSystemMocks.trackWrites) {
+        fileSystemMocks.existing.add(this.uri);
+      }
     }
   }
 
@@ -335,6 +341,7 @@ beforeEach(() => {
   appStateMocks.listeners = [];
   fileSystemMocks.deleted.splice(0);
   fileSystemMocks.existing.clear();
+  fileSystemMocks.trackWrites = false;
   accountState.getAuthHeaders.mockReset();
   accountState.getAuthHeadersFor.mockReset();
   accountState.getAuthHeadersFor.mockImplementation(
@@ -1068,6 +1075,64 @@ describe("SavedRecipesProvider household save entitlement", () => {
     expect(fifteenthPersonalResult!).toMatchObject({ allowed: true, saved: true });
     expect(latestSavedRecipes?.savedRecipes.filter((recipe) => !recipe.isStarter)).toHaveLength(15);
     expect(latestSavedRecipes?.savedRecipes.filter((recipe) => recipe.isStarter)).toHaveLength(3);
+  });
+
+  describe("scan files when the cookbook write fails", () => {
+    const scanState = (bytes: string) => ({
+      ...buildSuccessState(44),
+      sourceImages: [{ mimeType: "image/jpeg" as const, uri: `data:image/jpeg;base64,${bytes}` }]
+    });
+    const failCookbookWrites = () =>
+      asyncStorageMocks.setItem.mockImplementation((key: string) =>
+        key === "linkdish.savedRecipes"
+          ? Promise.reject(new Error("Row too big to fit into CursorWindow"))
+          : Promise.resolve(undefined)
+      );
+    const save = async (bytes: string) => {
+      let result: Awaited<ReturnType<NonNullable<typeof latestSavedRecipes>["saveRecipe"]>>;
+      await act(async () => {
+        result = await latestSavedRecipes!.saveRecipe(scanState(bytes));
+        await flushAsyncWork();
+      });
+      return result!;
+    };
+
+    it("removes a failed save's scans, so retries leave none behind", async () => {
+      vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      fileSystemMocks.trackWrites = true;
+      await renderProvider();
+      failCookbookWrites();
+
+      expect(await save("FIRSTTRY")).toMatchObject({ reason: "persist_failed", saved: false });
+
+      const written = fileSystemMocks.writes.map((write) => write.uri);
+      expect(written).toHaveLength(1);
+      expect(fileSystemMocks.deleted).toEqual(written);
+      expect(fileSystemMocks.existing.size).toBe(0);
+    });
+
+    it("keeps the scans a saved recipe uses until a new save of it is written", async () => {
+      vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      fileSystemMocks.trackWrites = true;
+      await renderProvider();
+      expect(await save("FIRST")).toMatchObject({ saved: true });
+      const [firstScan] = fileSystemMocks.writes.map((write) => write.uri);
+
+      // Saving it again fails: its stored scans are untouched, and the new ones are gone.
+      failCookbookWrites();
+      expect(await save("SECOND")).toMatchObject({ saved: false });
+      expect(fileSystemMocks.writes.filter((write) => write.uri === firstScan)).toHaveLength(1);
+      expect(fileSystemMocks.existing.has(firstScan!)).toBe(true);
+      expect(latestSavedRecipes?.savedRecipes[0]?.sourceImages?.[0]?.uri).toBe(firstScan);
+
+      // Saving it again works: the new scans replace the old, which are then let go.
+      asyncStorageMocks.setItem.mockResolvedValue(undefined);
+      expect(await save("THIRD")).toMatchObject({ saved: true });
+      const thirdScan = latestSavedRecipes?.savedRecipes[0]?.sourceImages?.[0]?.uri;
+      expect(thirdScan).not.toBe(firstScan);
+      expect(fileSystemMocks.existing.has(thirdScan!)).toBe(true);
+      expect(fileSystemMocks.existing.has(firstScan!)).toBe(false);
+    });
   });
 
   it("keeps scan photos out of the cookbook storage blob", async () => {
