@@ -332,6 +332,33 @@ describe("kitchen timers", () => {
       expect(getKitchenTimers().map((timer) => timer.id)).toEqual([kept]);
     });
 
+    it("keeps timer changes waiting to be saved when deleting their recipe fails", async () => {
+      vi.spyOn(console, "error").mockImplementation(() => undefined);
+      await hydrateKitchenTimers();
+      const id = startKitchenTimer({
+        durationMs: 60_000,
+        label: "Boil",
+        recipeId: "r1",
+        recipeTitle: "Chili"
+      });
+      fakeIdb.failNextDelete(
+        COOK_SESSIONS_STORE_NAME,
+        new DOMException("The recipe could not be deleted.", "UnknownError")
+      );
+
+      await expect(deleteSavedRecipe("r1", { snapshot: false })).rejects.toThrow();
+      await flushAsync();
+      await flushCookSessionWrites();
+      await flushAsync();
+      await flushCookSessionWrites();
+      await flushAsync();
+
+      expect((await getCookSession("r1"))?.timers).toEqual([
+        expect.objectContaining({ id, label: "Boil" })
+      ]);
+      expect(getKitchenTimers().map((timer) => timer.id)).toEqual([id]);
+    });
+
     it("doesn't bring a deleted recipe's timers back from changes still waiting to be saved", async () => {
       await hydrateKitchenTimers();
       const id = startKitchenTimer({
@@ -391,6 +418,12 @@ describe("kitchen timers", () => {
           await flushAsync();
           await flushCookSessionWrites();
           await flushAsync();
+        },
+        /** The other tab deleted the recipe (and its cook session with it), as it says so. */
+        deliverRecipeDeletion: (recipeId: string) => {
+          for (const topic of ["savedRecipes", "cookSessions"]) {
+            channel.onmessage?.({ data: { deletedIds: [recipeId], topic, v: 1 } } as MessageEvent);
+          }
         }
       };
     };
@@ -403,6 +436,28 @@ describe("kitchen timers", () => {
 
     const storedIds = async (recipeId: string) =>
       ((await getCookSession(recipeId))?.timers ?? []).map((timer) => timer.id);
+
+    it("doesn't bring back a recipe the other tab deleted from changes still waiting to be saved", async () => {
+      const other = crossTab();
+      await hydrateKitchenTimers();
+      startKitchenTimer({
+        durationMs: 60_000,
+        label: "Boil",
+        recipeId: "r1",
+        recipeTitle: "Chili"
+      });
+
+      // The other tab deletes the recipe before this tab's change is saved.
+      other.deliverRecipeDeletion("r1");
+      await flushAsync();
+      await flushCookSessionWrites();
+      await flushAsync();
+      await flushCookSessionWrites();
+      await flushAsync();
+
+      expect(await getCookSession("r1")).toBeUndefined();
+      expect(getKitchenTimers()).toEqual([]);
+    });
 
     it("drops a timer dismissed in the other tab and never writes it back", async () => {
       const other = crossTab();

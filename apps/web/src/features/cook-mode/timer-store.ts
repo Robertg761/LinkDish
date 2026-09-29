@@ -10,7 +10,10 @@ import {
   resumeCookTimer,
   startCookTimer
 } from "../../data/cook-session-store";
-import { getCookSessionWriteGeneration } from "../../data/cook-session-write-guard";
+import {
+  discardCookSessionWrites,
+  getCookSessionWriteGeneration
+} from "../../data/cook-session-write-guard";
 
 import { queueCookSessionUpdate } from "./cook-session-writer";
 import {
@@ -77,6 +80,7 @@ let pendingWrites = 0;
 let reloadWanted = false;
 let reloading = false;
 let unsubscribeRemote: (() => void) | null = null;
+let unsubscribeRecipeDeletions: (() => void) | null = null;
 /** Timers this tab changed whose save failed: until one lands, only this tab knows them. */
 const unsavedTimerIds = new Set<string>();
 
@@ -277,6 +281,14 @@ function listenForOtherTabs(): void {
     if (source === "remote" || change.reload || (change.deletedIds?.length ?? 0) > 0) {
       reloadWanted = true;
       reloadIfWanted();
+    }
+  });
+  // Another tab deleted these recipes (their cook sessions with them): timer changes this tab
+  // hasn't saved for them yet are dropped instead of creating those sessions again. (This tab's
+  // own deletions hold them back themselves, see deleteSavedRecipe.)
+  unsubscribeRecipeDeletions ??= subscribeDataChanges("savedRecipes", (change, source) => {
+    if (source === "remote") {
+      change.deletedIds?.forEach(discardCookSessionWrites);
     }
   });
 }
@@ -621,6 +633,8 @@ export const resetKitchenTimersForTests = (): void => {
   reloading = false;
   unsubscribeRemote?.();
   unsubscribeRemote = null;
+  unsubscribeRecipeDeletions?.();
+  unsubscribeRecipeDeletions = null;
   unsavedTimerIds.clear();
   emit();
 };

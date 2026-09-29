@@ -27,6 +27,7 @@ interface FakeIdbState {
   afterGetAll: Map<string, () => Promise<void> | void>;
   blockedOnce: boolean;
   callbacks: FakeOpenCallbacks | null;
+  failDeletes: Map<string, Error>;
   failGets: Map<string, Error>;
   failPuts: Map<string, Error>;
   definitions: Map<string, FakeStoreDefinition>;
@@ -44,6 +45,7 @@ const state: FakeIdbState = {
   afterGetAll: new Map(),
   blockedOnce: false,
   callbacks: null,
+  failDeletes: new Map(),
   failGets: new Map(),
   failPuts: new Map(),
   definitions: new Map(),
@@ -152,6 +154,13 @@ const createStoreApi = (name: string, request: RunRequest, beforeWrite?: BeforeW
     delete: (key: string) =>
       request(() => {
         const { records } = requireStore(name);
+        const failure = state.failDeletes.get(name);
+
+        if (failure) {
+          state.failDeletes.delete(name);
+          throw failure;
+        }
+
         beforeWrite?.(name);
         records.delete(String(key));
       }),
@@ -529,6 +538,7 @@ export const fakeIdb = {
     state.callbacks = null;
     state.failGets = new Map();
     state.failPuts = new Map();
+    state.failDeletes = new Map();
     state.writers = [];
     state.afterGetAll = new Map();
     fakeIdb.createdStores = [];
@@ -603,6 +613,11 @@ export const fakeIdb = {
    */
   failNextGet(storeName: string, error: Error): void {
     state.failGets.set(storeName, error);
+  },
+
+  /** The next `delete` from `storeName` (in any transaction) throws `error`. */
+  failNextDelete(storeName: string, error: Error): void {
+    state.failDeletes.set(storeName, error);
   },
 
   /** The next `put` into `storeName` (in any transaction) throws `error`. */

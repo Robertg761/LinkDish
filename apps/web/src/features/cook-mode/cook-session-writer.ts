@@ -1,5 +1,8 @@
 import { endCookSession, updateCookSession } from "../../data/cook-session-store";
-import { getCookSessionWriteGeneration } from "../../data/cook-session-write-guard";
+import {
+  getCookSessionWriteGeneration,
+  getPendingRecipeDeletion
+} from "../../data/cook-session-write-guard";
 
 import type { CookSession, CookSessionPatch } from "../../data/cook-session-store";
 
@@ -35,11 +38,27 @@ export const queueCookSessionUpdate = (
   patch: CookSessionPatch | ((session: CookSession) => CookSessionPatch),
   { generation = getCookSessionWriteGeneration(recipeId) }: { generation?: number } = {}
 ): Promise<CookSession> =>
-  enqueue(recipeId, () =>
-    updateCookSession(recipeId, patch, Date.now(), {
-      isCurrent: () => getCookSessionWriteGeneration(recipeId) === generation
-    })
-  );
+  enqueue(recipeId, async () => {
+    for (;;) {
+      await getPendingRecipeDeletion(recipeId);
+      let heldBack = false;
+      const session = await updateCookSession(recipeId, patch, Date.now(), {
+        isCurrent: () => {
+          heldBack =
+            getPendingRecipeDeletion(recipeId) !== undefined ||
+            getCookSessionWriteGeneration(recipeId) !== generation;
+          return !heldBack;
+        }
+      });
+
+      // Written, or dropped for good (the recipe was deleted after the change was made).
+      if (!heldBack || getCookSessionWriteGeneration(recipeId) !== generation) {
+        return session;
+      }
+
+      // A deletion of the recipe started while this write was on its way: see how it ends.
+    }
+  });
 
 /**
  * Ends a cook for the recipe: forgets the step and ticked ingredients, but keeps the session
