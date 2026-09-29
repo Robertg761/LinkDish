@@ -122,6 +122,15 @@ const RemoveMemberButton = ({
 };
 
 export default function HouseholdScreen() {
+  const { user } = useAccount();
+
+  // One screen per account: when another account signs in (or this one signs out), the last
+  // one's household, open confirmations and drafts go with its screen, so a confirmation opened
+  // for one account can never be carried out (with the next one's credentials) for another.
+  return <HouseholdView key={user ? `account:${user.id}` : "signed-out"} />;
+}
+
+function HouseholdView() {
   const params = useLocalSearchParams<{ invite?: string | string[] }>();
   const inviteParam = Array.isArray(params.invite) ? params.invite[0] : params.invite;
   const { getAuthHeaders, hasLoadedAccount, isSignedIn, refreshAccount, user } = useAccount();
@@ -142,6 +151,8 @@ export default function HouseholdScreen() {
   } | null>(null);
   const [removingMemberId, setRemovingMemberId] = useState<string | null>(null);
   const [isLeaveConfirmationVisible, setIsLeaveConfirmationVisible] = useState(false);
+  /** False once another account took this screen's place: its late answers land nowhere. */
+  const activeRef = useRef(true);
   const hasFamilyPlan = tier === "family";
   const isRestoringPurchases = purchaseStatus === "restoring";
   const client = useMemo(
@@ -171,13 +182,27 @@ export default function HouseholdScreen() {
 
     try {
       const response = await client.getHousehold();
-      setHousehold(response.household);
+
+      if (activeRef.current) {
+        setHousehold(response.household);
+      }
     } catch (loadError) {
-      setError(getErrorMessage(loadError));
+      if (activeRef.current) {
+        setError(getErrorMessage(loadError));
+      }
     } finally {
-      setIsLoading(false);
+      if (activeRef.current) {
+        setIsLoading(false);
+      }
     }
   }, [client, isSignedIn]);
+
+  useEffect(() => {
+    activeRef.current = true;
+    return () => {
+      activeRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     void refreshHousehold();
@@ -197,16 +222,27 @@ export default function HouseholdScreen() {
     setError(null);
 
     try {
-      setHousehold(await action());
+      const next = await action();
+
+      // Another account signed in meanwhile: this answer (and its refreshes) was the last one's.
+      if (!activeRef.current) {
+        return;
+      }
+
+      setHousehold(next);
       await refreshSharedRecipes();
 
       if (options.refreshAccountAfterward) {
         await refreshAccount();
       }
     } catch (actionError) {
-      setError(getErrorMessage(actionError));
+      if (activeRef.current) {
+        setError(getErrorMessage(actionError));
+      }
     } finally {
-      setIsLoading(false);
+      if (activeRef.current) {
+        setIsLoading(false);
+      }
     }
   };
 

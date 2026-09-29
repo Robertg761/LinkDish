@@ -387,7 +387,18 @@ export const CookbookScreen = () => {
   const [isFamilySharingOpen, setIsFamilySharingOpen] = useState(false);
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
   const [lockedFamilyHintVisible, setLockedFamilyHintVisible] = useState(false);
-  const [pendingConfirmation, setPendingConfirmation] = useState<PendingConfirmation | null>(null);
+  const [pendingConfirmation, setPendingConfirmation] = useState<{
+    account: string | null;
+    confirmation: PendingConfirmation;
+  } | null>(null);
+  /** Who a confirmation is for: one opened by another account (signed in since) isn't shown. */
+  const account = isSignedIn && user ? user.id : null;
+  const openConfirmation = useCallback(
+    (confirmation: PendingConfirmation) => setPendingConfirmation({ account, confirmation }),
+    [account]
+  );
+  const shownConfirmation =
+    pendingConfirmation?.account === account ? pendingConfirmation.confirmation : null;
   const [animateFirstRows, setAnimateFirstRows] = useState(true);
   const emptyLibraryLine = useMemo(() => selectFlavorCopyLine(EMPTY_LIBRARY_LINES), []);
   // Typing stays responsive: the list re-filters from a deferred copy of the query.
@@ -593,7 +604,7 @@ export const CookbookScreen = () => {
 
   const removeSavedRecipe = useCallback(
     (id: string, title: string) => {
-      setPendingConfirmation({
+      openConfirmation({
         cancelLabel: "Cancel",
         confirmLabel: "Remove",
         message: `“${title}” will be removed from your cookbook.`,
@@ -604,7 +615,7 @@ export const CookbookScreen = () => {
         title: "Remove recipe?"
       });
     },
-    [removeRecipe]
+    [openConfirmation, removeRecipe]
   );
 
   const toggleRecipeShared = useCallback(
@@ -614,7 +625,7 @@ export const CookbookScreen = () => {
         return;
       }
 
-      setPendingConfirmation({
+      openConfirmation({
         cancelLabel: "Keep shared",
         confirmLabel: "Unshare",
         message: "Remove this recipe from the Family recipe book?",
@@ -624,7 +635,7 @@ export const CookbookScreen = () => {
         title: "Unshare recipe?"
       });
     },
-    [shareRecipe, unshareRecipe]
+    [openConfirmation, shareRecipe, unshareRecipe]
   );
 
   const toggleFavorite = useCallback(
@@ -637,7 +648,7 @@ export const CookbookScreen = () => {
 
   const removeSharedRecipe = useCallback(
     (id: string, title: string) => {
-      setPendingConfirmation({
+      openConfirmation({
         cancelLabel: "Keep shared",
         confirmLabel: "Unshare",
         message: `Remove "${title}" from the Family recipe book?`,
@@ -647,7 +658,7 @@ export const CookbookScreen = () => {
         title: "Unshare recipe?"
       });
     },
-    [deleteSharedRecipe]
+    [deleteSharedRecipe, openConfirmation]
   );
 
   const listItems = useMemo((): CookbookListItem[] => {
@@ -1049,17 +1060,17 @@ export const CookbookScreen = () => {
       />
       <AppDialog
         actions={
-          pendingConfirmation
+          shownConfirmation
             ? [
                 {
-                  label: pendingConfirmation.cancelLabel,
+                  label: shownConfirmation.cancelLabel,
                   onPress: () => setPendingConfirmation(null),
                   variant: "outline"
                 },
                 {
-                  label: pendingConfirmation.confirmLabel,
+                  label: shownConfirmation.confirmLabel,
                   onPress: () => {
-                    const action = pendingConfirmation.onConfirm;
+                    const action = shownConfirmation.onConfirm;
                     setPendingConfirmation(null);
                     action();
                   },
@@ -1068,10 +1079,10 @@ export const CookbookScreen = () => {
               ]
             : []
         }
-        message={pendingConfirmation?.message ?? ""}
+        message={shownConfirmation?.message ?? ""}
         onRequestClose={() => setPendingConfirmation(null)}
-        title={pendingConfirmation?.title ?? ""}
-        visible={pendingConfirmation != null}
+        title={shownConfirmation?.title ?? ""}
+        visible={shownConfirmation != null}
       />
     </View>
   );

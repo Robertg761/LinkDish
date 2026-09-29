@@ -324,6 +324,40 @@ describe("CookbookScreen navigation and sharing", () => {
     expect(savedRecipesState.removeRecipe).toHaveBeenCalledWith("saved_1");
   });
 
+  it("never carries out a confirmation opened by the account that was signed in before", () => {
+    savedRecipesState.savedRecipes = [savedRecipe];
+    accountState.isSignedIn = true;
+    let renderer: ReturnType<typeof create>;
+
+    act(() => {
+      renderer = create(<CookbookScreen />);
+    });
+    act(() => {
+      (
+        renderer!.root.findByProps({ accessibilityLabel: "Remove recipe" }).props as {
+          onPress: () => void;
+        }
+      ).onPress();
+    });
+    expect(
+      (renderer!.root.findByType("AppDialog" as never).props as { visible: boolean }).visible
+    ).toBe(true);
+
+    // Another account signs in on the phone while the confirmation is open.
+    accountState.user = { id: "user_2" };
+    act(() => {
+      renderer!.update(<CookbookScreen />);
+    });
+
+    const dialogProps = renderer!.root.findByType("AppDialog" as never).props as {
+      actions: unknown[];
+      visible: boolean;
+    };
+    expect(dialogProps.visible).toBe(false);
+    expect(dialogProps.actions).toEqual([]);
+    expect(savedRecipesState.removeRecipe).not.toHaveBeenCalled();
+  });
+
   it("keeps Family sharing controls behind the Cookbook overflow row", () => {
     savedRecipesState.canUseSharedRecipeBook = true;
     savedRecipesState.savedRecipes = [savedRecipe];
