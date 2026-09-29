@@ -602,6 +602,75 @@ describe("SavedRecipesProvider household save entitlement", () => {
     expect(latestSavedRecipes?.savedRecipes).toHaveLength(18);
   });
 
+  describe("when a saved recipe changes while it is saved again", () => {
+    /** The cookbook write waits until `finish`, as a slow AsyncStorage write would. */
+    const holdNextCookbookWrite = () => {
+      let finish: () => void = () => undefined;
+      asyncStorageMocks.setItem.mockImplementationOnce((key: string) =>
+        key === "linkdish.savedRecipes"
+          ? new Promise<void>((resolve) => {
+              finish = resolve;
+            })
+          : Promise.resolve()
+      );
+      return () => finish();
+    };
+
+    const resaveFirst = async () => {
+      const stored = buildSavedRecipes(1);
+      storeSavedRecipes(stored);
+      await renderProvider();
+      const [record] = latestSavedRecipes!.savedRecipes;
+      const finishWrite = holdNextCookbookWrite();
+      let pending: ReturnType<NonNullable<typeof latestSavedRecipes>["saveRecipe"]> =
+        Promise.resolve({ allowed: true, saved: true });
+
+      await act(async () => {
+        // The same link imported again: the save replaces the stored recipe.
+        pending = latestSavedRecipes!.saveRecipe(buildSuccessState(0));
+        await flushAsyncWork();
+      });
+
+      return { finishWrite, pending: () => pending, record: record! };
+    };
+
+    it("keeps a favorite and a cook made while the recipe was written", async () => {
+      const { finishWrite, pending, record } = await resaveFirst();
+
+      act(() => {
+        latestSavedRecipes!.setRecipeFavorite(record.id, true);
+        latestSavedRecipes!.incrementRecipeTimesCooked(record.id);
+      });
+      await act(async () => {
+        finishWrite();
+        await pending();
+      });
+
+      expect(latestSavedRecipes?.savedRecipes).toHaveLength(1);
+      expect(latestSavedRecipes?.savedRecipes[0]).toMatchObject({
+        favorite: true,
+        id: record.id,
+        timesCooked: (record.timesCooked ?? 0) + 1
+      });
+    });
+
+    it("doesn't bring back a recipe deleted while it was written", async () => {
+      const { finishWrite, pending, record } = await resaveFirst();
+
+      act(() => {
+        latestSavedRecipes!.removeRecipe(record.id);
+      });
+      let result: Awaited<ReturnType<typeof pending>> | undefined;
+      await act(async () => {
+        finishWrite();
+        result = await pending();
+      });
+
+      expect(result).toMatchObject({ saved: false });
+      expect(latestSavedRecipes?.savedRecipes).toEqual([]);
+    });
+  });
+
   describe("when another account signs in while a recipe is saving", () => {
     /** The cookbook write waits until `finish`, as a slow AsyncStorage write would. */
     const holdCookbookWrite = () => {

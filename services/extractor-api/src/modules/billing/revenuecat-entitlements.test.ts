@@ -173,6 +173,82 @@ describe("RevenueCat entitlement cache", () => {
     now.mockRestore();
   });
 
+  describe("a lookup already out to RevenueCat when the plan changes", () => {
+    const planResponse = (plan: "family" | "free") =>
+      new Response(
+        JSON.stringify({
+          subscriber: { entitlements: plan === "family" ? { Family: { expires_date: null } } : {} }
+        }),
+        { headers: { "content-type": "application/json" }, status: 200 }
+      );
+
+    const holdRevenueCat = () => {
+      const releases: Array<(response: Response) => void> = [];
+      const fetchMock = vi.fn(
+        () =>
+          new Promise<Response>((resolve) => {
+            releases.push(resolve);
+          })
+      );
+      vi.stubGlobal("fetch", fetchMock);
+      return { fetchMock, releases };
+    };
+
+    it("isn't reused by a check made after this instance invalidated the plan", async () => {
+      const { fetchMock, releases } = holdRevenueCat();
+      const entitlements = await importEntitlements();
+
+      /* A household read asks RevenueCat, which still answers with the pre-refund plan... */
+      const before = entitlements.getCachedRevenueCatBillingPlanId("user_refunded");
+      await vi.waitFor(() => {
+        expect(releases).toHaveLength(1);
+      });
+      /* ...the refund webhook lands, and then an invite asks whether Family is active. */
+      await entitlements.invalidateRevenueCatEntitlementCache("user_refunded");
+      const verify = entitlements.verifyActiveRevenueCatFamilyEntitlement("user_refunded");
+      const hotPath = entitlements.hasActiveRevenueCatFamilyEntitlement("user_refunded");
+      await vi.waitFor(() => {
+        expect(releases).toHaveLength(2);
+      });
+      releases[0]?.(planResponse("family"));
+      releases[1]?.(planResponse("free"));
+
+      await expect(before).resolves.toBe("family");
+      await expect(verify).resolves.toBe(false);
+      await expect(hotPath).resolves.toBe(false);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it("isn't reused by a fresh check after another instance invalidated the plan", async () => {
+      const { fetchMock, releases } = holdRevenueCat();
+      const entitlements = await importEntitlements();
+      const store = await import("../storage/upstash-store.js");
+
+      const before = entitlements.getCachedRevenueCatBillingPlanId("user_cancelled");
+      await vi.waitFor(() => {
+        expect(releases).toHaveLength(1);
+      });
+      /* Another instance handled the webhook: only its marker is shared. */
+      await store.runStoreCommand([
+        "SET",
+        entitlements.getRevenueCatEntitlementInvalidationKey("user_cancelled"),
+        "1",
+        "EX",
+        String(entitlements.REVENUECAT_ENTITLEMENT_CACHE_TTL_SECONDS)
+      ]);
+      const verify = entitlements.verifyActiveRevenueCatFamilyEntitlement("user_cancelled");
+      await vi.waitFor(() => {
+        expect(releases).toHaveLength(2);
+      });
+      releases[0]?.(planResponse("family"));
+      releases[1]?.(planResponse("free"));
+
+      await expect(before).resolves.toBe("family");
+      await expect(verify).resolves.toBe(false);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+  });
+
   it("shares one RevenueCat call between concurrent lookups for the same user", async () => {
     const fetchMock = stubRevenueCat(new Map([["user_busy", "family" as const]]));
     const entitlements = await importEntitlements();

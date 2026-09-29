@@ -702,7 +702,29 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
       }
 
       setHasUnreadableStoredRecipes(false);
-      commitSavedRecipes((current) => upsertSavedRecipeRecord(current, nextRecord));
+
+      // Written as the cookbook was when the save began: a favorite, a cook, a Family share or a
+      // delete made to this recipe while it was written wins over that snapshot.
+      const latestRecord = getSavedRecipeRecordById(savedRecipesRef.current, recordId);
+
+      if (existingRecord && !latestRecord) {
+        return {
+          allowed: true,
+          message: "This recipe was deleted from your Cookbook while it was saving.",
+          saved: false
+        };
+      }
+
+      const savedRecord: SavedRecipeRecord = latestRecord
+        ? {
+            ...nextRecord,
+            favorite: latestRecord.favorite,
+            sharedAt: latestRecord.sharedAt,
+            sharedRecipeId: latestRecord.sharedRecipeId,
+            timesCooked: latestRecord.timesCooked
+          }
+        : nextRecord;
+      commitSavedRecipes((current) => upsertSavedRecipeRecord(current, savedRecord));
 
       trackMobileEvent({
         eventName: "recipe_saved",
@@ -715,8 +737,8 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
 
       return {
         allowed: true,
-        recipe: nextRecord,
-        recipeId: nextRecord.id,
+        recipe: savedRecord,
+        recipeId: savedRecord.id,
         saved: true
       };
     },

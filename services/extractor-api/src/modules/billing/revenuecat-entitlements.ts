@@ -200,7 +200,7 @@ const entitlementCacheTimeoutMs = 1_000;
 export const getRevenueCatEntitlementCacheKey = (appUserId: string): string =>
   `linkdish:entitlement:v1:${hashServerSideIdentity("entitlement-cache", appUserId)}`;
 
-const getRevenueCatEntitlementInvalidationKey = (appUserId: string): string =>
+export const getRevenueCatEntitlementInvalidationKey = (appUserId: string): string =>
   `linkdish:entitlement-invalidated:v1:${hashServerSideIdentity("entitlement-cache", appUserId)}`;
 
 type PaidPlanId = Exclude<RevenueCatBillingPlanId, "free">;
@@ -251,25 +251,49 @@ const writeCachedPlanId = async (
   }
 };
 
-/* Concurrent lookups for one user in one instance share a single RevenueCat call. */
+/*
+ * Concurrent lookups for one user in one instance share a single RevenueCat call, but never one
+ * that started before the user's plan changed: an invalidation in this instance drops the call
+ * from sharing, and a fresh check (one that authorises a change) doesn't share at all while an
+ * invalidation from any instance is recent (its marker is set), since the call may predate it.
+ */
 const inflightPlanLookups = new Map<string, Promise<RevenueCatBillingPlanId>>();
 
-const lookupRevenueCatBillingPlanId = (appUserId: string): Promise<RevenueCatBillingPlanId> => {
+/** The plan changed within the last cache lifetime (a webhook, handled by any instance). */
+const wasRecentlyInvalidated = async (appUserId: string): Promise<boolean> => {
+  try {
+    const marker = await getStoreString(getRevenueCatEntitlementInvalidationKey(appUserId), {
+      timeoutMs: entitlementCacheTimeoutMs
+    });
+    return marker !== null;
+  } catch {
+    // Unknown: ask RevenueCat again rather than trust a call that may predate a change.
+    return true;
+  }
+};
+
+const lookupRevenueCatBillingPlanId = async (
+  appUserId: string,
+  options: { fresh?: boolean } = {}
+): Promise<RevenueCatBillingPlanId> => {
   const inflightLookup = inflightPlanLookups.get(appUserId);
 
-  if (inflightLookup) {
+  if (inflightLookup && !(options.fresh && (await wasRecentlyInvalidated(appUserId)))) {
     return inflightLookup;
   }
 
   const startedAtMs = Date.now();
-  const lookup = getRevenueCatSubscriber(appUserId)
+  const lookup: Promise<RevenueCatBillingPlanId> = getRevenueCatSubscriber(appUserId)
     .then(async (subscriber) => {
       const planId = getRevenueCatBillingPlanIdFromSubscriber(subscriber);
       await writeCachedPlanId(appUserId, planId, startedAtMs);
       return planId;
     })
     .finally(() => {
-      inflightPlanLookups.delete(appUserId);
+      // A newer call may have taken this one's place (after an invalidation): leave it.
+      if (inflightPlanLookups.get(appUserId) === lookup) {
+        inflightPlanLookups.delete(appUserId);
+      }
     });
 
   inflightPlanLookups.set(appUserId, lookup);
@@ -290,7 +314,7 @@ export const getRevenueCatBillingPlanId = async (
     return testPremiumPlanId;
   }
 
-  return lookupRevenueCatBillingPlanId(appUserId);
+  return lookupRevenueCatBillingPlanId(appUserId, { fresh: true });
 };
 
 /** The test-premium or cached paid plan, without calling RevenueCat. */
@@ -323,6 +347,11 @@ export const invalidateRevenueCatEntitlementCache = async (
 
   if (users.length === 0) {
     return;
+  }
+
+  /* Calls already out to RevenueCat may hold the pre-change answer: nothing joins them now. */
+  for (const appUserId of users) {
+    inflightPlanLookups.delete(appUserId);
   }
 
   try {
