@@ -760,6 +760,55 @@ describe("SavedRecipesProvider household save entitlement", () => {
       expect(latestSavedRecipes?.shareMode).not.toBe("all");
     });
 
+    it("never renders the last account's Family recipes for the next one, even before its refresh", async () => {
+      signInAsMember();
+      const memberRecipe = buildSharedRecipe(710, "member_recipe");
+      apiMocks.getSharedRecipes
+        .mockResolvedValueOnce({ recipes: [memberRecipe] })
+        .mockImplementation(() => new Promise(() => undefined));
+      const renders: Array<{ loaded: boolean; shared: string[]; user: string | undefined }> = [];
+      const RenderLog = () => {
+        const value = useSavedRecipes();
+        renders.push({
+          loaded: value.hasLoadedSharedRecipes,
+          shared: value.sharedRecipes.map((recipe) => recipe.id),
+          user: accountState.user?.id
+        });
+        return null;
+      };
+      let renderer: ReturnType<typeof create> | null = null;
+
+      await act(async () => {
+        renderer = create(
+          <SavedRecipesProvider>
+            <RenderLog />
+          </SavedRecipesProvider>
+        );
+        await flushAsyncWork();
+      });
+      await act(async () => {
+        await flushAsyncWork();
+      });
+      expect(renders.at(-1)).toMatchObject({ loaded: true, shared: ["member_recipe"] });
+
+      // Another account signs straight in; its Family list is still loading.
+      accountState.user = { email: "other@example.com", id: "other_1" };
+      await act(async () => {
+        renderer!.update(
+          <SavedRecipesProvider>
+            <RenderLog />
+          </SavedRecipesProvider>
+        );
+        await flushAsyncWork();
+      });
+
+      const afterSwitch = renders.filter((render) => render.user === "other_1");
+      expect(afterSwitch.length).toBeGreaterThan(0);
+      expect(afterSwitch.every((render) => render.shared.length === 0 && !render.loaded)).toBe(
+        true
+      );
+    });
+
     it("never shows the last account's Family recipes once its late answer lands", async () => {
       signInAsMember();
       const memberRecipe = buildSharedRecipe(700, "member_recipe");

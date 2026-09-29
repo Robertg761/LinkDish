@@ -129,6 +129,9 @@ const SWITCHED_ACCOUNT_RESULT: SaveRecipeResult = {
   saved: false
 };
 
+/** Shown while the Family state belongs to another account (stable, for memoized readers). */
+const NO_SHARED_RECIPES: SharedRecipe[] = [];
+
 const buildPartialShareMessage = (message?: string): string =>
   message
     ? `Saved to your personal book, but Family sharing failed: ${message}`
@@ -218,13 +221,26 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
   const { getAuthHeaders, isSignedIn, user } = useAccount();
   const { tier } = useBilling();
   const [hasLoadedSavedRecipes, setHasLoadedSavedRecipes] = useState(false);
-  const [hasLoadedSharedRecipes, setHasLoadedSharedRecipes] = useState(false);
+  const [hasLoadedSharedRecipesState, setHasLoadedSharedRecipes] = useState(false);
   const [savedRecipes, setSavedRecipes] = useState<SavedRecipeRecord[]>([]);
   const [hasUnreadableStoredRecipes, setHasUnreadableStoredRecipes] = useState(false);
-  const [sharedRecipes, setSharedRecipes] = useState<SharedRecipe[]>([]);
-  const [sharedRecipeError, setSharedRecipeError] = useState<string | null>(null);
+  const [sharedRecipesState, setSharedRecipes] = useState<SharedRecipe[]>([]);
+  const [sharedRecipeErrorState, setSharedRecipeError] = useState<string | null>(null);
   const [shareMode, setShareModeState] = useState<RecipeBookShareMode>("none");
-  const [activeHouseholdId, setActiveHouseholdId] = useState<HouseholdDetails["id"] | null>(null);
+  const [activeHouseholdIdState, setActiveHouseholdId] = useState<HouseholdDetails["id"] | null>(
+    null
+  );
+  /** The account the Family state above was loaded for (null: signed out). */
+  const [familyStateOwner, setFamilyStateOwner] = useState<string | null>(null);
+  const familyStateOwnerRef = useRef<string | null>(null);
+  const familyAccount = isSignedIn && user ? user.id : null;
+  // Another account signed in (a direct switch): the last one's Family recipes, household and
+  // error are never shown, not even for the renders before this account's refresh starts.
+  const familyStateIsCurrent = familyStateOwner === familyAccount;
+  const sharedRecipes = familyStateIsCurrent ? sharedRecipesState : NO_SHARED_RECIPES;
+  const sharedRecipeError = familyStateIsCurrent ? sharedRecipeErrorState : null;
+  const activeHouseholdId = familyStateIsCurrent ? activeHouseholdIdState : null;
+  const hasLoadedSharedRecipes = familyStateIsCurrent && hasLoadedSharedRecipesState;
   const [hasLoadedShareMode, setHasLoadedShareMode] = useState(false);
   const savedRecipesRef = useRef<SavedRecipeRecord[]>([]);
   /** Bumped by every Family refresh, so only the newest one lands. */
@@ -310,6 +326,18 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
     const startedFor = isSignedIn ? user?.id : undefined;
     const stale = () =>
       refresh !== sharedRefreshRef.current || latestRef.current.userId !== startedFor;
+
+    // The Family state belongs to this account from now on; another's is cleared first.
+    const owner = startedFor ?? null;
+
+    if (familyStateOwnerRef.current !== owner) {
+      setSharedRecipes([]);
+      setActiveHouseholdId(null);
+      setSharedRecipeError(null);
+    }
+
+    familyStateOwnerRef.current = owner;
+    setFamilyStateOwner(owner);
 
     if (!isSignedIn || !user) {
       setActiveHouseholdId(null);
