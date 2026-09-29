@@ -10,6 +10,7 @@ import {
 } from "../../data/cook-session-store";
 import { getLinkDishWebDb, resetLinkDishWebDbForTests } from "../../storage/linkdish-db";
 import { fakeIdb } from "../../storage/testing/fake-idb";
+import { deleteSavedRecipe } from "../library/saved-recipe-store";
 
 import { flushCookSessionWrites } from "./cook-session-writer";
 import {
@@ -210,6 +211,41 @@ describe("kitchen timers", () => {
     expect(getKitchenTimers()).toEqual([
       expect.objectContaining({ href: "/recipes/r1", label: "5 min", recipeId: "r1" })
     ]);
+  });
+
+  describe("when this tab deletes a recipe's cook session", () => {
+    beforeEach(async () => {
+      // Open the database up front (its upgrade waits on timers, which are fake here).
+      const opening = getLinkDishWebDb();
+      await vi.advanceTimersByTimeAsync(0);
+      await opening;
+    });
+
+    it("drops the deleted recipe's timers and keeps the others", async () => {
+      await hydrateKitchenTimers();
+      startKitchenTimer({
+        durationMs: 60_000,
+        label: "Boil",
+        recipeId: "r1",
+        recipeTitle: "Chili"
+      });
+      const kept = startKitchenTimer({
+        durationMs: 90_000,
+        label: "Rest",
+        recipeId: "r2",
+        recipeTitle: "Bread"
+      });
+      await flushAsync();
+      await flushCookSessionWrites();
+
+      // Deleting the recipe deletes its cook session (and the timers stored in it).
+      await deleteSavedRecipe("r1", { snapshot: false });
+      await flushAsync();
+      await flushCookSessionWrites();
+      await flushAsync();
+
+      expect(getKitchenTimers().map((timer) => timer.id)).toEqual([kept]);
+    });
   });
 
   describe("with the app open in another tab", () => {

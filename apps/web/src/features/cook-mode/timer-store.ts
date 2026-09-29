@@ -256,8 +256,11 @@ function reloadIfWanted(): void {
 }
 
 function listenForOtherTabs(): void {
-  unsubscribeRemote ??= subscribeDataChanges("cookSessions", (_change, source) => {
-    if (source === "remote") {
+  unsubscribeRemote ??= subscribeDataChanges("cookSessions", (change, source) => {
+    // Also this tab deleting sessions (a deleted recipe takes its session and timers with it),
+    // so the dock never keeps a countdown whose stored timer is gone and could never be claimed.
+    // This store's own writes only ever upsert, so they don't come back here.
+    if (source === "remote" || change.reload || (change.deletedIds?.length ?? 0) > 0) {
       reloadWanted = true;
       reloadIfWanted();
     }
