@@ -282,9 +282,39 @@ describe("shopping-sync", () => {
     cacheHousehold(true);
 
     setShoppingAccount({ isAuthenticated: false, loading: true });
+    // Another screen reporting the same loading state keeps that assumption.
+    setShoppingAccount({ isAuthenticated: false, loading: true });
 
     expect(getShoppingSyncState()).toMatchObject({ mode: "household", userId: "u1" });
     expect(apiMocks.getHousehold).not.toHaveBeenCalled();
+  });
+
+  it("hides the last account's household list while sign-in resolves the account Clerk switched to", async () => {
+    const server = createHouseholdServer();
+    server.seed("h1", householdItem("milk-h1", "milk", { addedBy: "u1", qty: 1, unit: "cup" }));
+    await signIn("u1");
+    await syncShoppingNow();
+    await loadShoppingList({ force: true });
+    await waitFor(() =>
+      expect(getShoppingListSnapshot().items.map((item) => item.text)).toEqual(["milk"])
+    );
+
+    // Clerk switches straight to another account: auth lets u1 go and looks the next one up.
+    setShoppingAccount({ isAuthenticated: false, loading: true, userId: null });
+
+    await waitFor(() => expect(getShoppingListSnapshot().items).toEqual([]));
+    expect(getShoppingSyncState()).toMatchObject({ householdId: null, mode: "local" });
+    // Nothing added meanwhile is stamped for u1's household (or as u1's).
+    expect(getShoppingWriteOptions()).toEqual({ canSync: false });
+
+    // The next account settles: its own household's list shows.
+    server.use("h2");
+    server.seed("h2", householdItem("eggs-h2", "eggs", { addedBy: "u2", qty: 6 }));
+    await signIn("u2");
+    await syncShoppingNow();
+    await waitFor(() =>
+      expect(getShoppingListSnapshot().items.map((item) => item.text)).toEqual(["eggs"])
+    );
   });
 
   it("waits for a signed-in session's credentials before checking or syncing", async () => {

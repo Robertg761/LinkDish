@@ -136,19 +136,22 @@ let householdConfirmed = false;
 /** Answers this tab's checks got, for when storage can't be written (or read). */
 const answersInMemory = new Map<string, HouseholdCache>();
 let listeningToOtherTabs = false;
+/** The account auth last settled on (null: signed out, or not settled yet). */
+let settledUserId: string | null = null;
+/**
+ * Auth is resolving another account than the one it last settled on (Clerk switched straight to
+ * another account's session): someone is signed in, but who, and so which household, isn't known.
+ */
+let accountResolving = false;
 
 const setState = (patch: Partial<ShoppingSyncState>) => {
-  const previous = state;
   state = { ...state, ...patch };
 
-  if (
-    state.householdId !== previous.householdId ||
-    (state.userId === null) !== (previous.userId === null)
-  ) {
-    // The list shows this household's items (signed in without a known one, none of any
-    // household's); other households' changes wait out of sight.
-    setShoppingListHousehold(state.householdId, { signedIn: state.userId !== null });
-  }
+  // The list shows this household's items (signed in without a known one, none of any
+  // household's); other households' changes wait out of sight. Unchanged scopes are ignored.
+  setShoppingListHousehold(state.householdId, {
+    signedIn: state.userId !== null || accountResolving
+  });
 
   listeners.forEach((listener) => {
     listener();
@@ -460,6 +463,23 @@ export function setShoppingAccount(account: ShoppingAccount): void {
         householdConfirmed = true;
         setState({ ...cachedHouseholdState(cache), modeResolved: false, userId: cache.userId });
       }
+    } else if (settledUserId !== null && (account.userId ?? null) !== settledUserId) {
+      // The account the list was for is gone and the next one is still being looked up: none of
+      // the last one's household shows, or takes changes, meanwhile.
+      accountResolving = true;
+      syncWhenReady = false;
+      householdAnsweredAt = 0;
+      householdConfirmed = false;
+      settledUserId = null;
+      setState({
+        error: null,
+        householdId: null,
+        lastSyncedAt: null,
+        mode: "local",
+        modeResolved: false,
+        phase: "idle",
+        userId: null
+      });
     }
 
     return;
@@ -467,6 +487,14 @@ export function setShoppingAccount(account: ShoppingAccount): void {
 
   accountConfigured = true;
   const userId = account.isAuthenticated ? (account.userId ?? null) : null;
+  settledUserId = userId;
+
+  if (accountResolving) {
+    accountResolving = false;
+    // Scoped again below, for the account auth settled on (none of any household's until it's
+    // known); signed out, to this device's list.
+    setShoppingListHousehold(state.householdId, { signedIn: userId !== null });
+  }
 
   if (!userId) {
     syncWhenReady = false;
@@ -812,6 +840,8 @@ export function resetShoppingSyncForTests(): void {
   householdConfirmed = false;
   answersInMemory.clear();
   accountConfigured = false;
+  settledUserId = null;
+  accountResolving = false;
 
   if (listeningToOtherTabs) {
     window.removeEventListener("storage", onOtherTabStorage);

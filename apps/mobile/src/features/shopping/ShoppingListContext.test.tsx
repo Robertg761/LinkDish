@@ -8,6 +8,7 @@ import { AccountChangedError } from "../account/account-changed-error";
 const accountState = vi.hoisted(() => ({
   getAuthHeaders: vi.fn(),
   getAuthHeadersFor: vi.fn(),
+  hasLoadedAccount: true,
   isSignedIn: false,
   user: null as { email: string; id: string } | null
 }));
@@ -593,6 +594,7 @@ describe("ShoppingListProvider across accounts on one device", () => {
       () => () => accountState.getAuthHeaders() as Promise<Record<string, string>>
     );
     accountState.getAuthHeaders.mockResolvedValue({});
+    accountState.hasLoadedAccount = true;
     accountState.isSignedIn = true;
     accountState.user = firstCook;
     asyncStorageMocks.getItem.mockReset();
@@ -899,6 +901,24 @@ describe("ShoppingListProvider across accounts on one device", () => {
     await act(async () => {
       await latestShoppingList!.refreshShoppingList();
     });
+    expect(listSummary()).toEqual([["milk", false, "synced"]]);
+  });
+
+  it("shows none of the last household's list while the account Clerk switched to loads", async () => {
+    const server = createHouseholdServer([{ householdId: "household_1", item: milk }]);
+    apiMocks.createExtractorApiClient.mockReturnValue(server.client);
+    const renderer = await renderProvider();
+    expect(listSummary()).toEqual([["milk", false, "synced"]]);
+
+    // Clerk switches straight to another account: the account context lets the first cook go
+    // (nobody shows as signed in) until the next account has loaded.
+    accountState.hasLoadedAccount = false;
+    await switchAccount(renderer, null);
+    expect(listSummary()).toEqual([]);
+
+    // Signed out for real, this device's list shows as before.
+    accountState.hasLoadedAccount = true;
+    await switchAccount(renderer, null);
     expect(listSummary()).toEqual([["milk", false, "synced"]]);
   });
 

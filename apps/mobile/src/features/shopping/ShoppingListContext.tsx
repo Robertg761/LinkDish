@@ -190,7 +190,7 @@ interface SyncLoopState {
 }
 
 export const ShoppingListProvider = ({ children }: PropsWithChildren) => {
-  const { getAuthHeaders, getAuthHeadersFor, isSignedIn, user } = useAccount();
+  const { getAuthHeaders, getAuthHeadersFor, hasLoadedAccount, isSignedIn, user } = useAccount();
   const [checkedHousehold, setCheckedHousehold] = useState<HouseholdCheck | null>(null);
   const [hasLoadedShoppingItems, setHasLoadedShoppingItems] = useState(false);
   const [isRefreshingShoppingList, setIsRefreshingShoppingList] = useState(false);
@@ -744,6 +744,10 @@ export const ShoppingListProvider = ({ children }: PropsWithChildren) => {
   }, [applyMutation]);
 
   const signedIntoAccount = Boolean(isSignedIn && user);
+  // Who is signed in isn't known yet (the app is starting, or Clerk switched straight to another
+  // account, which lets the last one go until the next has loaded): not signed out, so no
+  // household's list shows meanwhile.
+  const accountUnknown = !hasLoadedAccount;
   /**
    * The household list shown: the account's household, or while it is in none, the one it was
    * last in (it keeps its list until it joins another). Unknown (another account just signed in
@@ -755,8 +759,8 @@ export const ShoppingListProvider = ({ children }: PropsWithChildren) => {
       ? (checkedHousehold?.id ?? checkedHousehold?.lastId ?? null)
       : null;
   const visibleShoppingItems = useMemo(
-    () => getShoppingListItems(shoppingItems, listHouseholdId, signedIntoAccount),
-    [listHouseholdId, shoppingItems, signedIntoAccount]
+    () => getShoppingListItems(shoppingItems, listHouseholdId, signedIntoAccount || accountUnknown),
+    [accountUnknown, listHouseholdId, shoppingItems, signedIntoAccount]
   );
 
   const state = useMemo<ShoppingListState>(
