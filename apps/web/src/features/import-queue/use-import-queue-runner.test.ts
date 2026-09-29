@@ -119,6 +119,16 @@ describe("useImportQueueRunner", () => {
     });
   });
 
+  it("tells the importer's allowance to refresh once the queue has imported something", async () => {
+    const { getImportUsageGeneration } = await import("../extract/import-usage-signal");
+    const before = getImportUsageGeneration();
+    runnerMocks.runImportQueue.mockResolvedValue({ paused: null, processed: 1 });
+
+    renderHook(() => useImportQueueRunner());
+
+    await waitFor(() => expect(getImportUsageGeneration()).toBe(before + 1));
+  });
+
   it("leaves the queue to the tab that already holds the lock", async () => {
     const request = vi.fn((_name: string, _options: unknown, callback: LockCallback) =>
       callback(null)

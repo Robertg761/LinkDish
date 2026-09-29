@@ -52,3 +52,62 @@ describe("useImportUsageState", () => {
     expect(result.current).toEqual({ pending: true, usage: null });
   });
 });
+
+describe("useImportUsageState freshness", () => {
+  beforeEach(() => {
+    mocks.auth = { credentialsKey: "clerk:user_1", isAuthenticated: true, loading: false };
+    mocks.getBillingUsage.mockReset();
+  });
+
+  it("drops the last import's quota once another account signs in", async () => {
+    mocks.getBillingUsage
+      .mockResolvedValueOnce({ billingEnabled: true, quota: quota(2) })
+      .mockResolvedValueOnce({ billingEnabled: true, quota: quota(3) });
+    const { rerender, result } = renderHook(
+      ({ latest }: { latest: QuotaStatus | null }) => useImportUsageState(latest, 0),
+      { initialProps: { latest: null as QuotaStatus | null } }
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // user_1 imports; the response says 0 left.
+    rerender({ latest: quota(0) });
+    expect(result.current.usage?.remaining).toBe(0);
+
+    mocks.auth = { credentialsKey: "clerk:user_2", isAuthenticated: true, loading: false };
+    rerender({ latest: quota(0) });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(result.current.usage?.remaining).toBe(3);
+  });
+
+  it("asks again when queued imports finish, and shows the newer answer", async () => {
+    const { invalidateImportUsage } = await import("./import-usage-signal");
+    mocks.getBillingUsage
+      .mockResolvedValueOnce({ billingEnabled: true, quota: quota(3) })
+      .mockResolvedValueOnce({ billingEnabled: true, quota: quota(1) });
+    const { rerender, result } = renderHook(
+      ({ latest }: { latest: QuotaStatus | null }) => useImportUsageState(latest, 0),
+      { initialProps: { latest: null as QuotaStatus | null } }
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    // A direct import in this page left 2.
+    rerender({ latest: quota(2) });
+    expect(result.current.usage?.remaining).toBe(2);
+
+    // The offline queue imports one more.
+    await act(async () => {
+      invalidateImportUsage();
+      await Promise.resolve();
+    });
+
+    expect(mocks.getBillingUsage).toHaveBeenCalledTimes(2);
+    expect(result.current.usage?.remaining).toBe(1);
+    expect(result.current.pending).toBe(false);
+  });
+});

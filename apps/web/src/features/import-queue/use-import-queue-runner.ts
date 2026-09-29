@@ -8,6 +8,7 @@ import {
 } from "../../data/import-queue-store";
 import { addNetworkListeners, isOnline } from "../../platform/detect-network";
 import { getWebBillingTier } from "../billing/web-billing";
+import { invalidateImportUsage } from "../extract/import-usage-signal";
 
 import type { QueuePauseReason } from "./import-queue-runner";
 import type { ImportQueueItem } from "../../data/import-queue-store";
@@ -149,6 +150,11 @@ export function useImportQueueRunner(enabled = true): ImportQueueRunnerState {
         tier
       });
       idleKeyRef.current = result.processed === 0 && !result.paused ? queuedKey : null;
+
+      if (result.processed > 0) {
+        // Imports finished in the background: the importer's allowance is out of date.
+        invalidateImportUsage();
+      }
 
       if (!controller.signal.aborted) {
         setPaused(result.paused);

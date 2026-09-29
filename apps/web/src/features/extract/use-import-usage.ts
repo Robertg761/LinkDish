@@ -1,9 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 
 import { apiClient } from "../../api/client";
 import { useAuth } from "../../auth/AuthProvider";
 import { hasMonthlyQuotaFields } from "../billing/quota-copy";
 import { getRemainingImports, webBillingPlans } from "../billing/web-billing";
+
+import { getImportUsageGeneration, subscribeImportUsage } from "./import-usage-signal";
 
 import type { QuotaStatus } from "@linkdish/api-contracts";
 
@@ -59,23 +61,51 @@ export interface ImportUsageState {
   pending: boolean;
 }
 
+/** Orders the quotas this hook sees, so the most recent answer for an account wins. */
+let answerSequence = 0;
+
 export function useImportUsageState(
   latestQuota: QuotaStatus | null,
   /** Bumped after each import so the on-device counter is read again. */
   version: number
 ): ImportUsageState {
   const { credentialsKey, isAuthenticated, loading } = useAuth();
-  /** The server's answer and the credentials it was asked with. */
+  // Bumped when the import queue imports links in the background.
+  const generation = useSyncExternalStore(
+    subscribeImportUsage,
+    getImportUsageGeneration,
+    getImportUsageGeneration
+  );
+  /** The server's answer, the credentials it was asked with, and when it arrived. */
   const [server, setServer] = useState<{
     key: string | null;
     quota: QuotaStatus | null;
+    sequence: number;
     settled: boolean;
-  }>({ key: null, quota: null, settled: false });
+  }>({ key: null, quota: null, sequence: 0, settled: false });
+  /** The last import's quota, with the credentials it was imported under. */
+  const [latest, setLatest] = useState<{
+    key: string | null;
+    quota: QuotaStatus | null;
+    sequence: number;
+  }>({ key: credentialsKey, quota: latestQuota, sequence: 0 });
+
+  useEffect(() => {
+    answerSequence += 1;
+    setLatest({ key: credentialsKey, quota: latestQuota, sequence: answerSequence });
+    // Only a new import's quota is recorded; a credentials change must not adopt the old one.
+  }, [latestQuota]);
 
   // Keyed on the credentials (which include the account): it waits for a cached Clerk user's
-  // session instead of asking anonymously, and asks again once Clerk signs in.
+  // session instead of asking anonymously, and asks again once Clerk signs in, or when the
+  // import queue has imported something. A refresh for the same account keeps showing the
+  // answer it has until the new one arrives.
   useEffect(() => {
-    setServer({ key: credentialsKey, quota: null, settled: false });
+    setServer((current) =>
+      current.key === credentialsKey
+        ? current
+        : { key: credentialsKey, quota: null, sequence: 0, settled: false }
+    );
 
     if (credentialsKey === null || !isAuthenticated) {
       return;
@@ -85,30 +115,37 @@ export function useImportUsageState(
     apiClient.getBillingUsage({ signal: controller.signal }).then(
       (response) => {
         if (!controller.signal.aborted) {
+          answerSequence += 1;
           setServer({
             key: credentialsKey,
             quota: response.billingEnabled ? response.quota : null,
+            sequence: answerSequence,
             settled: true
           });
         }
       },
       () => {
         if (!controller.signal.aborted) {
-          setServer({ key: credentialsKey, quota: null, settled: true });
+          setServer((current) =>
+            current.key === credentialsKey
+              ? { ...current, settled: true }
+              : { key: credentialsKey, quota: null, sequence: 0, settled: true }
+          );
         }
       }
     );
 
     return () => controller.abort();
-  }, [credentialsKey, isAuthenticated]);
+  }, [credentialsKey, generation, isAuthenticated]);
 
   if (loading) {
     return { pending: true, usage: null };
   }
 
   if (!isAuthenticated) {
-    // The version dependency re-reads the on-device counter after each import.
+    // The version and generation re-read the on-device counter after each import.
     void version;
+    void generation;
     return {
       pending: false,
       usage: {
@@ -120,12 +157,24 @@ export function useImportUsageState(
     };
   }
 
-  // Never show another account's quota for the render before this account's request starts.
-  const current = server.key === credentialsKey ? server : { quota: null, settled: false };
+  // Only this account's answers count, never another account's, even for a render. A quota
+  // that just arrived from an import (not recorded yet) is this account's and the newest.
+  const current =
+    server.key === credentialsKey ? server : { quota: null, sequence: 0, settled: false };
+  const fresh = latestQuota !== null && latestQuota !== latest.quota;
+  const imported = fresh
+    ? { quota: latestQuota, sequence: Number.POSITIVE_INFINITY }
+    : latest.key === credentialsKey && latest.quota
+      ? latest
+      : null;
+  const quota =
+    imported && (!current.quota || imported.sequence > current.sequence)
+      ? imported.quota
+      : current.quota;
 
   return {
-    pending: !latestQuota && !current.settled,
-    usage: toImportUsage(latestQuota ?? current.quota)
+    pending: !imported && !current.settled,
+    usage: toImportUsage(quota)
   };
 }
 
