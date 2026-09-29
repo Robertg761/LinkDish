@@ -283,6 +283,15 @@ const startedEvents = () =>
 
 describe("ExtractPage", () => {
   beforeEach(async () => {
+    // Before anything is awaited: work the last test left running (a household check, say) may
+    // call these meanwhile, and must get an answer.
+    apiMocks.extractRecipe.mockReset();
+    apiMocks.extractRecipeFromText.mockReset();
+    apiMocks.getBillingUsage.mockReset();
+    apiMocks.getBillingUsage.mockResolvedValue({ billingEnabled: false, plan: null, quota: null });
+    apiMocks.getHousehold.mockReset();
+    apiMocks.getHousehold.mockResolvedValue({ household: null });
+    apiMocks.createSharedRecipe.mockReset();
     fakeIdb.reset();
     localStorage.clear();
     sessionStorage.clear();
@@ -307,13 +316,6 @@ describe("ExtractPage", () => {
     upgradeMocks.requestUpgradeSheet.mockClear();
     vi.mocked(trackWebEvent).mockClear();
     vi.mocked(trackWebV2AnalyticsEvent).mockClear();
-    apiMocks.extractRecipe.mockReset();
-    apiMocks.extractRecipeFromText.mockReset();
-    apiMocks.getBillingUsage.mockReset();
-    apiMocks.getBillingUsage.mockResolvedValue({ billingEnabled: false, plan: null, quota: null });
-    apiMocks.getHousehold.mockReset();
-    apiMocks.getHousehold.mockResolvedValue({ household: null });
-    apiMocks.createSharedRecipe.mockReset();
     publishCurrentAccount("user_1");
     apiMocks.extractRecipe.mockResolvedValue({
       reason: "parse_failed",
