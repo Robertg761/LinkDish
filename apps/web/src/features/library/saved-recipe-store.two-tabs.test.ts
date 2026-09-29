@@ -144,7 +144,7 @@ describe("saved-recipe writes from two tabs", () => {
     );
 
     await Promise.all([
-      forceSaveRecipe({ ...input, recipe: { ...input.recipe, servings: "4" } }),
+      forceSaveRecipe({ ...input, recipe: { ...input.recipe, servings: "4" } }, true),
       favorited
     ]);
 

@@ -649,24 +649,31 @@ export async function saveRecipe(
  * Saves the recipe over the stored one with the same id (a re-import), keeping its personal notes
  * and metadata. Merged with the record as stored inside one readwrite transaction, so a favorite,
  * tag or cook another tab saves meanwhile is kept.
+ *
+ * When that recipe is gone by then (deleted in another tab), this saves a new recipe, which
+ * counts against the free limit like any other save: SavedRecipeLimitError when the cookbook is
+ * full (checked in the transaction that writes, see saveRecipe).
  */
-export async function forceSaveRecipe(input: SaveRecipeInput): Promise<WebSavedRecipe> {
+export async function forceSaveRecipe(
+  input: SaveRecipeInput,
+  isPremiumUser: boolean
+): Promise<WebSavedRecipe> {
   const id = await generateDeterministicId(input.sourceUrl, input.recipe.title);
   const now = new Date().toISOString();
-  const stored = await updateStoredRecipe(id, (existing): WebSavedRecipe => {
-    const existingSync = existing?.sync;
+  const replace = (existing: WebSavedRecipe): WebSavedRecipe => {
+    const existingSync = existing.sync;
 
     return {
       // Personal notes and metadata survive a re-import of the same recipe.
-      ...(existing ? toSavedRecipeListRecord(existing) : {}),
+      ...toSavedRecipeListRecord(existing),
       id,
       recipe: input.recipe,
       sourceUrl: input.sourceUrl,
       sourceHost: getSourceHost(input.sourceUrl),
-      createdAt: existing ? existing.createdAt : now,
+      createdAt: existing.createdAt,
       updatedAt: now,
       extraction: input.extraction,
-      timesCooked: existing?.timesCooked ?? 0,
+      timesCooked: existing.timesCooked ?? 0,
       sync: existingSync?.sharedRecipeId
         ? {
             ...existingSync,
@@ -675,18 +682,34 @@ export async function forceSaveRecipe(input: SaveRecipeInput): Promise<WebSavedR
         : (existingSync ?? { status: "local_only" }),
       ...(input.sourceImages
         ? { sourceImages: input.sourceImages }
-        : existing?.sourceImages
+        : existing.sourceImages
           ? { sourceImages: existing.sourceImages }
           : {})
     };
-  });
+  };
 
-  if (!stored) {
-    // Unreachable: the updater always returns a record to write.
-    throw new Error("This recipe couldn't be saved.");
+  // Twice at most: a recipe saved again under this id between the two writes is replaced.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const stored = await updateStoredRecipe(id, (existing) =>
+      existing ? replace(existing) : undefined
+    );
+
+    if (stored) {
+      return (await hydrateImages(stored)) ?? stored;
+    }
+
+    const saved = await saveRecipe(input, isPremiumUser);
+
+    if (saved.success && saved.recipe) {
+      return saved.recipe;
+    }
+
+    if (saved.error === "limit_exceeded") {
+      throw new SavedRecipeLimitError();
+    }
   }
 
-  return (await hydrateImages(stored)) ?? stored;
+  throw new Error("This recipe couldn't be saved.");
 }
 
 /**

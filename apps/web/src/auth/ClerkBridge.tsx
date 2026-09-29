@@ -59,10 +59,12 @@ const ClerkStatePublisher: React.FC = () => {
   const isLoaded = Boolean(auth.isLoaded);
   const isSignedIn = Boolean(auth.isSignedIn);
   const signInReady = Boolean(signIn.isLoaded && signIn.signIn);
+  // A switch straight to another account's session leaves isSignedIn true; the session id says so.
+  const sessionId = auth.sessionId ?? null;
 
   useEffect(() => {
-    publishClerkState({ isLoaded, isSignedIn, signInReady });
-  }, [isLoaded, isSignedIn, signInReady]);
+    publishClerkState({ isLoaded, isSignedIn, sessionId, signInReady });
+  }, [isLoaded, isSignedIn, sessionId, signInReady]);
 
   return null;
 };

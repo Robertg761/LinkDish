@@ -250,6 +250,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const clerkLoaded = clerkMounted && clerk.isLoaded;
   const clerkSignedIn = clerkLoaded && clerk.isSignedIn;
+  const clerkSessionId = clerkSignedIn ? clerk.sessionId : null;
   const clerkFailed = clerk.status === "failed" || (clerkWaitExpired && !clerkLoaded);
   // "Google sign-in can start": Clerk has loaded, or can be loaded on demand and has not failed.
   const clerkReady = clerkAvailable && !clerkFailed && (clerkLoaded ? clerk.signInReady : true);
@@ -267,6 +268,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const configRef = useRef(config);
   const userRef = useRef(user);
   const resolveRunRef = useRef(0);
+  /** The Clerk session the signed-in user was last resolved for (null: none yet). */
+  const resolvedClerkSessionRef = useRef<string | null>(null);
   transportRef.current = transport;
   configRef.current = config;
   userRef.current = user;
@@ -426,6 +429,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       if (isCurrent()) {
         applySession(result, source);
+
+        if (source === "clerk" && result.kind === "user") {
+          resolvedClerkSessionRef.current = clerkSessionId;
+        }
       }
 
       finish();
@@ -472,6 +479,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (clerkSignedIn) {
         removeLegacySessionToken();
 
+        // Clerk switched straight to another session (another account, as far as anyone here can
+        // tell) while requests already carry its token: let the last account go at once instead
+        // of showing it, and acting for it, until the new one is resolved.
+        if (
+          userRef.current &&
+          resolvedClerkSessionRef.current !== null &&
+          resolvedClerkSessionRef.current !== clerkSessionId
+        ) {
+          setUser(null);
+        }
+
         if (!userRef.current) {
           setLoading(true);
         }
@@ -505,6 +523,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     clerkAvailable,
     clerkLoaded,
     clerkMounted,
+    clerkSessionId,
     clerkSignedIn,
     clerkWaitExpired,
     configSettled,

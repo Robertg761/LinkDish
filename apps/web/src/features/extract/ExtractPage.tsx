@@ -25,7 +25,12 @@ import { ImportQueuePanel } from "../import-queue/ImportQueuePanel";
 import { useImportQueueRunner } from "../import-queue/use-import-queue-runner";
 import { markRecipeSaved } from "../install/install-eligibility";
 import { InstallPrompt } from "../install/InstallPrompt";
-import { forceSaveRecipe, saveRecipe, syncRecipeToHousehold } from "../library/saved-recipe-store";
+import {
+  forceSaveRecipe,
+  SavedRecipeLimitError,
+  saveRecipe,
+  syncRecipeToHousehold
+} from "../library/saved-recipe-store";
 import { useUpgradeSheet } from "../upgrade/UpgradeSheet";
 
 import { ExtractionProgress } from "./ExtractionProgress";
@@ -374,12 +379,19 @@ export const ExtractPage: React.FC = () => {
       const savedFor = getCurrentAccount();
 
       try {
-        keptFromToast(draft, input, await forceSaveRecipe(input), savedFor);
+        keptFromToast(draft, input, await forceSaveRecipe(input, isCachedUserPremium()), savedFor);
       } catch (error) {
+        // The recipe it replaced was deleted meanwhile, and the free cookbook is full again.
+        if (error instanceof SavedRecipeLimitError) {
+          requestUpgradeSheet("save_limit");
+          showToast({ message: "Your free cookbook is full.", tone: "danger" });
+          return;
+        }
+
         showToast({ message: getFriendlyErrorMessage(error, "save"), tone: "danger" });
       }
     },
-    [keptFromToast, showToast]
+    [keptFromToast, requestUpgradeSheet, showToast]
   );
 
   const saveDraftFromToast = useCallback(

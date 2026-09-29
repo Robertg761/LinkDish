@@ -311,6 +311,31 @@ describe("saved-recipe-store", () => {
     expect(await countQuotaSavedRecipes()).toBe(LOCAL_LIMIT_FREE);
   });
 
+  it("counts a replacement whose recipe was deleted meanwhile against the free limit", async () => {
+    const ids: string[] = [];
+    for (let i = 0; i < LOCAL_LIMIT_FREE; i += 1) {
+      ids.push((await saveRecipe(createSaveInput(i), false)).recipe!.id);
+    }
+    // Before Replace is pressed, another tab deletes the recipe and fills the slot it freed.
+    await deleteSavedRecipe(ids[3]!);
+    await saveRecipe(createSaveInput(LOCAL_LIMIT_FREE), false);
+
+    await expect(forceSaveRecipe(createSaveInput(3), false)).rejects.toBeInstanceOf(
+      SavedRecipeLimitError
+    );
+    expect(await countQuotaSavedRecipes()).toBe(LOCAL_LIMIT_FREE);
+  });
+
+  it("saves a replacement whose recipe was deleted meanwhile as a new recipe when there's room", async () => {
+    const { recipe: saved } = await saveRecipe(createSaveInput(1), false);
+    await deleteSavedRecipe(saved!.id);
+
+    const replaced = await forceSaveRecipe(createSaveInput(1), false);
+
+    expect(replaced.id).toBe(saved!.id);
+    expect(await countQuotaSavedRecipes()).toBe(1);
+  });
+
   it("fires the free save limit on the 16th personal recipe", async () => {
     for (let i = 0; i < LOCAL_LIMIT_FREE; i += 1) {
       await saveRecipe(createSaveInput(i), false);
@@ -530,7 +555,7 @@ describe("saved-recipe-store v4 behaviour", () => {
     expect(cooked?.sourceImages).toEqual([scan(1), scan(2)]);
 
     await setRecipeFavorite(saved.id, true);
-    const replaced = await forceSaveRecipe({ ...createSaveInput(1) });
+    const replaced = await forceSaveRecipe({ ...createSaveInput(1) }, true);
     expect(replaced.id).toBe(saved.id);
     expect(replaced.notes).toBe("less sugar");
     expect(replaced.favorite).toBe(true);

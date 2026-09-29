@@ -13,6 +13,7 @@ const clerk = vi.hoisted(() => ({
     getToken: vi.fn(),
     isLoaded: false,
     isSignedIn: false as boolean | undefined,
+    sessionId: null as string | null,
     signOut: vi.fn()
   },
   provider: null as null | {
@@ -66,6 +67,7 @@ describe("ClerkBridge", () => {
     resetClerkBridgeForTests();
     clerk.auth.isLoaded = false;
     clerk.auth.isSignedIn = undefined;
+    clerk.auth.sessionId = null;
     clerk.auth.getToken.mockReset().mockResolvedValue("jwt_1");
     clerk.auth.signOut.mockReset().mockResolvedValue(undefined);
     clerk.signIn.isLoaded = false;
@@ -85,20 +87,30 @@ describe("ClerkBridge", () => {
 
     clerk.auth.isLoaded = true;
     clerk.auth.isSignedIn = true;
+    clerk.auth.sessionId = "sess_1";
     clerk.signIn.isLoaded = true;
-    rerender(
-      <MemoryRouter initialEntries={["/sso-callback"]}>
-        <ClerkBridge handleSsoCallback={false} publishableKey="pk_test_real" />
-        <LocationProbe />
-      </MemoryRouter>
-    );
+    const rerenderBridge = () =>
+      rerender(
+        <MemoryRouter initialEntries={["/sso-callback"]}>
+          <ClerkBridge handleSsoCallback={false} publishableKey="pk_test_real" />
+          <LocationProbe />
+        </MemoryRouter>
+      );
+    rerenderBridge();
 
     expect(getClerkBridgeSnapshot()).toMatchObject({
       isLoaded: true,
       isSignedIn: true,
+      sessionId: "sess_1",
       signInReady: true,
       status: "ready"
     });
+
+    // Clerk switches straight to another account's session: still signed in, another session.
+    clerk.auth.sessionId = "sess_2";
+    rerenderBridge();
+
+    expect(getClerkBridgeSnapshot()).toMatchObject({ isSignedIn: true, sessionId: "sess_2" });
   });
 
   it("registers Clerk's actions and removes them on unmount", async () => {

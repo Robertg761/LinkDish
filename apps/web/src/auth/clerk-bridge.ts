@@ -37,6 +37,11 @@ export interface ClerkBridgeSnapshot {
   isLoaded: boolean;
   /** Clerk's `useAuth().isSignedIn`. */
   isSignedIn: boolean;
+  /**
+   * Clerk's active session (null signed out). Clerk can switch straight to another account's
+   * session with `isSignedIn` staying true; this changes when it does.
+   */
+  sessionId: string | null;
   /** `useSignIn()` is loaded and can start an OAuth redirect. */
   signInReady: boolean;
   /** Bumped when a failed bridge is requested again, so its boundary remounts. */
@@ -98,6 +103,7 @@ const createInitialSnapshot = (): ClerkBridgeSnapshot => {
     isLoaded: false,
     isSignedIn: false,
     reason,
+    sessionId: null,
     requested: reason !== null,
     signInReady: false,
     status: reason !== null ? "loading" : "idle"
@@ -173,10 +179,13 @@ export const publishClerkState = (state: {
   isLoaded: boolean;
   isSignedIn: boolean;
   signInReady: boolean;
+  sessionId?: string | null | undefined;
 }): void => {
+  const isSignedIn = state.isLoaded && state.isSignedIn;
   update({
     isLoaded: state.isLoaded,
-    isSignedIn: state.isLoaded && state.isSignedIn,
+    isSignedIn,
+    sessionId: isSignedIn ? (state.sessionId ?? null) : null,
     signInReady: state.signInReady,
     status: state.isLoaded ? "ready" : "loading"
   });
@@ -184,7 +193,13 @@ export const publishClerkState = (state: {
 
 /** Called when the bridge chunk (or Clerk itself) cannot be loaded. */
 export const markClerkBridgeFailed = (): void => {
-  update({ isLoaded: false, isSignedIn: false, signInReady: false, status: "failed" });
+  update({
+    isLoaded: false,
+    isSignedIn: false,
+    sessionId: null,
+    signInReady: false,
+    status: "failed"
+  });
 };
 
 export const registerClerkControls = (next: ClerkBridgeControls | null): void => {

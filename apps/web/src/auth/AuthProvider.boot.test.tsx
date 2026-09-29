@@ -51,6 +51,7 @@ const clerkMocks = {
     getToken: vi.fn<() => Promise<string | null>>(),
     isLoaded: true,
     isSignedIn: false,
+    sessionId: "sess_1" as string | null,
     signOut: vi.fn<() => Promise<void>>()
   },
   present: true
@@ -71,6 +72,7 @@ const syncClerk = () => {
   publishClerkState({
     isLoaded: clerkMocks.auth.isLoaded,
     isSignedIn: clerkMocks.auth.isSignedIn,
+    sessionId: clerkMocks.auth.sessionId,
     signInReady: clerkMocks.auth.isLoaded
   });
 };
@@ -142,6 +144,7 @@ describe("AuthProvider boot", () => {
     clerkMocks.present = true;
     clerkMocks.auth.isLoaded = true;
     clerkMocks.auth.isSignedIn = false;
+    clerkMocks.auth.sessionId = "sess_1";
     clerkMocks.auth.getToken.mockReset().mockResolvedValue("clerk_jwt");
     clerkMocks.auth.signOut.mockReset().mockResolvedValue(undefined);
   });
@@ -186,6 +189,42 @@ describe("AuthProvider boot", () => {
 
     await waitFor(() => expect(authText()).toBe("anonymous"));
     expect(localStorage.getItem(AUTH_USER_CACHE_KEY)).toBeNull();
+  });
+
+  it("lets the last account go as soon as Clerk switches straight to another account's session", async () => {
+    cacheConfig(clerkConfig);
+    clerkMocks.auth.isSignedIn = true;
+    apiClientMocks.getAuthConfig.mockResolvedValue(clerkConfig);
+    apiClientMocks.getSession.mockResolvedValue({ authenticated: true, user });
+
+    renderAuth();
+    await waitFor(() => expect(authText()).toBe("user:cook@example.com"));
+    expect(getCurrentAccount()).toBe("user_1");
+
+    // Another account signs in with Clerk (isSignedIn stays true); its session is still being
+    // looked up, while requests already carry its token.
+    const next = { billingPlan: "free" as const, email: "next@example.com", id: "user_2" };
+    let answer: (value: unknown) => void = () => undefined;
+    apiClientMocks.getSession.mockReturnValue(
+      new Promise((resolve) => {
+        answer = resolve;
+      })
+    );
+    clerkMocks.auth.sessionId = "sess_2";
+    act(() => {
+      syncClerk();
+    });
+
+    expect(authText()).toBe("loading");
+    expect(getCurrentAccount()).toBeNull();
+    expect(seen.at(-1)?.credentialsKey).toBeNull();
+
+    await act(async () => {
+      answer({ authenticated: true, user: next });
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(authText()).toBe("user:next@example.com"));
+    expect(getCurrentAccount()).toBe("user_2");
   });
 
   it("tells work that outlives its page (a toast's action) which account is signed in", async () => {

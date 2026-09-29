@@ -10,6 +10,7 @@ import { markRecipeSaved } from "../install/install-eligibility";
 import {
   forceSaveRecipe,
   generateDeterministicId,
+  SavedRecipeLimitError,
   saveRecipe,
   syncRecipeToHousehold
 } from "../library/saved-recipe-store";
@@ -133,8 +134,16 @@ export const useSaveFeaturedRecipe = (featured: FeaturedRecipe): FeaturedSave =>
     setError("");
 
     try {
-      await afterSave(await forceSaveRecipe(input), savedFor);
+      await afterSave(await forceSaveRecipe(input, isPremium), savedFor);
     } catch (saveError) {
+      // The recipe it replaced was deleted meanwhile, and the free cookbook is full again.
+      if (saveError instanceof SavedRecipeLimitError) {
+        setStatus("error");
+        setError("Your free cookbook is full: 15 recipes saved. Upgrade for unlimited recipes.");
+        requestUpgradeSheet("save_limit");
+        return;
+      }
+
       console.error("Featured replace failed:", saveError);
       setStatus("error");
       setError(getFriendlyErrorMessage(saveError, "save"));

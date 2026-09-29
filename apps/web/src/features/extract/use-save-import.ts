@@ -211,16 +211,22 @@ export function useSaveImport(
     setError("");
 
     try {
-      const recipe = await forceSaveRecipe(inputRef.current);
+      const recipe = await forceSaveRecipe(inputRef.current, isPremium);
       afterLocalSave(recipe, savedFor);
       return recipe;
     } catch (saveError) {
+      // The recipe it replaced was deleted meanwhile, and the free cookbook is full again.
+      if (saveError instanceof SavedRecipeLimitError) {
+        handleLimit();
+        return null;
+      }
+
       console.error("Import replace failed:", saveError);
       setStatus("error");
       setError(getFriendlyErrorMessage(saveError, "save"));
       return null;
     }
-  }, [account, afterLocalSave]);
+  }, [account, afterLocalSave, handleLimit, isPremium]);
 
   const retryShare = useCallback(() => {
     if (savedRecipe) {
