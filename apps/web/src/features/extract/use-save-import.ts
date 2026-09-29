@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { trackWebV2AnalyticsEvent } from "../../analytics/client";
 import { getFriendlyErrorMessage } from "../../api/error-message";
+import { getAccountScope, useIsCurrentAccount } from "../../auth/account-scope";
 import { useAuth } from "../../auth/AuthProvider";
 import { requestSaveFeedback } from "../../lib/delight-events";
 import { markRecipeSaved } from "../install/install-eligibility";
@@ -70,6 +71,9 @@ export function useSaveImport(
   onSavedRef.current = options.onSaved;
   const isPremium = user?.billingPlan === "plus" || user?.billingPlan === "family";
   const householdMode = shopping.mode;
+  /** Who a save is for: its recipe is shared only as that account, and only while it's signed in. */
+  const account = getAccountScope(isAuthenticated, user);
+  const isCurrentAccount = useIsCurrentAccount(account);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -95,17 +99,25 @@ export function useSaveImport(
   }, [input.recipe.title, input.sourceUrl]);
 
   const share = useCallback(
-    (recipe: WebSavedRecipe) => {
-      if (!isAuthenticated || recipe.isStarter) {
+    (recipe: WebSavedRecipe, sharedFor: string | null) => {
+      // Someone else signed in (or out) while it saved: it isn't shared into their household.
+      const isCurrent = () => isCurrentAccount(sharedFor);
+
+      if (sharedFor === null || recipe.isStarter || !isCurrent()) {
         setHousehold("none");
         return;
       }
 
       // Only talk about the household when we already know there is one.
       setHousehold(householdMode === "household" ? "sharing" : "checking");
-      void syncRecipeToHousehold(recipe).then(
+      void syncRecipeToHousehold(recipe, { isCurrent }).then(
         (synced) => {
           if (!mountedRef.current) {
+            return;
+          }
+
+          if (!isCurrent()) {
+            setHousehold("none");
             return;
           }
 
@@ -120,16 +132,16 @@ export function useSaveImport(
         },
         () => {
           if (mountedRef.current) {
-            setHousehold("failed");
+            setHousehold(isCurrent() ? "failed" : "none");
           }
         }
       );
     },
-    [householdMode, isAuthenticated]
+    [householdMode, isCurrentAccount]
   );
 
   const afterLocalSave = useCallback(
-    (recipe: WebSavedRecipe) => {
+    (recipe: WebSavedRecipe, savedFor: string | null) => {
       const current = inputRef.current;
       setSavedRecipe(recipe);
       setRecipeId(recipe.id);
@@ -149,7 +161,7 @@ export function useSaveImport(
       }
 
       onSavedRef.current?.(recipe);
-      share(recipe);
+      share(recipe, savedFor);
     },
     [share]
   );
@@ -161,6 +173,7 @@ export function useSaveImport(
   }, [requestUpgradeSheet]);
 
   const save = useCallback(async (): Promise<WebSavedRecipe | null> => {
+    const savedFor = account;
     setStatus("saving");
     setError("");
 
@@ -168,7 +181,7 @@ export function useSaveImport(
       const result = await saveRecipe(inputRef.current, isPremium);
 
       if (result.success && result.recipe) {
-        afterLocalSave(result.recipe);
+        afterLocalSave(result.recipe, savedFor);
         return result.recipe;
       }
 
@@ -190,15 +203,16 @@ export function useSaveImport(
       setError(getFriendlyErrorMessage(saveError, "save"));
       return null;
     }
-  }, [afterLocalSave, handleLimit, isPremium]);
+  }, [account, afterLocalSave, handleLimit, isPremium]);
 
   const replace = useCallback(async (): Promise<WebSavedRecipe | null> => {
+    const savedFor = account;
     setStatus("saving");
     setError("");
 
     try {
       const recipe = await forceSaveRecipe(inputRef.current);
-      afterLocalSave(recipe);
+      afterLocalSave(recipe, savedFor);
       return recipe;
     } catch (saveError) {
       console.error("Import replace failed:", saveError);
@@ -206,13 +220,13 @@ export function useSaveImport(
       setError(getFriendlyErrorMessage(saveError, "save"));
       return null;
     }
-  }, [afterLocalSave]);
+  }, [account, afterLocalSave]);
 
   const retryShare = useCallback(() => {
     if (savedRecipe) {
-      share(savedRecipe);
+      share(savedRecipe, account);
     }
-  }, [savedRecipe, share]);
+  }, [account, savedRecipe, share]);
 
   const dismissDuplicate = useCallback(() => setStatus("idle"), []);
 

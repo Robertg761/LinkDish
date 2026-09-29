@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import { trackWebV2AnalyticsEvent } from "../../analytics/client";
 import { getFriendlyErrorMessage } from "../../api/error-message";
+import { getAccountScope, useIsCurrentAccount } from "../../auth/account-scope";
 import { useAuth } from "../../auth/AuthProvider";
 import { useSavedRecipe } from "../../data/library-store";
 import { requestSaveFeedback } from "../../lib/delight-events";
@@ -44,6 +45,9 @@ export const useSaveFeaturedRecipe = (featured: FeaturedRecipe): FeaturedSave =>
   const [deterministicId, setDeterministicId] = useState<string | null>(null);
   const { recipe: existing } = useSavedRecipe(deterministicId ?? undefined);
   const isPremium = user?.billingPlan === "plus" || user?.billingPlan === "family";
+  /** Who a save is for: its recipe is shared only as that account, and only while it's signed in. */
+  const account = getAccountScope(isAuthenticated, user);
+  const isCurrentAccount = useIsCurrentAccount(account);
   const input = {
     extraction: featured.extraction,
     recipe: featured.recipe,
@@ -66,18 +70,20 @@ export const useSaveFeaturedRecipe = (featured: FeaturedRecipe): FeaturedSave =>
     };
   }, [featured.recipe.title, featured.sourceUrl]);
 
-  const afterSave = async (saved: WebSavedRecipe) => {
+  const afterSave = async (saved: WebSavedRecipe, savedFor: string | null) => {
     trackWebV2AnalyticsEvent({
       name: "recipe_saved",
       properties: { source_type: "url", surface: "import_result" },
       routeOrScreen: "/"
     });
+    // Someone else signed in (or out) while it saved: it isn't shared into their household.
+    const isCurrent = () => isCurrentAccount(savedFor);
 
-    if (isAuthenticated) {
+    if (savedFor !== null && isCurrent()) {
       setStatus("syncing");
-      const synced = await syncRecipeToHousehold(saved);
+      const synced = await syncRecipeToHousehold(saved, { isCurrent });
 
-      if (synced.sync?.status === "sync_failed") {
+      if (isCurrent() && synced.sync?.status === "sync_failed") {
         setSyncWarning("Saved here. Household sync failed; you can retry from the recipe.");
       }
     }
@@ -93,6 +99,7 @@ export const useSaveFeaturedRecipe = (featured: FeaturedRecipe): FeaturedSave =>
   };
 
   const save = async () => {
+    const savedFor = account;
     setStatus("saving");
     setError("");
     setSyncWarning("");
@@ -101,7 +108,7 @@ export const useSaveFeaturedRecipe = (featured: FeaturedRecipe): FeaturedSave =>
       const result = await saveRecipe(input, isPremium);
 
       if (result.success && result.recipe) {
-        await afterSave(result.recipe);
+        await afterSave(result.recipe, savedFor);
         return;
       }
 
@@ -121,11 +128,12 @@ export const useSaveFeaturedRecipe = (featured: FeaturedRecipe): FeaturedSave =>
   };
 
   const replace = async () => {
+    const savedFor = account;
     setStatus("saving");
     setError("");
 
     try {
-      await afterSave(await forceSaveRecipe(input));
+      await afterSave(await forceSaveRecipe(input), savedFor);
     } catch (saveError) {
       console.error("Featured replace failed:", saveError);
       setStatus("error");

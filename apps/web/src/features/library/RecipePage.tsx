@@ -634,6 +634,7 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
       return;
     }
 
+    const syncedFor = account;
     // Toast actions ("Sync now" after an edit, "Retry") keep the render they were created in, so
     // decide from the recipe as stored now rather than this render's `record` and `canSync`.
     const latest = await getSavedRecipeById(record.id).catch(() => undefined);
@@ -642,15 +643,16 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
       return;
     }
 
-    const syncedFor = account;
     setBusy("sync");
     const wasAlreadyShared = Boolean(latest.sync?.sharedRecipeId);
 
     try {
-      const synced = await syncRecipeToHousehold(latest);
+      const synced = await syncRecipeToHousehold(latest, {
+        isCurrent: () => isCurrentAccount(syncedFor)
+      });
 
-      // Another account signed in (or out) meanwhile: the recipe on this device records the
-      // share, but its toast, or an upsell, was the last account's.
+      // Another account signed in (or out) meanwhile: the share stopped before sharing into its
+      // household, and its toast, or an upsell, was the last account's.
       if (!isCurrentAccount(syncedFor)) {
         return;
       }

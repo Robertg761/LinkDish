@@ -112,6 +112,16 @@ const getRecipeBookShareModeStorageKey = (
 const parseRecipeBookShareMode = (value: string | null): RecipeBookShareMode =>
   value === "selected" || value === "all" || value === "none" ? value : "none";
 
+/** Why a recipe saved just as someone else signed in (or out) wasn't shared with the Family. */
+const ACCOUNT_CHANGED_MESSAGE = "you switched accounts while it was saving.";
+
+/** Sharing (or unsharing) the whole book stopped because someone else signed in (or out). */
+const ACCOUNT_CHANGED_RESULT: SaveRecipeResult = {
+  allowed: false,
+  message: "You switched accounts, so the rest of your recipes were left as they were.",
+  saved: false
+};
+
 const buildPartialShareMessage = (message?: string): string =>
   message
     ? `Saved to your personal book, but Family sharing failed: ${message}`
@@ -666,7 +676,14 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
   );
 
   const shareAllPersonalRecipes = useCallback(async (): Promise<SaveRecipeResult> => {
+    const startedFor = latestRef.current.userId;
+
     for (const recipe of savedRecipesRef.current.filter((entry) => !entry.isStarter)) {
+      // Never carry on into the household of someone who signed in meanwhile.
+      if (latestRef.current.userId !== startedFor) {
+        return ACCOUNT_CHANGED_RESULT;
+      }
+
       const result = await shareRecipeRecord(recipe);
 
       if (!result.saved) {
@@ -701,6 +718,11 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
 
     try {
       for (const sharedRecipeId of ownedSharedRecipeIds) {
+        // Never carry on as someone who signed in meanwhile.
+        if (latestRef.current.userId !== userId) {
+          return ACCOUNT_CHANGED_RESULT;
+        }
+
         await apiClient.deleteSharedRecipe(sharedRecipeId);
       }
 
@@ -911,9 +933,17 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
 
   const saveRecipe = useCallback(
     async (state: SuccessfulExtractionState) => {
+      const startedFor = latestRef.current.userId;
       const result = await savePersonalRecipe(state);
 
-      if (result.saved && result.recipe && latestRef.current.shareMode === "all") {
+      // Shared as the account that saved it: never into the household of one that signed in (or
+      // with the share setting of one) while the cookbook was being written.
+      if (
+        result.saved &&
+        result.recipe &&
+        latestRef.current.userId === startedFor &&
+        latestRef.current.shareMode === "all"
+      ) {
         const sharedResult = await shareRecipeRecord(result.recipe);
 
         if (!sharedResult.saved) {
@@ -976,6 +1006,7 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
         }
       }
 
+      const startedFor = latestRef.current.userId;
       const personalResult = await savePersonalRecipe(state);
 
       if (!personalResult.saved || !personalResult.recipe) {
@@ -985,6 +1016,19 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
           ...(personalResult.reason ? { reason: personalResult.reason } : {}),
           ...(personalResult.recipeId ? { recipeId: personalResult.recipeId } : {}),
           saved: false
+        };
+      }
+
+      // Someone else signed in (or out) while the cookbook was being written: the recipe is saved
+      // on this phone, but never shared into their household (or as a signed-out visitor).
+      if (latestRef.current.userId !== startedFor) {
+        return {
+          allowed: true,
+          ...(target === "both"
+            ? { message: buildPartialShareMessage(ACCOUNT_CHANGED_MESSAGE) }
+            : {}),
+          ...(personalResult.recipeId ? { recipeId: personalResult.recipeId } : {}),
+          saved: true
         };
       }
 

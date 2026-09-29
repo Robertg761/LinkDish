@@ -553,10 +553,12 @@ export const LibraryPage: React.FC = () => {
     const wasShared = Boolean(recipe.sync?.sharedRecipeId);
 
     try {
-      const synced = await syncRecipeToHousehold(recipe);
+      const synced = await syncRecipeToHousehold(recipe, {
+        isCurrent: () => isCurrentAccount(sharedFor)
+      });
 
-      // Another account signed in (or out) meanwhile: the recipe on this device records the
-      // share, but its toast, or an upsell, was the last account's.
+      // Another account signed in (or out) meanwhile: the share stopped before sharing into its
+      // household, and its toast, or an upsell, was the last account's.
       if (!isCurrentAccount(sharedFor)) {
         return;
       }

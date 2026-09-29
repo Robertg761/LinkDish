@@ -941,6 +941,46 @@ describe("saved-recipe-store v4 behaviour", () => {
     expect(await getSavedRecipes()).toEqual([]);
   });
 
+  describe("when another account signs in (or out) while it shares", () => {
+    it("stops before sharing into that account's household", async () => {
+      const { recipe: saved } = await saveRecipe(createSaveInput(1), true);
+      let sameAccount = true;
+      apiMocks.getHousehold.mockImplementation(() => {
+        // Someone else signs in while the household is looked up.
+        sameAccount = false;
+        return Promise.resolve({ household: { id: "house_1" } });
+      });
+
+      const synced = await syncRecipeToHousehold(saved!, { isCurrent: () => sameAccount });
+
+      expect(apiMocks.createSharedRecipe).not.toHaveBeenCalled();
+      expect(synced).toBe(saved);
+      expect((await getSavedRecipeById(saved!.id))?.sync).toEqual(saved!.sync);
+    });
+
+    it("asks nothing when it's already another account's turn", async () => {
+      const { recipe: saved } = await saveRecipe(createSaveInput(1), true);
+
+      await syncRecipeToHousehold(saved!, { isCurrent: () => false });
+
+      expect(apiMocks.getHousehold).not.toHaveBeenCalled();
+      expect(apiMocks.createSharedRecipe).not.toHaveBeenCalled();
+    });
+
+    it("doesn't record that account's failure as the recipe's", async () => {
+      const { recipe: saved } = await saveRecipe(createSaveInput(1), true);
+      let sameAccount = true;
+      apiMocks.getHousehold.mockImplementation(() => {
+        sameAccount = false;
+        return Promise.reject(new Error("Not a member of this household"));
+      });
+
+      await syncRecipeToHousehold(saved!, { isCurrent: () => sameAccount });
+
+      expect((await getSavedRecipeById(saved!.id))?.sync).toEqual(saved!.sync);
+    });
+  });
+
   it("sends the recipe as stored, not the caller's older copy", async () => {
     const { recipe: saved } = await saveRecipe(createSaveInput(1), true);
     const edited = { ...saved!.recipe, title: "Grandma's Best Cookies" };

@@ -602,6 +602,120 @@ describe("SavedRecipesProvider household save entitlement", () => {
     expect(latestSavedRecipes?.savedRecipes).toHaveLength(18);
   });
 
+  describe("when another account signs in while a recipe is saving", () => {
+    /** The cookbook write waits until `finish`, as a slow AsyncStorage write would. */
+    const holdCookbookWrite = () => {
+      let finish: () => void = () => undefined;
+      asyncStorageMocks.setItem.mockImplementation((key: string) =>
+        key === "linkdish.savedRecipes"
+          ? new Promise<void>((resolve) => {
+              finish = resolve;
+            })
+          : Promise.resolve()
+      );
+      return () => finish();
+    };
+
+    const signInAsMember = () => {
+      accountState.isSignedIn = true;
+      accountState.sessionToken = "session-token";
+      accountState.user = { email: "member@example.com", id: "member_1" };
+      apiMocks.getHousehold.mockResolvedValue({ household: buildHousehold() });
+    };
+
+    const switchAccount = async (renderer: ReturnType<typeof create> | null) => {
+      accountState.user = { email: "other@example.com", id: "other_1" };
+      await act(async () => {
+        renderer?.update(
+          <SavedRecipesProvider>
+            <Probe />
+          </SavedRecipesProvider>
+        );
+        await flushAsyncWork();
+      });
+    };
+
+    it("saves it on this phone without sharing it into the next account's household", async () => {
+      signInAsMember();
+      const renderer = await renderProvider();
+      expect(latestSavedRecipes?.canUseSharedRecipeBook).toBe(true);
+      const finishWrite = holdCookbookWrite();
+
+      let pending: ReturnType<NonNullable<typeof latestSavedRecipes>["saveRecipeToTargets"]>;
+      await act(async () => {
+        pending = latestSavedRecipes!.saveRecipeToTargets(buildSuccessState(30), "both");
+        await flushAsyncWork();
+      });
+
+      await switchAccount(renderer);
+      let result: Awaited<typeof pending> | undefined;
+      await act(async () => {
+        finishWrite();
+        result = await pending!;
+      });
+
+      expect(result).toMatchObject({
+        allowed: true,
+        message:
+          "Saved to your personal book, but Family sharing failed: you switched accounts while it was saving.",
+        saved: true
+      });
+      expect(apiMocks.createSharedRecipe).not.toHaveBeenCalled();
+    });
+
+    it("stops sharing the whole book once another account signs in", async () => {
+      storeSavedRecipes(buildSavedRecipes(3));
+      signInAsMember();
+      const renderer = await renderProvider();
+      let finishFirst: (value: unknown) => void = () => undefined;
+      apiMocks.createSharedRecipe.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishFirst = resolve;
+          })
+      );
+
+      let pending: Promise<void> = Promise.resolve();
+      await act(async () => {
+        pending = latestSavedRecipes!.setShareMode("all");
+        await flushAsyncWork();
+      });
+      await switchAccount(renderer);
+      await act(async () => {
+        finishFirst({ recipe: buildSharedRecipe(600, "shared_first") });
+        await pending;
+      });
+
+      // The recipe already on its way was shared as the member; none as the next account.
+      expect(apiMocks.createSharedRecipe).toHaveBeenCalledTimes(1);
+      expect(latestSavedRecipes?.shareMode).not.toBe("all");
+    });
+
+    it("doesn't share a recipe by the next account's share-everything setting", async () => {
+      signInAsMember();
+      asyncStorageMocks.getItem.mockImplementation((key: string) =>
+        Promise.resolve(key.startsWith("linkdish.recipeBookShareMode") ? "all" : null)
+      );
+      const renderer = await renderProvider();
+      expect(latestSavedRecipes?.shareMode).toBe("all");
+      const finishWrite = holdCookbookWrite();
+
+      let pending: ReturnType<NonNullable<typeof latestSavedRecipes>["saveRecipe"]>;
+      await act(async () => {
+        pending = latestSavedRecipes!.saveRecipe(buildSuccessState(31));
+        await flushAsyncWork();
+      });
+
+      await switchAccount(renderer);
+      await act(async () => {
+        finishWrite();
+        await pending!;
+      });
+
+      expect(apiMocks.createSharedRecipe).not.toHaveBeenCalled();
+    });
+  });
+
   it("keeps the free cap for signed-in users without active household access", async () => {
     storeSavedRecipes(buildSavedRecipes(15));
     accountState.isSignedIn = true;

@@ -250,7 +250,9 @@ async function keepImportedRecipe(
 
     // Shared as the account that imported it, never as one that signed in meanwhile.
     if (isAuthenticated && isCurrentAccount(context)) {
-      void syncRecipeToHousehold(saved.recipe).catch(() => undefined);
+      void syncRecipeToHousehold(saved.recipe, { isCurrent: context.isCurrent }).catch(
+        () => undefined
+      );
     }
   }
 

@@ -1036,8 +1036,17 @@ async function persistSyncState(
 /**
  * Shares a saved recipe with the household (or updates its household copy). It sends the recipe
  * as stored when called, not the caller's copy, which may predate an edit.
+ *
+ * `isCurrent` answers whether the account the share is for is still the one signed in: requests
+ * carry whoever is signed in when they go out, so once someone else has signed in (or out) it
+ * stops before its next request and hands back `recipe` as it was, never sharing into their
+ * household or recording an answer meant for them.
  */
-export async function syncRecipeToHousehold(recipe: WebSavedRecipe): Promise<WebSavedRecipe> {
+export async function syncRecipeToHousehold(
+  recipe: WebSavedRecipe,
+  options: { isCurrent?: (() => boolean) | undefined } = {}
+): Promise<WebSavedRecipe> {
+  const accountChanged = () => options.isCurrent?.() === false;
   const db = await getDb();
   const stored = (await db.get(STORE_NAME, recipe.id)) as WebSavedRecipe | undefined;
 
@@ -1051,8 +1060,16 @@ export async function syncRecipeToHousehold(recipe: WebSavedRecipe): Promise<Web
     return persistSyncState(current, () => ({ status: "local_only" }));
   }
 
+  if (accountChanged()) {
+    return recipe;
+  }
+
   try {
     const household = await apiClient.getHousehold();
+
+    if (accountChanged()) {
+      return recipe;
+    }
 
     if (!household.household) {
       return persistSyncState(current, (existing) => ({
@@ -1078,6 +1095,11 @@ export async function syncRecipeToHousehold(recipe: WebSavedRecipe): Promise<Web
       status: existing.updatedAt === current.updatedAt ? "synced" : "dirty"
     }));
   } catch (error) {
+    // Failed as another account (or signed out): not this recipe's failure to record.
+    if (accountChanged()) {
+      return recipe;
+    }
+
     return persistSyncState(current, (existing) => ({
       ...(existing.sync || { status: "local_only" }),
       lastError: error instanceof Error ? error.message : "Sync error",
