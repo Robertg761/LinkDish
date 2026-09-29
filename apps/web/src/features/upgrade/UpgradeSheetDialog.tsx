@@ -151,6 +151,11 @@ const useSaveLimitCopy = (enabled: boolean, base: TriggerCopy): TriggerCopy => {
 export interface UpgradeSheetDialogProps {
   currentPlan: WebBillingTier;
   isAuthenticated: boolean;
+  /**
+   * Whether the account a checkout started for is still signed in, answered by the provider: it
+   * stays mounted when another account signs in (or out), while this sheet closes.
+   */
+  isCurrentAccount: (startedFor: string | null) => boolean;
   onDismiss: () => void;
   trigger: UpgradeSheetTrigger;
 }
@@ -158,6 +163,7 @@ export interface UpgradeSheetDialogProps {
 export const UpgradeSheetDialog: React.FC<UpgradeSheetDialogProps> = ({
   currentPlan,
   isAuthenticated,
+  isCurrentAccount,
   onDismiss,
   trigger
 }) => {
@@ -166,7 +172,7 @@ export const UpgradeSheetDialog: React.FC<UpgradeSheetDialogProps> = ({
   const [period, setPeriod] = useState<BillingPeriod>("yearly");
   const availabilityView = useWebBillingAvailability();
   const { availability } = availabilityView;
-  const checkout = useWebCheckout({ trigger: copy.purchaseTrigger });
+  const checkout = useWebCheckout({ isCurrentAccount, trigger: copy.purchaseTrigger });
   const purchasablePeriod = getPurchasablePeriod(plan, period, availabilityView);
   const planName = planContent[plan].name;
   const pricingPath = `/pricing?upgrade=${plan}${period === "monthly" ? "&period=monthly" : ""}`;

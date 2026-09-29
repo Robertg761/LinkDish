@@ -416,11 +416,23 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
   const menuExtras = useRecipeMenuExtras(isSaved ? record : null);
   const [cookOpen, setCookOpen] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
-  const [shoppingOpen, setShoppingOpen] = useState(false);
-  /** Undefined when the household check could not answer: the sheet uses the cached mode. */
-  const [shoppingCanSync, setShoppingCanSync] = useState<boolean | undefined>(undefined);
+  /**
+   * The open shopping sheet, with the account it was opened for. `canSync` is undefined when the
+   * household check could not answer: the sheet then uses the cached mode.
+   */
+  const [shopping, setShopping] = useState<{
+    account: string | null;
+    canSync: boolean | undefined;
+  } | null>(null);
   const [confirm, setConfirm] = useState<"delete-synced" | "unshare" | null>(null);
   const [busy, setBusy] = useState<"delete" | "duplicate" | "sync" | "share-card" | null>(null);
+  // The sheet goes by its account's household: another account signing in or out never sees it,
+  // not even for a render (this screen stays up for a cookbook recipe), and it is closed for good.
+  const shoppingSheet = shopping?.account === account ? shopping : null;
+
+  useEffect(() => {
+    setShopping((current) => (current && current.account !== account ? null : current));
+  }, [account]);
 
   useDocumentTitle(recipe.title);
 
@@ -512,8 +524,7 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
       return;
     }
 
-    setShoppingCanSync(canSyncItems);
-    setShoppingOpen(true);
+    setShopping({ account: askedFor, canSync: canSyncItems });
   }, [account, authLoading, credentialsKey, isAuthenticated, isCurrentAccount, user?.id]);
 
   const handleShare = async () => {
@@ -631,11 +642,18 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
       return;
     }
 
+    const syncedFor = account;
     setBusy("sync");
     const wasAlreadyShared = Boolean(latest.sync?.sharedRecipeId);
 
     try {
       const synced = await syncRecipeToHousehold(latest);
+
+      // Another account signed in (or out) meanwhile: the recipe on this device records the
+      // share, but its toast, or an upsell, was the last account's.
+      if (!isCurrentAccount(syncedFor)) {
+        return;
+      }
 
       if (synced.sync?.status === "synced") {
         if (!wasAlreadyShared) {
@@ -664,7 +682,9 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
         });
       }
     } catch (error) {
-      showToast({ message: getFriendlyErrorMessage(error, "sync"), tone: "danger" });
+      if (isCurrentAccount(syncedFor)) {
+        showToast({ message: getFriendlyErrorMessage(error, "sync"), tone: "danger" });
+      }
     } finally {
       setBusy(null);
     }
@@ -1078,10 +1098,10 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
         />
       ) : null}
 
-      {shoppingOpen ? (
+      {shoppingSheet ? (
         <AddRecipeToShoppingSheet
-          canSync={shoppingCanSync}
-          onClose={() => setShoppingOpen(false)}
+          canSync={shoppingSheet.canSync}
+          onClose={() => setShopping(null)}
           recipe={recipe}
           recipeId={shared ? shared.id : record.id}
           scaling={scaling.state}

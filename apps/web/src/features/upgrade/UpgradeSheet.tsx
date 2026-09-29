@@ -10,7 +10,7 @@ import React, {
 } from "react";
 
 import { trackWebEvent } from "../../analytics/client";
-import { getAccountScope } from "../../auth/account-scope";
+import { getAccountScope, useIsCurrentAccount } from "../../auth/account-scope";
 import { useAuth } from "../../auth/AuthProvider";
 import { lazyWithRetry } from "../../platform/lazy";
 import { OptionalChunkBoundary } from "../../platform/OptionalChunkBoundary";
@@ -69,6 +69,9 @@ interface UpgradeSheetProviderProps {
 export const UpgradeSheetProvider: React.FC<UpgradeSheetProviderProps> = ({ children }) => {
   const { isAuthenticated, user } = useAuth();
   const account = getAccountScope(isAuthenticated, user);
+  // Checked here, where it keeps up with account changes: the sheet (and a checkout it started)
+  // goes away when another account signs in or out, and must not open that checkout afterwards.
+  const isCurrentAccount = useIsCurrentAccount(account);
   /** The open sheet, with the account it was opened for. */
   const [active, setActive] = useState<{
     account: string | null;
@@ -129,6 +132,7 @@ export const UpgradeSheetProvider: React.FC<UpgradeSheetProviderProps> = ({ chil
             <UpgradeSheetDialog
               currentPlan={currentPlan}
               isAuthenticated={isAuthenticated}
+              isCurrentAccount={isCurrentAccount}
               onDismiss={dismiss}
               trigger={activeTrigger}
             />

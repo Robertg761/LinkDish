@@ -62,11 +62,22 @@ interface CheckoutState {
  * Each action belongs to the account that started it: if another account signs in (or out)
  * before its checkout or billing page opens, the page never opens for the new one, and its busy
  * state and errors are never shown to it.
+ *
+ * A caller that unmounts when the account changes (the upgrade sheet closes then) passes
+ * `isCurrentAccount` from a component that stays mounted: this hook's own check stops seeing new
+ * accounts once its component is gone, and would let a late answer through.
  */
-export function useWebCheckout({ trigger }: { trigger: CheckoutTrigger }): WebCheckout {
+export function useWebCheckout({
+  isCurrentAccount: liveIsCurrentAccount,
+  trigger
+}: {
+  isCurrentAccount?: ((startedFor: string | null) => boolean) | undefined;
+  trigger: CheckoutTrigger;
+}): WebCheckout {
   const { isAuthenticated, refreshUser, user } = useAuth();
   const account = getAccountScope(isAuthenticated, user);
-  const isCurrentAccount = useIsCurrentAccount(account);
+  const ownIsCurrentAccount = useIsCurrentAccount(account);
+  const isCurrentAccount = liveIsCurrentAccount ?? ownIsCurrentAccount;
   const [state, setState] = useState<CheckoutState>({ account, busyAction: null, error: null });
 
   const begin = useCallback((startedFor: string | null, busyAction: CheckoutAction) => {

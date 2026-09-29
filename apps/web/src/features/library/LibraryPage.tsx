@@ -166,6 +166,8 @@ const isTypingTarget = (target: EventTarget | null): boolean =>
     target.closest("[role='menu']") !== null);
 
 interface ShoppingSheetState {
+  /** The account the sheet was opened for: its household decides where the items go. */
+  account: string | null;
   recipe: WebSavedRecipe;
   /** Undefined until the household check answers (the sheet then uses the cached mode). */
   canSync: boolean | undefined;
@@ -204,9 +206,29 @@ export const LibraryPage: React.FC = () => {
   const [manageCollectionsOpen, setManageCollectionsOpen] = useState(false);
   const [tagEditorId, setTagEditorId] = useState<string | null>(null);
   const [planRecipe, setPlanRecipe] = useState<WebSavedRecipe | null>(null);
-  const [shoppingSheet, setShoppingSheet] = useState<ShoppingSheetState | null>(null);
-  const [pendingSyncedDelete, setPendingSyncedDelete] = useState<WebSavedRecipe | null>(null);
+  const [shoppingSheetState, setShoppingSheet] = useState<ShoppingSheetState | null>(null);
+  /** A "Delete everywhere" confirmation, with the account it was opened for. */
+  const [syncedDeleteAsk, setSyncedDeleteAsk] = useState<{
+    account: string | null;
+    recipe: WebSavedRecipe;
+  } | null>(null);
   const [deletingSynced, setDeletingSynced] = useState(false);
+
+  // A shopping sheet belongs to the account it was opened for (its household decides where the
+  // items go): another account signing in or out never sees it, not even for a render, and it is
+  // closed for good.
+  const shoppingSheet = shoppingSheetState?.account === account ? shoppingSheetState : null;
+  // Likewise a "Delete everywhere" confirmation: removing the household copy was that account's.
+  const pendingSyncedDelete = syncedDeleteAsk?.account === account ? syncedDeleteAsk.recipe : null;
+  const setPendingSyncedDelete = useCallback(
+    (recipe: WebSavedRecipe | null) => setSyncedDeleteAsk(recipe ? { account, recipe } : null),
+    [account]
+  );
+
+  useEffect(() => {
+    setShoppingSheet((current) => (current && current.account !== account ? null : current));
+    setSyncedDeleteAsk((current) => (current && current.account !== account ? null : current));
+  }, [account]);
 
   const deferredQuery = useDeferredValue(query);
   const searchText = deferredQuery.trim();
@@ -527,10 +549,17 @@ export const LibraryPage: React.FC = () => {
       return;
     }
 
+    const sharedFor = account;
     const wasShared = Boolean(recipe.sync?.sharedRecipeId);
 
     try {
       const synced = await syncRecipeToHousehold(recipe);
+
+      // Another account signed in (or out) meanwhile: the recipe on this device records the
+      // share, but its toast, or an upsell, was the last account's.
+      if (!isCurrentAccount(sharedFor)) {
+        return;
+      }
 
       if (synced.sync?.status === "local_only") {
         requestUpgradeSheet("family_share_no_plan");
@@ -558,22 +587,32 @@ export const LibraryPage: React.FC = () => {
       void shared.reload();
     } catch (error) {
       console.error("Sync failed:", error);
-      showToast({ message: getFriendlyErrorMessage(error, "sync"), tone: "danger" });
+
+      if (isCurrentAccount(sharedFor)) {
+        showToast({ message: getFriendlyErrorMessage(error, "sync"), tone: "danger" });
+      }
     }
   };
 
   const openShopping = (recipe: WebSavedRecipe) => {
+    const openedFor = account;
     // Not "false" while the household check is out (or when it fails): items added then would
     // stay on this device for good. Unknown falls back to the shopping sync layer's mode.
-    setShoppingSheet({ canSync: undefined, recipe });
+    setShoppingSheet({ account: openedFor, canSync: undefined, recipe });
     primeShoppingAccount({ isAuthenticated, loading: authLoading, userId: user?.id });
 
     if (isAuthenticated) {
       apiClient
         .getHousehold()
         .then((response) => {
+          // Another account signed in meanwhile: the answer was the last one's household, and
+          // must not decide where the next one's items go (even on a sheet it opened since).
+          if (!isCurrentAccount(openedFor)) {
+            return;
+          }
+
           setShoppingSheet((current) =>
-            current?.recipe.id === recipe.id
+            current?.account === openedFor && current.recipe.id === recipe.id
               ? { ...current, canSync: Boolean(response.household) }
               : current
           );

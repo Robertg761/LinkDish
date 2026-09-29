@@ -87,6 +87,8 @@ const HouseholdView: React.FC<HouseholdViewProps> = ({ account, isCurrentAccount
   const [confirmLeave, setConfirmLeave] = useState(false);
   /** Bumped by every load and every action's answer, so only the newest one lands. */
   const answerRef = useRef(0);
+  /** An answer (a load's or an action's) is on the page: asking again keeps it meanwhile. */
+  const shownRef = useRef(false);
 
   const plan = getWebBillingTier(user);
   const isOwner = household?.role === "owner";
@@ -113,8 +115,13 @@ const HouseholdView: React.FC<HouseholdViewProps> = ({ account, isCurrentAccount
     const load = ++answerRef.current;
     /** A newer load or action answered since, or another account signed in: drop this one. */
     const stale = () => load !== answerRef.current || !isCurrentAccount(account);
-    setLoadState("loading");
-    setLoadError("");
+    // Asking again once this account's page is shown (its credentials changed) keeps the page,
+    // and what's typed into it, until the answer lands: only a first load (or a retry after
+    // an error) shows the skeleton.
+    if (!shownRef.current) {
+      setLoadState("loading");
+      setLoadError("");
+    }
 
     try {
       const response = await apiClient.getHousehold();
@@ -123,10 +130,12 @@ const HouseholdView: React.FC<HouseholdViewProps> = ({ account, isCurrentAccount
         return;
       }
 
+      shownRef.current = true;
       setHousehold(response.household);
       setLoadState("ready");
     } catch (error) {
-      if (stale()) {
+      // The page already shows this account's answer: keep it rather than an error in its place.
+      if (stale() || shownRef.current) {
         return;
       }
 
@@ -174,6 +183,7 @@ const HouseholdView: React.FC<HouseholdViewProps> = ({ account, isCurrentAccount
 
       // Newer than any load still out, which is dropped when it answers.
       answerRef.current += 1;
+      shownRef.current = true;
       setHousehold(next);
       setLoadState("ready");
 

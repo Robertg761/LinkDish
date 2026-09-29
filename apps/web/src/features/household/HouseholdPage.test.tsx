@@ -631,6 +631,65 @@ describe("HouseholdPage account switches", () => {
     expect(apiMocks.getHousehold).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps a no-household account's page, and a typed invite code, while the same account asks again", async () => {
+    const reload = deferred<{ household: HouseholdDetails | null }>();
+    authMocks.user = { billingPlan: "free", email: "cook@example.com", id: "user_1" };
+    apiMocks.getHousehold.mockResolvedValueOnce({ household: null });
+    apiMocks.getHousehold.mockReturnValueOnce(reload.promise);
+
+    const view = renderHouseholdPage();
+    const field = await screen.findByRole("textbox", { name: "Invite code or link" });
+    fireEvent.change(field, { target: { value: "AbCdEfGh1234" } });
+
+    // Clerk finished signing the same account in late: ask again without blanking the page.
+    authMocks.credentialsSource = "clerk";
+    view.rerender(householdTree());
+    await waitFor(() => expect(apiMocks.getHousehold).toHaveBeenCalledTimes(2));
+
+    expect(screen.queryByRole("status", { name: "Loading household" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Got an invite?" })).toBeVisible();
+    expect(screen.getByRole("textbox", { name: "Invite code or link" })).toHaveValue(
+      "AbCdEfGh1234"
+    );
+
+    await act(async () => {
+      reload.resolve({ household: null });
+      await reload.promise;
+    });
+
+    expect(screen.getByRole("textbox", { name: "Invite code or link" })).toHaveValue(
+      "AbCdEfGh1234"
+    );
+  });
+
+  it("keeps what the same account's page shows when asking again fails", async () => {
+    const reload = deferred<{ household: HouseholdDetails | null }>();
+    authMocks.user = { billingPlan: "free", email: "cook@example.com", id: "user_1" };
+    apiMocks.getHousehold.mockResolvedValueOnce({ household: null });
+    apiMocks.getHousehold.mockReturnValueOnce(
+      reload.promise.then(() => Promise.reject(new TypeError("Failed to fetch")))
+    );
+
+    const view = renderHouseholdPage();
+    const field = await screen.findByRole("textbox", { name: "Invite code or link" });
+    fireEvent.change(field, { target: { value: "AbCdEfGh1234" } });
+
+    authMocks.credentialsSource = "clerk";
+    view.rerender(householdTree());
+    await waitFor(() => expect(apiMocks.getHousehold).toHaveBeenCalledTimes(2));
+
+    await act(async () => {
+      reload.resolve({ household: null });
+      await reload.promise.catch(() => undefined);
+    });
+
+    await waitFor(() => expect(apiMocks.getHousehold).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText("We couldn't load your household")).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Invite code or link" })).toHaveValue(
+      "AbCdEfGh1234"
+    );
+  });
+
   it("asks again when the same account's credentials change, and lets a newer action win", async () => {
     const reload = deferred<{ household: HouseholdDetails | null }>();
     authMocks.user = { billingPlan: "family", email: "ana@example.com", id: "user_2" };
