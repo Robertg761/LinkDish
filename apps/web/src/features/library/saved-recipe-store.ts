@@ -1088,6 +1088,12 @@ export async function syncRecipeToHousehold(
           sourceSavedRecipeId: current.id
         });
 
+    // Someone else signed in (or out) while it was out: the share is in the last account's
+    // household, which the account now signed in can't see or update, so it isn't recorded here.
+    if (accountChanged()) {
+      return recipe;
+    }
+
     return persistSyncState(current, (existing) => ({
       lastSyncedAt: response.recipe.updatedAt,
       sharedRecipeId: response.recipe.id,

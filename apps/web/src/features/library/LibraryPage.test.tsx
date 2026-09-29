@@ -1484,8 +1484,12 @@ describe("LibraryPage", () => {
       await share.promise;
     });
 
-    // The device's copy still records the share; the toast was the last account's.
-    await waitFor(() => expect(storedRecipe("soup")?.sync?.sharedRecipeId).toBe("shared_new"));
+    // The share is in the last account's household: this device doesn't claim it for the next
+    // account (which could neither see nor update it), and the toast was the last account's.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(storedRecipe("soup")?.sync?.sharedRecipeId).toBeUndefined();
     expect(screen.queryByText("Shared with your Family cookbook")).not.toBeInTheDocument();
   });
 

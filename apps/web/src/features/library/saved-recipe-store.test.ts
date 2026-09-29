@@ -958,6 +958,25 @@ describe("saved-recipe-store v4 behaviour", () => {
       expect((await getSavedRecipeById(saved!.id))?.sync).toEqual(saved!.sync);
     });
 
+    it("doesn't record a share that finished after another account signed in", async () => {
+      const { recipe: saved } = await saveRecipe(createSaveInput(1), true);
+      let sameAccount = true;
+      apiMocks.getHousehold.mockResolvedValue({ household: { id: "house_1" } });
+      apiMocks.createSharedRecipe.mockImplementation(() => {
+        // Someone else signs in while the share is out.
+        sameAccount = false;
+        return Promise.resolve({
+          recipe: { id: "shared_9", updatedAt: "2026-09-04T00:00:00.000Z" }
+        });
+      });
+
+      const synced = await syncRecipeToHousehold(saved!, { isCurrent: () => sameAccount });
+
+      // The copy is in the last account's household: this device doesn't claim it for the next.
+      expect(synced).toBe(saved);
+      expect((await getSavedRecipeById(saved!.id))?.sync).toEqual(saved!.sync);
+    });
+
     it("asks nothing when it's already another account's turn", async () => {
       const { recipe: saved } = await saveRecipe(createSaveInput(1), true);
 

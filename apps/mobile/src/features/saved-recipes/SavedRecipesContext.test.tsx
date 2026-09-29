@@ -691,6 +691,65 @@ describe("SavedRecipesProvider household save entitlement", () => {
       expect(latestSavedRecipes?.shareMode).not.toBe("all");
     });
 
+    it("never shows the last account's Family recipes once its late answer lands", async () => {
+      signInAsMember();
+      const memberRecipe = buildSharedRecipe(700, "member_recipe");
+      const otherRecipe = buildSharedRecipe(701, "other_recipe");
+      let finishMemberList: (value: unknown) => void = () => undefined;
+      apiMocks.getSharedRecipes
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              finishMemberList = resolve;
+            })
+        )
+        .mockResolvedValue({ recipes: [otherRecipe] });
+      const renderer = await renderProvider();
+
+      await switchAccount(renderer);
+      expect(latestSavedRecipes?.sharedRecipes).toEqual([otherRecipe]);
+
+      await act(async () => {
+        finishMemberList({ recipes: [memberRecipe] });
+        await flushAsyncWork();
+      });
+
+      expect(latestSavedRecipes?.sharedRecipes).toEqual([otherRecipe]);
+    });
+
+    it("keeps a share that finished after a switch out of the next account's Family", async () => {
+      storeSavedRecipes(buildSavedRecipes(1));
+      signInAsMember();
+      const renderer = await renderProvider();
+      const [record] = latestSavedRecipes!.savedRecipes;
+      let finishShare: (value: unknown) => void = () => undefined;
+      apiMocks.createSharedRecipe.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishShare = resolve;
+          })
+      );
+
+      let pending: ReturnType<NonNullable<typeof latestSavedRecipes>["shareRecipe"]> =
+        Promise.resolve({ allowed: true, saved: true });
+      await act(async () => {
+        pending = latestSavedRecipes!.shareRecipe(record!.id);
+        await flushAsyncWork();
+      });
+      await switchAccount(renderer);
+      let result: Awaited<typeof pending> | undefined;
+      await act(async () => {
+        finishShare({ recipe: buildSharedRecipe(702, "member_share") });
+        result = await pending;
+      });
+
+      expect(result).toMatchObject({ saved: false });
+      expect(latestSavedRecipes?.sharedRecipes.map((entry) => entry.id)).not.toContain(
+        "member_share"
+      );
+      expect(latestSavedRecipes?.savedRecipes[0]?.sharedRecipeId).toBeUndefined();
+    });
+
     it("doesn't share a recipe by the next account's share-everything setting", async () => {
       signInAsMember();
       asyncStorageMocks.getItem.mockImplementation((key: string) =>

@@ -122,6 +122,13 @@ const ACCOUNT_CHANGED_RESULT: SaveRecipeResult = {
   saved: false
 };
 
+/** A Family change that finished after someone else signed in (or out): it isn't theirs. */
+const SWITCHED_ACCOUNT_RESULT: SaveRecipeResult = {
+  allowed: false,
+  message: "You switched accounts before this finished.",
+  saved: false
+};
+
 const buildPartialShareMessage = (message?: string): string =>
   message
     ? `Saved to your personal book, but Family sharing failed: ${message}`
@@ -220,6 +227,8 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
   const [activeHouseholdId, setActiveHouseholdId] = useState<HouseholdDetails["id"] | null>(null);
   const [hasLoadedShareMode, setHasLoadedShareMode] = useState(false);
   const savedRecipesRef = useRef<SavedRecipeRecord[]>([]);
+  /** Bumped by every Family refresh, so only the newest one lands. */
+  const sharedRefreshRef = useRef(0);
   const lastWrittenCookbookRef = useRef<string | null>(null);
   const client = useMemo(
     () =>
@@ -295,6 +304,13 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
   );
 
   const refreshSharedRecipes = useCallback(async () => {
+    // Only the newest refresh, for the account signed in now, lands: one started for another
+    // account (signed in before a direct switch) never shows its recipes or household here.
+    const refresh = ++sharedRefreshRef.current;
+    const startedFor = isSignedIn ? user?.id : undefined;
+    const stale = () =>
+      refresh !== sharedRefreshRef.current || latestRef.current.userId !== startedFor;
+
     if (!isSignedIn || !user) {
       setActiveHouseholdId(null);
       setSharedRecipes([]);
@@ -308,6 +324,11 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
 
     try {
       const householdResponse = await client.getHousehold();
+
+      if (stale()) {
+        return;
+      }
+
       nextHouseholdId = householdResponse.household?.id ?? null;
       setActiveHouseholdId(nextHouseholdId);
 
@@ -318,16 +339,27 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
       }
 
       const response = await client.getSharedRecipes();
+
+      if (stale()) {
+        return;
+      }
+
       setSharedRecipes(response.recipes);
       setSharedRecipeError(null);
     } catch (error) {
+      if (stale()) {
+        return;
+      }
+
       if (!nextHouseholdId) {
         setActiveHouseholdId(null);
       }
       setSharedRecipes([]);
       setSharedRecipeError(getSharedRecipeErrorMessage(error));
     } finally {
-      setHasLoadedSharedRecipes(true);
+      if (!stale()) {
+        setHasLoadedSharedRecipes(true);
+      }
     }
   }, [client, isSignedIn, user]);
 
@@ -528,7 +560,9 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
 
   const shareRecipeRecord = useCallback(
     async (record: SavedRecipeRecord): Promise<SaveRecipeResult & { sharedRecipeId?: string }> => {
-      const { client: apiClient, isSignedIn: signedIn } = latestRef.current;
+      const { client: apiClient, isSignedIn: signedIn, userId: startedFor } = latestRef.current;
+      /** Someone else signed in (or out) while it shared: what it answers isn't theirs. */
+      const switched = () => latestRef.current.userId !== startedFor;
 
       if (record.isStarter) {
         return {
@@ -560,6 +594,11 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
             >[1]["strategy"],
             warnings: record.warnings
           });
+
+          if (switched()) {
+            return SWITCHED_ACCOUNT_RESULT;
+          }
+
           upsertSharedRecipe(response.recipe);
           commitSavedRecipes((current) =>
             markSavedRecipeShared(current, record.id, response.recipe)
@@ -576,6 +615,11 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
         const response = await apiClient.createSharedRecipe(
           savedRecipeRecordToSharedRecipeRequest(record)
         );
+
+        if (switched()) {
+          return SWITCHED_ACCOUNT_RESULT;
+        }
+
         upsertSharedRecipe(response.recipe);
         commitSavedRecipes((current) => markSavedRecipeShared(current, record.id, response.recipe));
         setSharedRecipeError(null);
@@ -595,6 +639,10 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
           sharedRecipeId: response.recipe.id
         };
       } catch (error) {
+        if (switched()) {
+          return SWITCHED_ACCOUNT_RESULT;
+        }
+
         const message = getSharedRecipeErrorMessage(error);
         setSharedRecipeError(message);
 
@@ -726,6 +774,10 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
         await apiClient.deleteSharedRecipe(sharedRecipeId);
       }
 
+      if (latestRef.current.userId !== userId) {
+        return ACCOUNT_CHANGED_RESULT;
+      }
+
       setSharedRecipes((current) => current.filter((recipe) => recipe.ownerUserId !== userId));
       commitSavedRecipes((current) =>
         current.map((entry) => ({
@@ -741,6 +793,10 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
         saved: true
       };
     } catch (error) {
+      if (latestRef.current.userId !== userId) {
+        return ACCOUNT_CHANGED_RESULT;
+      }
+
       const message = getSharedRecipeErrorMessage(error);
       setSharedRecipeError(message);
 
@@ -754,7 +810,8 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
 
   const syncSharedRecipeFromRecord = useCallback(
     async (record: SavedRecipeRecord): Promise<void> => {
-      const { client: apiClient, isSignedIn: signedIn } = latestRef.current;
+      const { client: apiClient, isSignedIn: signedIn, userId: startedFor } = latestRef.current;
+      const switched = () => latestRef.current.userId !== startedFor;
 
       if (!record.sharedRecipeId || !signedIn) {
         return;
@@ -773,11 +830,19 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
           >[1]["strategy"],
           warnings: record.warnings
         });
+
+        // Someone else signed in (or out) meanwhile: the Family copy they see isn't this one.
+        if (switched()) {
+          return;
+        }
+
         upsertSharedRecipe(response.recipe);
         commitSavedRecipes((current) => markSavedRecipeShared(current, record.id, response.recipe));
         setSharedRecipeError(null);
       } catch (error) {
-        setSharedRecipeError(getSharedRecipeErrorMessage(error));
+        if (!switched()) {
+          setSharedRecipeError(getSharedRecipeErrorMessage(error));
+        }
       }
     },
     [commitSavedRecipes, upsertSharedRecipe]
@@ -852,8 +917,15 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
 
   const deleteSharedRecipe = useCallback(
     async (id: string): Promise<SaveRecipeResult> => {
+      const startedFor = latestRef.current.userId;
+
       try {
         await latestRef.current.client.deleteSharedRecipe(id);
+
+        if (latestRef.current.userId !== startedFor) {
+          return SWITCHED_ACCOUNT_RESULT;
+        }
+
         removeSharedRecipeFromState(id);
         setSharedRecipeError(null);
 
@@ -862,6 +934,10 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
           saved: true
         };
       } catch (error) {
+        if (latestRef.current.userId !== startedFor) {
+          return SWITCHED_ACCOUNT_RESULT;
+        }
+
         const message = getSharedRecipeErrorMessage(error);
         setSharedRecipeError(message);
 
@@ -973,10 +1049,17 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
       target: "personal" | "family" | "both"
     ): Promise<SaveRecipeResult & { recipeId?: string; sharedRecipeId?: string }> => {
       if (target === "family") {
+        const sharedFor = latestRef.current.userId;
+
         try {
           const response = await latestRef.current.client.createSharedRecipe(
             successStateToSharedRecipeRequest(state)
           );
+
+          if (latestRef.current.userId !== sharedFor) {
+            return SWITCHED_ACCOUNT_RESULT;
+          }
+
           upsertSharedRecipe(response.recipe);
           setSharedRecipeError(null);
 
@@ -995,6 +1078,10 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
             sharedRecipeId: response.recipe.id
           };
         } catch (error) {
+          if (latestRef.current.userId !== sharedFor) {
+            return SWITCHED_ACCOUNT_RESULT;
+          }
+
           const message = getSharedRecipeErrorMessage(error);
           setSharedRecipeError(message);
 
@@ -1127,8 +1214,15 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
         };
       }
 
+      const startedFor = latestRef.current.userId;
+
       try {
         await latestRef.current.client.deleteSharedRecipe(sourceRecord.sharedRecipeId);
+
+        if (latestRef.current.userId !== startedFor) {
+          return SWITCHED_ACCOUNT_RESULT;
+        }
+
         removeSharedRecipeFromState(sourceRecord.sharedRecipeId);
         commitSavedRecipes((current) => markSavedRecipeUnshared(current, id));
         setSharedRecipeError(null);
@@ -1138,6 +1232,10 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
           saved: true
         };
       } catch (error) {
+        if (latestRef.current.userId !== startedFor) {
+          return SWITCHED_ACCOUNT_RESULT;
+        }
+
         const message = getSharedRecipeErrorMessage(error);
         setSharedRecipeError(message);
 
@@ -1182,6 +1280,8 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
         return false;
       }
 
+      const startedFor = latestRef.current.userId;
+
       try {
         const apiClient = latestRef.current.client;
         const payload: Parameters<typeof apiClient.updateSharedRecipe>[1] = {
@@ -1194,11 +1294,20 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
         }
 
         const response = await apiClient.updateSharedRecipe(id, payload);
+
+        // Someone else signed in (or out) meanwhile: this Family recipe isn't in their list.
+        if (latestRef.current.userId !== startedFor) {
+          return false;
+        }
+
         upsertSharedRecipe(response.recipe);
         setSharedRecipeError(null);
         return true;
       } catch (error) {
-        setSharedRecipeError(getSharedRecipeErrorMessage(error));
+        if (latestRef.current.userId === startedFor) {
+          setSharedRecipeError(getSharedRecipeErrorMessage(error));
+        }
+
         return false;
       }
     },
