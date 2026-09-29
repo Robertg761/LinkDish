@@ -22,7 +22,13 @@ import {
 } from "../features/library/saved-recipe-store";
 
 import { isDeepEqual, reconcileById } from "./reconcile";
-import { createResourceStore, toViewStatus, upsertById, useResource } from "./resource-store";
+import {
+  createOptimisticRecordChange,
+  createResourceStore,
+  toViewStatus,
+  upsertById,
+  useResource
+} from "./resource-store";
 
 import type { DataChange } from "./change-feed";
 import type {
@@ -190,37 +196,22 @@ export const getCachedSavedRecipe = (id: string): WebSavedRecipe | undefined =>
  * Optimistic mutations
  * ---------------------------------------------------------------------------------------------- */
 
-const replaceCached = (recipe: WebSavedRecipe) => {
-  libraryResource.update((current) =>
-    current.map((entry) => (entry.id === recipe.id ? recipe : entry))
-  );
+const readSavedRecipeListRecord = async (id: string): Promise<WebSavedRecipe | undefined> => {
+  const record = await getSavedRecipeById(id);
+  return record && toSavedRecipeListRecord(record);
 };
 
 /**
- * Applies `patch` to the cached recipe immediately, persists with `commit`, and rolls the cache
- * back (rethrowing) when persisting fails.
+ * Applies `patch` to the cached recipe immediately (`undefined` removes it), persists with
+ * `commit`, and when persisting fails rolls back that recipe alone (rethrowing), keeping any
+ * change to it or to other recipes that landed meanwhile.
  */
-async function optimistic<Result>(
-  id: string,
-  patch: (recipe: WebSavedRecipe) => WebSavedRecipe,
-  commit: () => Promise<Result>
-): Promise<Result> {
-  const previous = getCachedSavedRecipe(id);
-
-  if (previous) {
-    replaceCached(patch(previous));
-  }
-
-  try {
-    return await commit();
-  } catch (error) {
-    if (previous) {
-      replaceCached(previous);
-    }
-
-    throw error;
-  }
-}
+const optimistic = createOptimisticRecordChange(libraryResource, {
+  getId: getRecipeId,
+  order: sortSavedRecipes,
+  read: readSavedRecipeListRecord,
+  reconcile: reconcileRecipe
+});
 
 const setOrDelete = <Key extends WebSavedRecipeMetadataKey | "notes">(
   recipe: WebSavedRecipe,
@@ -373,20 +364,15 @@ export const updateNotes = (id: string, notes: string | null) =>
  * recipe as it was deleted, scans included, for Undo (`undefined` when it was already gone or
  * could not be read). With `snapshot: false` (no Undo) nothing is read and it resolves `undefined`.
  */
-export async function removeSavedRecipe(
+export const removeSavedRecipe = (
   id: string,
   options?: { snapshot?: boolean }
-): Promise<WebSavedRecipe | undefined> {
-  const previous = libraryResource.getSnapshot().data;
-  libraryResource.update((current) => current.filter((recipe) => recipe.id !== id));
-
-  try {
-    return await deleteSavedRecipe(id, options);
-  } catch (error) {
-    libraryResource.update(() => previous);
-    throw error;
-  }
-}
+): Promise<WebSavedRecipe | undefined> =>
+  optimistic(
+    id,
+    () => undefined,
+    () => deleteSavedRecipe(id, options)
+  );
 
 /** Duplicates a recipe (throws `SavedRecipeLimitError` for full free cookbooks). */
 export const duplicateRecipe = (id: string, options?: SavedRecipeQuotaOptions) =>

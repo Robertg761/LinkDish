@@ -1,6 +1,7 @@
 import { useEffect, useSyncExternalStore } from "react";
 
 import { subscribeDataChanges, type DataChange, type DataTopic } from "./change-feed";
+import { isDeepEqual } from "./reconcile";
 
 /**
  * A tiny cache-once, reactive resource built for `useSyncExternalStore` (no dependencies).
@@ -302,4 +303,114 @@ export function upsertById<T>(
   }
 
   return Array.from(byId.values());
+}
+
+export interface OptimisticRecordOptions<T> {
+  getId: (record: T) => string;
+  /** Puts a new copy of the list back in order (it may sort that copy in place). */
+  order: (records: T[]) => T[];
+  /** Reads the record as stored now (`undefined`: there is none). */
+  read: (id: string) => Promise<T | undefined>;
+  /** Keeps the cached record's objects in an equal re-read one (default: the whole record). */
+  reconcile?: ((cached: T, stored: T) => T) | undefined;
+}
+
+/**
+ * Shows `change(record)` in the cache at once (`undefined` removes the record) while `commit`
+ * saves it. Settles like `commit`.
+ */
+export type OptimisticRecordChange<T> = <Result>(
+  id: string,
+  change: (record: T) => T | undefined,
+  commit: () => Promise<Result>
+) => Promise<Result>;
+
+const keepEqualRecord = <T>(cached: T, stored: T): T =>
+  isDeepEqual(cached, stored) ? cached : stored;
+
+/**
+ * Optimistic changes to single records of a list resource. A failed save rolls back that one
+ * record, never a snapshot of the whole list: that would undo every other change that landed
+ * while the save was pending (a record deleted meanwhile would come back, a newer write would be
+ * lost), and the stale view would stay until a reload.
+ *
+ * The rollback only happens while the cache still shows this change: a newer change to the record
+ * (a later write's result, another tab's reload) is kept. It puts back the record as it was, then
+ * settles on the record as storage has it now, since what it put back may itself have been
+ * another optimistic change that failed too, or the record may have been deleted meanwhile.
+ */
+export function createOptimisticRecordChange<T>(
+  store: ResourceStore<T[]>,
+  { getId, order, read, reconcile = keepEqualRecord }: OptimisticRecordOptions<T>
+): OptimisticRecordChange<T> {
+  /**
+   * Shows `next` for record `id` (`undefined`: none) if the cache shows `expected` for it. A
+   * record put back goes in at `at` before ordering, so it keeps its place among equals.
+   */
+  const swap = (id: string, expected: T | undefined, next: T | undefined, at = -1): boolean => {
+    let swapped = false;
+
+    store.update((current) => {
+      const index = current.findIndex((record) => getId(record) === id);
+      const shown = index === -1 ? undefined : current[index];
+
+      if (shown !== expected) {
+        return current;
+      }
+
+      swapped = true;
+
+      if (next === shown) {
+        return current;
+      }
+
+      if (next === undefined) {
+        return current.filter((_record, position) => position !== index);
+      }
+
+      const list = [...current];
+
+      if (index === -1) {
+        list.splice(at === -1 ? list.length : at, 0, next);
+      } else {
+        list[index] = next;
+      }
+
+      return order(list);
+    });
+
+    return swapped;
+  };
+
+  /** After a rollback to `restored`: shows the record as stored, unless it changed meanwhile. */
+  const settle = async (id: string, restored: T): Promise<void> => {
+    let stored: T | undefined;
+
+    try {
+      stored = await read(id);
+    } catch {
+      // Storage can't be read either: keep the record as it was before the change.
+      return;
+    }
+
+    swap(id, restored, stored && reconcile(restored, stored));
+  };
+
+  return async (id, change, commit) => {
+    const cached = store.getSnapshot().data;
+    const at = cached.findIndex((record) => getId(record) === id);
+    const previous = at === -1 ? undefined : cached[at];
+    const optimistic = previous && change(previous);
+    const shown = previous !== undefined && swap(id, previous, optimistic);
+
+    try {
+      return await commit();
+    } catch (error) {
+      if (shown && swap(id, optimistic, previous, at)) {
+        void settle(id, previous);
+      }
+
+      throw error;
+    }
+  };
 }

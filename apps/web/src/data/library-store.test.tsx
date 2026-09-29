@@ -1,13 +1,19 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { saveRecipe } from "../features/library/saved-recipe-store";
-import { resetLinkDishWebDbForTests, SAVED_RECIPES_STORE_NAME } from "../storage/linkdish-db";
+import { saveRecipe, seedStarterRecipesIfNeeded } from "../features/library/saved-recipe-store";
+import {
+  getLinkDishWebDb,
+  resetLinkDishWebDbForTests,
+  SAVED_RECIPES_STORE_NAME
+} from "../storage/linkdish-db";
 import { fakeIdb } from "../storage/testing/fake-idb";
+import { holdNextWrite } from "../storage/testing/held-write";
 
 import { resetDataChangeFeedForTests, setDataChannelFactoryForTests } from "./change-feed";
 import {
   getCachedSavedRecipe,
+  getSavedRecipesSnapshot,
   loadSavedRecipes,
   logCooked,
   removeSavedRecipe,
@@ -66,6 +72,16 @@ const saveInput = (index: number) => ({
   },
   sourceUrl: `https://example.com/${index}`
 });
+
+/**
+ * Loads the cookbook with nothing left to settle: seeding the starters during the first load
+ * would re-read it once more in the background. Resolves with the ids as listed.
+ */
+const loadSettledCookbook = async (): Promise<string[]> => {
+  await seedStarterRecipesIfNeeded();
+  await loadSavedRecipes();
+  return getSavedRecipesSnapshot().data.map((recipe) => recipe.id);
+};
 
 describe("library-store", () => {
   let channel: {
@@ -213,6 +229,67 @@ describe("library-store", () => {
     });
     expect(result.current.recipes.map((recipe) => recipe.id)).not.toContain(id);
     expect(fakeIdb.record(SAVED_RECIPES_STORE_NAME, id)).toBeUndefined();
+  });
+
+  it("restores only the recipe whose delete failed, keeping one deleted meanwhile", async () => {
+    const [failing, deleted, kept] = await loadSettledCookbook();
+    const shownIds = () => getSavedRecipesSnapshot().data.map((recipe) => recipe.id);
+    const held = holdNextWrite(await getLinkDishWebDb(), "transaction");
+
+    const removing = removeSavedRecipe(failing!, { snapshot: false });
+    await held.started;
+    expect(shownIds()).toEqual([deleted, kept]);
+
+    // Another delete is saved while the first one is pending.
+    await removeSavedRecipe(deleted!);
+    held.fail(new Error("disk full"));
+    await expect(removing).rejects.toThrow("disk full");
+
+    // Back in its place, and the other recipe stays deleted.
+    expect(shownIds()).toEqual([failing, kept]);
+    expect(fakeIdb.record(SAVED_RECIPES_STORE_NAME, deleted!)).toBeUndefined();
+    expect(fakeIdb.record(SAVED_RECIPES_STORE_NAME, failing!)).toBeDefined();
+  });
+
+  it("rolls back a failed metadata change without losing a newer one saved meanwhile", async () => {
+    const [id] = await loadSettledCookbook();
+    const held = holdNextWrite(await getLinkDishWebDb(), "transaction");
+
+    const favoriting = setFavorite(id!, true);
+    await held.started;
+    expect(getCachedSavedRecipe(id!)?.favorite).toBe(true);
+
+    await setRating(id!, 5);
+    held.fail(new Error("disk full"));
+    await expect(favoriting).rejects.toThrow("disk full");
+
+    expect(getCachedSavedRecipe(id!)?.rating).toBe(5);
+    expect(getCachedSavedRecipe(id!)).not.toHaveProperty("favorite");
+    const stored = fakeIdb.record<WebSavedRecipe>(SAVED_RECIPES_STORE_NAME, id!);
+    expect(stored?.rating).toBe(5);
+    expect(stored).not.toHaveProperty("favorite");
+  });
+
+  it("settles on the stored recipe when the change a rollback restores never saved", async () => {
+    const [id] = await loadSettledCookbook();
+    const db = await getLinkDishWebDb();
+
+    const favoriteHeld = holdNextWrite(db, "transaction");
+    const favoriting = setFavorite(id!, true);
+    await favoriteHeld.started;
+    const ratingHeld = holdNextWrite(db, "transaction");
+    const rating = setRating(id!, 2);
+    await ratingHeld.started;
+    expect(getCachedSavedRecipe(id!)).toMatchObject({ favorite: true, rating: 2 });
+
+    favoriteHeld.fail(new Error("disk full"));
+    await expect(favoriting).rejects.toThrow("disk full");
+    ratingHeld.fail(new Error("disk full"));
+    await expect(rating).rejects.toThrow("disk full");
+
+    // Rolling the rating back alone would show the favorite that never saved either.
+    await waitFor(() => expect(getCachedSavedRecipe(id!)).not.toHaveProperty("favorite"));
+    expect(getCachedSavedRecipe(id!)).not.toHaveProperty("rating");
   });
 
   it("refreshes when another tab changes the library", async () => {
