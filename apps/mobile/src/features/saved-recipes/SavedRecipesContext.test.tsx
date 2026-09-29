@@ -887,6 +887,58 @@ describe("SavedRecipesProvider household save entitlement", () => {
       expect(latestSavedRecipes?.savedRecipes[0]?.sharedRecipeId).toBe("other_copy");
     });
 
+    it("shares its own copy of an old Family link before its Family list says whose it is", async () => {
+      // Linked before sharers were recorded, by member_1 on this phone; another account is
+      // signed in now and its Family list hasn't answered yet.
+      const [record] = buildSavedRecipes(1);
+      storeSavedRecipes([
+        { ...record!, sharedAt: "2026-04-19T12:10:00.000Z", sharedRecipeId: "member_copy" }
+      ]);
+      signInAsMember();
+      accountState.user = { email: "other@example.com", id: "other_1" };
+      apiMocks.getSharedRecipes.mockReturnValue(new Promise(() => undefined));
+      apiMocks.createSharedRecipe.mockResolvedValue({
+        recipe: { ...buildSharedRecipe(1, "other_copy"), ownerUserId: "other_1" }
+      });
+      await renderProvider();
+
+      expect(latestSavedRecipes?.savedRecipes[0]?.sharedRecipeId).toBeUndefined();
+
+      await act(async () => {
+        await latestSavedRecipes!.unshareRecipe(record!.id);
+        await flushAsyncWork();
+      });
+      expect(apiMocks.deleteSharedRecipe).not.toHaveBeenCalled();
+
+      await act(async () => {
+        await latestSavedRecipes!.shareRecipe(record!.id);
+        await flushAsyncWork();
+      });
+      expect(apiMocks.updateSharedRecipe).not.toHaveBeenCalled();
+      expect(apiMocks.createSharedRecipe).toHaveBeenCalledTimes(1);
+      expect(latestSavedRecipes?.savedRecipes[0]?.sharedRecipeId).toBe("other_copy");
+    });
+
+    it("records an old Family link as the account's once its Family list shows it", async () => {
+      const [record] = buildSavedRecipes(1);
+      storeSavedRecipes([
+        { ...record!, sharedAt: "2026-04-19T12:10:00.000Z", sharedRecipeId: "member_copy" }
+      ]);
+      signInAsMember();
+      apiMocks.getSharedRecipes.mockResolvedValue({
+        recipes: [{ ...buildSharedRecipe(1, "member_copy"), ownerUserId: "member_1" }]
+      });
+      await renderProvider();
+
+      await act(async () => {
+        await flushAsyncWork();
+      });
+      expect(latestSavedRecipes?.savedRecipes[0]).toMatchObject({
+        sharedByUserId: "member_1",
+        sharedRecipeId: "member_copy"
+      });
+    });
+
     it("keeps a share that finished after a switch out of the next account's Family", async () => {
       storeSavedRecipes(buildSavedRecipes(1));
       signInAsMember();

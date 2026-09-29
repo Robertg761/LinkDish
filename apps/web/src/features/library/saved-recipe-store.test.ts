@@ -39,6 +39,7 @@ import {
   setRecipeRating,
   setRecipeTags,
   getOwnSharedRecipeId,
+  recordSharedLinkOwners,
   syncRecipeToHousehold,
   updateRecipeNotes,
   updateSavedRecipe,
@@ -942,6 +943,62 @@ describe("saved-recipe-store v4 behaviour", () => {
       });
     });
 
+    it("shares the account's own copy instead of updating a link from before sharers were recorded", async () => {
+      const { recipe: saved } = await saveRecipe(createSaveInput(1), true);
+      fakeIdb.seed(SAVED_RECIPES_STORE_NAME, [
+        { ...saved, sync: { sharedRecipeId: "a_copy", status: "synced" } }
+      ]);
+      publishCurrentAccount("user_b");
+      apiMocks.getHousehold.mockResolvedValue({ household: { id: "house_b" } });
+      apiMocks.createSharedRecipe.mockResolvedValue({
+        recipe: { id: "b_copy", ownerUserId: "user_b", updatedAt: "2026-09-04T00:00:00.000Z" }
+      });
+
+      const synced = await syncRecipeToHousehold((await getSavedRecipeById(saved!.id))!);
+
+      // For the account that did share it, the same call updates its copy (the API keys copies
+      // by sharer and saved recipe), so nobody ends up with two.
+      expect(apiMocks.updateSharedRecipe).not.toHaveBeenCalled();
+      expect(apiMocks.createSharedRecipe).toHaveBeenCalledWith(
+        expect.objectContaining({ sourceSavedRecipeId: saved!.id })
+      );
+      expect(synced.sync).toMatchObject({
+        sharedBy: "user_b",
+        sharedRecipeId: "b_copy",
+        status: "synced"
+      });
+    });
+
+    it("records whose Family copy an old link is once a Family list shows it", async () => {
+      const { recipe: first } = await saveRecipe(createSaveInput(1), true);
+      const { recipe: second } = await saveRecipe(createSaveInput(2), true);
+      const { recipe: third } = await saveRecipe(createSaveInput(3), true);
+      fakeIdb.seed(SAVED_RECIPES_STORE_NAME, [
+        { ...first, sync: { sharedRecipeId: "a_copy", status: "synced" } },
+        { ...second, sync: { sharedRecipeId: "gone_copy", status: "synced" } },
+        { ...third, sync: { sharedBy: "user_c", sharedRecipeId: "c_copy", status: "synced" } }
+      ]);
+
+      await recordSharedLinkOwners([
+        { id: "a_copy", ownerUserId: "user_a" },
+        { id: "c_copy", ownerUserId: "user_a" }
+      ]);
+
+      expect(fakeIdb.record(SAVED_RECIPES_STORE_NAME, first!.id)).toMatchObject({
+        sync: { sharedBy: "user_a", sharedRecipeId: "a_copy", status: "synced" }
+      });
+      // Not in the list: still nobody's. Already recorded: left as it is.
+      expect(fakeIdb.record(SAVED_RECIPES_STORE_NAME, second!.id)).toMatchObject({
+        sync: { sharedRecipeId: "gone_copy", status: "synced" }
+      });
+      expect(
+        (fakeIdb.record(SAVED_RECIPES_STORE_NAME, second!.id) as WebSavedRecipe).sync
+      ).not.toHaveProperty("sharedBy");
+      expect(fakeIdb.record(SAVED_RECIPES_STORE_NAME, third!.id)).toMatchObject({
+        sync: { sharedBy: "user_c" }
+      });
+    });
+
     it("updates the account's own link as before", async () => {
       const { recipe: saved } = await saveRecipe(createSaveInput(1), true);
       fakeIdb.seed(SAVED_RECIPES_STORE_NAME, [
@@ -966,8 +1023,17 @@ describe("saved-recipe-store v4 behaviour", () => {
       expect(getOwnSharedRecipeId(linked as WebSavedRecipe, "user_a")).toBe("a_copy");
       expect(getOwnSharedRecipeId(linked as WebSavedRecipe, "user_b")).toBeUndefined();
       expect(getOwnSharedRecipeId(linked as WebSavedRecipe, null)).toBeUndefined();
-      // Links made before the sharer was recorded stay usable, as before.
-      expect(getOwnSharedRecipeId(legacy as WebSavedRecipe, "user_b")).toBe("old_copy");
+      // A link made before sharers were recorded is nobody's until the account's Family list
+      // says whose copy it is.
+      const family = [{ id: "old_copy", ownerUserId: "user_a" }];
+      expect(getOwnSharedRecipeId(legacy as WebSavedRecipe, "user_b")).toBeUndefined();
+      expect(getOwnSharedRecipeId(legacy as WebSavedRecipe, "user_a")).toBeUndefined();
+      expect(getOwnSharedRecipeId(legacy as WebSavedRecipe, "user_a", family)).toBe("old_copy");
+      expect(getOwnSharedRecipeId(legacy as WebSavedRecipe, "user_b", family)).toBeUndefined();
+      expect(withOwnSharedLink(legacy as WebSavedRecipe, "user_b").sync).toEqual({
+        status: "local_only"
+      });
+      expect(withOwnSharedLink(legacy as WebSavedRecipe, "user_a", family)).toBe(legacy);
       expect(withOwnSharedLink(linked as WebSavedRecipe, "user_b").sync).toEqual({
         status: "local_only"
       });

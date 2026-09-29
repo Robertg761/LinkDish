@@ -96,6 +96,7 @@ import {
   restoreSavedRecipe,
   SavedRecipeLimitError,
   syncRecipeToHousehold,
+  recordSharedLinkOwners,
   withOwnSharedLink
 } from "./saved-recipe-store";
 
@@ -237,11 +238,35 @@ export const LibraryPage: React.FC = () => {
   const searching = searchText.length > 0;
   const engine = useSearchEngine(query.trim().length > 0);
   // The cookbook as this account sees it: another account's Family link on a recipe reads as not
-  // shared (it can't update, unshare or delete that account's copy).
+  // shared (it can't update, unshare or delete that account's copy), as does a link from before
+  // sharers were recorded until this account's Family list shows the copy is its own.
+  const family = shared.status === "ready" ? shared.recipes : null;
   const recipes = useMemo(
-    () => library.recipes.map((recipe) => withOwnSharedLink(recipe, account)),
-    [account, library.recipes]
+    () => library.recipes.map((recipe) => withOwnSharedLink(recipe, account, family)),
+    [account, family, library.recipes]
   );
+
+  // Once the Family list shows whose copy such an old link is, store that, so the link reads right
+  // wherever the list isn't at hand.
+  useEffect(() => {
+    if (!family?.length) {
+      return;
+    }
+
+    const listed = new Set(family.map((copy) => copy.id));
+    const unrecorded = library.recipes.some(
+      (recipe) =>
+        recipe.sync?.sharedRecipeId !== undefined &&
+        recipe.sync.sharedBy === undefined &&
+        listed.has(recipe.sync.sharedRecipeId)
+    );
+
+    if (unrecorded) {
+      recordSharedLinkOwners(family).catch((error: unknown) => {
+        console.warn("Could not record who shared Family recipes:", error);
+      });
+    }
+  }, [family, library.recipes]);
   const billingTier = getWebBillingTier(user);
   const isPremiumUser = isAuthenticated ? billingTier !== "free" : undefined;
   const canUseSharedRecipeBook = isAuthenticated && !shared.accessBlocked;

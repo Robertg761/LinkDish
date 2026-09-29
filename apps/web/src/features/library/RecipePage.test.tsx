@@ -591,7 +591,9 @@ describe("RecipePage saved route", () => {
   it("deletes the household copy first for synced recipes", async () => {
     authMocks.user = { billingPlan: "family", email: "a@example.com", id: "user_1" };
     apiMocks.deleteSharedRecipe.mockResolvedValue(undefined);
-    await seed([savedRecipe({ sync: { sharedRecipeId: "shared_9", status: "synced" } })]);
+    await seed([
+      savedRecipe({ sync: { sharedBy: "user_1", sharedRecipeId: "shared_9", status: "synced" } })
+    ]);
     renderAt("/recipes/recipe_local");
     await screen.findByRole("heading", { level: 1, name: "Weeknight Chili" });
 
@@ -608,7 +610,9 @@ describe("RecipePage saved route", () => {
   it("removes a synced recipe here once its household copy is gone, even if its scans can't be read", async () => {
     authMocks.user = { billingPlan: "family", email: "a@example.com", id: "user_1" };
     apiMocks.deleteSharedRecipe.mockResolvedValue(undefined);
-    await seed([savedRecipe({ sync: { sharedRecipeId: "shared_9", status: "synced" } })]);
+    await seed([
+      savedRecipe({ sync: { sharedBy: "user_1", sharedRecipeId: "shared_9", status: "synced" } })
+    ]);
     fakeIdb.seed(RECIPE_SOURCE_IMAGES_STORE_NAME, [
       { images: [], recipeId: "recipe_local", updatedAt: "2026-06-02T12:00:00.000Z" }
     ]);
@@ -636,7 +640,9 @@ describe("RecipePage saved route", () => {
   it("keeps a synced recipe when the household copy can't be deleted", async () => {
     authMocks.user = { billingPlan: "family", email: "a@example.com", id: "user_1" };
     apiMocks.deleteSharedRecipe.mockRejectedValue(new Error("offline"));
-    await seed([savedRecipe({ sync: { sharedRecipeId: "shared_9", status: "synced" } })]);
+    await seed([
+      savedRecipe({ sync: { sharedBy: "user_1", sharedRecipeId: "shared_9", status: "synced" } })
+    ]);
     renderAt("/recipes/recipe_local");
     await screen.findByRole("heading", { level: 1, name: "Weeknight Chili" });
 
@@ -660,7 +666,9 @@ describe("RecipePage saved route", () => {
         failRemoval = reject;
       })
     );
-    await seed([savedRecipe({ sync: { sharedRecipeId: "shared_9", status: "synced" } })]);
+    await seed([
+      savedRecipe({ sync: { sharedBy: "user_1", sharedRecipeId: "shared_9", status: "synced" } })
+    ]);
     const view = renderAt("/recipes/recipe_local");
     await screen.findByRole("heading", { level: 1, name: "Weeknight Chili" });
 
@@ -688,7 +696,9 @@ describe("RecipePage saved route", () => {
 
   it("closes a Delete recipe? confirmation when the account that opened it signs out", async () => {
     authMocks.user = { billingPlan: "family", email: "a@example.com", id: "user_1" };
-    await seed([savedRecipe({ sync: { sharedRecipeId: "shared_9", status: "synced" } })]);
+    await seed([
+      savedRecipe({ sync: { sharedBy: "user_1", sharedRecipeId: "shared_9", status: "synced" } })
+    ]);
     const view = renderAt("/recipes/recipe_local");
     await screen.findByRole("heading", { level: 1, name: "Weeknight Chili" });
 
@@ -775,7 +785,9 @@ describe("RecipePage saved route", () => {
 
   it("edits in a sheet and marks synced recipes as having local edits", async () => {
     authMocks.user = { billingPlan: "family", email: "a@example.com", id: "user_1" };
-    await seed([savedRecipe({ sync: { sharedRecipeId: "shared_9", status: "synced" } })]);
+    await seed([
+      savedRecipe({ sync: { sharedBy: "user_1", sharedRecipeId: "shared_9", status: "synced" } })
+    ]);
     renderAt("/recipes/recipe_local");
     await screen.findByRole("heading", { level: 1, name: "Weeknight Chili" });
 
@@ -834,7 +846,9 @@ describe("RecipePage saved route", () => {
     });
 
     it("sends the edit for a recipe that was in sync before it", async () => {
-      await seed([savedRecipe({ sync: { sharedRecipeId: "shared_9", status: "synced" } })]);
+      await seed([
+        savedRecipe({ sync: { sharedBy: "user_1", sharedRecipeId: "shared_9", status: "synced" } })
+      ]);
       renderAt("/recipes/recipe_local");
       await screen.findByRole("heading", { level: 1, name: "Weeknight Chili" });
       await editTitleAndSave("Best Chili");
@@ -850,7 +864,9 @@ describe("RecipePage saved route", () => {
     });
 
     it("keeps the edit (and sends it) for a recipe that already had unsynced changes", async () => {
-      await seed([savedRecipe({ sync: { sharedRecipeId: "shared_9", status: "dirty" } })]);
+      await seed([
+        savedRecipe({ sync: { sharedBy: "user_1", sharedRecipeId: "shared_9", status: "dirty" } })
+      ]);
       renderAt("/recipes/recipe_local");
       await screen.findByRole("heading", { level: 1, name: "Weeknight Chili" });
       await editTitleAndSave("Best Chili");
@@ -866,7 +882,9 @@ describe("RecipePage saved route", () => {
     });
 
     it("isn't offered when a save changed nothing and the recipe is still in sync", async () => {
-      await seed([savedRecipe({ sync: { sharedRecipeId: "shared_9", status: "synced" } })]);
+      await seed([
+        savedRecipe({ sync: { sharedBy: "user_1", sharedRecipeId: "shared_9", status: "synced" } })
+      ]);
       renderAt("/recipes/recipe_local");
       await screen.findByRole("heading", { level: 1, name: "Weeknight Chili" });
 

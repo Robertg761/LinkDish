@@ -527,7 +527,7 @@ describe("LibraryPage", () => {
     authMocks.user = { billingPlan: "family", email: "owner@example.com", id: "user_owner" };
     seedRecipes([
       makeRecipe("chili", {
-        extra: { sync: { sharedRecipeId: "shared_9", status: "synced" } },
+        extra: { sync: { sharedBy: "user_owner", sharedRecipeId: "shared_9", status: "synced" } },
         title: "Chili"
       })
     ]);
@@ -564,11 +564,63 @@ describe("LibraryPage", () => {
     expect(apiMocks.deleteSharedRecipe).not.toHaveBeenCalled();
   });
 
+  it("deletes just this device's copy of an old Family link its Family list doesn't show as this account's", async () => {
+    // Linked before sharers were recorded, by another account on this device.
+    authMocks.user = { billingPlan: "family", email: "owner@example.com", id: "user_owner" };
+    apiMocks.getSharedRecipes.mockResolvedValue({
+      recipes: [sharedRecipe({ id: "shared_9", ownerUserId: "user_other" })]
+    });
+    seedRecipes([
+      makeRecipe("chili", {
+        extra: { sync: { sharedRecipeId: "shared_9", status: "synced" } },
+        title: "Chili"
+      })
+    ]);
+
+    renderPage();
+    await screen.findByText("Chili");
+    await waitFor(() => expect(apiMocks.getSharedRecipes).toHaveBeenCalled());
+    fireEvent.click(within(openCardMenu("Chili")).getByRole("menuitem", { name: "Delete" }));
+
+    expect(await screen.findByText("Deleted “Chili”")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Delete shared recipe?" })).not.toBeInTheDocument();
+    expect(apiMocks.deleteSharedRecipe).not.toHaveBeenCalled();
+  });
+
+  it("records an old Family link as this account's once its Family list shows it", async () => {
+    authMocks.user = { billingPlan: "family", email: "owner@example.com", id: "user_owner" };
+    apiMocks.getSharedRecipes.mockResolvedValue({
+      recipes: [sharedRecipe({ id: "shared_9", ownerUserId: "user_owner" })]
+    });
+    seedRecipes([
+      makeRecipe("chili", {
+        extra: { sync: { sharedRecipeId: "shared_9", status: "synced" } },
+        title: "Chili"
+      })
+    ]);
+
+    renderPage();
+    await screen.findByText("Chili");
+    await waitFor(() =>
+      expect(storedRecipe("chili")?.sync).toMatchObject({
+        sharedBy: "user_owner",
+        sharedRecipeId: "shared_9"
+      })
+    );
+
+    fireEvent.click(within(openCardMenu("Chili")).getByRole("menuitem", { name: "Delete" }));
+    const dialog = await screen.findByRole("dialog", { name: "Delete shared recipe?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete everywhere" }));
+
+    await waitFor(() => expect(storedRecipe("chili")).toBeUndefined());
+    expect(apiMocks.deleteSharedRecipe).toHaveBeenCalledWith("shared_9");
+  });
+
   it("closes a Delete everywhere confirmation when the account that opened it signs out", async () => {
     authMocks.user = { billingPlan: "family", email: "owner@example.com", id: "user_owner" };
     seedRecipes([
       makeRecipe("chili", {
-        extra: { sync: { sharedRecipeId: "shared_9", status: "synced" } },
+        extra: { sync: { sharedBy: "user_owner", sharedRecipeId: "shared_9", status: "synced" } },
         title: "Chili"
       })
     ]);
@@ -597,7 +649,7 @@ describe("LibraryPage", () => {
     authMocks.user = { billingPlan: "family", email: "owner@example.com", id: "user_owner" };
     seedRecipes([
       makeRecipe("chili", {
-        extra: { sync: { sharedRecipeId: "shared_9", status: "synced" } },
+        extra: { sync: { sharedBy: "user_owner", sharedRecipeId: "shared_9", status: "synced" } },
         title: "Chili"
       })
     ]);
@@ -633,7 +685,7 @@ describe("LibraryPage", () => {
     apiMocks.deleteSharedRecipe.mockRejectedValue(new apiMocks.ExtractorApiError("nope", 500));
     seedRecipes([
       makeRecipe("chili", {
-        extra: { sync: { sharedRecipeId: "shared_9", status: "synced" } },
+        extra: { sync: { sharedBy: "user_owner", sharedRecipeId: "shared_9", status: "synced" } },
         title: "Chili"
       })
     ]);
@@ -666,7 +718,7 @@ describe("LibraryPage", () => {
     );
     seedRecipes([
       makeRecipe("chili", {
-        extra: { sync: { sharedRecipeId: "shared_9", status: "synced" } },
+        extra: { sync: { sharedBy: "user_owner", sharedRecipeId: "shared_9", status: "synced" } },
         title: "Chili"
       })
     ]);

@@ -534,10 +534,11 @@ export const markSavedRecipeUnshared = (
   );
 
 /**
- * The Family copy `record` links to, when that link is `userId`'s to use: it shared it, or
- * (a link from before sharers were recorded) that account's Family list has the copy as its own,
- * or its list isn't loaded yet. Another account's link on this device is not this one's to
- * update or unshare.
+ * The Family copy `record` links to, when that link is `userId`'s to use: it shared it, or (a link
+ * from before sharers were recorded) that account's Family list has the copy as its own. Another
+ * account's link on this device is not this one's to update or unshare. Sharing a recipe whose
+ * old link isn't known to be the account's is safe: the API keys copies by sharer and recipe, so
+ * the account that shared it gets its own copy back, updated, and any other one a copy of its own.
  */
 export const getOwnSharedRecipeId = (
   record: Pick<SavedRecipeRecord, "sharedByUserId" | "sharedRecipeId">,
@@ -552,8 +553,38 @@ export const getOwnSharedRecipeId = (
     return record.sharedByUserId === userId ? record.sharedRecipeId : undefined;
   }
 
+  // From before sharers were recorded: nobody's until the account's Family list shows whose copy
+  // it is (recordSharedLinkOwners then stores that).
   const copy = familyRecipes?.find((entry) => entry.id === record.sharedRecipeId);
-  return familyRecipes === null || copy?.ownerUserId === userId ? record.sharedRecipeId : undefined;
+  return copy?.ownerUserId === userId ? record.sharedRecipeId : undefined;
+};
+
+/**
+ * `records` with the sharer recorded on each link made before sharers were recorded whose copy
+ * `familyRecipes` (an account's Family list) shows, so those links read right without the list.
+ * Links to copies it doesn't list stay nobody's. The same array when there is nothing to record.
+ */
+export const recordSharedLinkOwners = <Entry extends SavedRecipeRecord>(
+  records: Entry[],
+  familyRecipes: readonly Pick<SharedRecipe, "id" | "ownerUserId">[]
+): Entry[] => {
+  const owners = new Map(familyRecipes.map((entry) => [entry.id, entry.ownerUserId]));
+  let changed = false;
+  const next = records.map((record) => {
+    const owner =
+      record.sharedRecipeId && !record.sharedByUserId
+        ? owners.get(record.sharedRecipeId)
+        : undefined;
+
+    if (!owner) {
+      return record;
+    }
+
+    changed = true;
+    return { ...record, sharedByUserId: owner };
+  });
+
+  return changed ? next : records;
 };
 
 /**

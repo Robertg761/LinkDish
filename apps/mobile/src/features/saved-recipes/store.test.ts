@@ -24,6 +24,7 @@ import {
   updateSavedRecipeRecord,
   upsertSavedRecipeRecord,
   getOwnSharedRecipeId,
+  recordSharedLinkOwners,
   markSavedRecipeShared,
   markSavedRecipeUnshared,
   withOwnSharedLink
@@ -436,7 +437,9 @@ describe("saved recipe store helpers", () => {
     expect(getOwnSharedRecipeId(record(), "user_1", family)).toBe("copy_1");
     expect(getOwnSharedRecipeId(record(), "user_2", family)).toBeUndefined();
     expect(getOwnSharedRecipeId(record(), "user_2", [])).toBeUndefined();
-    expect(getOwnSharedRecipeId(record(), "user_2", null)).toBe("copy_1");
+    // Until the list has loaded, such a link is nobody's.
+    expect(getOwnSharedRecipeId(record(), "user_1", null)).toBeUndefined();
+    expect(getOwnSharedRecipeId(record(), "user_2", null)).toBeUndefined();
 
     const savedRecipe = {
       ...createSavedRecipeRecord(buildSuccessState(), "2026-04-19T12:00:00.000Z"),
@@ -449,6 +452,17 @@ describe("saved recipe store helpers", () => {
       sharedAt: undefined,
       sharedRecipeId: undefined
     });
+
+    // Once a list shows whose copy it is, that's recorded on the link; others are left alone.
+    const records = [
+      { ...savedRecipe, id: "a", sharedByUserId: undefined, sharedRecipeId: "copy_1" },
+      { ...savedRecipe, id: "b", sharedByUserId: undefined, sharedRecipeId: "gone_copy" },
+      { ...savedRecipe, id: "c", sharedByUserId: "user_3", sharedRecipeId: "copy_1" }
+    ];
+    const recorded = recordSharedLinkOwners(records, family);
+    expect(recorded.map((entry) => entry.sharedByUserId)).toEqual(["user_1", undefined, "user_3"]);
+    // Nothing to record: the same list back.
+    expect(recordSharedLinkOwners(recorded, family)).toBe(recorded);
   });
 
   it("searches shared recipes while preserving shared ownership metadata", () => {

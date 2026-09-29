@@ -1059,21 +1059,33 @@ async function persistSyncState(
   return (await hydrateImages(stored)) ?? stored;
 }
 
+/** A Family copy as far as whose link it is goes: its id and the account that shared it. */
+export type FamilyCopyOwner = Pick<SharedRecipe, "id" | "ownerUserId">;
+
 /**
- * The Family copy `recipe` links to, when that link is `account`'s own: it shared it, or the link
- * is from before sharers were recorded. Another account's link on this device's cookbook is not
- * this account's to update, unshare or delete.
+ * The Family copy `recipe` links to, when that link is `account`'s own: it shared it. Another
+ * account's link on this device's cookbook is not this account's to update, unshare or delete.
+ *
+ * A link made before sharers were recorded is nobody's until `family` (the account's Family list,
+ * when it has loaded) shows whose copy it is; `recordSharedLinkOwners` then stores that. Sharing
+ * such a recipe again is safe either way: the API keys copies by sharer and saved recipe, so the
+ * account that shared it gets its own copy back, updated, and any other account a copy of its own.
  */
 export const getOwnSharedRecipeId = (
   recipe: Pick<WebSavedRecipe, "sync">,
-  account: string | null
+  account: string | null,
+  family: readonly FamilyCopyOwner[] | null = null
 ): string | undefined => {
   const sharedRecipeId = recipe.sync?.sharedRecipeId;
-  const sharedBy = recipe.sync?.sharedBy;
 
-  return sharedRecipeId && account && (sharedBy === undefined || sharedBy === account)
-    ? sharedRecipeId
-    : undefined;
+  if (!sharedRecipeId || !account) {
+    return undefined;
+  }
+
+  const sharedBy =
+    recipe.sync?.sharedBy ?? family?.find((copy) => copy.id === sharedRecipeId)?.ownerUserId;
+
+  return sharedBy === account ? sharedRecipeId : undefined;
 };
 
 /** `recipe`'s sync state as `account` sees it (none when it is another account's link). */
@@ -1084,16 +1096,51 @@ const ownSyncOf = (
   !recipe.sync?.sharedRecipeId || getOwnSharedRecipeId(recipe, account) ? recipe.sync : undefined;
 
 /**
- * `recipe` as signed-in `account` sees it: another account's Family link on it reads as not
- * shared. Signed out, it reads as stored (nothing can be shared or unshared then).
+ * `recipe` as signed-in `account` sees it: a Family link on it that isn't the account's (see
+ * getOwnSharedRecipeId) reads as not shared. Signed out, it reads as stored (nothing can be shared
+ * or unshared then).
  */
 export const withOwnSharedLink = <Recipe extends Pick<WebSavedRecipe, "sync">>(
   recipe: Recipe,
-  account: string | null
+  account: string | null,
+  family: readonly FamilyCopyOwner[] | null = null
 ): Recipe =>
-  account === null || !recipe.sync?.sharedRecipeId || getOwnSharedRecipeId(recipe, account)
+  account === null || !recipe.sync?.sharedRecipeId || getOwnSharedRecipeId(recipe, account, family)
     ? recipe
     : { ...recipe, sync: { status: "local_only" } };
+
+/**
+ * Stores who shared the Family copy each link made before sharers were recorded points to, as
+ * `family` (an account's Family list) shows it, so those links read right without the list. Links
+ * to copies it doesn't list stay nobody's. One transaction; changed recipes are reported.
+ */
+export async function recordSharedLinkOwners(family: readonly FamilyCopyOwner[]): Promise<void> {
+  const owners = new Map(family.map((copy) => [copy.id, copy.ownerUserId]));
+
+  if (owners.size === 0) {
+    return;
+  }
+
+  const updated = await runLinkDishTransaction([STORE_NAME], "readwrite", async (tx) => {
+    const recipes = tx.objectStore(STORE_NAME);
+    const changed = ((await recipes.getAll()) as WebSavedRecipe[]).flatMap((recipe) => {
+      const sync = recipe.sync;
+      const owner =
+        sync?.sharedRecipeId && sync.sharedBy === undefined
+          ? owners.get(sync.sharedRecipeId)
+          : undefined;
+
+      return sync && owner ? [{ ...recipe, sync: { ...sync, sharedBy: owner } }] : [];
+    });
+
+    await Promise.all(changed.map((recipe) => recipes.put(recipe)));
+    return changed.map(toSavedRecipeListRecord);
+  });
+
+  if (updated.length > 0) {
+    emitDataChange({ topic: "savedRecipes", upserted: updated });
+  }
+}
 
 /**
  * Shares a saved recipe with the household (or updates its household copy). It sends the recipe

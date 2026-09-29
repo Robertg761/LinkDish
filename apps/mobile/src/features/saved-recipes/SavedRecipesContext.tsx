@@ -38,6 +38,7 @@ import {
   isDataUrlSourceImage,
   markSavedRecipeShared,
   getOwnSharedRecipeId,
+  recordSharedLinkOwners,
   markSavedRecipeUnshared,
   withOwnSharedLink,
   readSavedRecipeRecords,
@@ -543,6 +544,14 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
 
     writer.schedule(savedRecipes);
   }, [hasLoadedSavedRecipes, hasUnreadableStoredRecipes, savedRecipes, writer]);
+
+  // Once this account's Family list shows whose copy a link from before sharers were recorded is,
+  // store that on the link, so it reads right wherever the list isn't at hand.
+  useEffect(() => {
+    if (hasLoadedSavedRecipes && hasLoadedSharedRecipes && sharedRecipes.length > 0) {
+      commitSavedRecipes((current) => recordSharedLinkOwners(current, sharedRecipes));
+    }
+  }, [commitSavedRecipes, hasLoadedSavedRecipes, hasLoadedSharedRecipes, sharedRecipes]);
 
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (state) => {
