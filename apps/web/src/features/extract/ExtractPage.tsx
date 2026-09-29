@@ -4,6 +4,7 @@ import { Link, useLocation, useNavigate, useSearchParams } from "react-router-do
 
 import { trackWebEvent, trackWebV2AnalyticsEvent } from "../../analytics/client";
 import { getFriendlyErrorMessage } from "../../api/error-message";
+import { getCurrentAccount } from "../../auth/account-scope";
 import { isCachedUserPremium } from "../../auth/auth-cache";
 import { useAuth } from "../../auth/AuthProvider";
 import { Icon } from "../../components/Icon";
@@ -24,7 +25,7 @@ import { ImportQueuePanel } from "../import-queue/ImportQueuePanel";
 import { useImportQueueRunner } from "../import-queue/use-import-queue-runner";
 import { markRecipeSaved } from "../install/install-eligibility";
 import { InstallPrompt } from "../install/InstallPrompt";
-import { saveRecipe } from "../library/saved-recipe-store";
+import { forceSaveRecipe, saveRecipe, syncRecipeToHousehold } from "../library/saved-recipe-store";
 import { useUpgradeSheet } from "../upgrade/UpgradeSheet";
 
 import { ExtractionProgress } from "./ExtractionProgress";
@@ -45,6 +46,8 @@ import type { ImportActionId } from "./import-outcome";
 import type { ImportPhase } from "./use-import-session";
 import type { ImportUsage } from "./use-import-usage";
 import type { SegmentedOption } from "../../components/SegmentedControl";
+import type { SaveRecipeInput } from "../library/saved-recipe-store";
+import type { WebSavedRecipe } from "../library/saved-recipe-types";
 
 import "./ExtractPage.css";
 
@@ -150,6 +153,29 @@ const ImportUsageChip: React.FC<{ usage: ImportUsage }> = ({ usage }) => {
  * cancellable import runs; the recipe comes out ready to save and cook. Several links at once
  * (or anything shared while offline) wait in the import queue.
  */
+
+/** The recipe an import draft saves as: what the result page saves. */
+const toDraftSaveInput = (draft: ImportDraft): SaveRecipeInput => {
+  const request = draft.request;
+
+  return {
+    extraction: {
+      fetchMode: draft.response.extraction.fetchMode,
+      provenance: draft.response.extraction.provenance,
+      strategy: draft.response.extraction.strategy,
+      warnings: draft.response.extraction.warnings
+    },
+    recipe: draft.response.recipe,
+    sourceImages: request.kind === "images" && request.images.length ? request.images : undefined,
+    sourceUrl:
+      request.kind === "url"
+        ? request.url
+        : request.kind === "images"
+          ? request.sourceUrl
+          : (request.sourceUrl ?? draft.response.recipe.sourceUrl)
+  };
+};
+
 export const ExtractPage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -307,27 +333,59 @@ export const ExtractPage: React.FC = () => {
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
   }, [unsaved]);
 
-  // Leaving the Add tab with an unsaved import: offer to save it from wherever the cook goes.
+  // Leaving the Add tab with an unsaved import: offer to save it from wherever the cook goes. It
+  // is saved as the result page saves it: shared with the household as the account that saved it
+  // (this page is gone by then, so the account is checked through getCurrentAccount), and a
+  // recipe already in the cookbook can be replaced with this version.
+  const keptFromToast = useCallback(
+    (
+      draft: ImportDraft,
+      input: SaveRecipeInput,
+      recipe: WebSavedRecipe,
+      savedFor: string | null
+    ) => {
+      clearImportDraft();
+      trackWebV2AnalyticsEvent({
+        name: "recipe_saved",
+        properties: { source_type: getImportSourceType(input), surface: "import_result" },
+        routeOrScreen: IMPORT_ANALYTICS_ROUTE
+      });
+      markRecipeSaved();
+
+      if (savedFor !== null && getCurrentAccount() === savedFor) {
+        void syncRecipeToHousehold(recipe, {
+          isCurrent: () => getCurrentAccount() === savedFor
+        }).catch(() => undefined);
+      }
+
+      showToast({
+        action: { label: "Open", onClick: () => void navigate(`/recipes/${recipe.id}`) },
+        icon: "check-circle",
+        message: `Saved “${draft.response.recipe.title}” to your cookbook.`,
+        tone: "success"
+      });
+    },
+    [navigate, showToast]
+  );
+
+  const replaceFromToast = useCallback(
+    async (draft: ImportDraft) => {
+      const input = toDraftSaveInput(draft);
+      const savedFor = getCurrentAccount();
+
+      try {
+        keptFromToast(draft, input, await forceSaveRecipe(input), savedFor);
+      } catch (error) {
+        showToast({ message: getFriendlyErrorMessage(error, "save"), tone: "danger" });
+      }
+    },
+    [keptFromToast, showToast]
+  );
+
   const saveDraftFromToast = useCallback(
     async (draft: ImportDraft) => {
-      const request = draft.request;
-      const input = {
-        extraction: {
-          fetchMode: draft.response.extraction.fetchMode,
-          provenance: draft.response.extraction.provenance,
-          strategy: draft.response.extraction.strategy,
-          warnings: draft.response.extraction.warnings
-        },
-        recipe: draft.response.recipe,
-        sourceImages:
-          request.kind === "images" && request.images.length ? request.images : undefined,
-        sourceUrl:
-          request.kind === "url"
-            ? request.url
-            : request.kind === "images"
-              ? request.sourceUrl
-              : (request.sourceUrl ?? draft.response.recipe.sourceUrl)
-      };
+      const input = toDraftSaveInput(draft);
+      const savedFor = getCurrentAccount();
 
       try {
         const result = await saveRecipe(input, isCachedUserPremium());
@@ -338,33 +396,25 @@ export const ExtractPage: React.FC = () => {
           return;
         }
 
-        clearImportDraft();
-        const id = result.recipe?.id;
-
-        if (result.success) {
-          trackWebV2AnalyticsEvent({
-            name: "recipe_saved",
-            properties: { source_type: getImportSourceType(input), surface: "import_result" },
-            routeOrScreen: IMPORT_ANALYTICS_ROUTE
-          });
-          markRecipeSaved();
+        if (result.success && result.recipe) {
+          keptFromToast(draft, input, result.recipe, savedFor);
+          return;
         }
 
+        // Already saved under this name: this version stays in the draft, for Replace (or for
+        // the result page, which offers the same choice).
         showToast({
-          ...(id
-            ? { action: { label: "Open", onClick: () => void navigate(`/recipes/${id}`) } }
-            : {}),
-          icon: "check-circle",
-          message: result.success
-            ? `Saved “${draft.response.recipe.title}” to your cookbook.`
-            : "That recipe is already in your cookbook.",
-          tone: "success"
+          action: { label: "Replace", onClick: () => void replaceFromToast(draft) },
+          duration: 9000,
+          icon: "bookmark-plus",
+          id: "import-unsaved",
+          message: `“${draft.response.recipe.title}” is already in your cookbook. Replace it with this version?`
         });
       } catch (error) {
         showToast({ message: getFriendlyErrorMessage(error, "save"), tone: "danger" });
       }
     },
-    [navigate, requestUpgradeSheet, showToast]
+    [keptFromToast, replaceFromToast, requestUpgradeSheet, showToast]
   );
 
   useEffect(

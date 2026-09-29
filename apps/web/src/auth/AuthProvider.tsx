@@ -3,6 +3,7 @@ import React, {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState
@@ -12,6 +13,7 @@ import { trackWebEvent } from "../analytics/client";
 import { apiClient, registerAuthTokenProvider } from "../api/client";
 import { isExtractorApiError } from "../api/errors";
 
+import { getAccountScope, publishCurrentAccount } from "./account-scope";
 import {
   clearCachedAuthUser,
   clearClerkSignOutPending,
@@ -650,6 +652,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     },
     [logout]
   );
+
+  // Work that outlives its component (a toast's action) checks the account through this.
+  const accountScope = getAccountScope(!!user, user);
+  useLayoutEffect(() => {
+    publishCurrentAccount(accountScope);
+  }, [accountScope]);
 
   const value = useMemo<AuthContextType>(
     () => ({

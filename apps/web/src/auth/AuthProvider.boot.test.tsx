@@ -3,6 +3,7 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { getCurrentAccount } from "./account-scope";
 import {
   AUTH_CONFIG_CACHE_KEY,
   AUTH_USER_CACHE_KEY,
@@ -185,6 +186,22 @@ describe("AuthProvider boot", () => {
 
     await waitFor(() => expect(authText()).toBe("anonymous"));
     expect(localStorage.getItem(AUTH_USER_CACHE_KEY)).toBeNull();
+  });
+
+  it("tells work that outlives its page (a toast's action) which account is signed in", async () => {
+    cacheConfig(legacyConfig);
+    cacheUser("legacy");
+    setLegacySessionToken("legacy_token");
+    apiClientMocks.getAuthConfig.mockResolvedValue(legacyConfig);
+    apiClientMocks.getSession.mockRejectedValue(
+      new ExtractorApiError("Extractor API request failed.", 401, { message: "Sign in" })
+    );
+
+    renderAuth();
+    expect(getCurrentAccount()).toBe("user_1");
+
+    await waitFor(() => expect(authText()).toBe("anonymous"));
+    expect(getCurrentAccount()).toBeNull();
   });
 
   it("drops a cached legacy user whose token is gone", () => {

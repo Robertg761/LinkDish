@@ -13,6 +13,20 @@ export const getAccountScope = (
   user: Pick<AccountUser, "id"> | null | undefined
 ): string | null => (isAuthenticated ? (user?.id ?? "") : null);
 
+let currentAccount: string | null = null;
+
+/**
+ * The account signed in now (see {@link getAccountScope}), as the auth provider last rendered it:
+ * for work that outlives the component that started it, such as a toast's action, which
+ * {@link useIsCurrentAccount} can't follow once that component is gone.
+ */
+export const getCurrentAccount = (): string | null => currentAccount;
+
+/** Called by the auth provider whenever the signed-in account changes. */
+export const publishCurrentAccount = (account: string | null): void => {
+  currentAccount = account;
+};
+
 /**
  * A stable check for async work that must land only on the account it started for: pass the
  * account captured when the work started, and it answers whether that account is still the one

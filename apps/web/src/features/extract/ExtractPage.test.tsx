@@ -4,6 +4,8 @@ import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-rou
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { trackWebEvent, trackWebV2AnalyticsEvent } from "../../analytics/client";
+import { publishCurrentAccount } from "../../auth/account-scope";
+import { ToastProvider } from "../../components/Toast";
 import { resetDataChangeFeedForTests, setDataChannelFactoryForTests } from "../../data/change-feed";
 import {
   enqueueImport,
@@ -20,6 +22,7 @@ import {
 } from "../../storage/linkdish-db";
 import { fakeIdb } from "../../storage/testing/fake-idb";
 import { resetInstallEligibilityForTests } from "../install/install-eligibility";
+import { saveRecipe } from "../library/saved-recipe-store";
 
 import { ExtractPage } from "./ExtractPage";
 
@@ -57,6 +60,7 @@ const apiMocks = vi.hoisted(() => {
           options?: { signal?: AbortSignal }
         ) => Promise<unknown>
       >(),
+    createSharedRecipe: vi.fn(),
     getBillingUsage: vi.fn(),
     getHousehold: vi.fn()
   };
@@ -65,6 +69,7 @@ const apiMocks = vi.hoisted(() => {
 vi.mock("../../api/client", () => ({
   apiBaseUrl: "/api",
   apiClient: {
+    createSharedRecipe: apiMocks.createSharedRecipe,
     extractRecipe: apiMocks.extractRecipe,
     extractRecipeFromText: apiMocks.extractRecipeFromText,
     getBillingUsage: apiMocks.getBillingUsage,
@@ -307,6 +312,8 @@ describe("ExtractPage", () => {
     apiMocks.getBillingUsage.mockResolvedValue({ billingEnabled: false, plan: null, quota: null });
     apiMocks.getHousehold.mockReset();
     apiMocks.getHousehold.mockResolvedValue({ household: null });
+    apiMocks.createSharedRecipe.mockReset();
+    publishCurrentAccount("user_1");
     apiMocks.extractRecipe.mockResolvedValue({
       reason: "parse_failed",
       status: "failure",
@@ -411,6 +418,107 @@ describe("ExtractPage", () => {
       await Promise.resolve();
     });
     expect(v2Events("import_failed")).toHaveLength(0);
+  });
+
+  describe("saving from the toast after leaving an unsaved import", () => {
+    /** The importer and the rest of the app, with toasts that outlive the importer. */
+    const renderWithToasts = () =>
+      render(
+        <ToastProvider>
+          <MemoryRouter initialEntries={["/import"]}>
+            <Routes>
+              <Route
+                element={
+                  <>
+                    <InAppLink to="/" />
+                    <ExtractPage />
+                  </>
+                }
+                path="/import"
+              />
+              <Route element={<p>Home</p>} path="/" />
+              <Route element={<p>Recipe page</p>} path="/recipes/:id" />
+            </Routes>
+          </MemoryRouter>
+        </ToastProvider>
+      );
+
+    const importThenLeave = async () => {
+      apiMocks.extractRecipe.mockResolvedValue(success());
+      renderWithToasts();
+      pasteLink("https://example.com/rice");
+      await screen.findByRole("heading", { level: 1, name: "Weeknight Rice" });
+      fireEvent.click(screen.getByRole("button", { name: "Go to /" }));
+      await screen.findByText("Home");
+      await screen.findByText("“Weeknight Rice” isn’t saved yet.");
+    };
+
+    const stored = () =>
+      fakeIdb
+        .records<WebSavedRecipe>(SAVED_RECIPES_STORE_NAME)
+        .filter((entry) => entry.recipe.title === "Weeknight Rice");
+
+    it("shares it with the household, as the result page would", async () => {
+      apiMocks.getHousehold.mockResolvedValue({ household: { id: "household_1" } });
+      apiMocks.createSharedRecipe.mockResolvedValue({
+        recipe: { id: "shared_rice", updatedAt: "2026-09-29T00:00:00.000Z" }
+      });
+      await importThenLeave();
+
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+      expect(await screen.findByText("Saved “Weeknight Rice” to your cookbook.")).toBeVisible();
+      await waitFor(() => expect(apiMocks.createSharedRecipe).toHaveBeenCalledOnce());
+    });
+
+    it("doesn't share it for an account that signed in while it saved", async () => {
+      apiMocks.getHousehold.mockResolvedValue({ household: { id: "household_1" } });
+      await importThenLeave();
+
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+      // Another account signs straight in while the recipe is written.
+      publishCurrentAccount("user_2");
+
+      expect(await screen.findByText("Saved “Weeknight Rice” to your cookbook.")).toBeVisible();
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+      expect(apiMocks.getHousehold).not.toHaveBeenCalled();
+      expect(apiMocks.createSharedRecipe).not.toHaveBeenCalled();
+    });
+
+    it("offers to replace a recipe already saved under that name with this version", async () => {
+      await importThenLeave();
+      // Saved meanwhile (another tab), from the same link, as an older version.
+      await saveRecipe(
+        {
+          extraction: {
+            fetchMode: "http",
+            provenance: [],
+            strategy: "recipe-schema",
+            warnings: []
+          },
+          recipe: { ...recipe, ingredients: [{ text: "1 cup old rice" }] },
+          sourceUrl: "https://example.com/rice"
+        },
+        true
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+      expect(
+        await screen.findByText(
+          "“Weeknight Rice” is already in your cookbook. Replace it with this version?"
+        )
+      ).toBeVisible();
+      expect(stored()[0]?.recipe.ingredients).toEqual([{ text: "1 cup old rice" }]);
+
+      fireEvent.click(screen.getByRole("button", { name: "Replace" }));
+
+      expect(await screen.findByText("Saved “Weeknight Rice” to your cookbook.")).toBeVisible();
+      expect(stored()).toHaveLength(1);
+      expect(stored()[0]?.recipe.ingredients).toEqual(recipe.ingredients);
+    });
   });
 
   it("records abandonment once and ignores a late answer after leaving", async () => {
