@@ -224,14 +224,68 @@ describe("reserved quota", () => {
     expect(bodies).toHaveLength(1);
     expect(bodies[0]).toEqual([
       "EVAL",
-      expect.stringContaining("linkdish_reserve_quota_v1"),
-      "1",
+      expect.stringContaining("linkdish_reserve_quota_v2"),
+      "2",
+      expect.stringContaining("linkdish:quota-reservation:"),
       expect.stringContaining(":lifetime:imports:"),
+      "3600",
       "1",
       "1",
       "3",
       "0"
     ]);
+  });
+
+  it("tries a failed release again with the same reservation, so it goes back once", async () => {
+    vi.resetModules();
+    const scripts: string[][] = [];
+    let releaseFailures = 1;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string, init?: { body?: string }) => {
+        if (!init?.body) {
+          return Promise.resolve(
+            new Response(JSON.stringify({ result: input.includes("/get/") ? "0" : null }))
+          );
+        }
+
+        const command = JSON.parse(init.body) as string[];
+        scripts.push(command);
+
+        if (command[1]?.includes("linkdish_release_quota") && releaseFailures > 0) {
+          releaseFailures -= 1;
+          return Promise.resolve(new Response("Service Unavailable", { status: 503 }));
+        }
+
+        return Promise.resolve(new Response(JSON.stringify({ result: 1 })));
+      })
+    );
+    for (const [key, value] of Object.entries({
+      BILLING_ENFORCEMENT_ENABLED: "true",
+      FREE_LIFETIME_IMPORT_LIMIT: "3",
+      UPSTASH_REDIS_REST_TOKEN: "token",
+      UPSTASH_REDIS_REST_URL: "https://upstash.test"
+    })) {
+      vi.stubEnv(key, value);
+    }
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const { authorizeExtractionRequest } = await import("./enforce-billing.js");
+
+    const authorization = await authorizeExtractionRequest(
+      { "x-linkdish-client-id": "retry-user" },
+      "primary",
+      identity("203.0.113.85")
+    );
+    expect(authorization.allowed).toBe(true);
+    await authorization.commitUsage(failure);
+    await authorization.releaseUsage?.();
+
+    const reserve = scripts.find((command) => command[1]?.includes("linkdish_reserve_quota"));
+    const releases = scripts.filter((command) => command[1]?.includes("linkdish_release_quota"));
+    // The blip is retried; once a release goes through, nothing more is given back.
+    expect(releases).toHaveLength(2);
+    expect(releases.map((command) => command[3])).toEqual([reserve?.[3], reserve?.[3]]);
+    expect(reserve?.[3]).toContain("linkdish:quota-reservation:");
   });
 });
 
