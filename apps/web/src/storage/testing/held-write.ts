@@ -58,3 +58,42 @@ export function holdNextWrite(connection: object, method: HeldMethod): HeldWrite
 
   return { fail: (error) => fail(error), started };
 }
+
+export interface QueuedTransaction {
+  /** Lets the queued transaction finish. */
+  release: () => void;
+  /** Resolves once the app has opened the queued transaction. */
+  started: Promise<void>;
+}
+
+/**
+ * The connection's next transaction runs its requests, but its `done` only settles once
+ * {@link QueuedTransaction.release} is called: like a read IndexedDB queues behind an earlier
+ * readwrite transaction on the same store, whose result comes back after that write settles.
+ * Later transactions go to the real connection again.
+ */
+export function queueNextTransaction(connection: object): QueuedTransaction {
+  let release: () => void = () => undefined;
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+
+  let start: () => void = () => undefined;
+  const started = new Promise<void>((resolve) => {
+    start = resolve;
+  });
+
+  const methods = connection as Record<string, unknown>;
+  const original = methods.transaction as (...args: unknown[]) => { done: Promise<void> };
+
+  methods.transaction = (...args: unknown[]) => {
+    methods.transaction = original;
+    const transaction = original.apply(connection, args);
+    const done = transaction.done.then(() => released);
+    done.catch(() => undefined);
+    start();
+    return { ...transaction, done };
+  };
+
+  return { release: () => release(), started };
+}

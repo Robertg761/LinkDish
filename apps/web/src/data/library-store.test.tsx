@@ -8,7 +8,7 @@ import {
   SAVED_RECIPES_STORE_NAME
 } from "../storage/linkdish-db";
 import { fakeIdb } from "../storage/testing/fake-idb";
-import { holdNextWrite } from "../storage/testing/held-write";
+import { holdNextWrite, queueNextTransaction } from "../storage/testing/held-write";
 
 import { resetDataChangeFeedForTests, setDataChannelFactoryForTests } from "./change-feed";
 import {
@@ -290,6 +290,92 @@ describe("library-store", () => {
     // Rolling the rating back alone would show the favorite that never saved either.
     await waitFor(() => expect(getCachedSavedRecipe(id!)).not.toHaveProperty("favorite"));
     expect(getCachedSavedRecipe(id!)).not.toHaveProperty("rating");
+  });
+
+  const REMOTE_OPENED_AT = "2026-09-28T12:00:00.000Z";
+
+  /**
+   * Another tab opens recipe `id`; this tab starts re-reading just that recipe, and the read
+   * comes back only once `release` is called (IndexedDB queues it behind a readwrite still
+   * pending). `reread` resolves once this tab shows the other tab's change.
+   */
+  const startRemoteReread = async (id: string) => {
+    const stored = fakeIdb.record<WebSavedRecipe>(SAVED_RECIPES_STORE_NAME, id);
+    fakeIdb.seed(SAVED_RECIPES_STORE_NAME, [{ ...stored!, lastOpenedAt: REMOTE_OPENED_AT }]);
+    const queued = queueNextTransaction(await getLinkDishWebDb());
+    act(() => {
+      channel.onmessage?.({
+        data: { topic: "savedRecipes", upsertedIds: [id], v: 1 }
+      } as MessageEvent);
+    });
+    await queued.started;
+
+    return {
+      release: queued.release,
+      reread: () =>
+        waitFor(() => expect(getCachedSavedRecipe(id)?.lastOpenedAt).toBe(REMOTE_OPENED_AT))
+    };
+  };
+
+  it("keeps a failed favorite rolled back when another tab's change is re-read meanwhile", async () => {
+    const [failing, other] = await loadSettledCookbook();
+    const held = holdNextWrite(await getLinkDishWebDb(), "transaction");
+
+    const favoriting = setFavorite(failing!, true);
+    await held.started;
+    expect(getCachedSavedRecipe(failing!)?.favorite).toBe(true);
+
+    const reread = await startRemoteReread(other!);
+    held.fail(new Error("disk full"));
+    await expect(favoriting).rejects.toThrow("disk full");
+    expect(getCachedSavedRecipe(failing!)).not.toHaveProperty("favorite");
+
+    reread.release();
+    await reread.reread();
+
+    // Storage never got the favorite, so the re-read must not bring it back.
+    expect(fakeIdb.record<WebSavedRecipe>(SAVED_RECIPES_STORE_NAME, failing!)).not.toHaveProperty(
+      "favorite"
+    );
+    expect(getCachedSavedRecipe(failing!)).not.toHaveProperty("favorite");
+  });
+
+  it("keeps a recipe whose delete failed when another tab's change is re-read meanwhile", async () => {
+    const [failing, other] = await loadSettledCookbook();
+    const held = holdNextWrite(await getLinkDishWebDb(), "transaction");
+
+    const removing = removeSavedRecipe(failing!, { snapshot: false });
+    await held.started;
+    expect(getCachedSavedRecipe(failing!)).toBeUndefined();
+
+    const reread = await startRemoteReread(other!);
+    held.fail(new Error("disk full"));
+    await expect(removing).rejects.toThrow("disk full");
+    expect(getCachedSavedRecipe(failing!)).toBeDefined();
+
+    reread.release();
+    await reread.reread();
+
+    // Still stored, so it must still be listed.
+    expect(fakeIdb.record(SAVED_RECIPES_STORE_NAME, failing!)).toBeDefined();
+    expect(getCachedSavedRecipe(failing!)).toBeDefined();
+  });
+
+  it("keeps a change made while another tab's change is re-read", async () => {
+    const [changing, other] = await loadSettledCookbook();
+    const reread = await startRemoteReread(other!);
+    const held = holdNextWrite(await getLinkDishWebDb(), "transaction");
+
+    const favoriting = setFavorite(changing!, true);
+    await held.started;
+    reread.release();
+    await reread.reread();
+
+    // The favorite is still being saved; the re-read of another recipe must not hide it.
+    expect(getCachedSavedRecipe(changing!)?.favorite).toBe(true);
+    held.fail(new Error("disk full"));
+    await expect(favoriting).rejects.toThrow("disk full");
+    expect(getCachedSavedRecipe(changing!)).not.toHaveProperty("favorite");
   });
 
   it("refreshes when another tab changes the library", async () => {

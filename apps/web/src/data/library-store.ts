@@ -107,9 +107,8 @@ const applySavedRecipeChange = (current: WebSavedRecipe[], change: DataChange): 
  * re-read and storage decides, rather than letting any delete in the batch win.
  */
 const applyRemoteSavedRecipeChanges = async (
-  current: WebSavedRecipe[],
   changes: readonly DataChange[]
-): Promise<WebSavedRecipe[]> => {
+): Promise<(current: WebSavedRecipe[]) => WebSavedRecipe[]> => {
   const ids = [...new Set(changes.flatMap((change) => change.upsertedIds ?? []))];
   const written = new Set(ids);
   const deleted = new Set(
@@ -127,7 +126,7 @@ const applyRemoteSavedRecipeChanges = async (
     }
   }
 
-  return applyUpserts(current, upserted, [...deleted]);
+  return (current) => applyUpserts(current, upserted, [...deleted]);
 };
 
 const libraryResource = createResourceStore<WebSavedRecipe[]>({

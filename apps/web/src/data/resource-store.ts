@@ -28,9 +28,11 @@ export interface ResourceStoreOptions<T> {
   applyLocalChange?: ((current: T, change: DataChange) => T | null) | undefined;
   /**
    * Other tabs' changes that name their records (`upsertedIds` / `deletedIds`): re-read just
-   * those and return the next data. Rejecting falls back to a full reload.
+   * those and resolve with how to apply them. That runs on the data shown once they are read, not
+   * on the data shown when the read began, so an optimistic change or rollback made meanwhile is
+   * kept. Rejecting falls back to a full reload.
    */
-  applyRemoteChanges?: ((current: T, changes: readonly DataChange[]) => Promise<T>) | undefined;
+  applyRemoteChanges?: ((changes: readonly DataChange[]) => Promise<(current: T) => T>) | undefined;
   /** Merges a full reload into the data already shown (e.g. keep unchanged records' objects). */
   reconcile?: ((previous: T, next: T) => T) | undefined;
 }
@@ -76,10 +78,16 @@ export function createResourceStore<T>(options: ResourceStoreOptions<T>): Resour
 
     const current = ++generation;
     const run: Promise<void> = Promise.resolve()
-      .then(() => apply(snapshot.data, changes))
+      .then(() => apply(changes))
       .then(
-        (data) => {
-          if (current === generation && data !== snapshot.data) {
+        (applyTo) => {
+          if (current !== generation) {
+            return;
+          }
+
+          const data = applyTo(snapshot.data);
+
+          if (data !== snapshot.data) {
             set({ data });
           }
         },
