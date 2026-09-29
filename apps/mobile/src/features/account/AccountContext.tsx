@@ -1,4 +1,5 @@
 import { ExtractorApiError, createExtractorApiClient } from "@linkdish/api-client";
+import { getTokenSessionId } from "@linkdish/utils";
 import * as SecureStore from "expo-secure-store";
 import React, {
   createContext,
@@ -13,6 +14,7 @@ import React, {
 
 import { mobileEnv } from "../../config/env";
 
+import { AccountChangedError } from "./account-changed-error";
 import { useClerkSession } from "./ClerkSessionContext";
 
 import type {
@@ -27,6 +29,13 @@ interface AccountContextValue {
   clearAccountError: () => void;
   deleteAccount: (confirmEmail: string) => Promise<void>;
   getAuthHeaders: () => Promise<Record<string, string>>;
+  /**
+   * Headers for requests made for account `userId` only: once the token is in hand, they are
+   * handed over only while that account is still the one loaded, and a Clerk token only if it is
+   * for the session the account was loaded under. Otherwise nothing is sent: the request rejects
+   * with {@link AccountChangedError}.
+   */
+  getAuthHeadersFor: (userId: string) => () => Promise<Record<string, string>>;
   getAuthToken: () => Promise<string | null>;
   hasLoadedAccount: boolean;
   isAccountBusy: boolean;
@@ -48,6 +57,7 @@ interface AccountContextValue {
 }
 
 const AccountContext = createContext<AccountContextValue | null>(null);
+
 const SESSION_TOKEN_STORAGE_KEY = "linkdish.account.sessionToken";
 const defaultAuthConfig: AuthConfigResponse = {
   authMode: "legacy_email_code",
@@ -114,6 +124,8 @@ export const AccountProvider = ({ children }: PropsWithChildren) => {
   /** Who is shown as signed in now, for work that finishes after an account switch. */
   const accountUserRef = useRef(accountUser);
   accountUserRef.current = accountUser;
+  const userClerkSessionIdRef = useRef(userClerkSessionId);
+  userClerkSessionIdRef.current = userClerkSessionId;
 
   const applySessionToken = useCallback(async (nextSessionToken: string | null) => {
     if (nextSessionToken) {
@@ -142,6 +154,27 @@ export const AccountProvider = ({ children }: PropsWithChildren) => {
         }
       : {};
   }, [getAuthToken]);
+
+  const getAuthHeadersFor = useCallback(
+    (userId: string) => async () => {
+      const headers = await getAuthHeaders();
+      const tokenSession = getTokenSessionId(
+        /^Bearer (.+)$/u.exec(headers.authorization ?? "")?.[1]
+      );
+
+      // Checked with the token in hand: Clerk may have switched to another account's session
+      // while it was fetched, before that account is loaded (or shown) here.
+      if (
+        accountUserRef.current?.id !== userId ||
+        (tokenSession !== null && tokenSession !== userClerkSessionIdRef.current)
+      ) {
+        throw new AccountChangedError();
+      }
+
+      return headers;
+    },
+    [getAuthHeaders]
+  );
 
   const loadAuthConfig = useCallback(async (): Promise<LoadedAuthConfig> => {
     try {
@@ -285,7 +318,9 @@ export const AccountProvider = ({ children }: PropsWithChildren) => {
         const deletingFor = accountUser.id;
 
         try {
-          await createClientWithHeaders(getAuthHeaders).deleteAccount({ confirmEmail });
+          await createClientWithHeaders(getAuthHeadersFor(deletingFor)).deleteAccount({
+            confirmEmail
+          });
 
           // Another account signed in meanwhile: it stays signed in (the deleted account's
           // session is gone with it).
@@ -309,6 +344,7 @@ export const AccountProvider = ({ children }: PropsWithChildren) => {
         }
       },
       getAuthHeaders,
+      getAuthHeadersFor,
       getAuthToken,
       hasLoadedAccount: hasLoadedAccount && !switchingAccount,
       isAccountBusy,
@@ -463,8 +499,9 @@ export const AccountProvider = ({ children }: PropsWithChildren) => {
         const updatedFor = accountUser.id;
 
         try {
-          const response =
-            await createClientWithHeaders(getAuthHeaders).updateAccountProfile(profile);
+          const response = await createClientWithHeaders(
+            getAuthHeadersFor(updatedFor)
+          ).updateAccountProfile(profile);
           // Only onto the account that saved it: if another account signed in (or out) meanwhile,
           // this is the last one's profile and must never be shown as the one signed in now.
           setUser((current) =>
@@ -515,6 +552,7 @@ export const AccountProvider = ({ children }: PropsWithChildren) => {
       authConfig,
       clerkSession,
       getAuthHeaders,
+      getAuthHeadersFor,
       getAuthToken,
       accountUser,
       hasLoadedAccount,

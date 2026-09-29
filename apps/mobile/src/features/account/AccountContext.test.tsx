@@ -442,6 +442,51 @@ describe("AccountContext", () => {
     expect(latestAccount?.user?.id).toBe("user_next");
   });
 
+  it("hands over account-bound headers only for the loaded account's own Clerk session", async () => {
+    const jwt = (sid: string) =>
+      `${btoa('{"alg":"RS256"}')}.${btoa(JSON.stringify({ sid })).replace(/=+$/u, "")}.sig`;
+    mocks.createExtractorApiClient.mockReturnValue(
+      createMockClient({
+        getAuthConfig: vi.fn().mockResolvedValue({
+          authMode: "clerk_beta",
+          clerkEnabled: true,
+          emailCodeEnabled: true
+        }),
+        getSession: vi.fn().mockResolvedValue({
+          authenticated: true,
+          expiresAt: "2026-08-09T10:00:00.000Z",
+          user: { email: "first@example.com", id: "user_first" }
+        })
+      })
+    );
+    clerkSessionState.getToken.mockResolvedValue(jwt("sess_first"));
+    clerkSessionState.isSignedIn = true;
+    clerkSessionState.sessionId = "sess_first";
+
+    await act(async () => {
+      create(
+        <AccountProvider>
+          <Probe />
+        </AccountProvider>
+      );
+      await flushAsyncWork();
+    });
+    const headersForFirst = latestAccount!.getAuthHeadersFor("user_first");
+
+    await expect(headersForFirst()).resolves.toEqual({
+      authorization: `Bearer ${jwt("sess_first")}`
+    });
+    // Another account's name: nothing is handed over.
+    await expect(latestAccount!.getAuthHeadersFor("user_next")()).rejects.toMatchObject({
+      name: "AccountChangedError"
+    });
+
+    // Clerk has switched to another session, and its token is what a request gets now, before
+    // that account is loaded here.
+    clerkSessionState.getToken.mockResolvedValue(jwt("sess_next"));
+    await expect(headersForFirst()).rejects.toMatchObject({ name: "AccountChangedError" });
+  });
+
   it("keeps a stored session token when startup session refresh fails", async () => {
     const getSession = vi.fn().mockRejectedValue(new Error("Network request failed"));
     const client = createMockClient({

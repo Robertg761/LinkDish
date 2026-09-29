@@ -13,6 +13,7 @@ const accountState = vi.hoisted(() => ({
   accountError: null as string | null,
   deleteAccount: vi.fn(),
   getAuthHeaders: vi.fn(),
+  getAuthHeadersFor: vi.fn(),
   hasLoadedAccount: true,
   isAccountBusy: false,
   isClerkSignInEnabled: false,
@@ -226,6 +227,10 @@ describe("AccountScreen household actions", () => {
     accountState.accountError = null;
     accountState.deleteAccount.mockReset();
     accountState.getAuthHeaders.mockReset();
+    accountState.getAuthHeadersFor.mockReset();
+    accountState.getAuthHeadersFor.mockImplementation(
+      () => () => accountState.getAuthHeaders() as Promise<Record<string, string>>
+    );
     accountState.getAuthHeaders.mockResolvedValue({
       authorization: "Bearer token"
     });

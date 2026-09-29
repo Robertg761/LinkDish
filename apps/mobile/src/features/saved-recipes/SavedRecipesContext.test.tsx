@@ -3,6 +3,8 @@ import React from "react";
 import { act, create } from "react-test-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { AccountChangedError } from "../account/account-changed-error";
+
 import {
   SAVED_RECIPES_PERSIST_DEBOUNCE_MS,
   SavedRecipesProvider,
@@ -21,6 +23,7 @@ import type { HouseholdDetails, SharedRecipe } from "@linkdish/api-contracts";
 
 const accountState = vi.hoisted(() => ({
   getAuthHeaders: vi.fn(),
+  getAuthHeadersFor: vi.fn(),
   isSignedIn: false,
   sessionToken: null as string | null,
   user: null as { email: string; id: string } | null
@@ -333,6 +336,10 @@ beforeEach(() => {
   fileSystemMocks.deleted.splice(0);
   fileSystemMocks.existing.clear();
   accountState.getAuthHeaders.mockReset();
+  accountState.getAuthHeadersFor.mockReset();
+  accountState.getAuthHeadersFor.mockImplementation(
+    () => () => accountState.getAuthHeaders() as Promise<Record<string, string>>
+  );
   accountState.getAuthHeaders.mockResolvedValue({});
   accountState.isSignedIn = false;
   accountState.sessionToken = null;
@@ -919,6 +926,38 @@ describe("SavedRecipesProvider household save entitlement", () => {
     expect(result!).toMatchObject({ allowed: false, saved: false });
     expect(apiMocks.createSharedRecipe).not.toHaveBeenCalled();
     expect(latestSavedRecipes?.savedRecipes).toHaveLength(15);
+  });
+
+  it("sends a Family save only with the signed-in account's own credentials", async () => {
+    storeSavedRecipes(buildSavedRecipes(3));
+    accountState.isSignedIn = true;
+    accountState.sessionToken = "session-token";
+    accountState.user = { email: "member@example.com", id: "member_1" };
+    const memberHeaders = vi.fn(() => Promise.resolve({ authorization: "Bearer member" }));
+    accountState.getAuthHeadersFor.mockImplementation((userId: string) =>
+      userId === "member_1" ? memberHeaders : () => Promise.reject(new Error("another account"))
+    );
+    apiMocks.getHousehold.mockResolvedValue({ household: buildHousehold() });
+    apiMocks.getSharedRecipes.mockResolvedValue({ recipes: [] });
+    // As the client does when Clerk switched accounts before the request's token was in hand.
+    apiMocks.createSharedRecipe.mockRejectedValue(new AccountChangedError());
+
+    await renderProvider();
+
+    // Family requests use headers bound to the account this render is for.
+    expect(apiMocks.createExtractorApiClient).toHaveBeenLastCalledWith(
+      expect.objectContaining({ getHeaders: memberHeaders })
+    );
+
+    let result: Awaited<ReturnType<NonNullable<typeof latestSavedRecipes>["saveRecipeToTargets"]>>;
+    await act(async () => {
+      result = await latestSavedRecipes!.saveRecipeToTargets(buildSuccessState(20), "family");
+      await flushAsyncWork();
+    });
+
+    // Not sent: handled like the account switch it is, with no error for the account shown.
+    expect(result!).toMatchObject({ saved: false });
+    expect(latestSavedRecipes?.sharedRecipeError).toBeNull();
   });
 
   it("does not unlock saves when household lookup succeeds but shared-book access fails", async () => {

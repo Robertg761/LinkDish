@@ -16,6 +16,7 @@ import { AppState } from "react-native";
 import { trackMobileEvent } from "../../analytics/client";
 import { mobileEnv } from "../../config/env";
 import { createDebouncedWriter } from "../../lib/debouncedWriter";
+import { isAccountChangedError } from "../account/account-changed-error";
 import { useAccount } from "../account/AccountContext";
 import { useBilling } from "../billing/BillingContext";
 import { billingPlans } from "../billing/plans";
@@ -218,7 +219,7 @@ const getSharedRecipeErrorMessage = (error: unknown): string => {
 };
 
 export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
-  const { getAuthHeaders, isSignedIn, user } = useAccount();
+  const { getAuthHeaders, getAuthHeadersFor, isSignedIn, user } = useAccount();
   const { tier } = useBilling();
   const [hasLoadedSavedRecipes, setHasLoadedSavedRecipes] = useState(false);
   const [hasLoadedSharedRecipesState, setHasLoadedSharedRecipes] = useState(false);
@@ -250,9 +251,11 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
     () =>
       createExtractorApiClient({
         baseUrl: mobileEnv.apiBaseUrl,
-        getHeaders: getAuthHeaders
+        // Family requests go out only as the account this render is for: an action holds this
+        // client from its start, so one Clerk switches to meanwhile is never sent its changes.
+        getHeaders: user ? getAuthHeadersFor(user.id) : getAuthHeaders
       }),
-    [getAuthHeaders]
+    [getAuthHeaders, getAuthHeadersFor, user]
   );
   const shareModeStorageKey = useMemo(
     () =>
@@ -375,7 +378,8 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
       setSharedRecipes(response.recipes);
       setSharedRecipeError(null);
     } catch (error) {
-      if (stale()) {
+      // Not sent: another account signed in first. Its own refresh follows.
+      if (stale() || isAccountChangedError(error)) {
         return;
       }
 
@@ -667,7 +671,7 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
           sharedRecipeId: response.recipe.id
         };
       } catch (error) {
-        if (switched()) {
+        if (switched() || isAccountChangedError(error)) {
           return SWITCHED_ACCOUNT_RESULT;
         }
 
@@ -843,7 +847,7 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
         saved: true
       };
     } catch (error) {
-      if (latestRef.current.userId !== userId) {
+      if (latestRef.current.userId !== userId || isAccountChangedError(error)) {
         return ACCOUNT_CHANGED_RESULT;
       }
 
@@ -890,7 +894,7 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
         commitSavedRecipes((current) => markSavedRecipeShared(current, record.id, response.recipe));
         setSharedRecipeError(null);
       } catch (error) {
-        if (!switched()) {
+        if (!switched() && !isAccountChangedError(error)) {
           setSharedRecipeError(getSharedRecipeErrorMessage(error));
         }
       }
@@ -984,7 +988,7 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
           saved: true
         };
       } catch (error) {
-        if (latestRef.current.userId !== startedFor) {
+        if (latestRef.current.userId !== startedFor || isAccountChangedError(error)) {
           return SWITCHED_ACCOUNT_RESULT;
         }
 
@@ -1128,7 +1132,7 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
             sharedRecipeId: response.recipe.id
           };
         } catch (error) {
-          if (latestRef.current.userId !== sharedFor) {
+          if (latestRef.current.userId !== sharedFor || isAccountChangedError(error)) {
             return SWITCHED_ACCOUNT_RESULT;
           }
 
@@ -1282,7 +1286,7 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
           saved: true
         };
       } catch (error) {
-        if (latestRef.current.userId !== startedFor) {
+        if (latestRef.current.userId !== startedFor || isAccountChangedError(error)) {
           return SWITCHED_ACCOUNT_RESULT;
         }
 
@@ -1354,7 +1358,7 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
         setSharedRecipeError(null);
         return true;
       } catch (error) {
-        if (latestRef.current.userId === startedFor) {
+        if (latestRef.current.userId === startedFor && !isAccountChangedError(error)) {
           setSharedRecipeError(getSharedRecipeErrorMessage(error));
         }
 

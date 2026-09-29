@@ -17,6 +17,7 @@ const apiMocks = vi.hoisted(() => ({
 
 const accountState = vi.hoisted(() => ({
   getAuthHeaders: vi.fn(),
+  getAuthHeadersFor: vi.fn(),
   hasLoadedAccount: true,
   isSignedIn: true,
   refreshAccount: vi.fn(),
@@ -207,6 +208,10 @@ const buildHousehold = (): HouseholdDetails => ({
 describe("HouseholdScreen billing gate", () => {
   beforeEach(() => {
     accountState.getAuthHeaders.mockReset();
+    accountState.getAuthHeadersFor.mockReset();
+    accountState.getAuthHeadersFor.mockImplementation(
+      () => () => accountState.getAuthHeaders() as Promise<Record<string, string>>
+    );
     accountState.getAuthHeaders.mockResolvedValue({
       authorization: "Bearer token"
     });

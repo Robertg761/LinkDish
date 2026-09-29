@@ -133,7 +133,8 @@ export default function HouseholdScreen() {
 function HouseholdView() {
   const params = useLocalSearchParams<{ invite?: string | string[] }>();
   const inviteParam = Array.isArray(params.invite) ? params.invite[0] : params.invite;
-  const { getAuthHeaders, hasLoadedAccount, isSignedIn, refreshAccount, user } = useAccount();
+  const { getAuthHeaders, getAuthHeadersFor, hasLoadedAccount, isSignedIn, refreshAccount, user } =
+    useAccount();
   const { purchaseStatus, restorePurchases, revenueCatConfigured, tier } = useBilling();
   const { showUpgradeMoment } = useOptionalUpgradeMoment();
   const { refreshSharedRecipes } = useSavedRecipes();
@@ -159,9 +160,10 @@ function HouseholdView() {
     () =>
       createExtractorApiClient({
         baseUrl: mobileEnv.apiBaseUrl,
-        getHeaders: getAuthHeaders
+        // Sent only as the account this screen is for: never another Clerk switches to meanwhile.
+        getHeaders: user ? getAuthHeadersFor(user.id) : getAuthHeaders
       }),
-    [getAuthHeaders]
+    [getAuthHeaders, getAuthHeadersFor, user]
   );
   const groupedHouseholdMembers = useMemo(
     () => ({

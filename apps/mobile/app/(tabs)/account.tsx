@@ -554,6 +554,7 @@ export default function AccountScreen() {
     accountError,
     deleteAccount,
     getAuthHeaders,
+    getAuthHeadersFor,
     hasLoadedAccount,
     isAccountBusy,
     isClerkSignInEnabled,
@@ -587,9 +588,10 @@ export default function AccountScreen() {
     () =>
       createExtractorApiClient({
         baseUrl: mobileEnv.apiBaseUrl,
-        getHeaders: getAuthHeaders
+        // Joins only as the account shown: never another Clerk switches to meanwhile.
+        getHeaders: user ? getAuthHeadersFor(user.id) : getAuthHeaders
       }),
-    [getAuthHeaders]
+    [getAuthHeaders, getAuthHeadersFor, user]
   );
   const nextProfile = getProfilePayload(profileDisplayName, profileAvatarEmoji);
   const isProfileDirty =
