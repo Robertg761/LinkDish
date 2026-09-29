@@ -242,20 +242,51 @@ const runStart = (text: string, end: number, character: RegExp): number => {
   return start;
 };
 
-/**
- * A size note that opens the phrase, as in "1 (8 inch) pie crust". Sticky, so a loop steps over
- * any number of notes in one pass; see leadingNotesEnd.
- */
-const LEADING_NOTE_PATTERN = /\s*[([][^)\]]*[)\]]\s*/uy;
+const isNoteOpener = (character: string | undefined): boolean =>
+  character === "(" || character === "[";
+const isNoteCloser = (character: string | undefined): boolean =>
+  character === ")" || character === "]";
 
-/** Where the notes that open a phrase end: 0 without any, 16 for "(8 inch) [thin] crust". */
+/** Where the run of characters matching `character` that starts at `start` ends. */
+const runEnd = (text: string, start: number, character: RegExp): number => {
+  let end = start;
+
+  while (end < text.length && character.test(text[end] ?? "")) {
+    end += 1;
+  }
+
+  return end;
+};
+
+/**
+ * Where the size notes that open a phrase end, as in "1 (8 inch) pie crust": 0 without any, 16
+ * for "(8 inch) [thin] crust". Each note is whitespace, "(" or "[", anything up to the first ")"
+ * or "]", then whitespace (the language of `\s*[([][^)\]]*[)\]]\s*`, repeated). A single forward
+ * scan, so it stays linear on any number of notes or on an opener that is never closed.
+ */
 const leadingNotesEnd = (phrase: string): number => {
   let end = 0;
-  LEADING_NOTE_PATTERN.lastIndex = 0;
+  let position = 0;
 
-  // A failed sticky match resets lastIndex to 0 and ends the loop; a match is never empty.
-  while (LEADING_NOTE_PATTERN.exec(phrase)) {
-    end = LEADING_NOTE_PATTERN.lastIndex;
+  while (position < phrase.length) {
+    const opener = runEnd(phrase, position, SPACE_CHARACTER);
+
+    if (!isNoteOpener(phrase[opener])) {
+      break;
+    }
+
+    let closer = opener + 1;
+
+    while (closer < phrase.length && !isNoteCloser(phrase[closer])) {
+      closer += 1;
+    }
+
+    if (closer >= phrase.length) {
+      break;
+    }
+
+    position = runEnd(phrase, closer + 1, SPACE_CHARACTER);
+    end = position;
   }
 
   return end;
