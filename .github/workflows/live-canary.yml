@@ -104,7 +104,14 @@ jobs:
                     `failed=${summary.failed ?? "n/a"}`,
                     `manifestDrift=${summary.manifestDrift ?? "n/a"}`,
                     `outcomeFailures=${summary.outcomeFailures ?? "n/a"}`
-                  ].join(", ")
+                  ].join(", "),
+                  ...(summary.abortReason === "canary_not_billing_exempt"
+                    ? [
+                        "",
+                        `Stopped early (${summary.skipped} entries skipped): the API metered the canary as a free user. ` +
+                          "Make the LINKDISH_CANARY_AUTH_TOKEN secret match the API's LINKDISH_CANARY_TOKEN and redeploy."
+                      ]
+                    : [])
                 ].join("\n");
               } catch (error) {
                 return `Could not read live canary results JSON: ${error.message}`;
