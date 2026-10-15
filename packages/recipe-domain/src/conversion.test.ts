@@ -455,6 +455,33 @@ describe("compound amounts in conversion (bug 16)", () => {
     );
   });
 
+  it("keeps the addition when rounding the folded amount would swallow it", () => {
+    const us = (text: string, scale: number) =>
+      getDisplayIngredient(text, { scale, units: "us" }).text;
+
+    // 0.5625 cup snapped back to ½ cup, dropping the tablespoon.
+    expect(us("1 cup plus 2 tablespoons flour", 0.5)).toBe("½ cup plus 1 Tbsp flour");
+    expect(us("2 cups plus 2 tablespoons milk", 0.5)).toBe("1 cup plus 1 Tbsp milk");
+    expect(us("1/2 cup plus 1 tablespoon sugar", 0.5)).toBe("4 Tbsp plus 1 ½ tsp sugar");
+    expect(us("1 pound plus 4 ounces beef", 1.5)).toBe("1 ½ lb plus 6 oz beef");
+    // The original-units display of the same lines, for comparison.
+    expect(getDisplayIngredient("1 cup plus 2 tablespoons flour", { scale: 0.5 }).text).toBe(
+      "½ cup plus 1 Tbsp flour"
+    );
+  });
+
+  it("still folds the addition when the folded amount rounds accurately", () => {
+    expect(
+      getDisplayIngredient("1 cup plus 2 tablespoons flour", { scale: 2, units: "us" }).text
+    ).toBe("2 ¼ cups flour");
+    expect(
+      getDisplayIngredient("1 tablespoon plus 1 teaspoon salt", { scale: 0.5, units: "us" }).text
+    ).toBe("2 tsp salt");
+    expect(
+      getDisplayIngredient("1 cup plus 2 tablespoons milk", { scale: 0.5, units: "metric" }).text
+    ).toBe("130 ml milk");
+  });
+
   it("keeps a metric alternate when a US amount only moves to a smaller US unit", () => {
     expect(convertIngredientLine("1/2 cup (113g) milk", "us", { scale: 0.5 }).text).toBe(
       "4 Tbsp (57 g) milk"

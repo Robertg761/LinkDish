@@ -37,7 +37,11 @@ import {
 } from "./units.js";
 
 import type { QuantityValue } from "./format-internal.js";
-import type { IngredientPackageSize, ParsedIngredientQuantity } from "./ingredient-quantities.js";
+import type {
+  IngredientAddition,
+  IngredientPackageSize,
+  ParsedIngredientQuantity
+} from "./ingredient-quantities.js";
 import type { UnitDefinition } from "./units.js";
 
 export type MeasurementSystem = "us" | "metric";
@@ -413,6 +417,30 @@ const toBase = (value: QuantityValue, definition: UnitDefinition): QuantityValue
 const isSpoon = (definition: UnitDefinition): boolean =>
   definition.canonical === "tsp" || definition.canonical === "Tbsp";
 
+/** How far a converted "plus" amount may drift from the exact sum before the parts split. */
+const FOLDED_AMOUNT_TOLERANCE = 0.02;
+
+/**
+ * True when a converted amount stays within FOLDED_AMOUNT_TOLERANCE of `exact` (written in
+ * `definition`). Only US results are checked: snapping to eighths and thirds is coarse next to a
+ * spoonful, while metric rounding steps are fine and density conversions change the kind.
+ */
+const keepsAmount = (
+  converted: Converted,
+  exact: QuantityValue,
+  definition: UnitDefinition
+): boolean => {
+  const unit = getUnitDefinition(converted.unit);
+
+  if (!unit?.base || unit.system !== "us" || unit.kind !== definition.kind) {
+    return true;
+  }
+
+  const exactBase = maxOfValue(toBase(exact, definition));
+  const convertedBase = maxOfValue(converted.value) * unit.base;
+  return Math.abs(convertedBase - exactBase) <= exactBase * FOLDED_AMOUNT_TOLERANCE;
+};
+
 /**
  * Converts one amount to the target system. Returns null when the amount should stay exactly as
  * written (already in the target system, in a comfortable unit, and not rescaled).
@@ -636,23 +664,46 @@ export const convertParsedQuantity = (
       addition: undefined
     };
   } else if (primaryDefinition) {
+    const context = { ingredient: parsed.item, useDensity, rescaled };
     // "1 cup plus 2 tablespoons" converts as one amount (1 ⅛ cups → 135 g).
-    const additionDefinition = getUnitDefinition(parsed.addition?.unit);
-    const foldedQty =
-      parsed.addition && additionDefinition?.base && primaryDefinition.base
-        ? mapValue(
-            qty,
-            (end) =>
-              end +
-              ((parsed.addition?.qty ?? 0) * factor * (additionDefinition.base ?? 0)) /
-                (primaryDefinition.base ?? 1)
-          )
-        : qty;
-    const converted = convertAmount(foldedQty, primaryDefinition, target, {
-      ingredient: parsed.item,
-      useDensity,
-      rescaled
-    });
+    const addition = parsed.addition;
+    const additionDefinition = getUnitDefinition(addition?.unit);
+    const folds = Boolean(addition && additionDefinition?.base && primaryDefinition.base);
+    const foldedQty = folds
+      ? mapValue(
+          qty,
+          (end) =>
+            end +
+            ((addition?.qty ?? 0) * factor * (additionDefinition?.base ?? 0)) /
+              (primaryDefinition.base ?? 1)
+        )
+      : qty;
+    let converted = convertAmount(foldedQty, primaryDefinition, target, context);
+    let convertedAddition: IngredientAddition | undefined;
+
+    // Snapping the folded amount can swallow the addition (½ cup plus 1 Tbsp is 0.5625 cup,
+    // which snaps back to ½ cup); then each part converts on its own and the line keeps "plus".
+    if (
+      folds &&
+      addition &&
+      additionDefinition &&
+      converted &&
+      !keepsAmount(converted, foldedQty, primaryDefinition)
+    ) {
+      const additionQty = addition.qty * factor;
+      const additionConverted = convertAmount(additionQty, additionDefinition, target, context);
+      converted = convertAmount(qty, primaryDefinition, target, context) ?? {
+        value: qty,
+        unit: primaryDefinition.canonical,
+        approximate: false
+      };
+      convertedAddition = {
+        ...addition,
+        // A single amount converts to a single amount.
+        qty: additionConverted ? maxOfValue(additionConverted.value) : additionQty,
+        unit: additionConverted?.unit ?? additionDefinition.canonical
+      };
+    }
 
     if (converted) {
       const unitChanged = converted.unit !== primaryDefinition.canonical;
@@ -661,7 +712,7 @@ export const convertParsedQuantity = (
         ...result,
         qty: converted.value,
         unit: converted.unit,
-        addition: undefined,
+        addition: convertedAddition,
         // Once the main amount is in the target system, an alternate in the other one is noise.
         ...(unitChanged && !primaryInTarget && altDefinition && altDefinition.system !== target
           ? { altQty: null, altUnit: null, altStyle: undefined }
