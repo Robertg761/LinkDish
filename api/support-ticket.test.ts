@@ -147,6 +147,37 @@ describe("Vercel support ticket adapter", () => {
     );
   });
 
+  it("hides network failures from the client and logs them", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mockFetch.mockRejectedValueOnce(
+      new TypeError("fetch failed: getaddrinfo ENOTFOUND api.resend.com")
+    );
+
+    const response = await supportTicketApi.POST(request(validPayload));
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({
+      message: "LinkDish could not submit the support ticket right now."
+    });
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      "Unhandled support ticket error.",
+      expect.any(TypeError)
+    );
+  });
+
+  it("logs a rejected Resend request and returns 503", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mockFetch.mockResolvedValueOnce(new Response("{}", { status: 422 }));
+
+    const response = await supportTicketApi.POST(request(validPayload));
+
+    expect(response.status).toBe(503);
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      "Support ticket email was rejected by Resend.",
+      422
+    );
+  });
+
   it("serves a CORS preflight for the public support site", () => {
     const response = supportTicketApi.OPTIONS(
       new Request("https://api.linkdish.ca/support-ticket", {
