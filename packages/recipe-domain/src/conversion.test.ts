@@ -482,6 +482,17 @@ describe("compound amounts in conversion (bug 16)", () => {
     ).toBe("130 ml milk");
   });
 
+  it("folds when splitting would land further from the exact amount", () => {
+    // Both parts would snap up to ⅛ tsp, overshooting more than the folded amount does.
+    expect(
+      getDisplayIngredient("1/8 teaspoon plus 1/8 teaspoon salt", { scale: 0.25, units: "us" }).text
+    ).toBe("⅛ tsp salt");
+    expect(
+      getDisplayIngredient("1/2 teaspoon plus 1/8 teaspoon pepper", { scale: 1 / 3, units: "us" })
+        .text
+    ).toBe("¼ tsp pepper");
+  });
+
   it("keeps a metric alternate when a US amount only moves to a smaller US unit", () => {
     expect(convertIngredientLine("1/2 cup (113g) milk", "us", { scale: 0.5 }).text).toBe(
       "4 Tbsp (57 g) milk"

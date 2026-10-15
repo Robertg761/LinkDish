@@ -421,24 +421,16 @@ const isSpoon = (definition: UnitDefinition): boolean =>
 const FOLDED_AMOUNT_TOLERANCE = 0.02;
 
 /**
- * True when a converted amount stays within FOLDED_AMOUNT_TOLERANCE of `exact` (written in
- * `definition`). Only US results are checked: snapping to eighths and thirds is coarse next to a
- * spoonful, while metric rounding steps are fine and density conversions change the kind.
+ * A converted amount in the base unit of its kind, or null when it cannot be compared with an
+ * amount written in `definition`. Only US results compare: snapping to eighths and thirds is coarse
+ * next to a spoonful, while metric rounding steps are fine and density conversions change the kind.
  */
-const keepsAmount = (
-  converted: Converted,
-  exact: QuantityValue,
-  definition: UnitDefinition
-): boolean => {
+const comparableBase = (converted: Converted, definition: UnitDefinition): number | null => {
   const unit = getUnitDefinition(converted.unit);
 
-  if (!unit?.base || unit.system !== "us" || unit.kind !== definition.kind) {
-    return true;
-  }
-
-  const exactBase = maxOfValue(toBase(exact, definition));
-  const convertedBase = maxOfValue(converted.value) * unit.base;
-  return Math.abs(convertedBase - exactBase) <= exactBase * FOLDED_AMOUNT_TOLERANCE;
+  return unit?.base && unit.system === "us" && unit.kind === definition.kind
+    ? maxOfValue(converted.value) * unit.base
+    : null;
 };
 
 /**
@@ -682,27 +674,46 @@ export const convertParsedQuantity = (
     let convertedAddition: IngredientAddition | undefined;
 
     // Snapping the folded amount can swallow the addition (½ cup plus 1 Tbsp is 0.5625 cup,
-    // which snaps back to ½ cup); then each part converts on its own and the line keeps "plus".
+    // which snaps back to ½ cup); then each part converts on its own and the line keeps "plus",
+    // but only when that lands closer to the exact sum: at small scales both parts can snap up
+    // to ⅛ tsp, which overshoots more than the folded amount does.
+    const exactBase = folds ? maxOfValue(toBase(foldedQty, primaryDefinition)) : 0;
+    const foldedBase = converted ? comparableBase(converted, primaryDefinition) : null;
+
     if (
       folds &&
       addition &&
       additionDefinition &&
-      converted &&
-      !keepsAmount(converted, foldedQty, primaryDefinition)
+      foldedBase !== null &&
+      Math.abs(foldedBase - exactBase) > exactBase * FOLDED_AMOUNT_TOLERANCE
     ) {
       const additionQty = addition.qty * factor;
-      const additionConverted = convertAmount(additionQty, additionDefinition, target, context);
-      converted = convertAmount(qty, primaryDefinition, target, context) ?? {
+      const primaryConverted = convertAmount(qty, primaryDefinition, target, context) ?? {
         value: qty,
         unit: primaryDefinition.canonical,
         approximate: false
       };
-      convertedAddition = {
-        ...addition,
-        // A single amount converts to a single amount.
-        qty: additionConverted ? maxOfValue(additionConverted.value) : additionQty,
-        unit: additionConverted?.unit ?? additionDefinition.canonical
+      const additionConverted = convertAmount(additionQty, additionDefinition, target, context) ?? {
+        value: additionQty,
+        unit: additionDefinition.canonical,
+        approximate: false
       };
+      const primaryBase = comparableBase(primaryConverted, primaryDefinition);
+      const additionBase = comparableBase(additionConverted, additionDefinition);
+
+      if (
+        primaryBase !== null &&
+        additionBase !== null &&
+        Math.abs(primaryBase + additionBase - exactBase) < Math.abs(foldedBase - exactBase)
+      ) {
+        converted = primaryConverted;
+        convertedAddition = {
+          ...addition,
+          // A single amount converts to a single amount.
+          qty: maxOfValue(additionConverted.value),
+          unit: additionConverted.unit
+        };
+      }
     }
 
     if (converted) {
