@@ -93,6 +93,22 @@ describe("parseServings", () => {
     expect(parseServings("Makes 12 cookies")?.noun).toBe("cookies");
   });
 
+  it("reads a fractional yield whole instead of stopping at the numerator", () => {
+    expect(parseServings("1/2 cup")).toEqual({
+      min: 0.5,
+      max: 0.5,
+      kind: "items",
+      noun: "cup",
+      display: "½ cup"
+    });
+    expect(parseServings("Makes 1/2 cup")).toMatchObject({ min: 0.5, noun: "cup" });
+    expect(parseServings("3/4 to 1 cup")).toMatchObject({ min: 0.75, max: 1, noun: "cup" });
+    expect(parseServings("1 1/2 cups")).toMatchObject({ min: 1.5, max: 1.5, noun: "cups" });
+    expect(parseServings("½ cup")).toMatchObject({ min: 0.5, max: 0.5, noun: "cup" });
+    expect(parseServings("4")).toMatchObject({ min: 4, max: 4, kind: "servings" });
+    expect(parseServings("4-6 servings")).toMatchObject({ min: 4, max: 6, kind: "servings" });
+  });
+
   it("reads every starter recipe", () => {
     expect(SAMPLE_RECIPES.map((sample) => parseServings(sample.recipe.servings)?.display)).toEqual([
       "Serves 4",
@@ -109,6 +125,7 @@ describe("formatServings and scaleFactorForServings", () => {
     expect(formatServings("Makes 12 cookies", { scale: 0.5 })).toBe("6 cookies");
     expect(formatServings("16, 1 loaf", { scale: 2 })).toBe("Serves 32");
     expect(formatServings("Serves 4-6", { scale: 1.5 })).toBe("Serves 6–9");
+    expect(formatServings("1/2 cup", { scale: 2 })).toBe("1 cup");
     expect(formatServings("Varies")).toBe("Varies");
     expect(formatServings(null)).toBe("");
   });
@@ -117,6 +134,7 @@ describe("formatServings and scaleFactorForServings", () => {
     expect(scaleFactorForServings("4 servings", 8)).toBe(2);
     expect(scaleFactorForServings("Serves 4-6", 2)).toBe(0.5);
     expect(scaleFactorForServings(parseServings("Makes 12 cookies"), 36)).toBe(3);
+    expect(scaleFactorForServings("1/2 cup", 1)).toBe(2);
     expect(scaleFactorForServings("Varies", 4)).toBe(1);
     expect(scaleFactorForServings("4 servings", 0)).toBe(1);
     expect(scaleFactorForServings("4 servings", Number.NaN)).toBe(1);

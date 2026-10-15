@@ -29,7 +29,11 @@ export type FormatServingsOptions = {
   scale?: number | undefined;
 };
 
-const NUMBER = `(?:${NUMBER_PHRASE_PATTERN}|${WORD_NUMBER_PATTERN}|a\\s+dozen)`;
+/**
+ * A count, never stopping short of a digit or slash: the trailing `(.*)` accepts any remainder,
+ * so without the lookahead "1/2 cup" matched the plain "1" and left "/2 cup" as the noun.
+ */
+const NUMBER = `(?:${NUMBER_PHRASE_PATTERN}|${WORD_NUMBER_PATTERN}|a\\s+dozen)(?![\\d/])`;
 const SEGMENT_PATTERN = new RegExp(
   String.raw`^(?:about|approx\.?|approximately|around|roughly|up to|at least|~)?\s*(${NUMBER})` +
     String.raw`(?:\s*(?:-|–|—|to|or)\s*(${NUMBER}))?\s*(.*)$`,
