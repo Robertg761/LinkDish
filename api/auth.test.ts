@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import { z } from "zod";
 
 import type * as AuthModule from "./auth.js";
@@ -6,8 +6,8 @@ import type * as AuthModule from "./auth.js";
 type AuthApi = typeof AuthModule;
 
 let authApi: AuthApi;
-let consoleInfoSpy: ReturnType<typeof vi.spyOn>;
-let consoleWarnSpy: ReturnType<typeof vi.spyOn>;
+let consoleInfoSpy: MockInstance<typeof console.info>;
+let consoleWarnSpy: MockInstance<typeof console.warn>;
 
 const billingMocks = vi.hoisted(() => ({
   getRevenueCatBillingPlanId: vi.fn(),
@@ -76,9 +76,7 @@ describe("Vercel auth adapter", () => {
     vi.resetModules();
     authApi = await import("./auth.js");
 
-    const response = await authApi.GET(
-      new Request("https://api.linkdish.ca/api/auth?path=config")
-    );
+    const response = await authApi.GET(new Request("https://api.linkdish.ca/api/auth?path=config"));
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({

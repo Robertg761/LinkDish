@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 
 import type * as SupportTicketModule from "./support-ticket.js";
 
@@ -6,7 +6,7 @@ type SupportTicketApi = typeof SupportTicketModule;
 
 let supportTicketApi: SupportTicketApi;
 let mockFetch: ReturnType<typeof vi.fn>;
-let consoleInfoSpy: ReturnType<typeof vi.spyOn>;
+let consoleInfoSpy: MockInstance<typeof console.info>;
 
 const request = (body: unknown, headers?: Record<string, string>) =>
   new Request("https://api.linkdish.ca/support-ticket", {

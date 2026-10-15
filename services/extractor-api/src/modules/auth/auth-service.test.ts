@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 
 const importAuthService = async (env?: Record<string, string>) => {
   vi.resetModules();
@@ -16,7 +16,7 @@ const importAuthService = async (env?: Record<string, string>) => {
   return import("./auth-service.js");
 };
 
-let consoleInfoSpy: ReturnType<typeof vi.spyOn>;
+let consoleInfoSpy: MockInstance<typeof console.info>;
 
 const getLastLoginCode = (): string => {
   const message = [...consoleInfoSpy.mock.calls]
