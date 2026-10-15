@@ -5,8 +5,7 @@ on:
     branches:
       - main
     paths-ignore:
-      - "docs/**"
-      - "store-shots/**"
+      - "docs/*.md"
       - "**.md"
       - "*.png"
       - public/privacy.html
@@ -42,9 +41,15 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # pnpm validate == lint + typecheck + test + check:site, the same gate the API deploy runs.
+      # pnpm validate == lint + typecheck + test + test:vercel-handlers + check:site, the same
+      # gate the API deploy runs.
       - name: Validate repository
         run: pnpm validate
+
+      - name: Check web bundle budgets
+        run: |
+          pnpm build:web
+          pnpm --filter @linkdish/web size
 
   audit:
     runs-on: ubuntu-latest

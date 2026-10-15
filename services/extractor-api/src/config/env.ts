@@ -15,7 +15,7 @@ for (const path of [
   resolve(serviceRoot, ".env.local"),
   resolve(process.cwd(), ".env")
 ]) {
-  loadDotEnv({ path });
+  loadDotEnv({ path, quiet: true });
 }
 
 const trimmedString = () => z.string().trim();

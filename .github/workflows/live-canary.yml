@@ -16,6 +16,10 @@ on:
   schedule:
     - cron: "0 14 * * 1"
 
+concurrency:
+  group: live-canary
+  cancel-in-progress: false
+
 jobs:
   canary:
     runs-on: ubuntu-latest

@@ -2,6 +2,9 @@
   "name": "linkdish",
   "private": true,
   "packageManager": "pnpm@10.8.0",
+  "engines": {
+    "node": ">=22.18"
+  },
   "scripts": {
     "dev:site": "node scripts/serve-site.mjs",
     "check:site": "node scripts/check-site.mjs",

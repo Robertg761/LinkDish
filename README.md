@@ -38,7 +38,7 @@ See [docs/architecture.md](docs/architecture.md) for a high-level system map.
 
 Requirements:
 
-- Node.js 20 or newer
+- Node.js 24 (what CI uses); 22.18 or newer at minimum
 - pnpm 10.8.0
 
 Install and validate the workspace:

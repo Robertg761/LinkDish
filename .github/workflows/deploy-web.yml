@@ -16,7 +16,8 @@ on:
 
 concurrency:
   group: deploy-web-production
-  cancel-in-progress: true
+  # Queue instead of cancelling: a cancelled run can stop between the deploy and its canary.
+  cancel-in-progress: false
 
 permissions:
   contents: read
