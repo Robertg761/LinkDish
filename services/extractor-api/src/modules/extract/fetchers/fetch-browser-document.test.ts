@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 
 type TestRoute = {
   abort: () => Promise<void>;
@@ -19,6 +19,8 @@ vi.mock("playwright", () => ({
 
 import { createBrowserFetcher } from "./fetch-browser-document";
 
+import type { ValidateSourceUrl } from "../source-url-safety";
+
 describe("createBrowserFetcher", () => {
   let browserMock: {
     newContext: ReturnType<typeof vi.fn>;
@@ -31,14 +33,14 @@ describe("createBrowserFetcher", () => {
   };
   let pageMock: {
     setExtraHTTPHeaders: ReturnType<typeof vi.fn>;
-    goto: ReturnType<typeof vi.fn>;
+    goto: Mock<(url: string) => Promise<unknown>>;
     waitForSelector: ReturnType<typeof vi.fn>;
     content: ReturnType<typeof vi.fn>;
     url: ReturnType<typeof vi.fn>;
     close: ReturnType<typeof vi.fn>;
     waitForLoadState: ReturnType<typeof vi.fn>;
   };
-  let validateUrlMock: ReturnType<typeof vi.fn>;
+  let validateUrlMock: Mock<ValidateSourceUrl>;
 
   const createEnabledFetcher = (validateUrl = validateUrlMock) =>
     createBrowserFetcher({

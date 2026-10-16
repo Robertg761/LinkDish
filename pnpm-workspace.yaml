@@ -4,3 +4,14 @@ packages:
   - packages/*
 
 nodeLinker: hoisted
+
+# These packages' install scripts only print banners or verify prebuilt binaries that
+# are already present, so pnpm does not need to run them.
+ignoredBuiltDependencies:
+  - "@clerk/shared"
+  - browser-tabs-lock
+  - bufferutil
+  - core-js
+  - esbuild
+  - unrs-resolver
+  - utf-8-validate

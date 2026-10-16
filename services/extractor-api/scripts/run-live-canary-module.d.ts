@@ -41,6 +41,8 @@ declare module "./run-live-canary.mjs" {
     primary: Record<string, number>;
     fallback: Record<string, number>;
     final: Record<string, number>;
+    abortReason: "canary_not_billing_exempt" | null;
+    skipped: number;
   };
 
   export function validateManifestEntry(input: {

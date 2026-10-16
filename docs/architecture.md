@@ -93,7 +93,7 @@ size` checks the budgets after a build (entry ≤ 115 KB gzip, landing JS ≤
 - Source detection now uses fetched HTML hints in addition to URL heuristics.
 - Success responses include `fetchMode` and extraction provenance metadata.
 - LLM fallback is behind a provider interface and is optional at runtime. The backend controls whether Gemini, OpenAI, or no provider is active.
-- The root `api/extract.ts` Vercel handler is an adapter into the full extractor runtime. See [extractor-deployment.md](extractor-deployment.md) before changing production routing.
+- The root `api/extract.ts` Vercel handler is an adapter into the full extractor runtime. Production routing lives in the root `vercel.json`.
 
 ### Sources
 
@@ -266,7 +266,6 @@ Performance pieces in `services/extractor-api/src/modules/extract`:
 - `AUTH_MODE` controls rollout behavior: `legacy_email_code`, `clerk_beta`, or `clerk_primary`.
 - `GET /auth/config` lets mobile discover whether Clerk sign-in and email-code fallback should be visible without requiring a signed-in session.
 - Google sign-in is supported through Clerk. Apple sign-in is intentionally hidden until an Apple Developer account and production Apple credentials exist.
-- See [clerk-auth.md](clerk-auth.md) before changing auth routes, Clerk/Google dashboard configuration, mobile sign-in UI, account linking, or deletion behavior.
 
 ## Extraction Fallback Contract
 

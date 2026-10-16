@@ -1,6 +1,6 @@
 import react from "@vitejs/plugin-react";
-import { defineConfig } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
+import { defineConfig } from "vitest/config";
 
 import type { HtmlTagDescriptor, Plugin, Rollup } from "vite";
 

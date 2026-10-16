@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 
 import type * as SupportTicketModule from "./support-ticket.js";
 
@@ -6,7 +6,7 @@ type SupportTicketApi = typeof SupportTicketModule;
 
 let supportTicketApi: SupportTicketApi;
 let mockFetch: ReturnType<typeof vi.fn>;
-let consoleInfoSpy: ReturnType<typeof vi.spyOn>;
+let consoleInfoSpy: MockInstance<typeof console.info>;
 
 const request = (body: unknown, headers?: Record<string, string>) =>
   new Request("https://api.linkdish.ca/support-ticket", {
@@ -144,6 +144,37 @@ describe("Vercel support ticket adapter", () => {
     expect(consoleInfoSpy).toHaveBeenCalledWith(
       expect.stringMatching(/^LinkDish support ticket LD-\d{8}-[A-F0-9]{8}$/u),
       expect.stringContaining("customer@example.com")
+    );
+  });
+
+  it("hides network failures from the client and logs them", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mockFetch.mockRejectedValueOnce(
+      new TypeError("fetch failed: getaddrinfo ENOTFOUND api.resend.com")
+    );
+
+    const response = await supportTicketApi.POST(request(validPayload));
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({
+      message: "LinkDish could not submit the support ticket right now."
+    });
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      "Unhandled support ticket error.",
+      expect.any(TypeError)
+    );
+  });
+
+  it("logs a rejected Resend request and returns 503", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mockFetch.mockResolvedValueOnce(new Response("{}", { status: 422 }));
+
+    const response = await supportTicketApi.POST(request(validPayload));
+
+    expect(response.status).toBe(503);
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      "Support ticket email was rejected by Resend.",
+      422
     );
   });
 

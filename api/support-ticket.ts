@@ -139,6 +139,7 @@ const sendSupportTicketEmail = async (
   });
 
   if (!response.ok) {
+    console.error("Support ticket email was rejected by Resend.", response.status);
     throw new SupportTicketError("LinkDish could not submit the support ticket right now.", 503);
   }
 };
@@ -151,26 +152,28 @@ const parseJsonBody = async (request: Request): Promise<unknown> => {
   }
 };
 
-const errorResponse = (request: Request, error: unknown): Response =>
-  corsJson(
+/*
+ * Unclassified failures (a network error reaching Resend, for example) carry
+ * provider internals, so the client gets a generic message and the detail is
+ * logged server-side.
+ */
+const errorResponse = (request: Request, error: unknown): Response => {
+  if (error instanceof SupportTicketError) {
+    return corsJson(request, { message: error.message }, { status: error.statusCode });
+  }
+
+  if (error instanceof ZodError) {
+    return corsJson(request, { message: "Check the support form and try again." }, { status: 400 });
+  }
+
+  console.error("Unhandled support ticket error.", error);
+
+  return corsJson(
     request,
-    {
-      message:
-        error instanceof ZodError
-          ? "Check the support form and try again."
-          : error instanceof Error
-            ? error.message
-            : "Unexpected support ticket error."
-    },
-    {
-      status:
-        error instanceof SupportTicketError
-          ? error.statusCode
-          : error instanceof ZodError
-            ? 400
-            : 500
-    }
+    { message: "LinkDish could not submit the support ticket right now." },
+    { status: 500 }
   );
+};
 
 export function OPTIONS(request: Request) {
   return corsPreflight(request);

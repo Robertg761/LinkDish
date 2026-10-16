@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 
 import type { AccountUser } from "../../../../../packages/api-contracts/src/index.js";
 
@@ -104,7 +104,7 @@ const createUser = async (
   return (await auth.verifyLoginCode(email, getLastLoginCode())).user;
 };
 
-let consoleInfoSpy: ReturnType<typeof vi.spyOn>;
+let consoleInfoSpy: MockInstance<typeof console.info>;
 
 const getLastConsoleCode = (prefix: string): string => {
   const message = [...consoleInfoSpy.mock.calls]

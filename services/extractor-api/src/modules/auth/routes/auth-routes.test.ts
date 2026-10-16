@@ -1,9 +1,9 @@
 import Fastify from "fastify";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import { z } from "zod";
 
-let consoleInfoSpy: ReturnType<typeof vi.spyOn>;
-let consoleWarnSpy: ReturnType<typeof vi.spyOn>;
+let consoleInfoSpy: MockInstance<typeof console.info>;
+let consoleWarnSpy: MockInstance<typeof console.warn>;
 
 const billingMocks = vi.hoisted(() => ({
   getRevenueCatBillingPlanId: vi.fn(),

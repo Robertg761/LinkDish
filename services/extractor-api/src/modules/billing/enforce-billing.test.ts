@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi, type MockInstance } from "vitest";
 
 const importBillingModule = async (env?: Record<string, string>) => {
   vi.resetModules();
@@ -63,7 +63,7 @@ const stubRevenueCatEntitlements = (
   return fetchMock;
 };
 
-const getLastConsoleCode = (infoSpy: ReturnType<typeof vi.spyOn>, prefix: string): string => {
+const getLastConsoleCode = (infoSpy: MockInstance<typeof console.info>, prefix: string): string => {
   const message = [...infoSpy.mock.calls]
     .map(([entry]) => (typeof entry === "string" ? entry : ""))
     .reverse()
@@ -77,14 +77,17 @@ const getLastConsoleCode = (infoSpy: ReturnType<typeof vi.spyOn>, prefix: string
   return code;
 };
 
-const createAuthenticatedUser = async (email: string, infoSpy: ReturnType<typeof vi.spyOn>) => {
+const createAuthenticatedUser = async (
+  email: string,
+  infoSpy: MockInstance<typeof console.info>
+) => {
   const auth = await import("../auth/auth-service.js");
 
   await auth.requestLoginCode(email);
   return auth.verifyLoginCode(email, getLastConsoleCode(infoSpy, "LinkDish login code for "));
 };
 
-const getLastInviteCode = (infoSpy: ReturnType<typeof vi.spyOn>): string =>
+const getLastInviteCode = (infoSpy: MockInstance<typeof console.info>): string =>
   getLastConsoleCode(infoSpy, "LinkDish household invite for ");
 
 afterEach(() => {
@@ -360,7 +363,9 @@ describe("authorizeExtractionRequest", () => {
 
     for (let index = 0; index < 5; index += 1) {
       const result =
-        index === 0 ? firstCurrentMonthResult : await authorizeExtractionRequest(headers, "primary");
+        index === 0
+          ? firstCurrentMonthResult
+          : await authorizeExtractionRequest(headers, "primary");
       expect(result.allowed).toBe(true);
       await result.commitUsage({
         status: "success",

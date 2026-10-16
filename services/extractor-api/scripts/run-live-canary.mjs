@@ -43,9 +43,7 @@ const toTimedOutFailure = (userMessage) => ({
 const buildRegex = (pattern) => (pattern ? new RegExp(pattern, "i") : null);
 const blockedStatusCodes = new Set([401, 402, 403, 429, 451]);
 
-export const resolveCanaryTimeoutMs = (
-  rawTimeoutMs = process.env.LINKDISH_CANARY_TIMEOUT_MS
-) => {
+export const resolveCanaryTimeoutMs = (rawTimeoutMs = process.env.LINKDISH_CANARY_TIMEOUT_MS) => {
   if (rawTimeoutMs == null || rawTimeoutMs.trim() === "") {
     return defaultTimeoutMs;
   }
@@ -78,12 +76,33 @@ const buildExtractHeaders = ({ billingClientId, billingProvider, headers = {} })
   return extractHeaders;
 };
 
+/*
+ * The production API meters a canary request like any anonymous import unless
+ * its bearer token matches the server's LINKDISH_CANARY_TOKEN. A plan_limit
+ * answer therefore means the token was not accepted, and every later entry
+ * would fail the same way.
+ */
+const canaryNotBillingExemptReason = "canary_not_billing_exempt";
+const isPlanLimited = (attempt) => attempt?.payload?.reason === "plan_limit";
+
 const getAttemptStatus = (attempt) => {
   const status = attempt?.payload?.status;
   return typeof status === "string" ? status : null;
 };
 
-const validateExpectedOutcome = ({ expectedMinimumOutcome, finalStatus, driftDetected }) => {
+const validateExpectedOutcome = ({
+  expectedMinimumOutcome,
+  finalStatus,
+  driftDetected,
+  planLimited
+}) => {
+  if (planLimited) {
+    return {
+      expectedOutcomeMet: false,
+      outcomeFailureReason: canaryNotBillingExemptReason
+    };
+  }
+
   if (driftDetected) {
     return {
       expectedOutcomeMet: false,
@@ -275,6 +294,7 @@ export const runLiveCanary = async ({
   await fs.mkdir(outputDir, { recursive: true });
 
   const results = [];
+  let abortReason = null;
 
   for (const entry of manifest) {
     const startedAt = Date.now();
@@ -316,10 +336,12 @@ export const runLiveCanary = async ({
     const primaryStatus = getAttemptStatus(primary);
     const fallbackStatus = getAttemptStatus(fallback);
     const finalStatus = fallbackStatus ?? primaryStatus;
+    const planLimited = isPlanLimited(primary) || isPlanLimited(fallback);
     const outcome = validateExpectedOutcome({
       expectedMinimumOutcome: entry.expectedMinimumOutcome,
       finalStatus,
-      driftDetected: preflight.driftDetected
+      driftDetected: preflight.driftDetected,
+      planLimited
     });
 
     results.push({
@@ -337,6 +359,11 @@ export const runLiveCanary = async ({
       finalStatus,
       ...outcome
     });
+
+    if (planLimited) {
+      abortReason = canaryNotBillingExemptReason;
+      break;
+    }
   }
 
   const summary = results.reduce(
@@ -397,6 +424,9 @@ export const runLiveCanary = async ({
     }
   );
 
+  summary.abortReason = abortReason;
+  summary.skipped = manifest.length - results.length;
+
   const payload = {
     ranAt: new Date().toISOString(),
     baseUrl,
@@ -431,6 +461,16 @@ export const main = async (argv = process.argv.slice(2)) => {
   });
 
   console.log(JSON.stringify(result, null, 2));
+
+  if (result.summary.abortReason === canaryNotBillingExemptReason) {
+    console.error(
+      "Live canary stopped: the API metered the canary as a free user (plan_limit), so " +
+        "LINKDISH_CANARY_AUTH_TOKEN was not accepted. Set it to the same value as the API's " +
+        `LINKDISH_CANARY_TOKEN and redeploy the API. ${result.summary.skipped} entries were skipped.`
+    );
+    process.exitCode = 1;
+    return;
+  }
 
   if (result.summary.failed > 0) {
     console.error(

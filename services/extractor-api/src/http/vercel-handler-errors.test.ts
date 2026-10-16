@@ -11,7 +11,8 @@ const mocks = vi.hoisted(() => ({
   handleRevenueCatWebhook: vi.fn(),
   joinIosWaitlist: vi.fn(),
   updateUserProfileById: vi.fn(),
-  getHouseholdOverviewForUser: vi.fn()
+  getHouseholdOverviewForUser: vi.fn(),
+  handleClerkWebhook: vi.fn()
 }));
 
 vi.mock("../modules/auth/auth-service.js", async (importOriginal) => ({
@@ -22,6 +23,10 @@ vi.mock("../modules/auth/auth-service.js", async (importOriginal) => ({
 
 vi.mock("../modules/billing/revenuecat-webhook-service.js", () => ({
   handleRevenueCatWebhook: mocks.handleRevenueCatWebhook
+}));
+
+vi.mock("../modules/auth/clerk-webhook-service.js", () => ({
+  handleClerkWebhook: mocks.handleClerkWebhook
 }));
 
 vi.mock("../modules/waitlist/ios-waitlist-service.js", () => ({
@@ -51,6 +56,7 @@ beforeEach(() => {
   mocks.getAuthenticatedUser.mockRejectedValue(new Error(internalMessage));
   mocks.handleRevenueCatWebhook.mockRejectedValue(new Error(internalMessage));
   mocks.joinIosWaitlist.mockRejectedValue(new Error(internalMessage));
+  mocks.handleClerkWebhook.mockRejectedValue(new Error(internalMessage));
 });
 
 afterEach(() => {
@@ -109,6 +115,16 @@ describe("serverless handlers hide internal failures", () => {
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ email: "cook@example.com" })
         })
+      )
+    );
+  });
+
+  it("/api/clerk-webhook returns a generic 500", async () => {
+    const clerkWebhookApi = await import("../../../../api/clerk-webhook.js");
+
+    await expectNoLeak(
+      await clerkWebhookApi.POST(
+        new Request("https://api.linkdish.ca/clerk-webhook", { method: "POST", body: "{}" })
       )
     );
   });

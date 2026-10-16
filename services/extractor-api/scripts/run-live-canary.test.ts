@@ -59,6 +59,8 @@ type RunLiveCanary = (input: {
     passed: number;
     failed: number;
     outcomeFailures: number;
+    abortReason: string | null;
+    skipped: number;
   };
 }>;
 
@@ -68,21 +70,17 @@ const validateManifestEntry = (canaryModule as { validateManifestEntry: Validate
   .validateManifestEntry;
 const preflightEntry = (canaryModule as { preflightEntry: PreflightEntry }).preflightEntry;
 const runLiveCanary = (canaryModule as { runLiveCanary: RunLiveCanary }).runLiveCanary;
-const resolveCanaryTimeoutMs = (
-  canaryModule as { resolveCanaryTimeoutMs: ResolveCanaryTimeoutMs }
-).resolveCanaryTimeoutMs;
+const resolveCanaryTimeoutMs = (canaryModule as { resolveCanaryTimeoutMs: ResolveCanaryTimeoutMs })
+  .resolveCanaryTimeoutMs;
 
 describe("resolveCanaryTimeoutMs", () => {
   it("accepts a positive integer override", () => {
     expect(resolveCanaryTimeoutMs("45000")).toBe(45_000);
   });
 
-  it.each(["", "0", "-1", "1.5", "not-a-number"])(
-    "falls back to the default for %j",
-    (value) => {
-      expect(resolveCanaryTimeoutMs(value)).toBe(20_000);
-    }
-  );
+  it.each(["", "0", "-1", "1.5", "not-a-number"])("falls back to the default for %j", (value) => {
+    expect(resolveCanaryTimeoutMs(value)).toBe(20_000);
+  });
 });
 
 describe("validateManifestEntry", () => {
@@ -250,7 +248,7 @@ describe("runLiveCanary", () => {
     const manifestPath = path.join(tempDir, "manifest.json");
     const manifest = [
       {
-        id: "recipe-plan-limit",
+        id: "recipe-parse-failed",
         kind: "recipe-webpage",
         url: "https://example.com/recipe",
         expectedMinimumOutcome: "success",
@@ -279,7 +277,7 @@ describe("runLiveCanary", () => {
           json: () =>
             Promise.resolve({
               status: "failure",
-              reason: "plan_limit"
+              reason: "parse_failed"
             })
         });
       }
@@ -322,6 +320,73 @@ describe("runLiveCanary", () => {
       expectedOutcomeMet: false,
       outcomeFailureReason: "expected_success_got_failure"
     });
+
+    await rm(tempDir, { recursive: true, force: true });
+    await rm(result.outputPath, { force: true });
+  });
+
+  it("stops at the first plan_limit because the canary token was not accepted", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "linkdish-canary-"));
+    const manifestPath = path.join(tempDir, "manifest.json");
+    const manifest = ["one", "two", "three"].map((id) => ({
+      id: `recipe-${id}`,
+      kind: "recipe-webpage",
+      url: `https://example.com/${id}`,
+      expectedMinimumOutcome: "success"
+    }));
+    let extractCalls = 0;
+
+    await writeFile(manifestPath, JSON.stringify(manifest, null, 2));
+
+    const fetchImplementation = ((url) => {
+      if (typeof url === "string" && url.startsWith("https://example.com/")) {
+        return Promise.resolve({
+          status: 200,
+          url,
+          text: () => Promise.resolve("<html><title>Recipe</title></html>")
+        });
+      }
+
+      if (typeof url === "string" && url.endsWith("/extract")) {
+        extractCalls += 1;
+
+        return Promise.resolve({
+          status: 200,
+          json: () =>
+            Promise.resolve(
+              extractCalls === 1
+                ? { status: "success" }
+                : { status: "failure", reason: "plan_limit" }
+            )
+        });
+      }
+
+      throw new Error(`Unexpected fetch: ${typeof url === "string" ? url : "non-string url"}`);
+    }) as typeof fetch;
+
+    const result = await runLiveCanary({
+      manifestPath,
+      baseUrl: "https://api.example.com",
+      timeoutMs: 100,
+      fetchImplementation
+    });
+
+    const artifact = JSON.parse(await readFile(result.outputPath, "utf8")) as {
+      results: Array<{ id: string; outcomeFailureReason: string | null }>;
+    };
+
+    expect(extractCalls).toBe(2);
+    expect(result.summary).toMatchObject({
+      total: 2,
+      passed: 1,
+      failed: 1,
+      abortReason: "canary_not_billing_exempt",
+      skipped: 1
+    });
+    expect(artifact.results.map((entry) => entry.outcomeFailureReason)).toEqual([
+      null,
+      "canary_not_billing_exempt"
+    ]);
 
     await rm(tempDir, { recursive: true, force: true });
     await rm(result.outputPath, { force: true });
