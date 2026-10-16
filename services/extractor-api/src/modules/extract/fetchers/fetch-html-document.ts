@@ -8,6 +8,7 @@ import {
   classifyFetchStatusCode,
   createTimeoutSignal,
   detectBlockedSignals,
+  identifyingFetchHeaders,
   isHtmlLikeContentType,
   readLimitedResponseText,
   ResponseBodyTooLargeError,
@@ -48,10 +49,81 @@ const loadDocumentBuilder = () => {
 
 class ConnectionFailure extends Error {}
 
+type FetchHeaders = typeof browserLikeHeaders | typeof identifyingFetchHeaders;
+
+const isBotChallengeError = (error: unknown): boolean =>
+  error instanceof HtmlFetchError &&
+  error.statusCode !== undefined &&
+  error.statusCode >= 400 &&
+  (error.reason === "blocked" || (error.statusCode === 503 && error.blockedSignals.length > 0));
+
+/*
+ * Cloudflare-protected sites challenge a spoofed Chrome user-agent (the TLS
+ * fingerprint does not match) but serve an honest, identifying bot user-agent.
+ * When the browser-like attempt is challenged, the whole fetch (redirects and
+ * URL safety checks included) is retried once with the identifying headers.
+ */
 export const fetchHtmlDocument = async (
   url: string,
   fetchImplementation: typeof fetch,
   options: FetchHtmlDocumentOptions
+): Promise<FetchResult> => {
+  let original: FetchResult | HtmlFetchError;
+
+  try {
+    original = await fetchHtmlDocumentWithHeaders(
+      url,
+      fetchImplementation,
+      options,
+      browserLikeHeaders
+    );
+  } catch (error) {
+    if (!isBotChallengeError(error)) {
+      throw error;
+    }
+
+    original = error as HtmlFetchError;
+  }
+
+  if (!(original instanceof HtmlFetchError) && original.blockedSignals.length === 0) {
+    return original;
+  }
+
+  if (options.signal?.aborted) {
+    if (original instanceof HtmlFetchError) {
+      throw original;
+    }
+
+    return original;
+  }
+
+  try {
+    const retried = await fetchHtmlDocumentWithHeaders(
+      url,
+      fetchImplementation,
+      options,
+      identifyingFetchHeaders
+    );
+
+    if (retried.blockedSignals.length === 0) {
+      return retried;
+    }
+  } catch {
+    /* Surface the original outcome below. */
+  }
+
+  if (original instanceof HtmlFetchError) {
+    throw original;
+  }
+
+  return original;
+};
+
+const fetchHtmlDocumentWithHeaders = async (
+  url: string,
+  fetchImplementation: typeof fetch,
+  options: FetchHtmlDocumentOptions,
+  headers: FetchHeaders
 ): Promise<FetchResult> => {
   const validateUrl = options.validateUrl ?? validatePublicSourceUrl;
   const maxRedirects = options.maxRedirects ?? 5;
@@ -80,7 +152,7 @@ export const fetchHtmlDocument = async (
       for (let redirectCount = 0; redirectCount <= maxRedirects; redirectCount += 1) {
         try {
           response = await fetchImplementation(requestUrl, {
-            headers: browserLikeHeaders,
+            headers,
             redirect: "manual",
             signal: timeout.signal
           });
