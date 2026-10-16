@@ -16,6 +16,16 @@ export const browserLikeHeaders = {
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36"
 } as const;
 
+/*
+ * Cloudflare-protected sites challenge the spoofed Chrome user-agent above (the
+ * TLS fingerprint does not match) but serve an honest, non-browser user-agent.
+ */
+export const identifyingFetchHeaders = {
+  accept: browserLikeHeaders.accept,
+  "accept-language": browserLikeHeaders["accept-language"],
+  "user-agent": "Mozilla/5.0 (compatible; LinkDishBot/1.0; +https://linkdish.ca)"
+} as const;
+
 const defaultBlockedPatterns = [
   /captcha/i,
   /attention required/i,

@@ -17,7 +17,69 @@ const createHtmlResponse = (status: number, html: string, url = "https://example
   }) as Response;
 const allowUrl: ValidateSourceUrl = () => Promise.resolve({ safe: true });
 
+const challengeHtml = "<html><title>Just a moment...</title><body>Enable JavaScript</body></html>";
+const recipeHtml = `<html><title>Spicy Noodles</title><body>${"Recipe text. ".repeat(200)}</body></html>`;
+const userAgentOf = (call: unknown[]) =>
+  ((call[1] as RequestInit).headers as Record<string, string>)["user-agent"];
+
 describe("fetchHtmlDocument", () => {
+  it("retries a 403 challenge with the identifying user-agent", async () => {
+    const fetchImplementation = vi
+      .fn()
+      .mockImplementation((_url: string, init: RequestInit) =>
+        Promise.resolve(
+          (init.headers as Record<string, string>)["user-agent"]?.includes("LinkDishBot")
+            ? createHtmlResponse(200, recipeHtml)
+            : createHtmlResponse(403, challengeHtml)
+        )
+      );
+
+    const result = await fetchHtmlDocument(
+      "https://example.com/recipe",
+      fetchImplementation as unknown as typeof fetch,
+      { validateUrl: allowUrl, timeoutMs: 1_000, retries: 0 }
+    );
+
+    expect(result.blockedSignals).toEqual([]);
+    expect(fetchImplementation).toHaveBeenCalledTimes(2);
+    expect(userAgentOf(fetchImplementation.mock.calls[1] as unknown[])).toContain("LinkDishBot");
+  });
+
+  it("retries a 200 challenge page with the identifying user-agent", async () => {
+    const fetchImplementation = vi
+      .fn()
+      .mockResolvedValueOnce(createHtmlResponse(200, challengeHtml))
+      .mockResolvedValueOnce(createHtmlResponse(200, recipeHtml));
+
+    const result = await fetchHtmlDocument(
+      "https://example.com/recipe",
+      fetchImplementation as unknown as typeof fetch,
+      { validateUrl: allowUrl, timeoutMs: 1_000, retries: 0 }
+    );
+
+    expect(result.blockedSignals).toEqual([]);
+    expect(fetchImplementation).toHaveBeenCalledTimes(2);
+  });
+
+  it("surfaces blocked when both attempts are challenged", async () => {
+    const fetchImplementation = vi
+      .fn()
+      .mockImplementation(() => Promise.resolve(createHtmlResponse(403, challengeHtml)));
+
+    await expect(
+      fetchHtmlDocument(
+        "https://example.com/recipe",
+        fetchImplementation as unknown as typeof fetch,
+        {
+          validateUrl: allowUrl,
+          timeoutMs: 1_000,
+          retries: 0
+        }
+      )
+    ).rejects.toMatchObject({ reason: "blocked", statusCode: 403 });
+    expect(fetchImplementation).toHaveBeenCalledTimes(2);
+  });
+
   it("classifies 402 anti-bot pages as blocked", async () => {
     const fetchImplementation = vi
       .fn()
@@ -57,6 +119,28 @@ describe("fetchHtmlDocument", () => {
       reason: "not_found",
       statusCode: 404
     });
+    expect(fetchImplementation).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not retry with the identifying user-agent after a cancellation", async () => {
+    const controller = new AbortController();
+    const fetchImplementation = vi.fn().mockImplementation(() => {
+      controller.abort();
+      return Promise.resolve(createHtmlResponse(403, challengeHtml));
+    });
+
+    await expect(
+      fetchHtmlDocument(
+        "https://example.com/recipe",
+        fetchImplementation as unknown as typeof fetch,
+        {
+          validateUrl: allowUrl,
+          timeoutMs: 1_000,
+          retries: 0,
+          signal: controller.signal
+        }
+      )
+    ).rejects.toMatchObject({ reason: "blocked" });
     expect(fetchImplementation).toHaveBeenCalledTimes(1);
   });
 
