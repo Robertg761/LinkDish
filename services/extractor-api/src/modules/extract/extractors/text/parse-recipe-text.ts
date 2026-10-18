@@ -93,6 +93,8 @@ const outroLinePattern =
 /* Recipe section names that stand alone without a colon ("Decoration", "Sauce"). */
 const sectionWordPattern =
   /^(?:for (?:the )?)?(?:[\p{L}]+ )?(?:decorations?|toppings?|sauce|dressing|filling|frosting|icing|glaze|marinade|batter|dough|crust|base|garnish|syrup|ganache|custard|streusel|crumble|coating|seasoning|assembly)$/iu;
+/* "Full recipe:", "Get the recipe here:", "Tasty Recipe:". */
+const recipeLabelPattern = /\brecipes?(?:\s+here)?\s*:?$/iu;
 const urlPattern = /https?:\/\/[^\s<>"')\]]+/giu;
 const hashtagOnlyPattern = /^(?:[#@][\p{L}\p{N}_.]+[\s,]*)+$/u;
 const trailingHashtagsPattern = /(?:\s+[#@][\p{L}\p{N}_.]+)+\s*$/u;
@@ -177,7 +179,16 @@ const toLines = (text: string): string[] =>
     .replace(/(\d)\uFE0F?\u20E3\s*/gu, "$1. ")
     .split("\n")
     .flatMap(splitRunOnLine)
-    .map((line) => line.replace(urlPattern, "").replace(/\s+/gu, " ").trim());
+    .map(withoutLinks);
+
+/* "Full recipe: https://…" and "My cookbook: https://…" lose the label with the link. */
+const withoutLinks = (line: string): string => {
+  const rest = line.replace(urlPattern, "").replace(/\s+/gu, " ").trim();
+  const isLinkLabel =
+    rest !== line && rest.length <= 40 && /:\W*$/u.test(rest) && readHeading(rest) === null;
+
+  return isLinkLabel ? "" : rest;
+};
 
 const withoutPictographs = (line: string): string =>
   line
@@ -265,7 +276,7 @@ const readHeading = (line: string): Heading | null => {
 /* "For the sauce:", "Frosting:", "Dough" (with a colon) inside an ingredient list. */
 const readSubsectionHeading = (line: string): string | null => {
   /* "Tasty Recipe:" labels the whole recipe, not a group of it. */
-  if (/\brecipes?\s*:?$/iu.test(line)) {
+  if (recipeLabelPattern.test(line)) {
     return null;
   }
 
@@ -694,6 +705,11 @@ const parseWithHeadings = (lines: TextLine[], metadata: Metadata): ParsedRecipeT
       continue;
     }
 
+    /* "Full recipe:" with its link on the next line labels the link, not a step. */
+    if (line.length <= 30 && recipeLabelPattern.test(line)) {
+      continue;
+    }
+
     const stepSubsection = readSubsectionHeading(line);
 
     if (stepSubsection && !looksLikeStepLine(line)) {
@@ -872,7 +888,12 @@ const readTextLines = (text: string): TextLine[] => {
 
     /* Before the noise filter: "Thanks for watching" is also promotional, but it ends the recipe. */
     if (isOutroLine(cleaned)) {
-      if (lines.some((line) => looksLikeIngredientLine(line.text))) {
+      if (
+        lines.some(
+          (line) =>
+            looksLikeIngredientLine(line.text) || readHeading(line.text)?.kind === "ingredients"
+        )
+      ) {
         break;
       }
 

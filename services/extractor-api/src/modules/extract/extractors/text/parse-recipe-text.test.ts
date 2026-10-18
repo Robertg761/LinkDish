@@ -416,6 +416,40 @@ describe("parseRecipeText", () => {
     ).toBe(1440);
   });
 
+  it("ends at a sign-off after a list of unmeasured ingredients", () => {
+    const parsed = parseRecipeText(
+      [
+        "Ingredients",
+        "Salt",
+        "Pepper",
+        "Method",
+        "Season the steak.",
+        "Thanks for watching",
+        "New videos every Friday"
+      ].join("\n")
+    );
+
+    expect(parsed.steps).toEqual(["Season the steak."]);
+  });
+
+  it("keeps recipe-link labels out of the method", () => {
+    const parsed = parseRecipeText(
+      [
+        "Ingredients",
+        "2 eggs",
+        "1 cup flour",
+        "Method",
+        "Mix and bake.",
+        "Full recipe: https://example.com/post",
+        "My cookbook: https://example.com/book",
+        "Printable recipe:",
+        "https://example.com/print"
+      ].join("\n")
+    );
+
+    expect(parsed.steps).toEqual(["Mix and bake."]);
+  });
+
   it("reads 'Preparation time' as a time, not the method heading", () => {
     const parsed = parseRecipeText(
       [
