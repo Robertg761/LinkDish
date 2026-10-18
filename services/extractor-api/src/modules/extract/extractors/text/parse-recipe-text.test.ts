@@ -326,6 +326,16 @@ describe("parseRecipeText", () => {
     ]);
   });
 
+  it("reads inline ingredients after an 'Ingredient list:' heading", () => {
+    const parsed = parseRecipeText("Ingredient list: 2 eggs, 1 cup flour Method: Mix and bake.");
+
+    expect(parsed.ingredients.map((ingredient) => ingredient.text)).toEqual([
+      "2 eggs",
+      "1 cup flour"
+    ]);
+    expect(parsed.steps).toEqual(["Mix and bake."]);
+  });
+
   it("reads 'Preparation time' as a time, not the method heading", () => {
     const parsed = parseRecipeText(
       [

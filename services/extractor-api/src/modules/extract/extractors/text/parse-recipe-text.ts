@@ -75,7 +75,7 @@ const leadingVerbPattern = new RegExp(
 );
 
 const ingredientHeadingPattern =
-  /^(?:the\s+)?(?:ingredients?|ingredient list|what you(?:'|’)?ll need|what you need|you(?:'|’)?ll need|you will need|shopping list|zutaten|ingrédients|ingredientes|ingredienti|ingrediënten)\b/iu;
+  /^(?:the\s+)?(?:ingredients? list|ingredients?|what you(?:'|’)?ll need|what you need|you(?:'|’)?ll need|you will need|shopping list|zutaten|ingrédients|ingredientes|ingredienti|ingrediënten)\b/iu;
 const stepHeadingPattern =
   /^(?:instructions?|directions?|method|steps?|preparation|how to make(?: it| them)?|how to cook(?: it)?|how to prepare|procedure|cooking instructions|recipe steps|zubereitung|préparation|preparación|preparazione|bereiding)\b/iu;
 const stopHeadingPattern =
