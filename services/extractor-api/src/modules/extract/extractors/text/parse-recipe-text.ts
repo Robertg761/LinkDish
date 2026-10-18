@@ -103,6 +103,12 @@ const servingsLinePattern =
 const timeLinePattern =
   /^(prep(?:aration)?|cook(?:ing)?|bak(?:e|ing)|total|active|ready in)(\s*time)?\s*([:\-–])?\s*((?:about |approx\.? |around )?\d.{0,28})$/iu;
 
+/* "1. 2 eggs": a numbered ingredient list, whose items start with their own amounts. */
+const listNumberPattern = /^\d{1,2}[.)]\s+(?=[\d½⅓⅔¼¾⅛⅜⅝⅞])/u;
+/* "10 min", "1 hour 30 minutes", "about 1.5 hours": a duration and nothing else. */
+const bareDurationPattern =
+  /^(?:about |approx\.? |around )?\d+(?:[.,]\d+)?\s*(?:h|hrs?|hours?|m|mins?|minutes?)(?:\s+\d+\s*(?:m|mins?|minutes?))?\.?$/iu;
+
 /* "1. Mix", "2) Bake", "Step 3: Serve"; not "1.5 cups" or "2-3 cloves". */
 const stepMarkerPattern = /^(?:step\s*)?(\d{1,2})\s*[.):\-–]\s*(?=[^\d\s.,/½⅓⅔¼¾⅛⅜⅝⅞])/iu;
 const stepWordMarkerPattern = /^step\s*\d{1,2}\b\s*[:.\-–]?\s*/iu;
@@ -302,8 +308,14 @@ const startsWithQuantity = (line: string): boolean =>
   leadingQuantityPattern.test(line) || leadingNumberWordPattern.test(line);
 
 /* A line that reads like one ingredient: a short line with an amount, or a "to taste" item. */
-const looksLikeIngredientLine = (line: string): boolean => {
-  if (line.length > maxIngredientLength || stepMarkerPattern.test(line)) {
+const looksLikeIngredientLine = (rawLine: string): boolean => {
+  if (stepMarkerPattern.test(rawLine)) {
+    return false;
+  }
+
+  const line = rawLine.replace(listNumberPattern, "");
+
+  if (line.length > maxIngredientLength) {
     return false;
   }
 
@@ -362,6 +374,9 @@ const isListNote = (lines: readonly TextLine[], index: number): boolean => {
     ingredientsFollow(lines, index)
   );
 };
+
+const stripListNumber = (line: string): string =>
+  line.replace(stepMarkerPattern, "").replace(listNumberPattern, "");
 
 const stripStepMarker = (line: string): string =>
   line.replace(stepWordMarkerPattern, "").replace(stepMarkerPattern, "").trim();
@@ -480,8 +495,18 @@ const readMetadataLine = (line: string, metadata: Metadata): boolean => {
     }
 
     const timeMatch = part.match(timeLinePattern);
+    /*
+     * "Prep 10 min" and "Total 1 hour" need no "time" or colon; "Cook 20 minutes" alone could be a
+     * step, so the verbs count only beside other metadata ("Prep 10 min | Cook 20 min").
+     */
+    const bareLabel = timeMatch?.[1]?.toLowerCase() ?? "";
     const labelled = Boolean(
-      timeMatch?.[2] || timeMatch?.[3] || /^ready in$/iu.test(timeMatch?.[1] ?? "")
+      timeMatch?.[2] ||
+      timeMatch?.[3] ||
+      bareLabel === "ready in" ||
+      (timeMatch?.[4] &&
+        bareDurationPattern.test(timeMatch[4]) &&
+        (parts.length > 1 || !/^(?:cook|bake)$/u.test(bareLabel)))
     );
     const minutes = timeMatch?.[4] && labelled ? parseDurationMinutes(timeMatch[4]) : null;
 
@@ -557,7 +582,7 @@ const parseWithHeadings = (lines: TextLine[], metadata: Metadata): ParsedRecipeT
   const stepBuilder: StepBuilder = { steps: [], numbered: false, pendingPrefix: null };
 
   const addIngredients = (line: string) => {
-    for (const text of splitIngredientLine(line.replace(stepMarkerPattern, ""))) {
+    for (const text of splitIngredientLine(stripListNumber(line))) {
       if (text.length > 0 && text.length <= maxIngredientLength) {
         ingredients.push({ text, section });
       }
@@ -752,7 +777,7 @@ const parseByLayout = (lines: TextLine[], metadata: Metadata): ParsedRecipeText 
     }
 
     if (looksLikeIngredientLine(line)) {
-      for (const text of splitIngredientLine(line)) {
+      for (const text of splitIngredientLine(stripListNumber(line))) {
         ingredients.push({ text, section });
       }
       inList = true;

@@ -336,6 +336,54 @@ describe("parseRecipeText", () => {
     expect(parsed.steps).toEqual(["Mix and bake."]);
   });
 
+  it("reads unpunctuated times, but keeps a lone 'Cook 20 minutes.' as a step", () => {
+    const parsed = parseRecipeText(
+      [
+        "Prep 10 min | Cook 20 min",
+        "Total 1 hour",
+        "Ingredients",
+        "200g pasta",
+        "1 jar pesto",
+        "Method",
+        "Boil the pasta.",
+        "Cook 20 minutes.",
+        "Stir in the pesto."
+      ].join("\n")
+    );
+
+    expect(parsed).toMatchObject({
+      prepTimeMinutes: 10,
+      cookTimeMinutes: 20,
+      totalTimeMinutes: 60
+    });
+    expect(parsed.steps).toEqual(["Boil the pasta.", "Cook 20 minutes.", "Stir in the pesto."]);
+  });
+
+  it("drops the list numbers from a numbered ingredient list", () => {
+    const withHeadings = parseRecipeText(
+      ["Ingredients", "1. 2 eggs", "2. 1 cup flour", "Method", "1. Mix.", "2. Bake."].join("\n")
+    );
+    const byLayout = parseRecipeText(
+      [
+        "1. 2 eggs",
+        "2. 1 cup flour",
+        "3. 1 cup milk",
+        "Whisk everything together and bake for 20 minutes."
+      ].join("\n")
+    );
+
+    expect(withHeadings.ingredients.map((ingredient) => ingredient.text)).toEqual([
+      "2 eggs",
+      "1 cup flour"
+    ]);
+    expect(withHeadings.steps).toEqual(["Mix.", "Bake."]);
+    expect(byLayout.ingredients.map((ingredient) => ingredient.text)).toEqual([
+      "2 eggs",
+      "1 cup flour",
+      "1 cup milk"
+    ]);
+  });
+
   it("reads 'Preparation time' as a time, not the method heading", () => {
     const parsed = parseRecipeText(
       [
