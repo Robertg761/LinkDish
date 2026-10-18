@@ -227,6 +227,24 @@ describe("parseRecipeText", () => {
     expect(parsed.methodSource).toBe("notes");
   });
 
+  it("ignores everything after a 'Thanks for watching' sign-off", () => {
+    const parsed = parseRecipeText(
+      [
+        "Ingredients",
+        "200g flour",
+        "2 eggs",
+        "Thanks for watching!",
+        "2 cups of love from my channel",
+        "My knives 20% off"
+      ].join("\n")
+    );
+
+    expect(parsed.ingredients.map((ingredient) => ingredient.text)).toEqual([
+      "200g flour",
+      "2 eggs"
+    ]);
+  });
+
   it("reads notes between groups of an unlabelled list", () => {
     const parsed = parseRecipeText(
       [

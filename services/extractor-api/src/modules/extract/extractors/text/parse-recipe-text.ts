@@ -798,15 +798,16 @@ const readTextLines = (text: string): TextLine[] => {
   for (const rawLine of toLines(text.slice(0, 20_000))) {
     const cleaned = stripDecorations(rawLine);
 
-    if (isNoiseLine(rawLine, cleaned)) {
-      continue;
-    }
-
+    /* Before the noise filter: "Thanks for watching" is also promotional, but it ends the recipe. */
     if (isOutroLine(cleaned)) {
       if (lines.some((line) => looksLikeIngredientLine(line.text))) {
         break;
       }
 
+      continue;
+    }
+
+    if (isNoiseLine(rawLine, cleaned)) {
       continue;
     }
 
