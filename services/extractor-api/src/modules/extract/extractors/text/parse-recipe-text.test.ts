@@ -258,6 +258,18 @@ describe("parseRecipeText", () => {
     expect(parsed.steps).toEqual(["Mix together.", "Bake for 20 minutes."]);
   });
 
+  it("keeps decimal commas and reads a labelled title line", () => {
+    const parsed = parseRecipeText(
+      ["Title: Pancakes", "Ingredients: 1,5 kg flour, 2 eggs", "Method", "Mix and fry."].join("\n")
+    );
+
+    expect(parsed.title).toBe("Pancakes");
+    expect(parsed.ingredients.map((ingredient) => ingredient.text)).toEqual([
+      "1,5 kg flour",
+      "2 eggs"
+    ]);
+  });
+
   it("reads a duration written with a comma", () => {
     const parsed = parseRecipeText(
       [

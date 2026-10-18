@@ -366,7 +366,8 @@ const stripStepMarker = (line: string): string =>
 /* "200g pasta, 3 cloves garlic, 2 tbsp butter": a list run into one line. */
 const splitInlineIngredients = (value: string): string[] => {
   const parts = value
-    .split(/\s*[,;]\s*|\s+(?:and|&)\s+(?=\d|[½⅓⅔¼¾⅛⅜⅝⅞])/u)
+    /* Not the decimal comma in "1,5 kg". */
+    .split(/\s*;\s*|\s*(?<!\d),\s*|\s*,(?!\d)\s*|\s+(?:and|&)\s+(?=\d|[½⅓⅔¼¾⅛⅜⅝⅞])/u)
     .map((part) => part.trim())
     .filter(Boolean);
 
@@ -431,7 +432,8 @@ const looksLikeTitleLine = (line: string): boolean =>
   !startsWithQuantity(line) &&
   !stepMarkerPattern.test(line) &&
   !/[.?]$/u.test(line) &&
-  !/:\s*\S/u.test(line) &&
+  /* "Title: Pancakes" and "Recipe: Pancakes" are titles; other "Label: text" lines are not. */
+  (!/:\s*\S/u.test(line) || /^(?:title|recipe)\s*:\s*\S/iu.test(line)) &&
   readHeading(line) === null;
 
 interface Metadata {
