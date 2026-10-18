@@ -105,9 +105,9 @@ const timeLinePattern =
 
 /* "1. 2 eggs": a numbered ingredient list, whose items start with their own amounts. */
 const listNumberPattern = /^\d{1,2}[.)]\s+(?=[\d½⅓⅔¼¾⅛⅜⅝⅞])/u;
-/* "10 min", "1 hour 30 minutes", "about 1.5 hours": a duration and nothing else. */
+/* "10 min", "1 hour 30 minutes", "about 1.5 hours", "1 day": a duration and nothing else. */
 const bareDurationPattern =
-  /^(?:about |approx\.? |around )?\d+(?:[.,]\d+)?\s*(?:h|hrs?|hours?|m|mins?|minutes?)(?:\s+\d+\s*(?:m|mins?|minutes?))?\.?$/iu;
+  /^(?:about |approx\.? |around )?\d+(?:[.,]\d+)?\s*(?:d|days?|h|hrs?|hours?|m|mins?|minutes?)(?:\s+\d+\s*(?:h|hrs?|hours?|m|mins?|minutes?))*\.?$/iu;
 
 /* "1. Mix", "2) Bake", "Step 3: Serve"; not "1.5 cups" or "2-3 cloves". */
 const stepMarkerPattern = /^(?:step\s*)?(\d{1,2})\s*[.):\-–]\s*(?=[^\d\s.,/½⅓⅔¼¾⅛⅜⅝⅞])/iu;
@@ -142,7 +142,7 @@ const stripDecorations = (line: string): string =>
 const splitRunOnLine = (line: string): string[] => {
   let split = line
     .replace(
-      /\s+(?=(?:ingredients?|instructions?|directions?|method|steps?|how to make(?: it)?)\s*:)/giu,
+      /\s+(?=(?:ingredients? list|ingredients?|zutaten|ingrédients|ingredientes|ingredienti|ingrediënten|instructions?|cooking instructions|directions?|method|steps?|recipe steps|preparation|procedure|how to (?:make|cook|prepare)(?: it| them)?|zubereitung|préparation|preparación|preparazione|bereiding)\s*:)/giu,
       "\n"
     )
     .replace(/\s+[•·▪◦●►▶▸➤✔✓✅☑]\s*/gu, "\n")
@@ -454,17 +454,20 @@ const looksLikeTitleLine = (line: string): boolean =>
   (!/:\s*\S/u.test(line) || /^(?:title|recipe)\s*:\s*\S/iu.test(line)) &&
   readHeading(line) === null;
 
-/* "1 hour 30 min", "1.5 hours", "1,5 h", "45 mins" in minutes; null without a unit. */
+/* "1 day 2 hours", "1 hour 30 min", "1.5 hours", "1,5 h", "45 mins" in minutes; null without a unit. */
 const parseDurationMinutes = (value: string): number | null => {
+  const days = value.match(/(\d+(?:[.,]\d+)?)\s*d(?:ays?)?\b/iu);
   const hours = value.match(/(\d+(?:[.,]\d+)?)\s*h(?:ours?|rs?)?\b/iu);
   const minutes = value.match(/(\d+)\s*m(?:in(?:ute)?s?)?\b/iu);
 
-  if (!hours && !minutes) {
+  if (!days && !hours && !minutes) {
     return null;
   }
 
-  const hourCount = hours?.[1] ? Number(hours[1].replace(",", ".")) : 0;
-  return Math.round(hourCount * 60) + Number(minutes?.[1] ?? 0);
+  const count = (match: RegExpMatchArray | null) =>
+    match?.[1] ? Number(match[1].replace(",", ".")) : 0;
+
+  return Math.round(count(days) * 24 * 60 + count(hours) * 60) + count(minutes);
 };
 
 interface Metadata {

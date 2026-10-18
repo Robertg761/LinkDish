@@ -384,6 +384,38 @@ describe("parseRecipeText", () => {
     ]);
   });
 
+  it("splits a one-line recipe at any method heading it knows", () => {
+    const parsed = parseRecipeText("Ingredients: 2 eggs, 1 cup flour Preparation: Mix and bake.");
+
+    expect(parsed.ingredients.map((ingredient) => ingredient.text)).toEqual([
+      "2 eggs",
+      "1 cup flour"
+    ]);
+    expect(parsed.steps).toEqual(["Mix and bake."]);
+  });
+
+  it("reads day-scale times", () => {
+    expect(
+      parseRecipeText(
+        [
+          "Total time: 1 day 2 hours",
+          "Ingredients",
+          "1 kg flour",
+          "700g water",
+          "Method",
+          "Mix."
+        ].join("\n")
+      ).totalTimeMinutes
+    ).toBe(1560);
+    expect(
+      parseRecipeText(
+        ["Total time: 1 day", "Ingredients", "1 kg flour", "700g water", "Method", "Mix."].join(
+          "\n"
+        )
+      ).totalTimeMinutes
+    ).toBe(1440);
+  });
+
   it("reads 'Preparation time' as a time, not the method heading", () => {
     const parsed = parseRecipeText(
       [
