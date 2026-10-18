@@ -13,7 +13,7 @@ type LiveCanaryEntry = {
   url: string;
   billingClientId?: string;
   billingProvider?: string;
-  expectedMinimumOutcome: "success" | "needs_retry";
+  expectedMinimumOutcome: "success" | "needs_retry" | "failure";
   expectedFinalUrlPattern?: string;
   expectedTitlePattern?: string;
 };

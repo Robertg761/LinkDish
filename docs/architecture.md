@@ -74,8 +74,9 @@ size` checks the budgets after a build (entry ≤ 115 KB gzip, landing JS ≤
 - Expo Router drives navigation between the intake screen and a result preview screen.
 - The mobile app talks to the backend through `@linkdish/api-client`.
 - Mock mode lives in the mobile service layer so the UI can ship ahead of the extractor implementation.
-- The result flow is a typed state machine: `success`, `needs_retry`, and `failure`.
-- Retryable responses trigger an explicit fallback request instead of silently escalating to AI.
+- The result flow is a typed state machine: `success`, `needs_retry`, and `failure`. The
+  server no longer sends `needs_retry` (links and text are read without an LLM), but
+  installed clients keep handling it.
 - The Cookbook renders with a FlatList; saved-recipes and shopping state are split into
   state and action contexts, and AsyncStorage writes go through a debounced writer that
   flushes when the app goes to the background.
@@ -92,7 +93,10 @@ size` checks the budgets after a build (entry ≤ 115 KB gzip, landing JS ≤
 - HTML fetching now prefers browser-like HTTP requests and can optionally escalate to Playwright browser rendering when a site is blocked or JS-heavy.
 - Source detection now uses fetched HTML hints in addition to URL heuristics.
 - Success responses include `fetchMode` and extraction provenance metadata.
-- LLM fallback is behind a provider interface and is optional at runtime. The backend controls whether Gemini, OpenAI, or no provider is active.
+- Links, YouTube videos, TikTok captions and pasted text are read by rules only; no LLM is
+  called for them, whatever `attempt` says. Photo scans are the one import read by an LLM,
+  behind a provider interface that is optional at runtime. The backend controls whether
+  Gemini, OpenAI, or no provider is active.
 - The root `api/extract.ts` Vercel handler is an adapter into the full extractor runtime. Production routing lives in the root `vercel.json`.
 
 ### Sources
@@ -115,13 +119,13 @@ platforms map onto them and are told apart internally by the detection `adapterK
   `totalTime` fills `totalTimeMinutes` only; it is never copied into prep or cook. WP
   Recipe Maker and Tasty Recipes ingredient groups become ingredient `section`s when the
   page's group sizes add up to the structured list. recipe-domain has no step sections,
-  so HowToSection names are not kept on steps. The LLM fallback keeps any metadata the
-  deterministic pass found.
+  so HowToSection names are not kept on steps.
 - **Confidence**: a site's own Recipe JSON-LD/microdata with a title, at least two
   ingredients and a step is a success even without servings or times; the gap becomes a
   plain-language warning ("The source didn't list servings or cooking times."). A
-  published total time stands in for prep/cook in scoring. Heuristic extractions keep the
-  old penalties and still return `needs_retry` when weak.
+  published total time stands in for prep/cook in scoring. A heuristic extraction below
+  its source's bar fails with `parse_failed` and a message naming what was missing (for
+  example "LinkDish couldn't find the method on that page.").
 - **Redirects**: a redirect only fails an import as "unrelated content" when it lands on
   another site (registrable domain, so apex↔www and subdomains are the same site), on the
   homepage for a deep link, on an unrelated path, or on a page whose title (or the
@@ -130,7 +134,15 @@ platforms map onto them and are told apart internally by the detection `adapterK
   buff.ly, lnkd.in, linktr.ee and a few more) may redirect anywhere.
 - **YouTube**, including Shorts, embed and live links: always fetched through the
   canonical watch page. The description is the full `videoDetails.shortDescription` from
-  the player response (og:description is truncated). The channel becomes `author`.
+  the player response (og:description is truncated). The channel becomes `author`. The
+  recipe is read from the description with the text parser (below); a transcript is only
+  used when it is itself laid out as a recipe and the description is not. When the
+  description has no method, or no recipe at all, up to two "full recipe" links in it
+  (`findYouTubeRecipeLinks`: cue lines like "Full recipe:" first, social, shop and music
+  hosts and home pages skipped) are fetched and extracted like any recipe page, with the
+  video kept as `videoUrl`. A description with ingredients only is saved with the step
+  "Follow the video for the method." when no linked page works. Otherwise the import fails
+  with "That video's description doesn't include a written recipe."
 - **Pinterest** pins (and pin.it links that land on one): the pin's outbound link
   (`og:see_also`, else `"link"` in the pin's app state), when it is a valid recipe
   `sourceUrl` (http(s), at most 2048 characters), is validated with the same SSRF
@@ -141,11 +153,10 @@ platforms map onto them and are told apart internally by the detection `adapterK
   import of the same recipe hits the cache.
 - **TikTok**: the caption is read through the public oEmbed endpoint
   (`fetchers/fetch-tiktok-document.ts`; short links are resolved hop by hop, TikTok hosts
-  only, each hop SSRF-validated, with the request deadline and a byte cap). A caption with
-  recipe signals answers the primary attempt with `needs_retry`
-  (`unsupported_primary_extraction`, `sourceType: social`), so the LLM only runs on the
-  client's explicit fallback attempt and is billed like one. Captions without a recipe
-  fail with `parse_failed` and no LLM call. Instagram and Facebook stay unsupported.
+  only, each hop SSRF-validated, with the request deadline and a byte cap) and parsed by
+  the text parser on the first attempt. An ingredients-only caption keeps the video step,
+  as YouTube does. Captions without a recipe fail with `parse_failed`. Instagram and
+  Facebook stay unsupported.
 
 ### Pasted text import
 
@@ -154,22 +165,26 @@ platforms map onto them and are told apart internally by the detection `adapterK
 `extractRecipeFromText`). `ExtractRecipeRequest` keeps its URL/image shape; the server
 parses `extractRecipeAnyRequestSchema`.
 
-- Text always goes to the LLM extractor, so it is authorized and committed as a fallback
-  attempt (imports and strong extractions) whatever `attempt` says. Usage is only
-  committed for successes.
-- Text without recipe signals (`extractors/recipe-text-signals.ts`) fails with
-  `parse_failed` before any LLM call. Without an LLM provider it returns
-  `fallback_unavailable`.
+- Text is read by `extractors/text/parse-recipe-text.ts`, a rule-based parser shared with
+  TikTok captions and YouTube descriptions. It finds the title, servings and labelled
+  times, then the ingredients and method under the text's own headings ("Ingredients",
+  "Method", "For the sauce:"), splitting run-on captions and numbered steps; without
+  headings it takes a run of measured ingredient lines followed by method lines. Text is
+  metered as a plain import (no strong extraction) whatever `attempt` says, and usage is
+  only committed for successes.
+- Text the parser can't split fails with `parse_failed`: text with recipe signals
+  (`extractors/recipe-text-signals.ts`) is told to label its ingredients and steps, other
+  text is told it doesn't look like a recipe.
 - Without a `sourceUrl`, the recipe gets a stable synthetic one,
   `https://linkdish.app/text-imports/<sha256 prefix of the text>`, so the same paste keeps
   the same saved-recipe id. `sourceType` is `unknown`, or derived from `sourceUrl`.
-- Text imports never read or write the result cache and have no hand-off.
+- Text imports never read or write the result cache.
 
 ### Quota visibility
 
 - Extract successes carry an optional `quota` (the existing `quotaStatusSchema`) with the
   allowance left after this import was counted: the allowance that runs out first when a
-  fallback counts against both imports and strong extractions. It is absent when billing
+  photo scan counts against both imports and strong extractions. It is absent when billing
   is disabled or for the live canary. It is attached after extraction, so it is never
   stored in the shared result cache (cache reads and writes also strip it).
 - `GET /billing/usage` returns `{ billingEnabled, plan, quota }` for the caller, resolved
@@ -204,7 +219,7 @@ parses `extractRecipeAnyRequestSchema`.
    deterministic extraction, LLM calls and cache writes.
 3. Usage is committed before responding, exactly as before, including for cache hits
    (a cache hit is still an import).
-4. Durable Postgres analytics, cache writes and fallback hand-off writes run after the
+4. Durable Postgres analytics and cache writes run after the
    response through `@vercel/functions` `waitUntil` (fire-and-forget on Fastify). The
    in-process admin metrics are recorded by both adapters.
 
@@ -221,7 +236,7 @@ Performance pieces in `services/extractor-api/src/modules/extract`:
   `llm-fallback` or `llm` provenance: the model reads page text anyone can post, such as
   comments, so one caller could steer what later importers are served), and never a page
   that redirected to another site. Reads treat an LLM-derived entry as a miss. A hit skips
-  fetch, parse and the text-cleanup LLM call and re-stamps the per-request
+  fetch and parse and re-stamps the per-request
   `recipe.sourceUrl`. Bump `EXTRACTOR_CACHE_VERSION` whenever extraction output or cache
   semantics change. `EXTRACT_CACHE_ENABLED` is the kill switch and
   `EXTRACT_CACHE_TTL_SECONDS` sets the lifetime (default 7 days). Only the live canary that
@@ -229,20 +244,14 @@ Performance pieces in `services/extractor-api/src/modules/extract`:
   cache reads and refreshes the entry; the bare `x-linkdish-canary` marker is
   caller-controlled and only keeps a request out of durable analytics. Responses carry
   `x-linkdish-cache: hit|miss|bypass`, and logs and analytics carry `cacheStatus`.
-- **Fallback hand-off** (`cache/fallback-handoff.ts`): when a primary attempt with a
-  `correlationId` returns needs_retry, it stores the LLM prompt summary, candidate,
-  detection and fetch mode for 15 minutes, keyed by the correlation id and URL. The
-  explicit fallback attempt uses that entry instead of re-fetching or re-rendering the
-  page, and falls back to a fresh fetch when the entry is missing. For a Pinterest pin
-  the entry also records the recipe page the pin resolved to (`sourceUrl`). TikTok
-  captions and pasted text are not handed off (re-reading a caption is one small request).
 - **One deadline** (`deadline.ts`): `EXTRACT_REQUEST_DEADLINE_MS` (default 50 s, under
   the 60 s `maxDuration`) sizes every step. The HTTP fetch retries at most once, only
   after connection errors, and not at all when Playwright can take over. The browser
   queue times out. Gemini attempts fit the remaining time. The OpenAI client has an
   explicit timeout and `maxRetries: 0`.
-- **LLM text cleanup** runs only when `RECIPE_TEXT_CLEANUP_ENABLED` is on, the runtime
-  provider is not `none`, and the text shows artifacts (`text-cleanup/needs-text-cleanup.ts`).
+- **LLM text cleanup** runs only on photo scans, when `RECIPE_TEXT_CLEANUP_ENABLED` is on,
+  the runtime provider is not `none`, and the text shows artifacts
+  (`text-cleanup/needs-text-cleanup.ts`).
 - **Parse once** (`html/parsed-html-document.ts`): each fetched page is parsed by cheerio
   once. Detection, page checks, extractors and image capture share that parse.
 - **Cold start**: cheerio, the fetchers, Playwright, the OpenAI SDK, `pg` and JSDOM load
@@ -274,13 +283,13 @@ Production extraction is expected to follow this ladder:
 1. Browser-like HTTP fetch.
 2. Playwright browser fetch for blocked, thin, or JavaScript-heavy pages when enabled.
 3. Deterministic extraction and confidence scoring.
-4. Explicit mobile retry with the configured Gemini/OpenAI fallback provider when deterministic extraction is incomplete. The retry reuses the page the primary attempt fetched (the hand-off) when it arrives with the same `correlationId` within 15 minutes.
+4. For YouTube, the "full recipe" links in the description when the description itself has no method.
 
 Cached successes short-circuit this ladder. They are shared only when they cleared the success confidence bar for their source type, and they are billed like any other import.
 
-Strong structured recipes (the site's own JSON-LD or microdata with a title, two or more ingredients and a step) stop at step 3 with a success even when servings or times are missing. TikTok captions always take step 4, because reading a caption needs the LLM.
+Strong structured recipes (the site's own JSON-LD or microdata with a title, two or more ingredients and a step) stop at step 3 with a success even when servings or times are missing. Anything that doesn't clear its confidence bar after these steps fails with a plain reason; no step calls an LLM. Photo scans are the only path that uses the configured Gemini/OpenAI provider.
 
-If production `/extract` skips browser fetch or fallback retry, it is a deployment regression even when `/health` is green.
+If production `/extract` skips the browser fetch, it is a deployment regression even when `/health` is green.
 
 ## Shared Packages
 

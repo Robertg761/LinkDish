@@ -143,7 +143,7 @@ export const ExtractionProgress: React.FC<ExtractionProgressProps> = ({
           <Icon name="hourglass" size={18} />
           <span>
             <strong>Taking longer than usual…</strong>{" "}
-            {attempt === "fallback" || request.kind !== "url"
+            {request.kind === "images"
               ? "AI help is still reading. It’s worth the wait."
               : "Some sites are slow to answer. Hang tight, or paste the recipe text instead."}
           </span>

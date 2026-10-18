@@ -82,11 +82,12 @@ const recordAnalytics = (
 };
 
 /*
- * Pasted text always goes to the AI extractor, so it is metered like an explicit fallback
- * attempt (imports and strong extractions) whatever the request's attempt says.
+ * Photo scans are the only imports read by an LLM, so only they are metered as strong
+ * extractions (imports and strong extractions). Links and pasted text are read by the
+ * rule-based extractors and count as plain imports, whatever `attempt` an older client sends.
  */
 const getBillingAttempt = (payload: ExtractRecipeAnyRequest): "primary" | "fallback" =>
-  "text" in payload ? "fallback" : payload.attempt;
+  "images" in payload ? "fallback" : "primary";
 
 /**
  * POST /extract after rate limiting and request parsing, shared by the Vercel

@@ -24,7 +24,7 @@ interface ImportTextPanelProps {
 
 const numberFormat = new Intl.NumberFormat();
 
-/** A caption, a note or an email with a recipe in it: AI help turns it into a recipe card. */
+/** A caption, a note or an email with a recipe in it: LinkDish sorts it into a recipe card. */
 export const ImportTextPanel: React.FC<ImportTextPanelProps> = ({
   value,
   onChange,
@@ -122,7 +122,7 @@ export const ImportTextPanel: React.FC<ImportTextPanelProps> = ({
           value={value}
         />
         <div className="import-text-meta">
-          <span className="import-text-tip">Read with AI help</span>
+          <span className="import-text-tip">Label the ingredients and steps for best results</span>
           <span
             aria-live="polite"
             className={`import-text-counter num${problem === "too_long" ? " is-over" : ""}`}
