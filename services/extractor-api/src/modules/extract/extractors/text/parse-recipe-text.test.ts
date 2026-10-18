@@ -286,6 +286,24 @@ describe("parseRecipeText", () => {
     expect(parsed.prepTimeMinutes).toBe(90);
   });
 
+  it("reads fractional hours and keeps method steps that start with 'Follow'", () => {
+    const parsed = parseRecipeText(
+      [
+        "Prep time: 1.5 hours | Cook time: 1 hour 15 min",
+        "Ingredients",
+        "200g noodles",
+        "2 tbsp soy sauce",
+        "Method",
+        "Follow the package directions to cook the noodles.",
+        "Follow me on Instagram"
+      ].join("\n")
+    );
+
+    expect(parsed.prepTimeMinutes).toBe(90);
+    expect(parsed.cookTimeMinutes).toBe(75);
+    expect(parsed.steps).toEqual(["Follow the package directions to cook the noodles."]);
+  });
+
   it("reads 'Preparation time' as a time, not the method heading", () => {
     const parsed = parseRecipeText(
       [

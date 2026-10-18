@@ -1,5 +1,3 @@
-import { parseTimeTextToMinutes } from "../shared.js";
-
 /*
  * A rule-based reader for recipe text that did not come with structured data: pasted notes, a
  * TikTok caption, a YouTube description. It only reports what the text itself says. Ingredients
@@ -85,7 +83,7 @@ const stopHeadingPattern =
 
 /* Lines that are channel or caption chrome, never recipe content. */
 const promotionalLinePattern =
-  /^(?:follow|subscribe|like and subscribe|please subscribe|check out|shop|use (?:my )?code|link in (?:my )?bio|business (?:inquiries|enquiries)|instagram|tiktok|facebook|twitter|pinterest|website|blog|email|contact|my (?:camera|gear|kitchen tools)|support (?:me|the channel)|join|patreon|merch|©|all rights reserved|thanks for watching|thank you for watching)\b/iu;
+  /^(?:follow (?:me|us|my|our|along|on|@)|subscribe|like and subscribe|please subscribe|check out|shop|use (?:my )?code|link in (?:my )?bio|business (?:inquiries|enquiries)|instagram|tiktok|facebook|twitter|pinterest|website|blog|email|contact|my (?:camera|gear|kitchen tools)|support (?:me|the channel)|join (?:me|us|my|our|the (?:channel|community|club|newsletter))|patreon|merch|©|all rights reserved|thanks for watching|thank you for watching)\b/iu;
 /*
  * A video description's sign-off ("Thanks for watching", "Like and share this video", "Turn on
  * the bell", subtitle hints, a list of other videos). Everything after it is channel chrome.
@@ -433,6 +431,19 @@ const looksLikeTitleLine = (line: string): boolean =>
   (!/:\s*\S/u.test(line) || /^(?:title|recipe)\s*:\s*\S/iu.test(line)) &&
   readHeading(line) === null;
 
+/* "1 hour 30 min", "1.5 hours", "1,5 h", "45 mins" in minutes; null without a unit. */
+const parseDurationMinutes = (value: string): number | null => {
+  const hours = value.match(/(\d+(?:[.,]\d+)?)\s*h(?:ours?|rs?)?\b/iu);
+  const minutes = value.match(/(\d+)\s*m(?:in(?:ute)?s?)?\b/iu);
+
+  if (!hours && !minutes) {
+    return null;
+  }
+
+  const hourCount = hours?.[1] ? Number(hours[1].replace(",", ".")) : 0;
+  return Math.round(hourCount * 60) + Number(minutes?.[1] ?? 0);
+};
+
 interface Metadata {
   servings: string | null;
   prepTimeMinutes: number | null;
@@ -464,7 +475,7 @@ const readMetadataLine = (line: string, metadata: Metadata): boolean => {
     const labelled = Boolean(
       timeMatch?.[2] || timeMatch?.[3] || /^ready in$/iu.test(timeMatch?.[1] ?? "")
     );
-    const minutes = timeMatch?.[4] && labelled ? parseTimeTextToMinutes(timeMatch[4]) : null;
+    const minutes = timeMatch?.[4] && labelled ? parseDurationMinutes(timeMatch[4]) : null;
 
     if (timeMatch?.[1] && minutes != null) {
       const label = timeMatch[1].toLowerCase();
