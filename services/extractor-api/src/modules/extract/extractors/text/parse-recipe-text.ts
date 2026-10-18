@@ -240,7 +240,15 @@ const readHeading = (line: string): Heading | null => {
   if (stopMatch) {
     const rest = line.slice(stopMatch[0].length).trim();
 
-    if (rest.length === 0 || /^[:\-–—]/u.test(rest) || rest.length <= 30) {
+    /* "Notes for the cake" is a heading; "Note the dough is sticky." is a step. */
+    if (
+      rest.length === 0 ||
+      /^[:\-–—]/u.test(rest) ||
+      (rest.length <= 30 &&
+        !/[.!?]$/u.test(rest) &&
+        !/^(?:that|the|this|these|it|how|you|if|when)\b/iu.test(rest) &&
+        !leadingVerbPattern.test(rest))
+    ) {
       return { kind: "stop" };
     }
   }

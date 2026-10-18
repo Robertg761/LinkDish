@@ -304,6 +304,28 @@ describe("parseRecipeText", () => {
     expect(parsed.steps).toEqual(["Follow the package directions to cook the noodles."]);
   });
 
+  it("keeps a method step that starts with 'Note' and stops at a 'Notes' heading", () => {
+    const parsed = parseRecipeText(
+      [
+        "Ingredients",
+        "500g flour",
+        "300ml water",
+        "Method",
+        "Mix the dough.",
+        "Note the dough is sticky.",
+        "Bake for 20 minutes.",
+        "Notes for storage",
+        "Keeps for 3 days."
+      ].join("\n")
+    );
+
+    expect(parsed.steps).toEqual([
+      "Mix the dough.",
+      "Note the dough is sticky.",
+      "Bake for 20 minutes."
+    ]);
+  });
+
   it("reads 'Preparation time' as a time, not the method heading", () => {
     const parsed = parseRecipeText(
       [
