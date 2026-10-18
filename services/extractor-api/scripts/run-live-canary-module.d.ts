@@ -5,7 +5,7 @@ declare module "./run-live-canary.mjs" {
     url: string;
     billingClientId?: string;
     billingProvider?: string;
-    expectedMinimumOutcome: "success" | "needs_retry";
+    expectedMinimumOutcome: "success" | "needs_retry" | "failure";
     expectedFinalUrlPattern?: string;
     expectedTitlePattern?: string;
     notes?: string;

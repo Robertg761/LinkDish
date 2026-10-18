@@ -213,8 +213,8 @@ const readHeading = (line: string): Heading | null => {
     const rest = line.slice(match[0].length).trim();
     const kind = ingredientMatch ? "ingredients" : "steps";
 
-    /* "Step 1: mix" is a step, not the method heading. */
-    if (/^\d/u.test(rest)) {
+    /* "Step 1: mix" is a step, and "Preparation time: 15 minutes" a time, not the method heading. */
+    if (/^\d/u.test(rest) || (kind === "steps" && /^time\b/iu.test(rest))) {
       return null;
     }
 

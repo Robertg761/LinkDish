@@ -286,6 +286,28 @@ describe("parseRecipeText", () => {
     expect(parsed.prepTimeMinutes).toBe(90);
   });
 
+  it("reads 'Preparation time' as a time, not the method heading", () => {
+    const parsed = parseRecipeText(
+      [
+        "Ingredients",
+        "2 eggs",
+        "1 cup flour",
+        "Preparation time: 15 minutes",
+        "Pinch of salt",
+        "Method",
+        "Mix and bake."
+      ].join("\n")
+    );
+
+    expect(parsed.prepTimeMinutes).toBe(15);
+    expect(parsed.ingredients.map((ingredient) => ingredient.text)).toEqual([
+      "2 eggs",
+      "1 cup flour",
+      "Pinch of salt"
+    ]);
+    expect(parsed.steps).toEqual(["Mix and bake."]);
+  });
+
   it("ignores everything after a 'Thanks for watching' sign-off", () => {
     const parsed = parseRecipeText(
       [
