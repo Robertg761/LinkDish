@@ -65,7 +65,8 @@ export const buildTextRecipeCandidate = (
 
   const ingredientsOnly = parsed.steps.length === 0;
 
-  if (ingredientsOnly && !options.isVideo) {
+  /* Pasted text has no video to hold the method, so a list with only notes in it is no recipe. */
+  if (!options.isVideo && (ingredientsOnly || parsed.methodSource === "notes")) {
     return null;
   }
 

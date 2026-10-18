@@ -609,6 +609,24 @@ describe("pasted text", () => {
     });
   });
 
+  it("rejects an ingredient list whose only method lines are notes between the groups", async () => {
+    const { response } = await extractRecipe(
+      {
+        text: [
+          "75g butter",
+          "2 tbsp sugar",
+          "* Chill for 30 minutes",
+          "110g chocolate",
+          "125ml whipping cream"
+        ].join("\n"),
+        attempt: "primary"
+      },
+      createRuntime()
+    );
+
+    expect(response).toMatchObject({ status: "failure", reason: "parse_failed" });
+  });
+
   it("works with no LLM provider configured", async () => {
     const { response } = await extractRecipe(
       { text: recipeText, attempt: "fallback" },
