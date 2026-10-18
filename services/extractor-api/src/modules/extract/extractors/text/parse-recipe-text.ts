@@ -203,6 +203,8 @@ const isNoiseLine = (rawLine: string, cleaned: string): boolean =>
   cleaned.length === 0 ||
   hashtagOnlyPattern.test(rawLine.trim()) ||
   promotionalLinePattern.test(cleaned) ||
+  /* "@Birds Eye": a tagged account. */
+  /^@\p{L}/u.test(cleaned) ||
   /^\d{1,2}:\d{2}(?::\d{2})?\b/u.test(cleaned) ||
   !/[\p{L}\p{N}]/u.test(cleaned);
 
@@ -446,8 +448,15 @@ const splitSentences = (value: string): string[] => {
   return sentences.map((sentence) => sentence.trim()).filter(Boolean);
 };
 
+/* "Pasta (recipe below)", "Pasta Recipe in caption, instructions in video": the dish alone. */
+export const withoutRecipePointer = (title: string): string =>
+  title
+    .replace(/\s*\((?:full )?recipe (?:below|in (?:the )?(?:caption|comments|bio))\)/iu, "")
+    .replace(/[\s,.!-]+(?:full )?recipe (?:is )?in (?:the )?caption\b.*$/iu, "")
+    .trim();
+
 const cleanTitle = (line: string): string | null => {
-  const title = line
+  const title = withoutRecipePointer(line.replace(/\*+/gu, ""))
     .replace(/^(?:recipe|title)\s*[:\-–]\s*/iu, "")
     .replace(/(?:[\s\p{Extended_Pictographic}❗!]|\u{FE0F}|\u{200D})+$/u, "")
     .replace(/\s*[|\-–—]\s*(?:recipe|easy recipe)$/iu, "")

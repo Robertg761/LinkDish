@@ -28,8 +28,10 @@ import type { DetectionResult } from "../types.js";
  * entry under a hash-routed app's page may hold one route's recipe.
  * 2026-10-18.1: YouTube recipes are read from the description's own ingredient
  * list and method (no LLM), and the text-cleanup LLM pass no longer runs on links.
+ * 2026-10-18.2: TikTok captions get their line breaks back before parsing; an older
+ * entry may hold a caption read as one run-on line.
  */
-export const EXTRACTOR_CACHE_VERSION = "2026-10-18.1";
+export const EXTRACTOR_CACHE_VERSION = "2026-10-18.2";
 
 const cacheKeyPrefix = "linkdish:extract-cache:v1";
 

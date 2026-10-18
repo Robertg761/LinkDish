@@ -118,6 +118,13 @@ const classifyOEmbedStatus = (status: number): SocialFetchError["reason"] =>
       ? "blocked"
       : "unreachable";
 
+/*
+ * TikTok returns a caption with its line breaks flattened into spaces; where a line ended there
+ * are usually two or more. Those become line breaks again, so "Ingredients" and each item get
+ * their own line for the recipe parser.
+ */
+const restoreCaptionLines = (caption: string): string => caption.replace(/[^\S\n]{2,}/gu, "\n");
+
 const readString = (value: unknown): string | null =>
   typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 
@@ -182,7 +189,7 @@ export const fetchTikTokDocument = async (
       kind: "text",
       url: videoUrl,
       origin: "tiktok",
-      text: (caption ?? "").slice(0, maxCaptionChars),
+      text: restoreCaptionLines(caption ?? "").slice(0, maxCaptionChars),
       title: null,
       authorName: readString(payload.author_name),
       thumbnailUrl: thumbnailUrl && isHttpUrl(thumbnailUrl) ? thumbnailUrl : null

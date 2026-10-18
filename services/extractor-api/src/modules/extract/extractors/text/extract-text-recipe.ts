@@ -1,6 +1,10 @@
 import { buildFieldProvenance } from "../shared.js";
 
-import { parseRecipeText, type ParsedRecipeText } from "./parse-recipe-text.js";
+import {
+  parseRecipeText,
+  withoutRecipePointer,
+  type ParsedRecipeText
+} from "./parse-recipe-text.js";
 
 import type { Recipe } from "../../../../../../../packages/recipe-domain/src/index.js";
 import type { ExtractionCandidate, TextSourceDocument } from "../../types.js";
@@ -138,7 +142,7 @@ const firstWords = (text: string, maxLength: number): string | null => {
     .map((entry) =>
       entry
         .replace(/(?:^|\s)[#@][\p{L}\p{N}_.]+/gu, " ")
-        .replace(/\p{Extended_Pictographic}|\u{FE0F}|\u{200D}/gu, " ")
+        .replace(/\p{Extended_Pictographic}|\u{FE0F}|\u{200D}|\*+/gu, " ")
         .replace(/\s+/gu, " ")
         .trim()
     )
@@ -155,12 +159,12 @@ const firstWords = (text: string, maxLength: number): string | null => {
     sentence.length > maxLength ||
     /:$/u.test(sentence) ||
     /^(?:ingredients?|instructions?|directions?|method|steps?)\b/iu.test(sentence) ||
-    /^[\d½⅓⅔¼¾⅛⅜⅝⅞]/u.test(sentence)
+    (/^[\d½⅓⅔¼¾⅛⅜⅝⅞]/u.test(sentence) && !/^\d+[-\s]ingredients?\b/iu.test(sentence))
   ) {
     return null;
   }
 
-  return sentence.replace(/[.!?]+$/u, "");
+  return withoutRecipePointer(sentence.replace(/[.!?]+$/u, "")) || null;
 };
 
 /** Pasted text and TikTok captions: the recipe is read from the text alone. */
