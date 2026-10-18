@@ -22,8 +22,7 @@ import { isOnline } from "../../platform/detect-network";
 import {
   canStartWebImport,
   canStartWebStrongExtraction,
-  spendWebImport,
-  spendWebStrongExtraction
+  spendWebImport
 } from "../billing/web-billing";
 import { isSocialImportUrl } from "../extract/import-input";
 import {
@@ -102,7 +101,7 @@ const propertiesFor = (item: ImportQueueItem): ImportProperties => {
   const source = item.source ?? "in_app";
 
   if (!item.url) {
-    return { attempt: "fallback", source, source_type: "text" };
+    return { attempt: "primary", source, source_type: "text" };
   }
 
   const host = getAnalyticsSourceHost(item.url);
@@ -138,7 +137,7 @@ const extract = (
     ? apiClient.extractRecipe({ attempt, correlationId, url: item.url }, { signal })
     : apiClient.extractRecipeFromText(
         {
-          attempt: "fallback",
+          attempt: "primary",
           correlationId,
           text: item.text ?? "",
           ...(item.sourceUrl ? { sourceUrl: item.sourceUrl } : {})
@@ -348,14 +347,9 @@ export async function processImportQueueItem(
     return { reason: "save_limit", status: "paused" };
   }
 
-  // 3. The signed-out allowance (signed-in imports are metered by the API).
-  const needsStrong = !item.url;
-
-  if (
-    !isAuthenticated &&
-    (!canStartWebImport(tier).allowed ||
-      (needsStrong && !canStartWebStrongExtraction(tier).allowed))
-  ) {
+  // 3. The signed-out allowance (signed-in imports are metered by the API). Links and pasted text
+  // are read without AI, so they only use a plain import.
+  if (!isAuthenticated && !canStartWebImport(tier).allowed) {
     await retryImport(item.id, owner);
     return { reason: "import_limit", status: "paused" };
   }
@@ -376,7 +370,7 @@ export async function processImportQueueItem(
   const extractAs = (attemptNow: "primary" | "fallback") =>
     asAccount(runningFor, () => extract(item, attemptNow, correlationId, signal));
   let properties = propertiesFor(item);
-  let attempt: "primary" | "fallback" = item.url ? "primary" : "fallback";
+  let attempt: "primary" | "fallback" = "primary";
   let terminal = false;
   /** Set once the import worked (and is paid for): the item must not let go of it from then on. */
   let imported: ImportQueuePendingSave | undefined;
@@ -467,10 +461,6 @@ export async function processImportQueueItem(
 
       if (!isAuthenticated && current) {
         spendWebImport(tier);
-
-        if (attempt === "fallback") {
-          spendWebStrongExtraction(tier);
-        }
       }
 
       imported = {

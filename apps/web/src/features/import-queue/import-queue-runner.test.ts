@@ -334,7 +334,7 @@ describe("import queue runner", () => {
 
       await expect(tab).resolves.toEqual({ paused: null, processed: 1 });
       expect(apiMocks.extractRecipeFromText).toHaveBeenCalledOnce();
-      expect(readWebBillingUsage()).toMatchObject({ imports: 1, strongExtractions: 1 });
+      expect(readWebBillingUsage()).toMatchObject({ imports: 1, strongExtractions: 0 });
       expect((await getImportQueue())[0]).toMatchObject({ status: "done" });
     });
 
@@ -891,7 +891,7 @@ describe("import queue runner", () => {
     });
   });
 
-  it("imports queued text through AI help", async () => {
+  it("imports queued text as a plain import", async () => {
     await enqueueImport({ text: "Soup: 1 onion, 2 cups stock. Simmer 20 minutes." });
     apiMocks.extractRecipeFromText.mockResolvedValue(
       success("Onion soup", "https://linkdish.app/text-imports/abc")
@@ -900,7 +900,7 @@ describe("import queue runner", () => {
     await runImportQueue(context());
 
     expect(apiMocks.extractRecipeFromText.mock.calls[0]?.[0]).toMatchObject({
-      attempt: "fallback",
+      attempt: "primary",
       text: "Soup: 1 onion, 2 cups stock. Simmer 20 minutes."
     });
     expect((await getImportQueue())[0]?.status).toBe("done");
@@ -931,7 +931,7 @@ describe("import queue runner", () => {
 
       expect(apiMocks.extractRecipe).not.toHaveBeenCalled();
       expect(apiMocks.extractRecipeFromText.mock.calls[0]?.[0]).toMatchObject({
-        attempt: "fallback",
+        attempt: "primary",
         sourceUrl: link,
         text: caption
       });
@@ -943,7 +943,7 @@ describe("import queue runner", () => {
       expect(kept?.id).toBe(await generateDeterministicId(link, "Sesame noodles"));
       expect((await getImportQueue())[0]).toMatchObject({ recipeId: kept?.id, status: "done" });
       expect(v2Events("import_succeeded")[0]?.[0].properties).toMatchObject({
-        attempt: "fallback",
+        attempt: "primary",
         source_type: "text"
       });
     });

@@ -213,7 +213,7 @@ describe("quota on success responses", () => {
 });
 
 describe("text import billing", () => {
-  it("meters pasted text like an explicit fallback attempt", async () => {
+  it("meters pasted text as a plain import, whatever attempt the client sends", async () => {
     mocks.authorizeExtractionRequest.mockResolvedValue({
       allowed: true,
       commitUsage: vi.fn(),
@@ -222,23 +222,23 @@ describe("text import billing", () => {
     });
     const { runtime } = createRuntime();
 
-    const result = await runPipeline(runtime, { text: recipeText, attempt: "primary" });
+    const result = await runPipeline(runtime, { text: recipeText, attempt: "fallback" });
 
     expect(mocks.authorizeExtractionRequest).toHaveBeenCalledWith(
       expect.any(Object),
-      "fallback",
+      "primary",
       expect.any(Object)
     );
     expect(result.response).toMatchObject({
       status: "success",
-      recipe: { title: "Pasted Lentil Soup", sourceType: "unknown" },
-      extraction: { strategy: "llm-fallback" },
+      recipe: { title: "Weeknight lentil soup", sourceType: "unknown" },
+      extraction: { strategy: "article-pattern" },
       quota
     });
     expect(result.headers).toEqual({ "x-linkdish-cache": "bypass" });
   });
 
-  it("does not call the model when billing denies the text import", async () => {
+  it("never calls the model for a text import, even when billing denies it", async () => {
     const extract = vi.fn(() => Promise.resolve(llmCandidate));
     mocks.authorizeExtractionRequest.mockResolvedValue({
       allowed: false,

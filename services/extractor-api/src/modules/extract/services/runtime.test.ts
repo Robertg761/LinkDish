@@ -140,7 +140,6 @@ describe("default runtime browser escalation", () => {
   it("holds the render until an extraction's billing answer, and skips it on a denial", async () => {
     const defaultRuntime = createDefaultExtractorRuntime();
     delete defaultRuntime.extractionCache;
-    delete defaultRuntime.fallbackHandoffStore;
     const runtime: ExtractorRuntime = {
       ...defaultRuntime,
       fallbackExtractor: { available: false, providerName: "none", extract: vi.fn() },

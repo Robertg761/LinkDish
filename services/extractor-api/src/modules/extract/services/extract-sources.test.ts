@@ -175,7 +175,7 @@ describe("structured recipes with missing metadata", () => {
     });
   });
 
-  it("still asks for a fallback when the page is weak", async () => {
+  it("fails plainly, without a retry, when the page is weak", async () => {
     const runtime = createRuntime({
       fetchHtmlDocument: (url: string) => Promise.resolve(htmlResult(url, articleWeak))
     });
@@ -185,7 +185,30 @@ describe("structured recipes with missing metadata", () => {
       runtime
     );
 
-    expect(response.status).toBe("needs_retry");
+    expect(response).toMatchObject({ status: "failure", reason: "parse_failed" });
+  });
+
+  it("names what is missing when a page lacks part of the recipe", async () => {
+    const html = `<html><head><script type="application/ld+json">${JSON.stringify({
+      "@type": "Recipe",
+      name: "Thin Soup",
+      recipeIngredient: ["1 onion", "4 cups stock"],
+      recipeInstructions: []
+    })}</script></head><body><h1>Thin Soup</h1></body></html>`;
+    const runtime = createRuntime({
+      fetchHtmlDocument: (url: string) => Promise.resolve(htmlResult(url, html))
+    });
+
+    const { response } = await extractRecipe(
+      { url: "https://fixtures.linkdish.test/thin-soup", attempt: "fallback" },
+      runtime
+    );
+
+    expect(response).toMatchObject({
+      status: "failure",
+      reason: "parse_failed",
+      userMessage: "LinkDish couldn't find the method on that page."
+    });
   });
 });
 
@@ -302,7 +325,12 @@ describe("Pinterest pins", () => {
       })
     );
 
-    const runtime = createRuntime({ fetchHtmlDocument, fetchYouTubeDocument });
+    const extract = vi.fn<FallbackRecipeExtractor["extract"]>();
+    const runtime = createRuntime({
+      fetchHtmlDocument,
+      fetchYouTubeDocument,
+      fallbackExtractor: fallbackExtractor(extract)
+    });
 
     const direct = await extractRecipe({ url: videoUrl, attempt: "primary" }, runtime);
     const pinned = await extractRecipe({ url: pinUrl, attempt: "primary" }, runtime);
@@ -317,24 +345,11 @@ describe("Pinterest pins", () => {
     expect(pinned.response.status).not.toBe("failure");
     expect(pinned.response).toEqual(direct.response);
     expect(pinned.logContext.sourceType).toBe("youtube");
-
-    /* The explicit fallback gives the model the transcript, not the video page's HTML shell. */
-    const extract = vi.fn<FallbackRecipeExtractor["extract"]>(() =>
-      Promise.resolve(llmCandidate("Skillet Chicken"))
-    );
-    await extractRecipe(
-      { url: pinUrl, attempt: "fallback" },
-      createRuntime({
-        fetchHtmlDocument,
-        fetchYouTubeDocument,
-        fallbackExtractor: fallbackExtractor(extract)
-      })
-    );
-
-    expect(extract.mock.calls[0]?.[0]).toMatchObject({
-      sourceType: "youtube",
-      sourceDocument: { kind: "youtube", transcript: youtubeTranscript }
+    expect(pinned.response).toMatchObject({
+      status: "success",
+      recipe: { title: "Skillet Chicken", sourceType: "youtube" }
     });
+    expect(extract).not.toHaveBeenCalled();
   });
 
   it("reads a linked TikTok through its caption, like a direct TikTok link", async () => {
@@ -352,9 +367,8 @@ describe("Pinterest pins", () => {
     expect(fetchHtmlDocument.mock.calls.map(([url]) => url)).toEqual([pinUrl]);
     expect(fetchSocialDocument).toHaveBeenCalledWith(tiktokUrl, expect.any(Object));
     expect(response).toMatchObject({
-      status: "needs_retry",
-      reason: "unsupported_primary_extraction",
-      sourceType: "social"
+      status: "success",
+      recipe: { title: "Easy chili", sourceType: "social" }
     });
   });
 
@@ -391,56 +405,60 @@ describe("Pinterest pins", () => {
 describe("TikTok captions", () => {
   const tiktokUrl = "https://www.tiktok.com/@cook/video/7234567890123456789";
 
-  it("asks for the AI fallback when the caption holds a recipe", async () => {
-    const extract = vi.fn(() => Promise.resolve(llmCandidate()));
+  it("reads the caption's recipe without the LLM, on either attempt", async () => {
+    const extract = vi.fn<FallbackRecipeExtractor["extract"]>();
     const runtime = createRuntime({
       fetchSocialDocument: () => Promise.resolve(tiktokDocument()),
       fallbackExtractor: fallbackExtractor(extract)
     });
 
-    const { response, logContext } = await extractRecipe(
-      { url: tiktokUrl, attempt: "primary" },
-      runtime
-    );
+    const primary = await extractRecipe({ url: tiktokUrl, attempt: "primary" }, runtime);
+    const fallback = await extractRecipe({ url: tiktokUrl, attempt: "fallback" }, runtime);
 
-    expect(response).toMatchObject({
-      status: "needs_retry",
-      reason: "unsupported_primary_extraction",
-      sourceType: "social",
-      suggestedAttempt: "fallback",
-      recovery: { allowFallback: true, suggestedAction: "retry_fallback" }
-    });
     expect(extract).not.toHaveBeenCalled();
-    expect(logContext.sourceType).toBe("social");
-  });
-
-  it("extracts the caption with the LLM on the fallback attempt", async () => {
-    const extract = vi.fn<FallbackRecipeExtractor["extract"]>(() =>
-      Promise.resolve(llmCandidate())
-    );
-    const runtime = createRuntime({
-      fetchSocialDocument: () => Promise.resolve(tiktokDocument()),
-      fallbackExtractor: fallbackExtractor(extract)
-    });
-
-    const { response } = await extractRecipe({ url: tiktokUrl, attempt: "fallback" }, runtime);
-
-    expect(extract.mock.calls[0]?.[0].sourceDocument).toMatchObject({
-      kind: "text",
-      origin: "tiktok"
-    });
-    expect(response).toMatchObject({
+    expect(fallback.response).toEqual(primary.response);
+    expect(primary.logContext.sourceType).toBe("social");
+    expect(primary.response).toMatchObject({
       status: "success",
       recipe: {
-        title: "Caption Chili",
+        title: "Easy chili",
         sourceType: "social",
         sourceUrl: tiktokUrl,
         siteName: "TikTok",
         author: "Cook Creator",
         videoUrl: tiktokUrl,
-        image: { url: "https://p16-sign.tiktokcdn.com/thumb.jpeg", source: "og" }
+        image: { url: "https://p16-sign.tiktokcdn.com/thumb.jpeg", source: "og" },
+        ingredients: [
+          { text: "1 lb ground beef" },
+          { text: "1 can beans" },
+          { text: "2 tbsp chili powder" }
+        ],
+        steps: [{ index: 1, text: "Brown the beef, stir in everything and simmer 20 min" }]
       },
-      extraction: { sourceType: "social", strategy: "llm-fallback" }
+      extraction: {
+        sourceType: "social",
+        strategy: "article-pattern",
+        provenance: ["visible-text"]
+      }
+    });
+  });
+
+  it("keeps a caption that lists only ingredients and points to the video for the method", async () => {
+    const runtime = createRuntime({
+      fetchSocialDocument: () =>
+        Promise.resolve(
+          tiktokDocument("Ingredients:\n2 cups flour\n1 cup sugar\n2 eggs\n#baking #fyp")
+        )
+    });
+
+    const { response } = await extractRecipe({ url: tiktokUrl, attempt: "primary" }, runtime);
+
+    expect(response).toMatchObject({
+      status: "success",
+      recipe: {
+        title: "TikTok recipe from Cook Creator",
+        steps: [{ index: 1, text: "Follow the video for the method." }]
+      }
     });
   });
 
@@ -473,17 +491,15 @@ describe("TikTok captions", () => {
     });
   });
 
-  it("reports fallback_unavailable for the fallback attempt without an LLM provider", async () => {
-    const fetchSocialDocument = vi.fn(() => Promise.resolve(tiktokDocument()));
+  it("reads captions with no LLM provider configured", async () => {
     const runtime = createRuntime({
-      fetchSocialDocument,
+      fetchSocialDocument: () => Promise.resolve(tiktokDocument()),
       fallbackExtractor: fallbackExtractor(undefined, false)
     });
 
     const { response } = await extractRecipe({ url: tiktokUrl, attempt: "fallback" }, runtime);
 
-    expect(response).toMatchObject({ status: "failure", reason: "fallback_unavailable" });
-    expect(fetchSocialDocument).not.toHaveBeenCalled();
+    expect(response.status).toBe("success");
   });
 
   it("stays unsupported for runtimes without a caption reader, and for Instagram", async () => {
@@ -510,25 +526,27 @@ describe("pasted text", () => {
     "Brown the beef, stir in everything and simmer 20 minutes."
   ].join("\n");
 
-  it("extracts pasted text with the LLM and a stable synthetic source url", async () => {
-    const extract = vi.fn<FallbackRecipeExtractor["extract"]>(() =>
-      Promise.resolve(llmCandidate("Grandma's Chili"))
-    );
+  it("reads pasted text without the LLM, under a stable synthetic source url", async () => {
+    const extract = vi.fn<FallbackRecipeExtractor["extract"]>();
     const runtime = createRuntime({ fallbackExtractor: fallbackExtractor(extract) });
 
     const first = await extractRecipe({ text: recipeText, attempt: "fallback" }, runtime);
     const second = await extractRecipe({ text: recipeText, attempt: "fallback" }, runtime);
-    const input = extract.mock.calls[0]?.[0];
 
-    expect(input?.sourceDocument).toMatchObject({
-      kind: "text",
-      origin: "paste",
-      text: recipeText
-    });
+    expect(extract).not.toHaveBeenCalled();
     expect(first.response).toMatchObject({
       status: "success",
-      recipe: { title: "Grandma's Chili", sourceType: "unknown" },
-      extraction: { sourceType: "unknown", strategy: "llm-fallback" }
+      recipe: {
+        title: "Grandma's chili",
+        sourceType: "unknown",
+        ingredients: [
+          { text: "1 lb ground beef" },
+          { text: "1 can beans" },
+          { text: "2 tbsp chili powder" }
+        ],
+        steps: [{ index: 1, text: "Brown the beef, stir in everything and simmer 20 minutes." }]
+      },
+      extraction: { sourceType: "unknown", strategy: "article-pattern" }
     });
     expect(first.response.status === "success" && first.response.recipe.sourceUrl).toBe(
       buildTextImportSourceUrl(recipeText)
@@ -536,7 +554,7 @@ describe("pasted text", () => {
     expect(second.response.status === "success" && second.response.recipe.sourceUrl).toBe(
       buildTextImportSourceUrl(recipeText)
     );
-    expect(first.logContext).toMatchObject({ attempt: "fallback", cacheStatus: "bypass" });
+    expect(first.logContext).toMatchObject({ attempt: "primary", cacheStatus: "bypass" });
   });
 
   it("keeps a provided source url and derives the source type from it", async () => {
@@ -557,7 +575,7 @@ describe("pasted text", () => {
     });
   });
 
-  it("rejects text without recipe signals before calling the model", async () => {
+  it("rejects text without recipe signals", async () => {
     const extract = vi.fn(() => Promise.resolve(llmCandidate()));
     const runtime = createRuntime({ fallbackExtractor: fallbackExtractor(extract) });
 
@@ -574,58 +592,89 @@ describe("pasted text", () => {
     expect(extract).not.toHaveBeenCalled();
   });
 
-  it("reports fallback_unavailable without a provider", async () => {
+  it("explains how to label text whose ingredients and steps it cannot tell apart", async () => {
+    const { response } = await extractRecipe(
+      {
+        text: "My chili: brown 1 lb beef with 2 tbsp chili powder, then add 1 can beans and simmer.",
+        attempt: "primary"
+      },
+      createRuntime()
+    );
+
+    expect(response).toMatchObject({
+      status: "failure",
+      reason: "parse_failed",
+      userMessage:
+        'LinkDish couldn\'t tell the ingredients from the steps. Put the ingredients under an "Ingredients" heading and the steps under a "Method" heading, then try again.'
+    });
+  });
+
+  it("works with no LLM provider configured", async () => {
     const { response } = await extractRecipe(
       { text: recipeText, attempt: "fallback" },
       createRuntime({ fallbackExtractor: fallbackExtractor(undefined, false) })
     );
 
-    expect(response).toMatchObject({ status: "failure", reason: "fallback_unavailable" });
-  });
-
-  it("maps model errors to fallback failures", async () => {
-    const { response } = await extractRecipe(
-      { text: recipeText, attempt: "fallback" },
-      createRuntime({
-        fallbackExtractor: fallbackExtractor(() => Promise.reject(new Error("model down")))
-      })
-    );
-
-    expect(response).toMatchObject({ status: "failure", reason: "fallback_failed" });
+    expect(response.status).toBe("success");
   });
 });
 
-describe("fallback metadata carry-over", () => {
-  it("keeps metadata the deterministic pass found when the LLM rebuilds the recipe", async () => {
-    const html = `<html><head><meta property="og:site_name" content="Fixture Kitchen"><script type="application/ld+json">${JSON.stringify(
-      {
-        "@type": "Recipe",
-        name: "Thin Soup",
-        description: "A soup the page barely describes.",
-        author: { "@type": "Person", name: "Ada Cook" },
-        recipeCuisine: "French",
-        recipeIngredient: ["1 onion"],
-        recipeInstructions: []
-      }
-    )}</script></head><body><h1>Thin Soup</h1></body></html>`;
-    const runtime = createRuntime({
-      fetchHtmlDocument: (url: string) => Promise.resolve(htmlResult(url, html))
-    });
-
-    const { response } = await extractRecipe(
-      { url: "https://fixtures.linkdish.test/thin-soup", attempt: "fallback" },
-      runtime
+describe("YouTube recipe links", () => {
+  const videoUrl = "https://www.youtube.com/watch?v=dQw4w9WgXcQ";
+  const recipeUrl = "https://fixtures.linkdish.test/recipe-jsonld";
+  const youtubeDocument = (description: string) =>
+    vi.fn<ExtractorRuntime["fetchYouTubeDocument"]>((url, videoId) =>
+      Promise.resolve({
+        kind: "youtube",
+        url,
+        videoId,
+        title: "Tomato Pasta",
+        description,
+        transcript: null,
+        chapters: [],
+        pageHtml: null
+      })
     );
 
+  it("reads the written recipe a description links to, keeping the video", async () => {
+    const fetchHtmlDocument = vi.fn((url: string) =>
+      Promise.resolve(htmlResult(url, recipeJsonLd))
+    );
+    const validateSourceUrl = vi.fn(() => Promise.resolve({ safe: true as const }));
+    const runtime = createRuntime({
+      fetchHtmlDocument,
+      validateSourceUrl,
+      fetchYouTubeDocument: youtubeDocument(
+        `My favourite pasta!\nInstagram: https://instagram.com/cook\nFull recipe: ${recipeUrl}`
+      )
+    });
+
+    const { response } = await extractRecipe({ url: videoUrl, attempt: "primary" }, runtime);
+
+    expect(fetchHtmlDocument.mock.calls.map(([url]) => url)).toEqual([recipeUrl]);
+    expect(validateSourceUrl).toHaveBeenCalledWith(recipeUrl);
     expect(response).toMatchObject({
       status: "success",
-      recipe: {
-        title: "Caption Chili",
-        description: "A soup the page barely describes.",
-        author: "Ada Cook",
-        siteName: "Fixture Kitchen",
-        cuisine: "French"
-      }
+      recipe: { title: "One-Pan Tomato Pasta", sourceUrl: recipeUrl, videoUrl },
+      extraction: { strategy: "recipe-schema" }
+    });
+  });
+
+  it("explains that the video has no written recipe when neither the description nor a link has one", async () => {
+    const fetchHtmlDocument = vi.fn((url: string) => Promise.resolve(htmlResult(url, articleWeak)));
+    const runtime = createRuntime({
+      fetchHtmlDocument,
+      fetchYouTubeDocument: youtubeDocument(`Easy pasta 🍝\nRecipe here: ${recipeUrl}`)
+    });
+
+    const { response } = await extractRecipe({ url: videoUrl, attempt: "primary" }, runtime);
+
+    expect(fetchHtmlDocument).toHaveBeenCalledTimes(1);
+    expect(response).toMatchObject({
+      status: "failure",
+      reason: "parse_failed",
+      userMessage:
+        "That video's description doesn't include a written recipe. Try the recipe's website instead."
     });
   });
 });

@@ -1,143 +1,102 @@
 import { toYouTubeWatchUrl } from "../../source-detection/parse-youtube-video-id.js";
 import {
-  buildFieldProvenance,
-  extractMinutesFromText,
-  extractServingsFromText,
-  toIngredientLines,
-  toStepLines,
-  uniqueNonEmptyText
-} from "../shared.js";
+  buildTextRecipeCandidate,
+  isCompleteRecipeParse,
+  type TextRecipeExtraction
+} from "../text/extract-text-recipe.js";
+import { findTextLinks, parseRecipeText } from "../text/parse-recipe-text.js";
 
-import type { ExtractionCandidate, YouTubeSourceDocument } from "../../types.js";
+import type { YouTubeSourceDocument } from "../../types.js";
 
-const pullSectionLines = (text: string, headingPattern: RegExp): string[] => {
-  const lines = text.split(/\n+/).map((line) => line.trim());
-  const section: string[] = [];
-  let collecting = false;
-
-  for (const line of lines) {
-    if (headingPattern.test(line)) {
-      collecting = true;
-      continue;
-    }
-
-    if (
-      collecting &&
-      (/^[A-Z][A-Za-z ]+:$/.test(line) ||
-        /^(prep|cook)\s+time[:\s]/i.test(line) ||
-        /^serves?\b/i.test(line) ||
-        /^ingredients?:/i.test(line))
-    ) {
-      break;
-    }
-
-    if (collecting && line.length > 0) {
-      section.push(line);
-    }
-  }
-
-  return uniqueNonEmptyText(section);
-};
-
+/*
+ * A YouTube recipe is read from what the creator wrote: the description (or, where the server
+ * can get one, a transcript that happens to be laid out as a recipe). Spoken transcripts are
+ * not turned into recipes; a video whose description has no recipe is reported as such, and
+ * the caller can follow a "full recipe" link instead (see findYouTubeRecipeLinks).
+ */
 export const extractYouTubeRecipe = (
   document: YouTubeSourceDocument
-): ExtractionCandidate | null => {
-  const transcript = document.transcript?.trim();
-  const description = document.description?.trim() ?? "";
-  const chapterText = document.chapters.join("\n");
-  const combinedText = [description, chapterText, transcript].filter(Boolean).join("\n");
-  const ingredientLines = pullSectionLines(combinedText, /^ingredients?:?/i);
-  const stepLines = pullSectionLines(combinedText, /^(instructions?|directions?|method|steps?):?/i);
-  const fallbackDescriptionLines = combinedText
-    .split(/\n+/)
-    .map((line) => line.trim())
-    .filter(Boolean);
+): TextRecipeExtraction | null => {
+  const descriptionParse = parseRecipeText(document.description ?? "");
+  const transcriptParse = document.transcript ? parseRecipeText(document.transcript) : null;
+  const usesTranscript =
+    transcriptParse !== null &&
+    isCompleteRecipeParse(transcriptParse) &&
+    !isCompleteRecipeParse(descriptionParse);
+  const parsed = usesTranscript ? transcriptParse : descriptionParse;
+  const provenance = usesTranscript ? "transcript" : "visible-text";
 
-  if (
-    !transcript &&
-    ingredientLines.length === 0 &&
-    stepLines.length === 0 &&
-    !/recipe|ingredients?/i.test(description)
-  ) {
-    return null;
-  }
-
-  const fallbackTranscriptSentences = transcript
-    ? transcript
-        .split(/[.?!]\s+/)
-        .map((sentence) => sentence.trim())
-        .filter(Boolean)
-    : fallbackDescriptionLines;
-  const ingredientSource =
-    ingredientLines.length > 0
-      ? ingredientLines
-      : fallbackTranscriptSentences
-          .filter((sentence) => /cup|tbsp|tsp|ingredient/i.test(sentence))
-          .slice(0, 10);
-  const stepSource =
-    stepLines.length > 0
-      ? stepLines
-      : fallbackTranscriptSentences.filter((sentence) => sentence.length > 20).slice(0, 8);
-  const usesTranscript = Boolean(transcript);
-
-  return {
+  return buildTextRecipeCandidate(parsed, {
+    sourceTitle: document.title,
+    fallbackTitle: `YouTube recipe ${document.videoId}`,
+    isVideo: true,
+    strategy: "youtube-transcript",
+    provenance,
     recipe: {
-      title: document.title ?? `YouTube recipe ${document.videoId}`,
       sourceUrl: document.url,
       sourceType: "youtube",
       image: {
         source: "youtube-thumb",
         url: `https://i.ytimg.com/vi/${encodeURIComponent(document.videoId)}/hqdefault.jpg`
       },
-      ingredients: toIngredientLines(ingredientSource),
-      steps: toStepLines(stepSource),
-      servings: extractServingsFromText(combinedText),
-      prepTimeMinutes: extractMinutesFromText(combinedText, "prep"),
-      cookTimeMinutes: extractMinutesFromText(combinedText, "cook"),
-      nutrition: null,
       siteName: "YouTube",
       videoUrl: toYouTubeWatchUrl(document.videoId),
       ...(document.authorName ? { author: document.authorName } : {})
-    },
-    strategy: "youtube-transcript",
-    evidence: [
-      usesTranscript
-        ? "Parsed YouTube transcript and metadata for recipe cues."
-        : "Parsed YouTube description and chapter metadata for recipe cues."
-    ],
-    warnings: [
-      usesTranscript
-        ? "YouTube extraction is transcript-dependent and may miss unspoken details."
-        : "YouTube extraction used description-level cues because a transcript was unavailable."
-    ],
-    provenance: usesTranscript ? ["transcript", "visible-text"] : ["visible-text"],
-    fieldProvenance: buildFieldProvenance({
-      title: "visible-text",
-      ingredients: usesTranscript ? "transcript" : "visible-text",
-      steps: usesTranscript ? "transcript" : "visible-text",
-      servings: extractServingsFromText(combinedText) ? "visible-text" : null,
-      prepTimeMinutes: extractMinutesFromText(combinedText, "prep") == null ? null : "visible-text",
-      cookTimeMinutes: extractMinutesFromText(combinedText, "cook") == null ? null : "visible-text",
-      nutrition: null
-    }),
-    signals: {
-      requiredFieldsInferred: !usesTranscript,
-      titleConfidence: document.title ? "strong" : "weak",
-      timesFromStructuredMetadata: false,
-      recipeLike:
-        ingredientLines.length > 0 ||
-        stepLines.length > 0 ||
-        /ingredients?|instructions?|recipe/i.test(combinedText),
-      detectionConfidence: usesTranscript ? "high" : "medium",
-      sectionCohesion:
-        ingredientLines.length > 0 && stepLines.length > 0
-          ? "strong"
-          : ingredientLines.length > 0 || stepLines.length > 0
-            ? "medium"
-            : "weak",
-      transcriptQuality: usesTranscript ? "strong" : "missing",
-      usedBrowserFallback: false,
-      blockedSourceSignals: 0
     }
-  };
+  });
+};
+
+/* Hosts that never carry the written recipe: socials, shops, music, link hubs. */
+const nonRecipeHostPattern =
+  /(?:^|\.)(?:youtube\.com|youtu\.be|instagram\.com|facebook\.com|fb\.com|fb\.me|tiktok\.com|twitter\.com|x\.com|threads\.net|pinterest\.[a-z.]+|pin\.it|patreon\.com|amazon\.[a-z.]+|amzn\.[a-z]+|amzn\.to|linktr\.ee|beacons\.ai|spotify\.com|apple\.com|music\.apple\.com|soundcloud\.com|discord\.gg|discord\.com|twitch\.tv|snapchat\.com|reddit\.com|ko-fi\.com|buymeacoffee\.com|paypal\.me|paypal\.com|etsy\.com|shopify\.com|teespring\.com|spreadshirt\.[a-z.]+|epidemicsound\.com|artlist\.io|google\.com|goo\.gl|forms\.gle|wa\.me|t\.me|whatsapp\.com)$/iu;
+/* "Full recipe:", "Get the recipe here", "Printable recipe & measurements". */
+const strongRecipeCuePattern =
+  /\b(?:full|written|printable|complete|detailed|exact)\s+recipe\b|\brecipe\s*(?:here|link|[:👉⬇↓])|\bget the recipe\b|\b(?:measurements|ingredients list)\b/iu;
+const recipeCuePattern =
+  /\b(?:recipes?|written|printable|ingredients|measurements|method|blog)\b/iu;
+
+const maxRecipeLinks = 2;
+
+/**
+ * Links in a video's description that likely lead to its written recipe, best first: links on
+ * (or right under) a line like "Full recipe:", then lines that mention a recipe, then links
+ * whose path says "recipe". Home pages and social, shop and music links are left out.
+ */
+export const findYouTubeRecipeLinks = (document: YouTubeSourceDocument): string[] => {
+  const ranked = findTextLinks(document.description ?? "")
+    .map(({ url, line }, order) => {
+      let parsed: URL;
+
+      try {
+        parsed = new URL(url);
+      } catch {
+        return null;
+      }
+
+      if (
+        (parsed.protocol !== "https:" && parsed.protocol !== "http:") ||
+        nonRecipeHostPattern.test(parsed.hostname)
+      ) {
+        return null;
+      }
+
+      const tier = strongRecipeCuePattern.test(line)
+        ? 0
+        : recipeCuePattern.test(line)
+          ? 1
+          : /recipe/iu.test(parsed.pathname)
+            ? 2
+            : null;
+      const isHomePage = parsed.pathname.replace(/\/+$/u, "") === "";
+
+      if (isHomePage || tier === null) {
+        return null;
+      }
+
+      return { url: parsed.toString(), rank: tier * 1000 + order };
+    })
+    .filter((entry): entry is { url: string; rank: number } => entry !== null)
+    .sort((left, right) => left.rank - right.rank);
+
+  return [...new Set(ranked.map((entry) => entry.url))].slice(0, maxRecipeLinks);
 };

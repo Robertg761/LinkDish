@@ -178,7 +178,7 @@
   {
     "id": "article-king-arthur-no-knead-bread",
     "kind": "article-blog",
-    "expectedMinimumOutcome": "needs_retry",
+    "expectedMinimumOutcome": "failure",
     "url": "https://www.kingarthurbaking.com/blog/2022/05/25/how-to-make-a-bread-recipe-no-knead",
     "expectedFinalUrlPattern": "kingarthurbaking\\.com/blog/2022/05/25/how-to-make-a-bread-recipe-no-knead",
     "expectedTitlePattern": "No-Knead|Bread Recipe"
@@ -250,7 +250,7 @@
   {
     "id": "article-king-arthur-no-knead-bread-archive",
     "kind": "article-blog",
-    "expectedMinimumOutcome": "needs_retry",
+    "expectedMinimumOutcome": "failure",
     "url": "https://www.kingarthurbaking.com/blog/2020/04/27/how-to-make-no-knead-sourdough-bread",
     "expectedFinalUrlPattern": "kingarthurbaking\\.com/blog/2020/04/27/how-to-make-no-knead-sourdough-bread",
     "expectedTitlePattern": "No-Knead|Sourdough Bread"

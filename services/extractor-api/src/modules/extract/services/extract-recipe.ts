@@ -8,14 +8,12 @@ import {
   type ExtractRecipeSuccess
 } from "../../../../../../packages/api-contracts/src/index.js";
 import {
-  buildMissingFieldSummary,
   computeMissingRecipeFields,
   hasRequiredRecipeFields,
   type Recipe,
   type SourceType
 } from "../../../../../../packages/recipe-domain/src/index.js";
 import { extractorApiEnv } from "../../../config/env.js";
-import { toHandoffSourceDocument, type FallbackHandoff } from "../cache/fallback-handoff.js";
 import { isStrongStructuredCandidate } from "../confidence/score-recipe.js";
 import { successConfidenceThresholds } from "../confidence/thresholds.js";
 import {
@@ -25,7 +23,6 @@ import {
 } from "../deadline.js";
 import { looksLikeRecipeText } from "../extractors/recipe-text-signals.js";
 import { FallbackProviderError } from "../fallback/errors.js";
-import { loadFallbackInputBuilder } from "../fallback/load-fallback-input.js";
 import {
   BrowserFetchError,
   HtmlFetchError,
@@ -55,12 +52,12 @@ import type {
   DeterministicFailureDecision,
   ExtractionCandidate,
   ExtractionLogContext,
-  ExtractionRetryReason,
   ExtractorRuntime,
   HtmlSourceDocument,
   NormalizedExtraction,
   SourceDocument,
-  TextSourceDocument
+  TextSourceDocument,
+  YouTubeSourceDocument
 } from "../types.js";
 
 type ExtractRecipeUrlRequest = {
@@ -95,17 +92,14 @@ export interface ExtractRecipeOptions {
    * LLM calls and cache writes wait for `true`; `false` cancels the extraction.
    */
   authorization?: Promise<boolean>;
-  /** The client's import correlation id; keys the primary-to-fallback hand-off. */
+  /** The client's import correlation id. */
   correlationId?: string;
   /**
    * "default" reads and writes the result cache, "refresh" skips reads but
    * stores fresh results (the live canary), "bypass" does neither.
    */
   cacheMode?: "default" | "refresh" | "bypass";
-  /**
-   * Keeps work alive past the response (cache writes, and a hand-off write that outlasts its
-   * pre-response wait); Vercel passes waitUntil. Without it that work is awaited inline.
-   */
+  /** Keeps work alive past the response (cache writes); Vercel passes waitUntil. */
   schedule?: (task: Promise<unknown>) => void;
 }
 
@@ -113,32 +107,10 @@ interface ExtractionContext {
   runtime: ExtractorRuntime;
   deadline: RequestDeadline;
   authorization: Promise<boolean>;
-  correlationId: string | undefined;
   cacheMode: NonNullable<ExtractRecipeOptions["cacheMode"]>;
   /** Starts `task` and lets it finish after the response. Never rejects. */
   afterResponse(task: () => Promise<void>, failureEvent?: string): Promise<void>;
-  /**
-   * Starts `task` and waits at most `maxWaitMs` for it; a slower task finishes after the
-   * response, like `afterResponse` work. Never rejects: a failed task reads as "settled".
-   */
-  beforeResponse(
-    task: () => Promise<void>,
-    options: { maxWaitMs: number; failureEvent: string }
-  ): Promise<"settled" | "timed_out">;
 }
-
-/*
- * How long a needs_retry answer waits for its fallback hand-off to be stored. Clients may send
- * the fallback attempt the moment the primary answer arrives (the import queue does), so a
- * hand-off still being written then is missed and the page is fetched (often rendered) again.
- * Storing it takes a lazily loaded HTML summary pass and one store write: typically tens of
- * milliseconds, a few hundred on a cold start with a large page. 400 ms covers that tail while
- * staying well under the store's own 1.5 s request timeout, so a slow or failing store adds at
- * most 400 ms to an answer whose next step is a multi-second LLM call. A write that takes longer
- * keeps running after the response, as it did before, and usually still lands before the
- * fallback attempt (a new request, rate-limited and billed first) reads it.
- */
-export const FALLBACK_HANDOFF_MAX_WAIT_MS = 400;
 
 const logTaskFailure = (event: string) => (error: unknown) => {
   console.warn(
@@ -148,26 +120,6 @@ const logTaskFailure = (event: string) => (error: unknown) => {
     })
   );
 };
-
-/* Resolves true when `task` settles within `maxWaitMs`, false when the wait ran out first. */
-const settlesWithin = async (task: Promise<void>, maxWaitMs: number): Promise<boolean> => {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<false>((resolve) => {
-    timer = setTimeout(() => resolve(false), Math.max(0, maxWaitMs));
-  });
-
-  try {
-    return await Promise.race([task.then(() => true as const), timeout]);
-  } finally {
-    clearTimeout(timer);
-  }
-};
-
-const defaultRetryRecovery = {
-  retryable: true,
-  allowFallback: true,
-  suggestedAction: "retry_fallback"
-} as const;
 
 const unsupportedSourceMessages = {
   social:
@@ -221,7 +173,6 @@ const createExtractionContext = (
       runtime,
       deadline,
       authorization: options.authorization ?? Promise.resolve(true),
-      correlationId: options.correlationId,
       cacheMode: options.cacheMode ?? "default",
       afterResponse: async (task, failureEvent = "extract_post_response_task_failed") => {
         const guardedTask = task().catch(logTaskFailure(failureEvent));
@@ -229,17 +180,6 @@ const createExtractionContext = (
         if (!keepAlive(guardedTask)) {
           await guardedTask;
         }
-      },
-      beforeResponse: async (task, { maxWaitMs, failureEvent }) => {
-        const guardedTask = task().catch(logTaskFailure(failureEvent));
-
-        /* Scheduled first, so the task outlives the response if the wait below runs out. */
-        if (!keepAlive(guardedTask)) {
-          await guardedTask;
-          return "settled";
-        }
-
-        return (await settlesWithin(guardedTask, maxWaitMs)) ? "settled" : "timed_out";
       }
     },
     dispose: () => {
@@ -272,25 +212,6 @@ const buildFailureDecision = (
   recovery
 });
 
-const buildRetryDecision = (
-  sourceType: SourceType,
-  candidate: ExtractionCandidate | null,
-  confidenceScore: number,
-  reason: ExtractionRetryReason,
-  userMessage: string
-): DeterministicDecision => ({
-  kind: "needs_retry",
-  reason,
-  sourceType,
-  userMessage,
-  diagnostics: {
-    confidenceScore,
-    missingFields: computeMissingRecipeFields(candidate?.recipe ?? {})
-  },
-  candidate,
-  recovery: defaultRetryRecovery
-});
-
 const makeLogContext = ({
   hostname,
   detection,
@@ -303,8 +224,7 @@ const makeLogContext = ({
   finalUrl,
   blockedSignals,
   browserAttempted,
-  textCleanup,
-  fallbackHandoff
+  textCleanup
 }: {
   hostname: string;
   detection: DetectionResult;
@@ -318,7 +238,6 @@ const makeLogContext = ({
   blockedSignals?: string[];
   browserAttempted?: boolean;
   textCleanup?: ExtractionLogContext["textCleanup"];
-  fallbackHandoff?: ExtractionLogContext["fallbackHandoff"];
 }): Omit<ExtractionLogContext, "latencyMs"> => ({
   hostname,
   sourceType: detection.sourceType,
@@ -345,8 +264,7 @@ const makeLogContext = ({
   finalUrl: finalUrl ?? null,
   blockedSignals: blockedSignals ?? [],
   browserAttempted: browserAttempted ?? fetchMode === "browser",
-  ...(textCleanup ? { textCleanup } : {}),
-  ...(fallbackHandoff ? { fallbackHandoff } : {})
+  ...(textCleanup ? { textCleanup } : {})
 });
 
 const getDocumentLogFields = (sourceDocument: SourceDocument, fetchMode: FetchMode) => ({
@@ -650,10 +568,9 @@ const loadArticleExtractor = async () => {
   return module.extractArticleRecipe;
 };
 
-const loadYouTubeExtractor = async () => {
-  const module = await import("../extractors/youtube/extract-youtube-recipe.js");
-  return module.extractYouTubeRecipe;
-};
+const loadYouTubeExtractorModule = () => import("../extractors/youtube/extract-youtube-recipe.js");
+
+const loadYouTubeExtractor = async () => (await loadYouTubeExtractorModule()).extractYouTubeRecipe;
 
 const runHtmlExtractors = async (
   sourceDocument: HtmlSourceDocument,
@@ -695,7 +612,7 @@ const runDeterministicExtraction = async (
     const extractYouTubeRecipe = await loadYouTubeExtractor();
 
     return withRuntimeSignals(
-      extractYouTubeRecipe(sourceDocument),
+      extractYouTubeRecipe(sourceDocument)?.candidate ?? null,
       detection,
       fetchMode,
       sourceDocument
@@ -705,10 +622,32 @@ const runDeterministicExtraction = async (
   return null;
 };
 
+const noRecipeRecovery = {
+  retryable: false,
+  allowFallback: false,
+  suggestedAction: "try_another_url"
+} as const;
+
+const describeMissingRequiredFields = (recipe: Partial<Recipe>): string => {
+  const missing = [
+    ...(typeof recipe.title === "string" && recipe.title.trim().length > 0 ? [] : ["a title"]),
+    ...((recipe.ingredients?.length ?? 0) > 0 ? [] : ["the ingredients"]),
+    ...((recipe.steps?.length ?? 0) > 0 ? [] : ["the method"])
+  ];
+
+  return missing.length === 0
+    ? "LinkDish couldn't read a complete recipe from that page."
+    : `LinkDish couldn't find ${missing.join(" or ")} on that page.`;
+};
+
+/*
+ * Every link is answered by the deterministic extractors alone: a recipe the page (or video
+ * description) states clearly is a success, anything less is a plain failure. Nothing is
+ * guessed at, so a weak read is never saved as a recipe.
+ */
 const decidePrimaryOutcome = (
   request: ExtractRecipeUrlRequest,
   detection: DetectionResult,
-  sourceDocument: SourceDocument,
   fetchMode: FetchMode,
   candidate: ExtractionCandidate | null
 ): DeterministicDecision => {
@@ -723,73 +662,48 @@ const decidePrimaryOutcome = (
   }
 
   if (!candidate) {
-    if (
-      sourceType === "youtube" &&
-      sourceDocument.kind === "youtube" &&
-      !sourceDocument.transcript
-    ) {
-      return buildRetryDecision(
-        sourceType,
-        null,
-        0,
-        "transcript_required",
-        "A transcript is required before we can reliably extract this YouTube recipe."
-      );
-    }
-
     return buildFailureDecision(
       "parse_failed",
-      "We could not identify recipe signals from this source.",
-      {
-        retryable: false,
-        allowFallback: false,
-        suggestedAction: "try_another_url"
-      }
+      sourceType === "youtube"
+        ? "That video's description doesn't include a written recipe. Try the recipe's website instead."
+        : "LinkDish couldn't find a recipe on that page.",
+      noRecipeRecovery
+    );
+  }
+
+  if (!hasRequiredRecipeFields(candidate.recipe)) {
+    return buildFailureDecision(
+      "parse_failed",
+      describeMissingRequiredFields(candidate.recipe),
+      noRecipeRecovery
     );
   }
 
   const normalized = normalizeExtractionCandidate(candidate, sourceType, request.url, fetchMode);
-  const missingFields = computeMissingRecipeFields(candidate.recipe);
-
-  if (!hasRequiredRecipeFields(candidate.recipe)) {
-    return buildRetryDecision(
-      sourceType,
-      candidate,
-      normalized?.confidenceScore ?? 0,
-      "missing_required_fields",
-      buildMissingFieldSummary(candidate.recipe)
-    );
-  }
 
   if (!normalized) {
-    return buildRetryDecision(
-      sourceType,
-      candidate,
-      0,
-      "missing_required_fields",
-      "Required recipe fields were missing after normalization."
+    return buildFailureDecision(
+      "parse_failed",
+      describeMissingRequiredFields(candidate.recipe),
+      noRecipeRecovery
     );
   }
 
   /*
    * A site's own Recipe JSON-LD/microdata with a title, ingredients and steps is a success even
-   * when servings or times are missing (the normaliser notes the gaps as a warning).
+   * when servings or times are missing (the normaliser notes the gaps as a warning). A YouTube
+   * candidate only exists when the description lays out an ingredient list (see
+   * buildTextRecipeCandidate), so it needs no confidence bar of its own.
    */
   if (
+    sourceType !== "youtube" &&
     normalized.confidenceScore < successConfidenceThresholds[sourceType] &&
     !isStrongStructuredCandidate(candidate)
   ) {
-    return buildRetryDecision(
-      sourceType,
-      candidate,
-      normalized.confidenceScore,
-      sourceType === "youtube" &&
-        sourceDocument.kind === "youtube" &&
-        !sourceDocument.transcript &&
-        !candidate.provenance.includes("transcript")
-        ? "transcript_required"
-        : "low_confidence",
-      "We found recipe details, but they are not reliable enough yet."
+    return buildFailureDecision(
+      "parse_failed",
+      "LinkDish found parts of a recipe on that page, but not enough to save it reliably.",
+      noRecipeRecovery
     );
   }
 
@@ -797,7 +711,7 @@ const decidePrimaryOutcome = (
     kind: "success",
     result: {
       ...normalized,
-      missingFields
+      missingFields: computeMissingRecipeFields(candidate.recipe)
     }
   };
 };
@@ -819,18 +733,6 @@ const asApiResponse = (decision: DeterministicDecision): ExtractRecipeResponse =
     };
   }
 
-  if (decision.kind === "needs_retry") {
-    return {
-      status: "needs_retry",
-      reason: decision.reason,
-      sourceType: decision.sourceType,
-      suggestedAttempt: "fallback",
-      userMessage: decision.userMessage,
-      diagnostics: decision.diagnostics,
-      recovery: decision.recovery
-    };
-  }
-
   return {
     status: "failure",
     reason: decision.reason,
@@ -840,10 +742,10 @@ const asApiResponse = (decision: DeterministicDecision): ExtractRecipeResponse =
 };
 
 /*
- * The Gemini cleanup pass is a second LLM call, so it only runs when it can
- * help: cleanup is enabled (RECIPE_TEXT_CLEANUP_ENABLED and a Gemini key), an
- * LLM provider is active (the admin switch is not "none"), the text shows an
- * artifact worth fixing, and the request has time left for it.
+ * Photo scans are the one import read by an LLM. The Gemini cleanup pass is a second LLM call on
+ * that result, so it only runs when it can help: cleanup is enabled (RECIPE_TEXT_CLEANUP_ENABLED
+ * and a Gemini key), an LLM provider is active (the admin switch is not "none"), the text shows
+ * an artifact worth fixing, and the request has time left for it.
  */
 const cleanNormalizedExtraction = async (
   normalized: NormalizedExtraction,
@@ -902,95 +804,6 @@ const scheduleCacheWrite = (
       detectionConfidence: detection.confidence
     });
   });
-};
-
-/*
- * Stores the hand-off before the needs_retry answer goes out (bounded by
- * FALLBACK_HANDOFF_MAX_WAIT_MS and the request deadline), so a fallback attempt sent the moment
- * that answer arrives finds it. While this instance reads the fallback provider as switched off
- * the write still runs, only after the response: that reading can be up to 30 s stale (see
- * RuntimeManagedFallbackExtractor), and the fallback attempt may land on an instance that already
- * reads the provider as on.
- */
-const persistFallbackHandoff = async (
-  context: ExtractionContext,
-  requestUrl: string,
-  sourceUrl: string,
-  sourceDocument: SourceDocument,
-  detection: DetectionResult,
-  fetchMode: FetchMode,
-  candidate: ExtractionCandidate | null
-): Promise<void> => {
-  const store = context.runtime.fallbackHandoffStore;
-  const correlationId = context.correlationId;
-
-  if (
-    !store ||
-    !correlationId ||
-    sourceDocument.kind === "image" ||
-    sourceDocument.kind === "text"
-  ) {
-    return;
-  }
-
-  const writeHandoff = async () => {
-    const sourceSummary =
-      sourceDocument.kind === "html"
-        ? (await loadFallbackInputBuilder()).buildHtmlSourceSummary(sourceDocument.html)
-        : null;
-    const handoff: FallbackHandoff = {
-      url: requestUrl,
-      detection,
-      fetchMode,
-      candidate,
-      sourceDocument: toHandoffSourceDocument(sourceDocument),
-      sourceSummary,
-      ...(sourceUrl === requestUrl ? {} : { sourceUrl })
-    };
-
-    await store.write(correlationId, requestUrl, handoff);
-  };
-  const failureEvent = "extract_handoff_write_failed";
-
-  if (!context.runtime.fallbackExtractor.available) {
-    await context.afterResponse(writeHandoff, failureEvent);
-    return;
-  }
-
-  const maxWaitMs = context.deadline.budgetMs(FALLBACK_HANDOFF_MAX_WAIT_MS);
-  const outcome = await context.beforeResponse(writeHandoff, { maxWaitMs, failureEvent });
-
-  if (outcome === "timed_out") {
-    console.warn(
-      JSON.stringify({
-        event: "extract_handoff_write_slow",
-        waitedMs: maxWaitMs
-      })
-    );
-  }
-};
-
-const readFallbackHandoff = async (
-  context: ExtractionContext,
-  url: string
-): Promise<FallbackHandoff | null> => {
-  const store = context.runtime.fallbackHandoffStore;
-
-  if (!store || !context.correlationId) {
-    return null;
-  }
-
-  try {
-    return await store.read(context.correlationId, url);
-  } catch (error) {
-    console.warn(
-      JSON.stringify({
-        event: "extract_handoff_read_failed",
-        message: error instanceof Error ? error.message : "Unknown error"
-      })
-    );
-    return null;
-  }
 };
 
 /* Unsupported social/video links can never be cached, so they skip the lookup. */
@@ -1068,258 +881,25 @@ const buildCacheHitResult = (
   };
 };
 
-const fallbackFailureResponse = (
-  reason: "fallback_failed" | "quota_exceeded",
-  userMessage: string
-): ExtractRecipeResponse =>
-  extractRecipeResponseSchema.parse({
-    status: "failure",
-    reason,
-    userMessage,
-    recovery: {
-      retryable: reason === "quota_exceeded",
-      allowFallback: false,
-      suggestedAction: reason === "quota_exceeded" ? "try_again_later" : "try_another_url"
-    }
-  });
-
-const recipeMetadataKeys = [
-  "description",
-  "totalTimeMinutes",
-  "author",
-  "siteName",
-  "cuisine",
-  "category",
-  "keywords",
-  "videoUrl"
-] as const satisfies readonly (keyof Recipe)[];
-
-/*
- * The LLM extractors return the core recipe only. Metadata the deterministic pass or the source
- * already knew (description, author, site, video...) is carried over where the model left a gap.
- */
-const withMissingMetadata = (
-  recipe: Partial<Recipe>,
-  ...sources: Array<Partial<Recipe> | null | undefined>
-): Partial<Recipe> => {
-  const merged: Partial<Recipe> = { ...recipe };
-
-  for (const key of recipeMetadataKeys) {
-    if (merged[key] != null) {
-      continue;
-    }
-
-    const value = sources.map((source) => source?.[key]).find((entry) => entry != null);
-
-    if (value != null) {
-      Object.assign(merged, { [key]: value });
-    }
-  }
-
-  return merged;
-};
-
-/* Metadata a fetched source carries by itself: the video and channel for YouTube and TikTok. */
-const sourceDocumentMetadata = (sourceDocument: SourceDocument): Partial<Recipe> => {
-  if (sourceDocument.kind === "youtube") {
-    return {
-      siteName: "YouTube",
-      videoUrl: toYouTubeWatchUrl(sourceDocument.videoId),
-      ...(sourceDocument.authorName ? { author: sourceDocument.authorName } : {})
-    };
-  }
-
-  if (sourceDocument.kind === "text" && sourceDocument.origin === "tiktok") {
-    return {
-      siteName: "TikTok",
-      videoUrl: sourceDocument.url,
-      ...(sourceDocument.authorName ? { author: sourceDocument.authorName } : {})
-    };
-  }
-
-  return {};
-};
-
-const runUrlFallbackExtraction = async ({
-  request,
-  context,
-  hostname,
-  detection,
-  fetchMode,
-  sourceDocument,
-  candidate,
-  sourceSummary,
-  fallbackHandoff
-}: {
-  request: ExtractRecipeUrlRequest;
-  context: ExtractionContext;
-  hostname: string;
-  detection: DetectionResult;
-  fetchMode: FetchMode;
-  sourceDocument: SourceDocument;
-  candidate: ExtractionCandidate | null;
-  sourceSummary: string | null;
-  fallbackHandoff: NonNullable<ExtractionLogContext["fallbackHandoff"]> | undefined;
-}): Promise<ExtractionResult> => {
-  const { runtime } = context;
-  const documentLogFields = {
-    ...getDocumentLogFields(sourceDocument, fetchMode),
-    /* A handed-off document was fetched by the primary attempt, not by this request. */
-    ...(fallbackHandoff === "used" ? { browserAttempted: false } : {})
-  };
-  const logBase = {
-    hostname,
-    detection,
-    attempt: request.attempt,
-    fetchMode,
-    fallbackProvider: runtime.fallbackExtractor.providerName,
-    ...documentLogFields,
-    ...(fallbackHandoff ? { fallbackHandoff } : {})
-  };
-
-  await ensureAuthorized(context);
-
-  try {
-    const fallbackCandidate = await runtime.fallbackExtractor.extract({
-      url: request.url,
-      sourceType: detection.sourceType,
-      sourceDocument,
-      candidate,
-      detection,
-      fetchMode,
-      ...(sourceSummary ? { sourceSummary } : {}),
-      deadline: context.deadline
-    });
-
-    if (!fallbackCandidate) {
-      const response = fallbackFailureResponse(
-        "fallback_failed",
-        "LinkDish could not build a reliable recipe from that link."
-      );
-
-      return {
-        response,
-        logContext: makeLogContext({ ...logBase, response, strategy: "none" })
-      };
-    }
-
-    const normalized = normalizeExtractionCandidate(
-      {
-        ...fallbackCandidate,
-        recipe: {
-          ...withMissingMetadata(
-            fallbackCandidate.recipe,
-            candidate?.recipe,
-            sourceDocumentMetadata(sourceDocument)
-          ),
-          image: fallbackCandidate.recipe.image ?? candidate?.recipe.image ?? null
-        },
-        signals: {
-          ...fallbackCandidate.signals,
-          usedBrowserFallback: fetchMode === "browser",
-          detectionConfidence: detection.confidence
-        }
-      },
-      detection.sourceType,
-      request.url,
-      fetchMode
-    );
-
-    if (!normalized) {
-      const response = fallbackFailureResponse(
-        "fallback_failed",
-        "LinkDish still missed required recipe details from that link."
-      );
-
-      return {
-        response,
-        logContext: makeLogContext({ ...logBase, response, strategy: "llm-fallback" })
-      };
-    }
-
-    const cleanup = await cleanNormalizedExtraction(normalized, context);
-    const cleanedNormalized = cleanup.normalized;
-    const response = extractRecipeResponseSchema.parse({
-      status: "success",
-      recipe: cleanedNormalized.recipe,
-      extraction: {
-        sourceType: detection.sourceType,
-        strategy: cleanedNormalized.strategy,
-        confidenceScore: cleanedNormalized.confidenceScore,
-        missingFields: cleanedNormalized.missingFields,
-        warnings: cleanedNormalized.warnings,
-        fetchMode: cleanedNormalized.fetchMode,
-        provenance: cleanedNormalized.provenance
-      }
-    });
-
-    /*
-     * LLM output is never written to the shared result cache: the model reads page text that
-     * other people can post (comments, reviews), so one caller could steer what every later
-     * importer of this URL is served. See extraction-cache.ts.
-     */
-
-    return {
-      response,
-      logContext: makeLogContext({
-        ...logBase,
-        response,
-        strategy: cleanedNormalized.strategy,
-        textCleanup: cleanup.textCleanup
-      })
-    };
-  } catch (error) {
-    if (error instanceof ExtractionCancelledError) {
-      throw error;
-    }
-
-    const reason =
-      error instanceof FallbackProviderError && error.reason === "quota_exceeded"
-        ? "quota_exceeded"
-        : "fallback_failed";
-    const response = fallbackFailureResponse(
-      reason,
-      reason === "quota_exceeded"
-        ? "Extra recipe help is temporarily unavailable."
-        : "Extra recipe help failed unexpectedly."
-    );
-
-    return {
-      response,
-      logContext: makeLogContext({ ...logBase, response, strategy: "none" })
-    };
-  }
-};
-
-const fallbackUnavailableResponse = (userMessage: string): ExtractRecipeResponse =>
-  extractRecipeResponseSchema.parse({
-    status: "failure",
-    reason: "fallback_unavailable",
-    userMessage,
-    recovery: {
-      retryable: false,
-      allowFallback: false,
-      suggestedAction: "try_again_later"
-    }
-  });
-
 const noRecipeInTextResponse = (userMessage: string): ExtractRecipeResponse =>
   extractRecipeResponseSchema.parse({
     status: "failure",
     reason: "parse_failed",
     userMessage,
-    recovery: {
-      retryable: false,
-      allowFallback: false,
-      suggestedAction: "try_another_url"
-    }
+    recovery: noRecipeRecovery
   });
 
+const loadTextRecipeExtractor = async () => {
+  const module = await import("../extractors/text/extract-text-recipe.js");
+  return module.extractTextRecipe;
+};
+
 /*
- * The LLM path for text that did not come from a fetched page: a TikTok caption (on the
- * explicit fallback attempt) or pasted text. Billing treats both as strong extractions.
+ * Text that did not come from a fetched page: a TikTok caption or pasted text. The recipe is
+ * read from the text's own headings or layout (see parse-recipe-text.ts); text without a clear
+ * ingredient list fails with a message that says what to add.
  */
-const runTextFallbackExtraction = async ({
+const runTextExtraction = async ({
   context,
   document,
   detection,
@@ -1341,113 +921,56 @@ const runTextFallbackExtraction = async ({
     fallbackProvider: runtime.fallbackExtractor.providerName,
     browserAttempted: false
   };
-  const failure = (
-    reason: "fallback_failed" | "quota_exceeded",
-    userMessage: string,
-    strategy: ExtractionLogContext["strategy"]
-  ): ExtractionResult => {
-    const response = fallbackFailureResponse(reason, userMessage);
-    return { response, logContext: makeLogContext({ ...logBase, response, strategy }) };
-  };
 
   await ensureAuthorized(context);
 
-  try {
-    const fallbackCandidate = await runtime.fallbackExtractor.extract({
-      url: document.url,
-      sourceType: detection.sourceType,
-      sourceDocument: document,
-      candidate: null,
-      detection,
-      fetchMode: "http",
-      deadline: context.deadline
-    });
-
-    if (!fallbackCandidate) {
-      return failure(
-        "fallback_failed",
-        "LinkDish could not build a reliable recipe from that text.",
-        "none"
-      );
-    }
-
-    const normalized = normalizeExtractionCandidate(
-      {
-        ...fallbackCandidate,
-        recipe: {
-          ...withMissingMetadata(fallbackCandidate.recipe, sourceDocumentMetadata(document)),
-          image:
-            fallbackCandidate.recipe.image ??
-            (document.thumbnailUrl ? { url: document.thumbnailUrl, source: "og" } : null)
+  const extraction = (await loadTextRecipeExtractor())(document);
+  const normalized = extraction
+    ? normalizeExtractionCandidate(
+        {
+          ...extraction.candidate,
+          signals: { ...extraction.candidate.signals, detectionConfidence: detection.confidence }
         },
-        signals: {
-          ...fallbackCandidate.signals,
-          detectionConfidence: detection.confidence,
-          usedBrowserFallback: false,
-          blockedSourceSignals: 0
-        }
-      },
-      detection.sourceType,
-      document.url,
-      "http"
+        detection.sourceType,
+        document.url,
+        "http"
+      )
+    : null;
+
+  if (!normalized) {
+    const isCaption = document.origin === "tiktok";
+    const response = noRecipeInTextResponse(
+      isCaption
+        ? "That video's caption doesn't include a written recipe. Try the recipe's website instead."
+        : looksLikeRecipeText(document.text)
+          ? 'LinkDish couldn\'t tell the ingredients from the steps. Put the ingredients under an "Ingredients" heading and the steps under a "Method" heading, then try again.'
+          : "That text doesn't look like a recipe yet. Include the ingredients and the steps."
     );
 
-    if (!normalized) {
-      return failure(
-        "fallback_failed",
-        "LinkDish still missed required recipe details in that text.",
-        "llm-fallback"
-      );
-    }
-
-    const cleanup = await cleanNormalizedExtraction(normalized, context);
-    const cleanedNormalized = cleanup.normalized;
-    const response = extractRecipeResponseSchema.parse({
-      status: "success",
-      recipe: cleanedNormalized.recipe,
-      extraction: {
-        sourceType: detection.sourceType,
-        strategy: cleanedNormalized.strategy,
-        confidenceScore: cleanedNormalized.confidenceScore,
-        missingFields: cleanedNormalized.missingFields,
-        warnings: cleanedNormalized.warnings,
-        fetchMode: cleanedNormalized.fetchMode,
-        provenance: cleanedNormalized.provenance
-      }
-    });
-
-    return {
-      response,
-      logContext: makeLogContext({
-        ...logBase,
-        response,
-        strategy: cleanedNormalized.strategy,
-        textCleanup: cleanup.textCleanup
-      })
-    };
-  } catch (error) {
-    if (error instanceof ExtractionCancelledError) {
-      throw error;
-    }
-
-    const quotaExceeded =
-      error instanceof FallbackProviderError && error.reason === "quota_exceeded";
-
-    return failure(
-      quotaExceeded ? "quota_exceeded" : "fallback_failed",
-      quotaExceeded
-        ? "Extra recipe help is temporarily unavailable."
-        : "Extra recipe help failed unexpectedly.",
-      "none"
-    );
+    return { response, logContext: makeLogContext({ ...logBase, response, strategy: "none" }) };
   }
+
+  const response = extractRecipeResponseSchema.parse({
+    status: "success",
+    recipe: normalized.recipe,
+    extraction: {
+      sourceType: detection.sourceType,
+      strategy: normalized.strategy,
+      confidenceScore: normalized.confidenceScore,
+      missingFields: normalized.missingFields,
+      warnings: normalized.warnings,
+      fetchMode: normalized.fetchMode,
+      provenance: normalized.provenance
+    }
+  });
+
+  return {
+    response,
+    logContext: makeLogContext({ ...logBase, response, strategy: normalized.strategy })
+  };
 };
 
-/*
- * TikTok: the caption is read through oEmbed. A caption with recipe signals needs the LLM, which
- * only runs on the client's explicit fallback attempt (billed as a strong extraction), so the
- * primary attempt answers needs_retry; a caption without a recipe fails without any LLM call.
- */
+/* TikTok: the caption is read through oEmbed and parsed like pasted text. */
 const extractFromSocialCaption = async (
   request: ExtractRecipeUrlRequest,
   context: ExtractionContext,
@@ -1463,18 +986,6 @@ const extractFromSocialCaption = async (
     browserAttempted: false
   };
   const fetchSocialDocument = runtime.fetchSocialDocument;
-
-  if (request.attempt === "fallback" && !runtime.fallbackExtractor.available) {
-    const response = fallbackUnavailableResponse(
-      "Extra recipe help is unavailable until backend recovery credentials are configured."
-    );
-
-    return {
-      response,
-      logContext: makeLogContext({ ...logBase, response, strategy: "none", fetchMode: "none" })
-    };
-  }
-
   let document: TextSourceDocument;
 
   try {
@@ -1499,39 +1010,7 @@ const extractFromSocialCaption = async (
     };
   }
 
-  await ensureAuthorized(context);
-
-  if (!looksLikeRecipeText(document.text)) {
-    const response = noRecipeInTextResponse(
-      "That video's caption doesn't include a recipe. Try the recipe's website instead."
-    );
-
-    return {
-      response,
-      logContext: makeLogContext({ ...logBase, response, strategy: "none", fetchMode: "http" })
-    };
-  }
-
-  if (request.attempt === "primary") {
-    const response = extractRecipeResponseSchema.parse(
-      asApiResponse(
-        buildRetryDecision(
-          detection.sourceType,
-          null,
-          0,
-          "unsupported_primary_extraction",
-          "This video's caption has a recipe. LinkDish can read it with extra recipe help."
-        )
-      )
-    );
-
-    return {
-      response,
-      logContext: makeLogContext({ ...logBase, response, strategy: "none", fetchMode: "http" })
-    };
-  }
-
-  return runTextFallbackExtraction({
+  return runTextExtraction({
     context,
     document,
     detection,
@@ -1579,6 +1058,104 @@ const rejectUnsupportedSource = (
   };
 };
 
+/* Linked recipe pages are only tried while this much of the request budget is left. */
+const minimumLinkedPageBudgetMs = 4_000;
+
+/**
+ * Reads the written recipe a YouTube description links to ("Full recipe: https://..."). Each
+ * link is validated like a user URL and must be an ordinary web page; the first one whose page
+ * yields a recipe wins. The recipe keeps the video as its videoUrl. Returns null when no link
+ * yields one, so the description's own result (or failure) stands.
+ */
+const extractFromYouTubeRecipeLinks = async (
+  request: ExtractRecipeUrlRequest,
+  context: ExtractionContext,
+  hostname: string,
+  video: YouTubeSourceDocument
+): Promise<ExtractionResult | null> => {
+  const { findYouTubeRecipeLinks } = await loadYouTubeExtractorModule();
+  const videoUrl = toYouTubeWatchUrl(video.videoId);
+
+  for (const link of findYouTubeRecipeLinks(video)) {
+    if (context.deadline.remainingMs() < minimumLinkedPageBudgetMs) {
+      return null;
+    }
+
+    const linkDetection = detectSourceTypeFromUrl(link);
+
+    if (linkDetection.sourceType !== "recipe-webpage" && linkDetection.sourceType !== "article") {
+      continue;
+    }
+
+    if (isSourceUrlRejection(await context.runtime.validateSourceUrl(link))) {
+      continue;
+    }
+
+    let fetched: FetchedSource;
+
+    try {
+      fetched = await fetchSourceDocument(link, linkDetection, context);
+    } catch (error) {
+      if (error instanceof ExtractionCancelledError) {
+        throw error;
+      }
+
+      continue;
+    }
+
+    if (await detectFetchedDocumentFailure(link, fetched.sourceDocument)) {
+      continue;
+    }
+
+    const linkRequest: ExtractRecipeUrlRequest = { ...request, url: link };
+    const candidate = await runDeterministicExtraction(
+      fetched.sourceDocument,
+      fetched.detection,
+      fetched.fetchMode
+    );
+    const decision = decidePrimaryOutcome(
+      linkRequest,
+      fetched.detection,
+      fetched.fetchMode,
+      candidate
+    );
+
+    if (decision.kind !== "success") {
+      continue;
+    }
+
+    /* Not cached: the linked page's own cache entry should not carry this video. */
+    const response = extractRecipeResponseSchema.parse(
+      asApiResponse({
+        ...decision,
+        result: {
+          ...decision.result,
+          recipe: {
+            ...decision.result.recipe,
+            videoUrl: decision.result.recipe.videoUrl ?? videoUrl
+          }
+        }
+      })
+    );
+
+    return {
+      response,
+      logContext: makeLogContext({
+        hostname,
+        detection: fetched.detection,
+        attempt: request.attempt,
+        response,
+        strategy: decision.result.strategy,
+        fetchMode: decision.result.fetchMode,
+        fallbackProvider: context.runtime.fallbackExtractor.providerName,
+        ...getDocumentLogFields(fetched.sourceDocument, fetched.fetchMode)
+      })
+    };
+  }
+
+  return null;
+};
+
 const extractFromUrl = async (
   request: ExtractRecipeUrlRequest,
   context: ExtractionContext
@@ -1588,8 +1165,7 @@ const extractFromUrl = async (
   const hostname = new URL(request.url).hostname;
   const cacheLookupEnabled = isCacheLookupEnabled(context, initialDetection);
 
-  /* Settings refresh, URL safety (DNS) and the cache lookup are independent. */
-  const settingsRefresh = refreshFallbackSettings(runtime);
+  /* URL safety (DNS) and the cache lookup are independent. */
   const validation = runtime.validateSourceUrl(request.url);
   const cacheLookup = cacheLookupEnabled
     ? readCachedExtraction(context, request.url)
@@ -1600,12 +1176,10 @@ const extractFromUrl = async (
   const cached = await cacheLookup;
 
   if (cached) {
-    await settingsRefresh;
     return buildCacheHitResult(request, cached, runtime, hostname);
   }
 
   const sourceUrlSafety = await validation;
-  await settingsRefresh;
 
   if (isSourceUrlRejection(sourceUrlSafety)) {
     const isReachabilityFailure = sourceUrlSafety.reason === "dns_lookup_failed";
@@ -1648,55 +1222,6 @@ const extractFromUrl = async (
 
   if (unsupportedSource) {
     return unsupportedSource;
-  }
-
-  const handoffConfigured = Boolean(runtime.fallbackHandoffStore && context.correlationId);
-
-  if (request.attempt === "fallback") {
-    /* Without a fallback provider there is nothing to fetch the page for. */
-    if (!runtime.fallbackExtractor.available) {
-      const response = extractRecipeResponseSchema.parse({
-        status: "failure",
-        reason: "fallback_unavailable",
-        userMessage:
-          "Extra recipe help is unavailable until backend recovery credentials are configured.",
-        recovery: {
-          retryable: false,
-          allowFallback: false,
-          suggestedAction: "try_again_later"
-        }
-      });
-
-      return {
-        response,
-        logContext: makeLogContext({
-          hostname,
-          detection: initialDetection,
-          attempt: request.attempt,
-          response,
-          strategy: "none",
-          fetchMode: "none",
-          fallbackProvider: runtime.fallbackExtractor.providerName,
-          browserAttempted: false
-        })
-      };
-    }
-
-    const handoff = handoffConfigured ? await readFallbackHandoff(context, request.url) : null;
-
-    if (handoff) {
-      return runUrlFallbackExtraction({
-        request: { ...request, url: handoff.sourceUrl ?? request.url },
-        context,
-        hostname,
-        detection: handoff.detection,
-        fetchMode: handoff.fetchMode,
-        sourceDocument: handoff.sourceDocument,
-        candidate: handoff.candidate,
-        sourceSummary: handoff.sourceSummary,
-        fallbackHandoff: "used"
-      });
-    }
   }
 
   const fetchFailureResult = (
@@ -1808,46 +1333,27 @@ const extractFromUrl = async (
   }
 
   const candidate = await runDeterministicExtraction(sourceDocument, detection, fetchMode);
+  const decision = decidePrimaryOutcome(sourceRequest, detection, fetchMode, candidate);
 
-  if (request.attempt === "fallback") {
-    return runUrlFallbackExtraction({
-      request: sourceRequest,
-      context,
-      hostname,
-      detection,
-      fetchMode,
-      sourceDocument,
-      candidate,
-      sourceSummary: null,
-      fallbackHandoff: handoffConfigured ? "missing" : undefined
-    });
+  /*
+   * A video whose description has no full recipe (none, or the ingredients without a method)
+   * often links to the written one; that page is read like a direct link to it.
+   */
+  if (
+    sourceDocument.kind === "youtube" &&
+    (decision.kind !== "success" || candidate?.signals.requiredFieldsInferred === true)
+  ) {
+    const linked = await extractFromYouTubeRecipeLinks(request, context, hostname, sourceDocument);
+
+    if (linked) {
+      return linked;
+    }
   }
 
-  const decision = decidePrimaryOutcome(
-    sourceRequest,
-    detection,
-    sourceDocument,
-    fetchMode,
-    candidate
-  );
-  const cleanup =
-    decision.kind === "success" ? await cleanNormalizedExtraction(decision.result, context) : null;
-  const cleanedDecision: DeterministicDecision =
-    decision.kind === "success" && cleanup ? { ...decision, result: cleanup.normalized } : decision;
-  const response = extractRecipeResponseSchema.parse(asApiResponse(cleanedDecision));
+  const response = extractRecipeResponseSchema.parse(asApiResponse(decision));
 
   if (response.status === "success") {
     await scheduleCacheWrite(context, sourceRequest.url, response, sourceDocument, detection);
-  } else if (decision.kind === "needs_retry") {
-    await persistFallbackHandoff(
-      context,
-      request.url,
-      sourceRequest.url,
-      sourceDocument,
-      detection,
-      fetchMode,
-      decision.candidate
-    );
   }
 
   return {
@@ -1860,8 +1366,7 @@ const extractFromUrl = async (
       strategy: response.status === "success" ? response.extraction.strategy : "none",
       fetchMode: response.status === "success" ? response.extraction.fetchMode : fetchMode,
       fallbackProvider: runtime.fallbackExtractor.providerName,
-      ...documentLogFields,
-      ...(cleanup ? { textCleanup: cleanup.textCleanup } : {})
+      ...documentLogFields
     })
   };
 };
@@ -2106,7 +1611,6 @@ const extractFromText = async (
   request: TextImportRequest,
   context: ExtractionContext
 ): Promise<ExtractionResult> => {
-  const { runtime } = context;
   const sourceUrl = request.sourceUrl ?? buildTextImportSourceUrl(request.text);
   const detection: DetectionResult = {
     sourceType: getTextImportSourceType(request.sourceUrl),
@@ -2116,34 +1620,7 @@ const extractFromText = async (
   };
   const hostname = new URL(sourceUrl).hostname;
 
-  await refreshFallbackSettings(runtime);
-
-  const logBase = {
-    hostname,
-    detection,
-    attempt: "fallback" as const,
-    fetchMode: "http" as const,
-    fallbackProvider: runtime.fallbackExtractor.providerName,
-    browserAttempted: false
-  };
-
-  if (!runtime.fallbackExtractor.available) {
-    const response = fallbackUnavailableResponse(
-      "Importing from text is unavailable until backend recovery credentials are configured."
-    );
-
-    return { response, logContext: makeLogContext({ ...logBase, response, strategy: "none" }) };
-  }
-
-  if (!looksLikeRecipeText(request.text)) {
-    const response = noRecipeInTextResponse(
-      "That text doesn't look like a recipe yet. Include the ingredients and the steps."
-    );
-
-    return { response, logContext: makeLogContext({ ...logBase, response, strategy: "none" }) };
-  }
-
-  return runTextFallbackExtraction({
+  return runTextExtraction({
     context,
     document: {
       kind: "text",
@@ -2156,7 +1633,7 @@ const extractFromText = async (
     },
     detection,
     hostname,
-    attempt: "fallback"
+    attempt: "primary"
   });
 };
 
