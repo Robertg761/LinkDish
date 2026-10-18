@@ -59,6 +59,24 @@ describe("extractYouTubeRecipe", () => {
     expect(extraction?.candidate.recipe.ingredients).toHaveLength(3);
   });
 
+  it("prefers a recipe transcript over a description with only method notes", () => {
+    const extraction = extractYouTubeRecipe(
+      video({
+        description: [
+          "200g Cream cheese",
+          "40g Sugar",
+          "*Freeze for 2 hours",
+          "100g Chocolate",
+          "18g Corn oil"
+        ].join("\n"),
+        transcript: recipeText
+      })
+    );
+
+    expect(extraction?.candidate.provenance).toEqual(["transcript"]);
+    expect(extraction?.methodInVideo).toBe(false);
+  });
+
   it("returns null for a description and a spoken transcript without a recipe layout", () => {
     expect(
       extractYouTubeRecipe(
@@ -130,6 +148,12 @@ describe("findYouTubeRecipeLinks", () => {
       "https://cookblog.example/beef-stew/",
       "https://cookblog.example/recipes/soup/"
     ]);
+  });
+
+  it("keeps a query-routed recipe permalink", () => {
+    expect(
+      findYouTubeRecipeLinks(video({ description: "Full recipe: https://blog.example/?p=123" }))
+    ).toEqual(["https://blog.example/?p=123"]);
   });
 
   it("finds nothing in a description without recipe links", () => {

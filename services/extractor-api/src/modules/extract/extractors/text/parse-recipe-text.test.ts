@@ -227,6 +227,18 @@ describe("parseRecipeText", () => {
     expect(parsed.methodSource).toBe("notes");
   });
 
+  it("splits a short one-line recipe at its labels", () => {
+    const parsed = parseRecipeText(
+      "Ingredients: 2 eggs, 1 cup flour Method: Mix together and bake."
+    );
+
+    expect(parsed.ingredients.map((ingredient) => ingredient.text)).toEqual([
+      "2 eggs",
+      "1 cup flour"
+    ]);
+    expect(parsed.steps).toEqual(["Mix together and bake."]);
+  });
+
   it("ignores everything after a 'Thanks for watching' sign-off", () => {
     const parsed = parseRecipeText(
       [

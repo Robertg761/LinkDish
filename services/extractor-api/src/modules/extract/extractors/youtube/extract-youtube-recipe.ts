@@ -87,7 +87,8 @@ export const findYouTubeRecipeLinks = (document: YouTubeSourceDocument): string[
           : /recipe/iu.test(parsed.pathname)
             ? 2
             : null;
-      const isHomePage = parsed.pathname.replace(/\/+$/u, "") === "";
+      /* "https://blog.example/?p=123" is a recipe permalink, not the home page. */
+      const isHomePage = parsed.pathname.replace(/\/+$/u, "") === "" && parsed.search === "";
 
       if (isHomePage || tier === null) {
         return null;

@@ -122,15 +122,17 @@ const stripDecorations = (line: string): string =>
  * section labels, bullets, emoji bullets and inline step numbers each start a new line.
  */
 const splitRunOnLine = (line: string): string[] => {
+  /* "Ingredients: 2 eggs, 1 cup flour Method: Mix and bake." splits at its labels at any length. */
+  const atHeadings = line.replace(
+    /\s+(?=(?:ingredients?|instructions?|directions?|method|steps?|how to make(?: it)?)\s*:)/giu,
+    "\n"
+  );
+
   if (line.length < 100) {
-    return [line];
+    return atHeadings.split("\n");
   }
 
-  let split = line
-    .replace(
-      /\s+(?=(?:ingredients?|instructions?|directions?|method|steps?|how to make(?: it)?)\s*:)/giu,
-      "\n"
-    )
+  let split = atHeadings
     .replace(/\s+[•·▪◦●►▶▸➤✔✓✅☑]\s*/gu, "\n")
     .replace(/\s+(?=\p{Extended_Pictographic}\u{FE0F}?\s*(?:\d|[½⅓⅔¼¾⅛⅜⅝⅞]))/gu, "\n")
     .replace(/(?<!\d)\s+-\s+(?=\d|[½⅓⅔¼¾⅛⅜⅝⅞])/gu, "\n");

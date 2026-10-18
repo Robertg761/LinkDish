@@ -34,12 +34,6 @@ export interface TextRecipeExtraction {
 
 const minimumIngredientCount = 2;
 
-/** Whether a parse found a whole recipe: ingredients and at least one method step. */
-export const isCompleteRecipeParse = (parsed: ParsedRecipeText): boolean =>
-  parsed.structure !== null &&
-  parsed.ingredients.length >= minimumIngredientCount &&
-  parsed.steps.length >= 1;
-
 /*
  * Notes between the ingredient groups, or a couple of short lines after an unlabelled list ("Bake
  * at 180℃ for 20 minutes"), are notes on the method, not the whole method.
@@ -53,6 +47,13 @@ const hasPartialMethod = (parsed: ParsedRecipeText): boolean =>
     parsed.methodSource === "layout" &&
     parsed.steps.length <= maxPartialMethodSteps &&
     parsed.steps.join(" ").length < maxPartialMethodLength);
+
+/** Whether a parse found a whole recipe: ingredients and a method that is more than a few notes. */
+export const isCompleteRecipeParse = (parsed: ParsedRecipeText): boolean =>
+  parsed.structure !== null &&
+  parsed.ingredients.length >= minimumIngredientCount &&
+  parsed.steps.length >= 1 &&
+  !hasPartialMethod(parsed);
 
 export const buildTextRecipeCandidate = (
   parsed: ParsedRecipeText,
