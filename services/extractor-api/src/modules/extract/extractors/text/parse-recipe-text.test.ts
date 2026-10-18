@@ -239,6 +239,41 @@ describe("parseRecipeText", () => {
     expect(parsed.steps).toEqual(["Mix together and bake."]);
   });
 
+  it("splits a short bulleted line and keeps unit abbreviations in inline ingredients", () => {
+    expect(
+      parseRecipeText("Ingredients: 2 eggs • 1 cup flour Method: Mix and bake.").ingredients
+    ).toEqual([
+      { text: "2 eggs", section: null },
+      { text: "1 cup flour", section: null }
+    ]);
+
+    const parsed = parseRecipeText(
+      "Ingredients: 1 tsp. Salt, 2 cups Flour\nMethod: Mix together. Bake for 20 minutes."
+    );
+
+    expect(parsed.ingredients.map((ingredient) => ingredient.text)).toEqual([
+      "1 tsp. Salt",
+      "2 cups Flour"
+    ]);
+    expect(parsed.steps).toEqual(["Mix together.", "Bake for 20 minutes."]);
+  });
+
+  it("reads a duration written with a comma", () => {
+    const parsed = parseRecipeText(
+      [
+        "Serves 4, Prep time: 1 hour, 30 minutes",
+        "Ingredients",
+        "2 eggs",
+        "1 cup flour",
+        "Method",
+        "Mix and bake."
+      ].join("\n")
+    );
+
+    expect(parsed.servings).toBe("4");
+    expect(parsed.prepTimeMinutes).toBe(90);
+  });
+
   it("ignores everything after a 'Thanks for watching' sign-off", () => {
     const parsed = parseRecipeText(
       [

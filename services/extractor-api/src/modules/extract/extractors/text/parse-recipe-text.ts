@@ -53,6 +53,19 @@ const quantityWithUnitPattern = new RegExp(
   `(?:\\d+(?:[.,/]\\d+)?|[${fractionCharacters}])\\s*(?:${unitWords})\\b`,
   "iu"
 );
+const abbreviationEndPattern = new RegExp(`\\b(?:${unitWords}|approx|e\\.g|i\\.e)$`, "iu");
+
+/*
+ * Where sentences end: the index of each ".", "!" or "?" followed by a capital, skipping
+ * abbreviations ("1 tsp. Salt", "approx. 2 cups").
+ */
+const findSentenceBreaks = (value: string): number[] =>
+  [...value.matchAll(/[.!?]\s+(?=\p{Lu})/gu)]
+    .map((match) => match.index)
+    .filter((index) => value[index] !== "." || !abbreviationEndPattern.test(value.slice(0, index)));
+
+const hasSentenceBreak = (line: string): boolean => findSentenceBreaks(line).length > 0;
+
 const toTastePattern =
   /\b(?:to taste|as needed|for (?:garnish|serving|frying|greasing|dusting)|optional)\b/iu;
 
@@ -122,18 +135,19 @@ const stripDecorations = (line: string): string =>
  * section labels, bullets, emoji bullets and inline step numbers each start a new line.
  */
 const splitRunOnLine = (line: string): string[] => {
-  /* "Ingredients: 2 eggs, 1 cup flour Method: Mix and bake." splits at its labels at any length. */
-  const atHeadings = line.replace(
-    /\s+(?=(?:ingredients?|instructions?|directions?|method|steps?|how to make(?: it)?)\s*:)/giu,
-    "\n"
-  );
+  /* "Ingredients: 2 eggs • 1 cup flour Method: Mix and bake." splits at labels and bullets at any length. */
+  const atHeadings = line
+    .replace(
+      /\s+(?=(?:ingredients?|instructions?|directions?|method|steps?|how to make(?: it)?)\s*:)/giu,
+      "\n"
+    )
+    .replace(/\s+[•·▪◦●►▶▸➤✔✓✅☑]\s*/gu, "\n");
 
   if (line.length < 100) {
     return atHeadings.split("\n");
   }
 
   let split = atHeadings
-    .replace(/\s+[•·▪◦●►▶▸➤✔✓✅☑]\s*/gu, "\n")
     .replace(/\s+(?=\p{Extended_Pictographic}\u{FE0F}?\s*(?:\d|[½⅓⅔¼¾⅛⅜⅝⅞]))/gu, "\n")
     .replace(/(?<!\d)\s+-\s+(?=\d|[½⅓⅔¼¾⅛⅜⅝⅞])/gu, "\n");
 
@@ -295,7 +309,7 @@ const looksLikeIngredientLine = (line: string): boolean => {
   }
 
   /* Two or more sentences is method text, whatever amounts it mentions. */
-  if (/[.!?]\s+\p{Lu}/u.test(line)) {
+  if (hasSentenceBreak(line)) {
     return false;
   }
 
@@ -389,11 +403,18 @@ const splitIngredientLine = (line: string): string[] => {
   return quantityParts >= 2 ? parts : [line];
 };
 
-const splitSentences = (value: string): string[] =>
-  value
-    .split(/(?<=[.!?])\s+(?=\p{Lu})/u)
-    .map((sentence) => sentence.trim())
-    .filter(Boolean);
+const splitSentences = (value: string): string[] => {
+  const sentences: string[] = [];
+  let start = 0;
+
+  for (const index of findSentenceBreaks(value)) {
+    sentences.push(value.slice(start, index + 1));
+    start = index + 1;
+  }
+
+  sentences.push(value.slice(start));
+  return sentences.map((sentence) => sentence.trim()).filter(Boolean);
+};
 
 const cleanTitle = (line: string): string | null => {
   const title = line
@@ -423,7 +444,10 @@ interface Metadata {
 /* "Serves 4", "Prep time: 15 mins", "Prep: 10 min | Cook: 20 min". Returns false for other lines. */
 const readMetadataLine = (line: string, metadata: Metadata): boolean => {
   const parts = line
-    .split(/\s*[|•·,]\s*/u)
+    /* A comma separates "Serves 4, Prep 10 min" but not "Prep time: 1 hour, 30 minutes". */
+    .split(
+      /\s*[|•·]\s*|\s*,\s*(?=(?:serves|servings?|yields?|makes|portions?|prep|cook|bak(?:e|ing)|total|active|ready in)\b)/iu
+    )
     .map((part) => part.trim())
     .filter(Boolean);
   let matchedAll = parts.length > 0;
@@ -531,7 +555,7 @@ const parseWithHeadings = (lines: TextLine[], metadata: Metadata): ParsedRecipeT
       section = null;
 
       /* "Ingredients: 1 lb beef, 1 can beans. Brown the beef..." runs on into the method. */
-      const methodStart = heading.inline.search(/[.!?]\s+(?=\p{Lu})/u);
+      const methodStart = findSentenceBreaks(heading.inline)[0] ?? -1;
       const inlineIngredients =
         methodStart >= 0 ? heading.inline.slice(0, methodStart) : heading.inline;
 
@@ -615,7 +639,7 @@ const parseWithHeadings = (lines: TextLine[], metadata: Metadata): ParsedRecipeT
       /* "Full recipe:" and other labels are not ingredients. */
       if (
         line.length <= maxIngredientLength &&
-        !/[.!?]\s+\p{Lu}/u.test(line) &&
+        !hasSentenceBreak(line) &&
         !(/:$/u.test(line) && !looksLikeIngredientLine(line))
       ) {
         addIngredients(line);
