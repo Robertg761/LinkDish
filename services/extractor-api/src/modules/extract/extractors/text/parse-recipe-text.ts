@@ -132,24 +132,21 @@ const stripDecorations = (line: string): string =>
 
 /*
  * Captions and descriptions often run a whole recipe into one line. Before line-based parsing,
- * section labels, bullets, emoji bullets and inline step numbers each start a new line.
+ * section labels, bullets, emoji bullets and inline step numbers each start a new line, at any
+ * line length. Only " - " waits for a long line: a short "Cook - 2 minutes" is one line.
  */
 const splitRunOnLine = (line: string): string[] => {
-  /* "Ingredients: 2 eggs • 1 cup flour Method: Mix and bake." splits at labels and bullets at any length. */
-  const atHeadings = line
+  let split = line
     .replace(
       /\s+(?=(?:ingredients?|instructions?|directions?|method|steps?|how to make(?: it)?)\s*:)/giu,
       "\n"
     )
-    .replace(/\s+[•·▪◦●►▶▸➤✔✓✅☑]\s*/gu, "\n");
+    .replace(/\s+[•·▪◦●►▶▸➤✔✓✅☑]\s*/gu, "\n")
+    .replace(/\s+(?=\p{Extended_Pictographic}\u{FE0F}?\s*(?:\d|[½⅓⅔¼¾⅛⅜⅝⅞]))/gu, "\n");
 
-  if (line.length < 100) {
-    return atHeadings.split("\n");
+  if (line.length >= 100) {
+    split = split.replace(/(?<!\d)\s+-\s+(?=\d|[½⅓⅔¼¾⅛⅜⅝⅞])/gu, "\n");
   }
-
-  let split = atHeadings
-    .replace(/\s+(?=\p{Extended_Pictographic}\u{FE0F}?\s*(?:\d|[½⅓⅔¼¾⅛⅜⅝⅞]))/gu, "\n")
-    .replace(/(?<!\d)\s+-\s+(?=\d|[½⅓⅔¼¾⅛⅜⅝⅞])/gu, "\n");
 
   const inlineStepMarkers = split.match(/(?:^|\s)(?:step\s*)?\d{1,2}[.)]\s+(?=\p{Lu}|\p{Ll})/giu);
 

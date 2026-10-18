@@ -154,6 +154,11 @@ describe("findYouTubeRecipeLinks", () => {
     expect(
       findYouTubeRecipeLinks(video({ description: "Full recipe: https://blog.example/?p=123" }))
     ).toEqual(["https://blog.example/?p=123"]);
+    expect(
+      findYouTubeRecipeLinks(
+        video({ description: "Full recipe: https://cook.example/#/recipes/123" })
+      )
+    ).toEqual(["https://cook.example/#/recipes/123"]);
   });
 
   it("finds nothing in a description without recipe links", () => {

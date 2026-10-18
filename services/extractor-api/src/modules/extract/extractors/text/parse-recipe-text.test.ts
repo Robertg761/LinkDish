@@ -308,6 +308,12 @@ describe("parseRecipeText", () => {
     expect(parsed.steps).toEqual(["Mix and bake."]);
   });
 
+  it("splits short inline numbered steps", () => {
+    expect(
+      parseRecipeText("Ingredients: 2 eggs, 1 cup flour Method: 1. Mix. 2. Bake.").steps
+    ).toEqual(["Mix.", "Bake."]);
+  });
+
   it("ignores everything after a 'Thanks for watching' sign-off", () => {
     const parsed = parseRecipeText(
       [
