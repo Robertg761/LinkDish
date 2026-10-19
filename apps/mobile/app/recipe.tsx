@@ -811,7 +811,7 @@ export default function RecipeScreen() {
             body="LinkDish closed before it could read your photos, so the scan was not kept. Scan the recipe again to pick up where you left off."
             primaryAction={{
               label: "Scan again",
-              onPress: () => router.replace("/import" as never)
+              onPress: () => router.replace("/import")
             }}
             title="Your scan needs another look"
           />
@@ -865,7 +865,7 @@ export default function RecipeScreen() {
               extraction.state.reason === "plan_limit"
                 ? {
                     label: "View Plans",
-                    onPress: () => router.push("/upgrade" as never)
+                    onPress: () => router.push("/upgrade")
                   }
                 : extraction.state.allowFallback ||
                     extraction.state.suggestedAction === "retry_fallback"

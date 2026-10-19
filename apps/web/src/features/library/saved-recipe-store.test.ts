@@ -638,21 +638,21 @@ describe("saved-recipe-store v4 behaviour", () => {
     const db = await getDb();
     const transaction = db.transaction.bind(db);
     // The recipe and its scans read fine; deleting its cook session fails.
-    vi.spyOn(db, "transaction").mockImplementationOnce(((
-      ...args: Parameters<typeof transaction>
-    ) => {
-      const tx = transaction(...args);
-      const objectStore = tx.objectStore.bind(tx);
-      return Object.assign(tx, {
-        objectStore: (name: string) =>
-          name === "cookSessions"
-            ? {
-                ...objectStore(name),
-                delete: () => Promise.reject(new DOMException("disk gone", "UnknownError"))
-              }
-            : objectStore(name)
-      });
-    }) as typeof db.transaction);
+    vi.spyOn(db, "transaction").mockImplementationOnce(
+      (...args: Parameters<typeof transaction>) => {
+        const tx = transaction(...args);
+        const objectStore = tx.objectStore.bind(tx);
+        return Object.assign(tx, {
+          objectStore: (name: string) =>
+            name === "cookSessions"
+              ? {
+                  ...objectStore(name),
+                  delete: () => Promise.reject(new DOMException("disk gone", "UnknownError"))
+                }
+              : objectStore(name)
+        });
+      }
+    );
 
     await expect(deleteSavedRecipe(saved.id)).rejects.toMatchObject({ name: "UnknownError" });
 

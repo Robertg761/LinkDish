@@ -87,7 +87,7 @@ const defaultChannelFactory: ChannelFactory = (name) => {
     const created = new BroadcastChannel(name);
     // Node (tests, SSR tooling) keeps the process alive for an open channel; browsers lack unref.
     (created as unknown as { unref?: () => void }).unref?.();
-    return created as unknown as BroadcastLike;
+    return created;
   } catch {
     return null;
   }
@@ -160,7 +160,7 @@ const getChannel = (): BroadcastLike | null => {
 
 /** Notifies this tab's listeners (with records) and other tabs (with a reload hint). */
 export function emitDataChange<RecordType>(change: DataChange<RecordType>): void {
-  dispatch(change as DataChange, "local");
+  dispatch(change, "local");
 
   const upsertedIds = change.reload ? null : upsertedIdsOf(change.upserted);
   const message: CrossTabMessage = {

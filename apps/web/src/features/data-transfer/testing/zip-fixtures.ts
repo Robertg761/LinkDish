@@ -13,7 +13,7 @@ export async function compressBytes(
   bytes: Uint8Array,
   format: "gzip" | "deflate-raw"
 ): Promise<Uint8Array> {
-  const stream = new CompressionStream(format as CompressionFormat);
+  const stream = new CompressionStream(format);
   const writer = stream.writable.getWriter();
   void writer.write(bytes as Uint8Array<ArrayBuffer>);
   void writer.close();

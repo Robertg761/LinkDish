@@ -47,7 +47,7 @@ const accountState = vi.hoisted(() => ({
   isSignedIn: false,
   user: {
     id: "user_1"
-  } as { id: string } | null
+  }
 }));
 
 vi.mock("@expo/vector-icons", () => ({

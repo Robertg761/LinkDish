@@ -24,14 +24,14 @@ const accountState = vi.hoisted(() => ({
   user: {
     email: "family@example.com",
     id: "user_family"
-  } as { email: string; id: string } | null
+  }
 }));
 
 const billingState = vi.hoisted(() => ({
   purchaseStatus: "idle",
   restorePurchases: vi.fn(),
   revenueCatConfigured: true,
-  tier: "free" as "free" | "plus" | "family"
+  tier: "free"
 }));
 
 const routerMocks = vi.hoisted(() => ({

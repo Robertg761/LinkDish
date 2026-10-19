@@ -63,12 +63,12 @@ const nextTransaction = (connection: FakeConnection): Promise<void> =>
       }
 
       originals.set(name, original);
-      methods[name] = ((...args: never[]) => {
+      methods[name] = (...args: never[]) => {
         const result = original.apply(connection, args);
         restore();
         resolve();
         return result;
-      }) as Method;
+      };
     }
   });
 
@@ -96,8 +96,8 @@ export function writeInOtherTabAfterNextRead<Result>(
     const afterRead = async <Value>(value: Value): Promise<Value> => {
       if (!fired) {
         fired = true;
-        methods.get = originalGet as Method;
-        methods.transaction = originalTransaction as Method;
+        methods.get = originalGet;
+        methods.transaction = originalTransaction;
         const started = nextTransaction(otherConnection);
         write().then(resolve, reject);
         await started;
@@ -115,11 +115,11 @@ export function writeInOtherTabAfterNextRead<Result>(
           }
         : store;
 
-    methods.get = ((readStore: string, readKey: string) =>
+    methods.get = (readStore: string, readKey: string) =>
       readStore === storeName && readKey === key
         ? originalGet.call(connection, readStore, readKey).then(afterRead)
-        : originalGet.call(connection, readStore, readKey)) as Method;
-    methods.transaction = ((...args: unknown[]) => {
+        : originalGet.call(connection, readStore, readKey);
+    methods.transaction = (...args: unknown[]) => {
       const tx = originalTransaction.apply(connection, args);
       const names = Array.isArray(args[0]) ? (args[0] as string[]) : [args[0] as string];
 
@@ -128,7 +128,7 @@ export function writeInOtherTabAfterNextRead<Result>(
         objectStore: (name: string) => watch(name, tx.objectStore(name)),
         store: watch(names[0] ?? "", tx.store)
       };
-    }) as Method;
+    };
   });
 }
 

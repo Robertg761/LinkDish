@@ -165,7 +165,8 @@ export async function migrateRecipeSourceImages(
   if (images.length > 0) {
     const imageRecord: StoredRecipeSourceImages = {
       images,
-      recipeId: typeof key === "string" ? key : String(key as number),
+      recipeId:
+        typeof key === "string" ? key : typeof key === "number" ? String(key) : JSON.stringify(key),
       updatedAt: typeof record.updatedAt === "string" ? record.updatedAt : now()
     };
 
@@ -387,7 +388,7 @@ export function getLinkDishWebDb(): Promise<IDBPDatabase> {
   const promise: Promise<IDBPDatabase> = openDB(LINKDISH_WEB_DB_NAME, LINKDISH_WEB_DB_VERSION, {
     upgrade(db, oldVersion, _newVersion, transaction) {
       try {
-        runLinkDishWebDbUpgrade(db as unknown as UpgradeDatabase, oldVersion);
+        runLinkDishWebDbUpgrade(db, oldVersion);
       } catch (error) {
         console.error("LinkDish storage upgrade failed; keeping the previous data.", error);
 

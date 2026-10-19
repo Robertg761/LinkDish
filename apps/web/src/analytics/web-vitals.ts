@@ -61,7 +61,7 @@ const observe = (type: string, callback: (entries: PerformanceEntry[]) => void, 
     const observer = new PerformanceObserver((list) => {
       callback(list.getEntries());
     });
-    observer.observe({ buffered: true, type, ...extra } as PerformanceObserverInit);
+    observer.observe({ buffered: true, type, ...extra });
   } catch {
     // Unsupported entry types or options: skip that metric.
   }

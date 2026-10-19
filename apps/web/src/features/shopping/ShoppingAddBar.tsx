@@ -70,7 +70,7 @@ export const ShoppingAddBar: React.FC<ShoppingAddBarProps> = ({
     <div
       className="shopping-add"
       onBlur={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+        if (!event.currentTarget.contains(event.relatedTarget)) {
           setFocused(false);
         }
       }}

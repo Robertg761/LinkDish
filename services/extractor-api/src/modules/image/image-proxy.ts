@@ -117,7 +117,7 @@ const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number): Promise<T
 
 export const assertPublicImageUrl = async (
   url: URL,
-  resolveHostname: ResolveHostname = lookup as ResolveHostname
+  resolveHostname: ResolveHostname = lookup
 ): Promise<void> => {
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     reject("unsupported_protocol", "Only HTTP and HTTPS image URLs are supported.");
@@ -339,7 +339,7 @@ export const getProxiedImage = async (
 ): Promise<Buffer> => {
   const imageBytes = await fetchImageBytes(sourceUrl, {
     fetchImplementation: dependencies?.fetchImplementation ?? fetch,
-    resolveHostname: dependencies?.resolveHostname ?? (lookup as ResolveHostname)
+    resolveHostname: dependencies?.resolveHostname ?? lookup
   });
 
   return resizeImageToWebp(imageBytes, width, dependencies?.loadSharp);

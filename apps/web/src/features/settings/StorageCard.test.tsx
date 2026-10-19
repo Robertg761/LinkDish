@@ -6,10 +6,8 @@ import { formatBytes } from "../data-transfer/device-storage";
 
 import { StorageCard } from "./StorageCard";
 
-import type { LinkDishDbStatus } from "../../storage/linkdish-db";
-
 const db = vi.hoisted(() => ({
-  status: { state: "ready" } as LinkDishDbStatus,
+  status: { state: "ready" },
   retry: vi.fn(() => Promise.resolve(true))
 }));
 

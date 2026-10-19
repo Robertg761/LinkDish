@@ -426,7 +426,7 @@ describe("library-store", () => {
     const getAll = vi.spyOn(db, "getAll");
 
     fakeIdb.seed(SAVED_RECIPES_STORE_NAME, [
-      { ...first, lastOpenedAt: "2026-09-28T10:00:00.000Z" } as WebSavedRecipe
+      { ...first, lastOpenedAt: "2026-09-28T10:00:00.000Z" }
     ]);
     act(() => {
       channel.onmessage?.({

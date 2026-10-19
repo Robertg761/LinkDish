@@ -65,7 +65,7 @@ const saved = (id: string, overrides: Partial<WebSavedRecipe> = {}): WebSavedRec
 const starter = (index: number, overrides: Partial<WebSavedRecipe> = {}): WebSavedRecipe => {
   const sample = SAMPLE_RECIPES[index]!;
   return saved(sample.id, {
-    recipe: sample.recipe as Recipe,
+    recipe: sample.recipe,
     sourceUrl: sample.recipe.sourceUrl,
     sourceHost: new URL(sample.recipe.sourceUrl).hostname,
     createdAt: "2026-09-01T00:00:00.000Z",
@@ -102,7 +102,7 @@ const blobText = (blob: Blob): Promise<string> =>
   new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result as string);
-    reader.onerror = () => reject(reader.error as Error);
+    reader.onerror = () => reject(reader.error ?? new Error("Could not read the blob."));
     reader.readAsText(blob);
   });
 
