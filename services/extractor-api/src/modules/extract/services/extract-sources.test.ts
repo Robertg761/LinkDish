@@ -754,7 +754,7 @@ describe("YouTube recipe links", () => {
       status: "failure",
       reason: "parse_failed",
       userMessage:
-        "That video's description doesn't include a written recipe. Try the recipe's website instead."
+        "That video's description and the creator's comments don't include a written recipe. Try the recipe's website instead."
     });
   });
 });

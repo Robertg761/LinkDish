@@ -101,7 +101,9 @@ export const buildTextRecipeCandidate = (
       evidence: [
         parsed.structure === "headings"
           ? "Read the ingredients and method under the text's own headings."
-          : "Read a list of measured ingredients followed by method lines."
+          : parsed.structure === "method"
+            ? "Read a numbered method, and the ingredients from the amounts its steps name."
+            : "Read a list of measured ingredients followed by method lines."
       ],
       warnings: methodInVideo
         ? [
@@ -109,7 +111,9 @@ export const buildTextRecipeCandidate = (
               ? "The text lists the ingredients only, so the method is in the video."
               : "The text has only a few notes on the method, so the rest is in the video."
           ]
-        : [],
+        : parsed.structure === "method"
+          ? ["The recipe had no ingredient list, so this one was put together from its steps."]
+          : [],
       provenance: [provenance],
       fieldProvenance: buildFieldProvenance({
         title: "visible-text",

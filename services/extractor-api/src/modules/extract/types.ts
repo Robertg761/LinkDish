@@ -40,6 +40,11 @@ export interface YouTubeSourceDocument {
   pageHtml: string | null;
   /** The channel name from oEmbed, when known. */
   authorName?: string | null | undefined;
+  /**
+   * The creator's own top-level comments on the video, best first. Creators often post the
+   * written recipe as a (pinned) comment instead of in the description.
+   */
+  creatorComments?: string[] | undefined;
 }
 
 /**

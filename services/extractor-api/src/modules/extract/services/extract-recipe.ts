@@ -665,7 +665,7 @@ const decidePrimaryOutcome = (
     return buildFailureDecision(
       "parse_failed",
       sourceType === "youtube"
-        ? "That video's description doesn't include a written recipe. Try the recipe's website instead."
+        ? "That video's description and the creator's comments don't include a written recipe. Try the recipe's website instead."
         : "LinkDish couldn't find a recipe on that page.",
       noRecipeRecovery
     );

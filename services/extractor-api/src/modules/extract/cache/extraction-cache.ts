@@ -30,8 +30,11 @@ import type { DetectionResult } from "../types.js";
  * list and method (no LLM), and the text-cleanup LLM pass no longer runs on links.
  * 2026-10-18.2: TikTok captions get their line breaks back before parsing; an older
  * entry may hold a caption read as one run-on line.
+ * 2026-10-19.1: YouTube recipes are also read from the creator's own comments, a
+ * numbered method without an ingredient list is read, and "recipe in the comments"
+ * pointers leave video titles.
  */
-export const EXTRACTOR_CACHE_VERSION = "2026-10-18.2";
+export const EXTRACTOR_CACHE_VERSION = "2026-10-19.1";
 
 const cacheKeyPrefix = "linkdish:extract-cache:v1";
 

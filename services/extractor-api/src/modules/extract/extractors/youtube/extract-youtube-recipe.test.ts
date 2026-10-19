@@ -25,7 +25,51 @@ const video = (overrides: Partial<YouTubeSourceDocument>): YouTubeSourceDocument
   ...overrides
 });
 
+const creatorComment = readFileSync(
+  new URL("../../__fixtures__/youtube-creator-comment.txt", import.meta.url),
+  "utf8"
+);
+
 describe("extractYouTubeRecipe", () => {
+  it("reads the recipe the creator posted as a comment, titled after the comment", () => {
+    const extraction = extractYouTubeRecipe(
+      video({
+        title: "The best one pan dinner! I’ll have the written recipe up in comments soon!",
+        description: "",
+        creatorComments: ["Thank you all so much! ❤️", creatorComment]
+      })
+    );
+
+    expect(extraction?.methodInVideo).toBe(false);
+    expect(extraction?.candidate.provenance).toEqual(["visible-text"]);
+    expect(extraction?.candidate.warnings).toEqual([
+      "The recipe had no ingredient list, so this one was put together from its steps."
+    ]);
+    expect(extraction?.candidate.recipe).toMatchObject({
+      title: "Marry Me Bacon Chicken Gnocchi",
+      videoUrl: "https://www.youtube.com/watch?v=video123"
+    });
+    expect(extraction?.candidate.recipe.ingredients).toHaveLength(15);
+    expect(extraction?.candidate.recipe.steps).toHaveLength(7);
+  });
+
+  it("keeps the description's recipe ahead of a creator comment", () => {
+    const extraction = extractYouTubeRecipe(
+      video({ description: recipeText, creatorComments: [creatorComment] })
+    );
+
+    expect(extraction?.candidate.recipe.title).toBe("Skillet Chicken");
+    expect(extraction?.candidate.recipe.ingredients).toHaveLength(3);
+  });
+
+  it("drops a 'recipe in the comments' pointer from the video title", () => {
+    const extraction = extractYouTubeRecipe(
+      video({ title: "Skillet Chicken - recipe in comments", description: recipeText })
+    );
+
+    expect(extraction?.candidate.recipe.title).toBe("Skillet Chicken");
+  });
+
   it("reads the recipe the description lays out, titled after the video", () => {
     const extraction = extractYouTubeRecipe(video({ description: recipeText }));
 

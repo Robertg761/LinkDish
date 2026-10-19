@@ -136,13 +136,20 @@ platforms map onto them and are told apart internally by the detection `adapterK
   canonical watch page. The description is the full `videoDetails.shortDescription` from
   the player response (og:description is truncated). The channel becomes `author`. The
   recipe is read from the description with the text parser (below); a transcript is only
-  used when it is itself laid out as a recipe and the description is not. When the
+  used when it is itself laid out as a recipe and the description is not. Creators often
+  post the written recipe as a comment instead ("recipe in the comments"), so the first
+  page of comments is read too (`youtubei/v1/next` with the watch page's comment-section
+  continuation, in parallel with the transcript), and the creator's own top-level
+  comments (`isCreator`, up to three) are the next source; a comment's own title line
+  ("Marry Me Chicken Gnocchi") wins over the video title. "Recipe in the comments"
+  pointers are dropped from video titles. When the
   description has no method, or no recipe at all, up to two "full recipe" links in it
   (`findYouTubeRecipeLinks`: cue lines like "Full recipe:" first, social, shop and music
   hosts and home pages skipped) are fetched and extracted like any recipe page, with the
   video kept as `videoUrl`. A description with ingredients only is saved with the step
   "Follow the video for the method." when no linked page works. Otherwise the import fails
-  with "That video's description doesn't include a written recipe."
+  with "That video's description and the creator's comments don't include a written
+  recipe."
 - **Pinterest** pins (and pin.it links that land on one): the pin's outbound link
   (`og:see_also`, else `"link"` in the pin's app state), when it is a valid recipe
   `sourceUrl` (http(s), at most 2048 characters), is validated with the same SSRF
@@ -169,7 +176,11 @@ parses `extractRecipeAnyRequestSchema`.
   TikTok captions and YouTube descriptions. It finds the title, servings and labelled
   times, then the ingredients and method under the text's own headings ("Ingredients",
   "Method", "For the sauce:"), splitting run-on captions and numbered steps; without
-  headings it takes a run of measured ingredient lines followed by method lines. Text is
+  headings it takes a run of measured ingredient lines followed by method lines. A
+  numbered method with no ingredient list at all (three or more steps) has its
+  ingredients read from the amounts the steps name ("add 12 ounces of bacon" →
+  "12 ounces bacon") and from "season with A, B and C"; the recipe carries a note that
+  the list was put together from its steps. Text is
   metered as a plain import (no strong extraction) whatever `attempt` says, and usage is
   only committed for successes.
 - Text the parser can't split fails with `parse_failed`: text with recipe signals
