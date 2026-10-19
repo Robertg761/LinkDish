@@ -25,7 +25,12 @@ interface FakeWindow {
 
 const runAnalytics = (fakeWindow: FakeWindow, beacon: () => boolean = () => true) => {
   const sendBeacon = vi.fn(beacon);
-  const fakeDocument = { addEventListener: vi.fn(), referrer: "" };
+  const fakeDocument = {
+    addEventListener: vi.fn(),
+    createElement: (tagName: string) => document.createElement(tagName),
+    head: document.createElement("head"),
+    referrer: ""
+  };
   const fakeNavigator = { sendBeacon };
   const fakeFetch = vi.fn(() => Promise.resolve());
 
