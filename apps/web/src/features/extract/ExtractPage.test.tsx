@@ -836,7 +836,7 @@ describe("ExtractPage", () => {
     expect(screen.queryByRole("button", { name: "Start over" })).not.toBeInTheDocument();
   });
 
-  it("imports pasted text through AI help", async () => {
+  it("imports pasted text as a plain import", async () => {
     apiMocks.extractRecipeFromText.mockResolvedValue(success());
     renderPage();
 
@@ -856,11 +856,11 @@ describe("ExtractPage", () => {
 
     await screen.findByRole("heading", { level: 1, name: "Weeknight Rice" });
     expect(apiMocks.extractRecipeFromText.mock.calls[0]?.[0]).toMatchObject({
-      attempt: "fallback",
+      attempt: "primary",
       text
     });
     expect(startedEvents()[0]?.[0].properties).toMatchObject({
-      attempt: "fallback",
+      attempt: "primary",
       source_type: "text"
     });
   });
@@ -925,7 +925,7 @@ describe("ExtractPage", () => {
     expect(apiMocks.extractRecipe).not.toHaveBeenCalled();
     expect(apiMocks.extractRecipeFromText).toHaveBeenCalledOnce();
     expect(apiMocks.extractRecipeFromText.mock.calls[0]?.[0]).toMatchObject({
-      attempt: "fallback",
+      attempt: "primary",
       sourceUrl: link,
       text
     });

@@ -339,7 +339,7 @@ describe("runExtractRequestPipeline", () => {
       expect(fetchHtmlDocument).toHaveBeenCalledTimes(2);
     });
 
-    it("never stores LLM fallback output, even for the verified canary", async () => {
+    it("answers a link's fallback attempt without the LLM, so the cache only holds page data", async () => {
       const extract = vi.fn<FallbackRecipeExtractor["extract"]>(() =>
         Promise.resolve(llmCandidate)
       );
@@ -365,18 +365,19 @@ describe("runExtractRequestPipeline", () => {
         { "x-linkdish-client-id": "victim" }
       );
 
+      expect(extract).not.toHaveBeenCalled();
       expect(seeded.response).toMatchObject({
         status: "success",
-        recipe: { title: "LLM Output Title" },
-        extraction: { strategy: "llm-fallback" }
+        recipe: { title: "One-Pan Tomato Pasta" },
+        extraction: { strategy: "recipe-schema" }
       });
-      expect(next.headers).toEqual({ "x-linkdish-cache": "miss" });
+      expect(next.headers).toEqual({ "x-linkdish-cache": "hit" });
       expect(next.response).toMatchObject({
         status: "success",
         recipe: { title: "One-Pan Tomato Pasta" },
         extraction: { strategy: "recipe-schema" }
       });
-      expect(fetchHtmlDocument).toHaveBeenCalledTimes(3);
+      expect(fetchHtmlDocument).toHaveBeenCalledTimes(2);
     });
   });
 });

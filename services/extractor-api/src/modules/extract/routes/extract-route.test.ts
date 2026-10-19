@@ -4,11 +4,8 @@ import { describe, expect, it, vi } from "vitest";
 import { ZodError } from "zod";
 
 import { buildApp } from "../../../app";
-import { createMemoryCacheStore } from "../cache/cache-store";
-import { createFallbackHandoffStore } from "../cache/fallback-handoff";
 import { HtmlFetchError } from "../fetchers";
 
-import type { FallbackHandoffStore } from "../cache/fallback-handoff";
 import type {
   ExtractorRuntime,
   ExtractionCandidate,
@@ -125,79 +122,37 @@ describe("POST /extract", () => {
     });
   });
 
-  it("preserves captured OpenGraph image metadata when fallback builds the recipe", async () => {
+  it("never asks the LLM about a link, even on an older client's fallback attempt", async () => {
+    const extract = vi.fn<FallbackRecipeExtractor["extract"]>();
     const app = buildApp({
-      runtime: createRuntime({
-        fallbackAvailable: true,
-        fallbackCandidate: {
-          recipe: {
-            title: "Fallback Cozy Soup",
-            ingredients: [{ text: "1 can white beans" }],
-            steps: [{ index: 1, text: "Simmer the soup." }],
-            servings: "4 servings",
-            prepTimeMinutes: 10,
-            cookTimeMinutes: 20,
-            nutrition: null
-          },
-          strategy: "llm-fallback",
-          evidence: ["Fallback model assembled a complete recipe."],
-          warnings: [],
-          provenance: ["llm"],
-          fieldProvenance: {
-            title: "llm",
-            ingredients: "llm",
-            steps: "llm",
-            servings: "llm",
-            prepTimeMinutes: "llm",
-            cookTimeMinutes: "llm",
-            nutrition: null
-          },
-          signals: {
-            requiredFieldsInferred: false,
-            titleConfidence: "strong",
-            timesFromStructuredMetadata: false,
-            recipeLike: true,
-            detectionConfidence: "medium",
-            sectionCohesion: "medium",
-            transcriptQuality: "weak",
-            usedBrowserFallback: false,
-            blockedSourceSignals: 0
-          }
-        }
-      })
+      runtime: {
+        ...createRuntime({ fallbackAvailable: true }),
+        fallbackExtractor: { available: true, providerName: "gemini", extract }
+      }
     });
 
-    const response = await app.inject({
+    const weak = await app.inject({
       method: "POST",
       url: "/extract",
-      payload: {
-        url: "https://fixtures.linkdish.test/article-recipe",
-        attempt: "fallback"
-      }
+      payload: { url: "https://fixtures.linkdish.test/article-weak", attempt: "fallback" }
+    });
+    const structured = await app.inject({
+      method: "POST",
+      url: "/extract",
+      payload: { url: "https://fixtures.linkdish.test/recipe-jsonld", attempt: "fallback" }
     });
 
-    expect(response.statusCode).toBe(200);
-    expect(response.json()).toMatchObject({
+    expect(extract).not.toHaveBeenCalled();
+    expect(weak.json()).toMatchObject({ status: "failure", reason: "parse_failed" });
+    expect(structured.json()).toMatchObject({
       status: "success",
-      recipe: {
-        title: "Fallback Cozy Soup",
-        image: {
-          height: 800,
-          source: "og",
-          url: "https://fixtures.linkdish.test/images/cozy-weeknight-soup.jpg",
-          width: 1200
-        }
-      }
+      recipe: { title: "One-Pan Tomato Pasta" },
+      extraction: { strategy: "recipe-schema" }
     });
   });
 
-  it("cleans successful structured recipe text that shows artifacts before returning it", async () => {
-    const clean = vi.fn<RecipeTextCleaner["clean"]>().mockImplementation((recipe) =>
-      Promise.resolve({
-        ...recipe,
-        title: "Clean One-Pan Tomato Pasta"
-      })
-    );
+  it("never runs the text cleanup LLM on a link, even when the text shows artifacts", async () => {
+    const clean = vi.fn<RecipeTextCleaner["clean"]>();
     const app = buildApp({
       runtime: createRuntime({
         fallbackAvailable: true,
@@ -218,11 +173,11 @@ describe("POST /extract", () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(clean).toHaveBeenCalledTimes(1);
+    expect(clean).not.toHaveBeenCalled();
     expect(response.json()).toMatchObject({
       status: "success",
       recipe: {
-        title: "Clean One-Pan Tomato Pasta"
+        title: "One-Pan Tomato Pasta"
       }
     });
   });
@@ -286,7 +241,7 @@ describe("POST /extract", () => {
     });
   });
 
-  it("returns needs_retry when the deterministic pass is too weak", async () => {
+  it("returns a plain failure, not a retry, when the deterministic pass is too weak", async () => {
     const app = buildApp({
       runtime: createRuntime()
     });
@@ -301,7 +256,9 @@ describe("POST /extract", () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({
-      status: "needs_retry"
+      status: "failure",
+      reason: "parse_failed",
+      recovery: { allowFallback: false, suggestedAction: "try_another_url" }
     });
   });
 
@@ -384,81 +341,6 @@ describe("POST /extract", () => {
     expect(response.json()).toMatchObject({
       status: "failure",
       reason: "unsupported_source"
-    });
-  });
-
-  it("returns fallback success when extra cleanup works", async () => {
-    const clean = vi.fn<RecipeTextCleaner["clean"]>().mockImplementation((recipe) =>
-      Promise.resolve({
-        ...recipe,
-        title: "Clean Fallback Skillet Chicken"
-      })
-    );
-    const app = buildApp({
-      runtime: createRuntime({
-        recipeTextCleaner: {
-          available: true,
-          providerName: "gemini",
-          clean
-        },
-        fallbackCandidate: {
-          recipe: {
-            title: "Fallback Skillet Chicken",
-            ingredients: [{ text: "1 lb chicken thighs" }],
-            steps: [{ index: 1, text: "Sear the chicken.<br>" }],
-            servings: "4 servings",
-            prepTimeMinutes: 10,
-            cookTimeMinutes: 18,
-            nutrition: null
-          },
-          strategy: "llm-fallback",
-          evidence: ["Fallback model assembled a complete recipe."],
-          warnings: [],
-          provenance: ["llm"],
-          fieldProvenance: {
-            title: "llm",
-            ingredients: "llm",
-            steps: "llm",
-            servings: "llm",
-            prepTimeMinutes: "llm",
-            cookTimeMinutes: "llm",
-            nutrition: null
-          },
-          signals: {
-            requiredFieldsInferred: false,
-            titleConfidence: "strong",
-            timesFromStructuredMetadata: false,
-            recipeLike: true,
-            detectionConfidence: "medium",
-            sectionCohesion: "medium",
-            transcriptQuality: "weak",
-            usedBrowserFallback: false,
-            blockedSourceSignals: 0
-          }
-        },
-        fallbackAvailable: true
-      })
-    });
-
-    const response = await app.inject({
-      method: "POST",
-      url: "/extract",
-      payload: {
-        url: "https://fixtures.linkdish.test/article-weak",
-        attempt: "fallback"
-      }
-    });
-
-    expect(response.statusCode).toBe(200);
-    expect(clean).toHaveBeenCalledTimes(1);
-    expect(response.json()).toMatchObject({
-      status: "success",
-      recipe: {
-        title: "Clean Fallback Skillet Chicken"
-      },
-      extraction: {
-        strategy: "llm-fallback"
-      }
     });
   });
 
@@ -557,7 +439,7 @@ describe("POST /extract", () => {
     });
   });
 
-  it("returns fallback_unavailable when OpenAI is not configured", async () => {
+  it("returns fallback_unavailable for a photo scan when no LLM is configured", async () => {
     const app = buildApp({
       runtime: createRuntime({
         fallbackCandidate: null,
@@ -569,7 +451,8 @@ describe("POST /extract", () => {
       method: "POST",
       url: "/extract",
       payload: {
-        url: "https://fixtures.linkdish.test/article-weak",
+        images: [{ dataUrl: "data:image/jpeg;base64,abc123", mimeType: "image/jpeg" }],
+        sourceUrl: "https://linkdish.app/image-imports/fixture",
         attempt: "fallback"
       }
     });
@@ -683,118 +566,5 @@ describe("POST /extract", () => {
 
     expect(response.statusCode).toBe(500);
     expect(response.json()).toEqual({ message: "Unexpected extractor error." });
-  });
-});
-
-describe("POST /extract primary-to-fallback hand-off", () => {
-  const correlationId = "5d9a4b20-7e1f-4d5f-8fa2-838071ca35cb";
-  const url = "https://fixtures.linkdish.test/article-weak";
-  const fallbackCandidate: ExtractionCandidate = {
-    recipe: {
-      title: "Fallback Skillet Chicken",
-      ingredients: [{ text: "1 lb chicken thighs" }],
-      steps: [{ index: 1, text: "Sear the chicken." }],
-      servings: "4 servings",
-      prepTimeMinutes: 10,
-      cookTimeMinutes: 18,
-      nutrition: null
-    },
-    strategy: "llm-fallback",
-    evidence: ["Fallback model assembled a complete recipe."],
-    warnings: [],
-    provenance: ["llm"],
-    fieldProvenance: {
-      title: "llm",
-      ingredients: "llm",
-      steps: "llm",
-      servings: "llm",
-      prepTimeMinutes: "llm",
-      cookTimeMinutes: "llm",
-      nutrition: null
-    },
-    signals: {
-      requiredFieldsInferred: false,
-      titleConfidence: "strong",
-      timesFromStructuredMetadata: false,
-      recipeLike: true,
-      detectionConfidence: "medium",
-      sectionCohesion: "medium",
-      transcriptQuality: "weak",
-      usedBrowserFallback: false,
-      blockedSourceSignals: 0
-    }
-  };
-
-  const createHandoffRuntime = (
-    write: (
-      store: FallbackHandoffStore,
-      ...args: Parameters<FallbackHandoffStore["write"]>
-    ) => Promise<boolean>
-  ) => {
-    const base = createRuntime({ fallbackAvailable: true, fallbackCandidate });
-    const store = createFallbackHandoffStore({ store: createMemoryCacheStore(10) });
-    const fetchHtmlDocument = vi.fn<ExtractorRuntime["fetchHtmlDocument"]>((...args) =>
-      base.fetchHtmlDocument(...args)
-    );
-    const extract = vi.fn<FallbackRecipeExtractor["extract"]>((...args) =>
-      base.fallbackExtractor.extract(...args)
-    );
-    const runtime: ExtractorRuntime = {
-      ...base,
-      fetchHtmlDocument,
-      fallbackExtractor: { ...base.fallbackExtractor, extract },
-      fallbackHandoffStore: {
-        read: (...args) => store.read(...args),
-        write: (...args) => write(store, ...args)
-      }
-    };
-
-    return { runtime, fetchHtmlDocument, extract };
-  };
-
-  it("stores the hand-off before answering, so an immediate fallback skips the second fetch", async () => {
-    const { runtime, fetchHtmlDocument, extract } = createHandoffRuntime(async (store, ...args) => {
-      await new Promise((resolve) => setTimeout(resolve, 25));
-      return store.write(...args);
-    });
-    const app = buildApp({ runtime });
-
-    const primary = await app.inject({
-      method: "POST",
-      url: "/extract",
-      payload: { url, attempt: "primary", correlationId }
-    });
-    /* The route fires post-response work and forgets it; the client retries straight away. */
-    const fallback = await app.inject({
-      method: "POST",
-      url: "/extract",
-      payload: { url, attempt: "fallback", correlationId }
-    });
-
-    expect(primary.statusCode).toBe(200);
-    expect(primary.json()).toMatchObject({ status: "needs_retry" });
-    expect(fallback.statusCode).toBe(200);
-    expect(fallback.json()).toMatchObject({
-      status: "success",
-      extraction: { strategy: "llm-fallback" }
-    });
-    expect(fetchHtmlDocument).toHaveBeenCalledTimes(1);
-    expect(extract.mock.calls[0]?.[0].sourceSummary).toContain("Page title:");
-  });
-
-  it("still answers needs_retry with a 200 when the hand-off store fails or stalls", async () => {
-    const failing = createHandoffRuntime(() => Promise.reject(new Error("store unavailable")));
-    const stalled = createHandoffRuntime(() => new Promise<boolean>(() => undefined));
-
-    for (const { runtime } of [failing, stalled]) {
-      const response = await buildApp({ runtime }).inject({
-        method: "POST",
-        url: "/extract",
-        payload: { url, attempt: "primary", correlationId }
-      });
-
-      expect(response.statusCode).toBe(200);
-      expect(response.json()).toMatchObject({ status: "needs_retry" });
-    }
   });
 });

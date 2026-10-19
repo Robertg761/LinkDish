@@ -1,7 +1,6 @@
 import { extractorApiEnv } from "../../../config/env.js";
 import { getSharedManagedFallbackExtractor } from "../../admin/model-control.js";
 import { createExtractionResultCache } from "../cache/extraction-cache.js";
-import { createFallbackHandoffStore } from "../cache/fallback-handoff.js";
 import { ExtractionCancelledError } from "../deadline.js";
 import { BrowserFetchError, HtmlFetchError } from "../fetchers/errors.js";
 import { getDomainAdapter } from "../source-detection/domain-adapters.js";
@@ -228,7 +227,6 @@ export const createDefaultExtractorRuntime = (): ExtractorRuntime => {
           })
         }
       : {}),
-    fallbackHandoffStore: createFallbackHandoffStore(),
     validateSourceUrl: validatePublicSourceUrl,
     dispose: async () => {
       const browserFetcher = await browserFetcherPromise?.catch(() => null);

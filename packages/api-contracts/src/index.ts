@@ -112,9 +112,9 @@ export const MIN_EXTRACT_TEXT_CHARS = 20;
 export const MAX_EXTRACT_TEXT_CHARS = 20_000;
 
 /**
- * Pasted recipe text (a caption, a note, an email). It always goes to the AI extractor, so it
- * is metered like an explicit fallback attempt whatever `attempt` says; `attempt` is accepted
- * (and defaults to "fallback") so callers can reuse their URL request plumbing.
+ * Pasted recipe text (a caption, a note, an email). It is read by the rule-based text parser
+ * and metered as a plain import whatever `attempt` says; `attempt` is accepted (and defaults to
+ * "fallback") so older callers keep working.
  */
 export const extractRecipeTextRequestSchema = z.object({
   text: z.string().trim().min(MIN_EXTRACT_TEXT_CHARS).max(MAX_EXTRACT_TEXT_CHARS),
