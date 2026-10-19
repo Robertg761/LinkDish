@@ -1,7 +1,7 @@
 declare module "./run-live-canary.mjs" {
   export type LiveCanaryEntry = {
     id: string;
-    kind: "recipe-webpage" | "article-blog" | "youtube";
+    kind: "recipe-webpage" | "article-blog" | "youtube" | "tiktok";
     url: string;
     billingClientId?: string;
     billingProvider?: string;

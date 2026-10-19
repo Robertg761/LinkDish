@@ -6,7 +6,11 @@ vi.mock("youtube-transcript", () => ({
 }));
 
 import { SocialFetchError } from "./errors";
-import { fetchTikTokDocument, TIKTOK_OEMBED_ENDPOINT } from "./fetch-tiktok-document";
+import {
+  fetchTikTokDocument,
+  TIKTOK_EMBED_PAGE_ENDPOINT,
+  TIKTOK_OEMBED_ENDPOINT
+} from "./fetch-tiktok-document";
 import { extractYouTubeShortDescription, fetchYouTubeDocument } from "./fetch-youtube-document";
 
 import type { ValidateSourceUrl } from "../source-url-safety";
@@ -73,6 +77,70 @@ describe("fetchTikTokDocument", () => {
     expect(document.text).toBe(
       "Pasta salad\nIngredients\nPasta screws cooked\nParsley\n#easyrecipes"
     );
+  });
+
+  it("reads the caption from the embed page when oEmbed sends only a player", async () => {
+    const embedState = {
+      source: {
+        data: {
+          "/embed/v2/7234567890123456789": {
+            videoData: {
+              itemInfos: {
+                text: "Chili  Ingredients  1 lb beef  1 can beans  #dinner",
+                covers: ["https://p16-common-sign.tiktokcdn-us.com/cover.jpeg"]
+              },
+              authorInfos: { uniqueId: "cook", nickName: "Cook Creator" }
+            }
+          }
+        }
+      }
+    };
+    const fetchMock = vi.fn<FetchSignature>((input) =>
+      Promise.resolve(
+        requestedUrl(input).startsWith(TIKTOK_EMBED_PAGE_ENDPOINT)
+          ? new Response(
+              `<html><script id="__FRONTITY_CONNECT_STATE__" type="application/json">${JSON.stringify(embedState)}</script></html>`,
+              { status: 200, headers: { "content-type": "text/html" } }
+            )
+          : json({
+              type: "video",
+              html: '<iframe src="https://www.tiktok.com/player/v1/7234567890123456789"></iframe>',
+              embed_product_id: "7234567890123456789"
+            })
+      )
+    );
+
+    const document = await fetchTikTokDocument(videoUrl, fetchMock as unknown as typeof fetch, {
+      timeoutMs: 1_000,
+      validateUrl: safe
+    });
+
+    expect(requestedUrl(fetchMock.mock.calls[1]![0])).toBe(
+      `${TIKTOK_EMBED_PAGE_ENDPOINT}/7234567890123456789`
+    );
+    expect(document).toMatchObject({
+      text: "Chili\nIngredients\n1 lb beef\n1 can beans\n#dinner",
+      authorName: "Cook Creator",
+      thumbnailUrl: "https://p16-common-sign.tiktokcdn-us.com/cover.jpeg"
+    });
+  });
+
+  it("returns an empty caption when neither oEmbed nor the embed page has one", async () => {
+    const fetchMock = vi.fn<FetchSignature>((input) =>
+      Promise.resolve(
+        requestedUrl(input).startsWith(TIKTOK_EMBED_PAGE_ENDPOINT)
+          ? new Response("blocked", { status: 403 })
+          : json({ type: "video", embed_product_id: "7234567890123456789" })
+      )
+    );
+
+    const document = await fetchTikTokDocument(videoUrl, fetchMock as unknown as typeof fetch, {
+      timeoutMs: 1_000,
+      validateUrl: safe
+    });
+
+    expect(document.text).toBe("");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("resolves short links one validated hop at a time", async () => {
