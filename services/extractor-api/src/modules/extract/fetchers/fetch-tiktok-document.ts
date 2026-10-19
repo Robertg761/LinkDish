@@ -275,9 +275,25 @@ export const fetchTikTokDocument = async (
     const videoId = post.caption ? null : readVideoId(videoUrl, payload);
 
     if (videoId) {
-      post =
-        (await fetchEmbedPagePost(videoId, fetchImplementation, validateUrl, timeout.signal)) ??
-        post;
+      /* The embed page is a best-effort extra: if it fails, the oEmbed answer still stands. */
+      const embedPost = await fetchEmbedPagePost(
+        videoId,
+        fetchImplementation,
+        validateUrl,
+        timeout.signal
+      ).catch((error: unknown) => {
+        if (timeout.signal.aborted || isAbortError(error)) {
+          throw error;
+        }
+
+        return null;
+      });
+
+      post = {
+        caption: embedPost?.caption ?? post.caption,
+        authorName: post.authorName ?? embedPost?.authorName ?? null,
+        thumbnailUrl: post.thumbnailUrl ?? embedPost?.thumbnailUrl ?? null
+      };
     }
 
     return {

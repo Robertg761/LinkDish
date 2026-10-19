@@ -143,6 +143,57 @@ describe("fetchTikTokDocument", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps oEmbed's author and thumbnail when the embed page has only the caption", async () => {
+    const embedState = {
+      source: {
+        data: {
+          "/embed/v2/7234567890123456789": {
+            videoData: { itemInfos: { text: "Chili  Ingredients  1 lb beef" } }
+          }
+        }
+      }
+    };
+    const fetchMock = vi.fn<FetchSignature>((input) =>
+      Promise.resolve(
+        requestedUrl(input).startsWith(TIKTOK_EMBED_PAGE_ENDPOINT)
+          ? new Response(
+              `<script id="__FRONTITY_CONNECT_STATE__">${JSON.stringify(embedState)}</script>`,
+              { status: 200, headers: { "content-type": "text/html" } }
+            )
+          : json({
+              author_name: "Cook Creator",
+              thumbnail_url: "https://p16-sign.tiktokcdn-us.com/thumb.jpeg"
+            })
+      )
+    );
+
+    const document = await fetchTikTokDocument(videoUrl, fetchMock as unknown as typeof fetch, {
+      timeoutMs: 1_000,
+      validateUrl: safe
+    });
+
+    expect(document).toMatchObject({
+      text: "Chili\nIngredients\n1 lb beef",
+      authorName: "Cook Creator",
+      thumbnailUrl: "https://p16-sign.tiktokcdn-us.com/thumb.jpeg"
+    });
+  });
+
+  it("keeps the oEmbed answer when the embed page request fails", async () => {
+    const fetchMock = vi.fn<FetchSignature>((input) =>
+      requestedUrl(input).startsWith(TIKTOK_EMBED_PAGE_ENDPOINT)
+        ? Promise.reject(new TypeError("fetch failed"))
+        : Promise.resolve(json({ author_name: "Cook Creator" }))
+    );
+
+    const document = await fetchTikTokDocument(videoUrl, fetchMock as unknown as typeof fetch, {
+      timeoutMs: 1_000,
+      validateUrl: safe
+    });
+
+    expect(document).toMatchObject({ text: "", authorName: "Cook Creator" });
+  });
+
   it("resolves short links one validated hop at a time", async () => {
     const validateUrl = vi.fn<ValidateSourceUrl>(() => Promise.resolve({ safe: true }));
     const fetchMock = vi.fn<FetchSignature>((input) => {
