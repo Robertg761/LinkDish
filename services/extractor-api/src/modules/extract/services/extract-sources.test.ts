@@ -462,6 +462,68 @@ describe("TikTok captions", () => {
     });
   });
 
+  it("reads a real caption once its line breaks are restored, dropping tags and recipe pointers", async () => {
+    /* From a TikTok oEmbed caption, with the double spaces turned back into line breaks. */
+    const caption = [
+      "*Italian Sausage, Mushroom & Spinach Pasta* Recipe in caption, instructions in video!",
+      "- 1lb pasta (I’m using orecchiette, but recommend any short pasta for this recipe)",
+      "- 16oz ground sausage (sweet or hot - I like a combination) - 1 large sweet onion, chopped - 8 cloves garlic, chopped - 1/2 cup dry white wine",
+      "- 1 1/2 cups heavy cream",
+      "- Cajun seasoning, to taste (I used roughly a teaspoon) - 1 cup grated Parmesan cheese (reserve 1/4 for serving/garnish)",
+      "#capcut #pasta #fyp",
+      "@Birds Eye #CapCut"
+    ].join("\n");
+    const runtime = createRuntime({
+      fetchSocialDocument: () => Promise.resolve(tiktokDocument(caption))
+    });
+
+    const { response } = await extractRecipe({ url: tiktokUrl, attempt: "primary" }, runtime);
+
+    expect(response).toMatchObject({
+      status: "success",
+      recipe: {
+        title: "Italian Sausage, Mushroom & Spinach Pasta",
+        steps: [{ index: 1, text: "Follow the video for the method." }]
+      }
+    });
+    expect(response.status === "success" && response.recipe.ingredients.map((i) => i.text)).toEqual(
+      [
+        "1lb pasta (I’m using orecchiette, but recommend any short pasta for this recipe)",
+        "16oz ground sausage (sweet or hot - I like a combination)",
+        "1 large sweet onion, chopped",
+        "8 cloves garlic, chopped",
+        "1/2 cup dry white wine",
+        "1 1/2 cups heavy cream",
+        "Cajun seasoning, to taste (I used roughly a teaspoon)",
+        "1 cup grated Parmesan cheese (reserve 1/4 for serving/garnish)"
+      ]
+    );
+  });
+
+  it("titles a caption that opens with an ingredient count", async () => {
+    const runtime = createRuntime({
+      fetchSocialDocument: () =>
+        Promise.resolve(
+          tiktokDocument(
+            [
+              "3-Ingredient Pasta Sauce (recipe below) #pasta #foodtok",
+              "Ingredients: 1 cup heavy cream",
+              "4-5 oz sun dried tomato pesto",
+              "8 ounces pasta",
+              "Directions: Warm the cream and pesto, then toss with the pasta."
+            ].join("\n")
+          )
+        )
+    });
+
+    const { response } = await extractRecipe({ url: tiktokUrl, attempt: "primary" }, runtime);
+
+    expect(response).toMatchObject({
+      status: "success",
+      recipe: { title: "3-Ingredient Pasta Sauce" }
+    });
+  });
+
   it("fails without an LLM call when the caption has no recipe", async () => {
     const extract = vi.fn(() => Promise.resolve(llmCandidate()));
     const runtime = createRuntime({

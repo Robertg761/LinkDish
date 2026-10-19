@@ -58,6 +58,23 @@ describe("fetchTikTokDocument", () => {
     });
   });
 
+  it("turns the runs of spaces TikTok leaves for line breaks back into line breaks", async () => {
+    const fetchMock = vi.fn<FetchSignature>(() =>
+      Promise.resolve(
+        json({ title: "Pasta salad  Ingredients  Pasta screws cooked  Parsley  #easyrecipes " })
+      )
+    );
+
+    const document = await fetchTikTokDocument(videoUrl, fetchMock as unknown as typeof fetch, {
+      timeoutMs: 1_000,
+      validateUrl: safe
+    });
+
+    expect(document.text).toBe(
+      "Pasta salad\nIngredients\nPasta screws cooked\nParsley\n#easyrecipes"
+    );
+  });
+
   it("resolves short links one validated hop at a time", async () => {
     const validateUrl = vi.fn<ValidateSourceUrl>(() => Promise.resolve({ safe: true }));
     const fetchMock = vi.fn<FetchSignature>((input) => {
