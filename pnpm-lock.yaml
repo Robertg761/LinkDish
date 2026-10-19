@@ -98,7 +98,7 @@ importers:
     dependencies:
       '@clerk/expo':
         specifier: ^3.7.4
-        version: 3.7.4(d1eac414d7d724d2862e985b66004742)
+        version: 3.7.4(61add769440a5e88b7388b2c43531ce1)
       '@expo/dom-webview':
         specifier: ~56.0.6
         version: 56.0.6(expo@56.0.15)(react-native@0.85.3(@babel/core@7.29.6)(@react-native/metro-config@0.85.3(@babel/core@7.29.6)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.3)(utf-8-validate@6.0.6))(react@19.2.3)
@@ -133,8 +133,8 @@ importers:
         specifier: ~56.0.4
         version: 56.0.4(expo@56.0.15)(react-native@0.85.3(@babel/core@7.29.6)(@react-native/metro-config@0.85.3(@babel/core@7.29.6)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.3)(utf-8-validate@6.0.6))(react@19.2.3)
       expo-auth-session:
-        specifier: ~56.0.15
-        version: 56.0.15(expo@56.0.15)(react-native@0.85.3(@babel/core@7.29.6)(@react-native/metro-config@0.85.3(@babel/core@7.29.6)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.3)(utf-8-validate@6.0.6))(react@19.2.3)
+        specifier: ~58.0.13
+        version: 58.0.13(expo@56.0.15)(react-native@0.85.3(@babel/core@7.29.6)(@react-native/metro-config@0.85.3(@babel/core@7.29.6)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.3)(utf-8-validate@6.0.6))(react@19.2.3)(typescript@6.0.3)
       expo-blur:
         specifier: ~56.0.3
         version: 56.0.3(expo@56.0.15)(react-native@0.85.3(@babel/core@7.29.6)(@react-native/metro-config@0.85.3(@babel/core@7.29.6)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.3)(utf-8-validate@6.0.6))(react@19.2.3)
@@ -1732,6 +1732,10 @@ packages:
     resolution: {integrity: sha512-3c9Mg9x0HmGPEsVrGAGyEDJsNUOZ55cZvZ47/HLmXh7MHV9Zv7My73wThklKrObaBBoMfE4YqpKjYKDRzojpjQ==}
     engines: {node: '>=20.12.0'}
 
+  '@expo/env@2.5.2':
+    resolution: {integrity: sha512-z8kCvBVJpd2S20a+Ab1otQgz8sJLeR7CXDTsuAMcNbYFsK10Fdhfb7rx9Ys1vvlbijnY55eZhQvJACajc1IjBQ==}
+    engines: {node: '>=20.12.0'}
+
   '@expo/expo-modules-macros-plugin@0.2.2':
     resolution: {integrity: sha512-4IMzPDIo/VOXREQjsJtliSfqYVZvfzU2SLFS/9sKMWF848S8CHx+e/E+Vf0TcMvpWCCKX5umyqxb13KJJ+YUzg==}
 
@@ -1868,6 +1872,14 @@ packages:
     resolution: {integrity: sha512-IX7XXg9obnrH3ni0TClBbVKgqk0nT0bjTEPTBtbD+WgIeZ0hpcgwxMJH3j5uBsUqEAq1jqUAkJWrPcg7ZRSV7g==}
     peerDependencies:
       typescript: ^5.0.0 || ^5.0.0-0 || ^6.0.0
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+
+  '@expo/require-utils@58.0.4':
+    resolution: {integrity: sha512-DvjS5NCitXYcad2Woe1EMHJKcbhTbE77HX0BgOQGL2LFHE3q2H0n8kCWDPBOCVJ63Drap3c35nwoJwF5TQL7Tw==}
+    peerDependencies:
+      typescript: ^5.0.0 || ^5.0.0-0 || ^6.0.0 || ^7.0.0
     peerDependenciesMeta:
       typescript:
         optional: true
@@ -3764,8 +3776,8 @@ packages:
     engines: {node: '>=6.0.0'}
     hasBin: true
 
-  baseline-browser-mapping@2.11.29:
-    resolution: {integrity: sha512-YeesxhUmR4h5y5V8KF8iBCqJb8YFrBJ++XBTeGcWIaQOYXGN19JM0FoiOjAhwuDoln8owMgXcWBmgHtYSkky2w==}
+  baseline-browser-mapping@2.11.30:
+    resolution: {integrity: sha512-YJs6Pz17RMNv8HoyKREtCY38E3BV1nPkWVmIb+XN1uHC1Vqt3KZCH/uJH9ZKRoiKb/icZ6tvehyee6RZNbFfRA==}
     engines: {node: '>=6.0.0'}
     hasBin: true
 
@@ -4421,8 +4433,8 @@ packages:
       react: '*'
       react-native: '*'
 
-  expo-application@56.0.3:
-    resolution: {integrity: sha512-DdGGPlMuM6cSTeKhbvh6OeLr2O/+EI5BHKYrD+Do8sJPYgLwzGrgESELfyjJCpEhFzT+TgKIdmLmWXhNUQnHiw==}
+  expo-application@58.1.2:
+    resolution: {integrity: sha512-WYFdNHGaxe/j69oYREhK0cKsKYszuIuz399WXYCP+M1grfO+FCWB/RbuMgaXJsLWlzqhNjA/zLgfJ+33FwrQvw==}
     peerDependencies:
       expo: '*'
 
@@ -4433,8 +4445,8 @@ packages:
       react: '*'
       react-native: '*'
 
-  expo-auth-session@56.0.15:
-    resolution: {integrity: sha512-vviFyzIkMBkDMuWzU4SnbRq6EIHBOhUdBQIQffPl/DFLOo5k4tUpxj4YmU1viRYZH9XNP6d3R4MU2pW0GCYNWA==}
+  expo-auth-session@58.0.13:
+    resolution: {integrity: sha512-x1WOQClARC36nikmzbuxSVmA/HCOISF7FUAPCHsdhlNXvKQ/geh/fXYo5wTd4U5yBxDpho7ijxdGGvNb3WKtFw==}
     peerDependencies:
       react: '*'
       react-native: '*'
@@ -4452,8 +4464,19 @@ packages:
       expo: '*'
       react-native: '*'
 
+  expo-constants@58.0.12:
+    resolution: {integrity: sha512-d3/dsps32nU4m6YJQbXQ1dIfn58GxfmJjTnZ0WtnhdSHTdG/oVsOakLqYRlX/FaLUKkQOSHXMf7hyCx+2a/HSQ==}
+    peerDependencies:
+      expo: '*'
+      react-native: '*'
+
   expo-crypto@56.0.4:
     resolution: {integrity: sha512-fRNEhoXRXgAWBpe3/hq5X+KXTit3OZqdiAGts1YvNEUHQb+H5591mpPac0Yw+sZg9pXcrjRnzo5AxvZaENpc7g==}
+    peerDependencies:
+      expo: '*'
+
+  expo-crypto@58.0.7:
+    resolution: {integrity: sha512-g+4i4UpqQ5jNy1VPRvVVvr9aIdh8WwvxbpwL2ntiSESDRsXyVSeb8JM6tHVdC3b9J2nGxjtrhrsaWOo0jbSxlA==}
     peerDependencies:
       expo: '*'
 
@@ -4506,6 +4529,13 @@ packages:
   expo-linking@56.0.15:
     resolution: {integrity: sha512-V3tkCxHIWO624ayw2L5Nfi0/bPgYy/0MgmoQR7g3FAKF4nyAayK8IhgAInz4MZ5Ao5Bb+5uZWDdUaS4yyEb+Gw==}
     peerDependencies:
+      react: '*'
+      react-native: '*'
+
+  expo-linking@58.0.13:
+    resolution: {integrity: sha512-kQEyBGaKY3d9T4DXYzbkZBo1shJP4MupeboNW2TyM9mFR9hVtmcwUXijgAYaYEFkR+1yl7SJWS9Lq9dQ4rUd7Q==}
+    peerDependencies:
+      expo: '*'
       react: '*'
       react-native: '*'
 
@@ -4614,6 +4644,12 @@ packages:
 
   expo-web-browser@56.0.5:
     resolution: {integrity: sha512-kaN+wcR5lHwPCH1IgrU1XyPUQvBRzdF1TMp65uAF9iUCyipqYnmrvV87eqAmrdkFFopWVgU7FcxPu1UZw+gvUQ==}
+    peerDependencies:
+      expo: '*'
+      react-native: '*'
+
+  expo-web-browser@58.0.6:
+    resolution: {integrity: sha512-6/QtDqTOaTqM/ysYYdEZG4XDrWloOo1wVYCn4g3IgayF+1lZWTwMqa5j4kcn2TA1UBer8O7zbMQYLfSMppQ/zg==}
     peerDependencies:
       expo: '*'
       react-native: '*'
@@ -8427,7 +8463,7 @@ snapshots:
       react-dom: 19.2.3(react@19.2.3)
       tslib: 2.8.1
 
-  '@clerk/expo@3.7.4(d1eac414d7d724d2862e985b66004742)':
+  '@clerk/expo@3.7.4(61add769440a5e88b7388b2c43531ce1)':
     dependencies:
       '@clerk/clerk-js': 6.25.2(@solana/web3.js@1.98.4(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@6.0.6))(@types/react@19.2.17)(bs58@6.0.0)(bufferutil@4.1.0)(react-dom@19.2.3(react@19.2.3))(react-native@0.85.3(@babel/core@7.29.6)(@react-native/metro-config@0.85.3(@babel/core@7.29.6)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.3)(utf-8-validate@6.0.6))(react@19.2.3)(typescript@6.0.3)(use-sync-external-store@1.6.0(react@19.2.3))(utf-8-validate@6.0.6)(zod@3.25.76)
       '@clerk/react': 6.12.2(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
@@ -8440,7 +8476,7 @@ snapshots:
       tslib: 2.8.1
     optionalDependencies:
       expo-apple-authentication: 56.0.4(expo@56.0.15)(react-native@0.85.3(@babel/core@7.29.6)(@react-native/metro-config@0.85.3(@babel/core@7.29.6)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.3)(utf-8-validate@6.0.6))(react@19.2.3)
-      expo-auth-session: 56.0.15(expo@56.0.15)(react-native@0.85.3(@babel/core@7.29.6)(@react-native/metro-config@0.85.3(@babel/core@7.29.6)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.3)(utf-8-validate@6.0.6))(react@19.2.3)
+      expo-auth-session: 58.0.13(expo@56.0.15)(react-native@0.85.3(@babel/core@7.29.6)(@react-native/metro-config@0.85.3(@babel/core@7.29.6)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.3)(utf-8-validate@6.0.6))(react@19.2.3)(typescript@6.0.3)
       expo-constants: 56.0.20(expo@56.0.15)(react-native@0.85.3(@babel/core@7.29.6)(@react-native/metro-config@0.85.3(@babel/core@7.29.6)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.3)(utf-8-validate@6.0.6))
       expo-crypto: 56.0.4(expo@56.0.15)
       expo-secure-store: 56.0.4(expo@56.0.15)
@@ -8904,6 +8940,14 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
+  '@expo/env@2.5.2':
+    dependencies:
+      chalk: 4.1.2
+      debug: 4.4.3
+      getenv: 2.0.0
+    transitivePeerDependencies:
+      - supports-color
+
   '@expo/expo-modules-macros-plugin@0.2.2': {}
 
   '@expo/fingerprint@0.19.7':
@@ -9137,6 +9181,16 @@ snapshots:
       - typescript
 
   '@expo/require-utils@56.1.4(typescript@6.0.3)':
+    dependencies:
+      '@babel/code-frame': 7.29.7
+      '@babel/core': 7.29.6
+      '@babel/plugin-transform-modules-commonjs': 7.29.7(@babel/core@7.29.6)
+    optionalDependencies:
+      typescript: 6.0.3
+    transitivePeerDependencies:
+      - supports-color
+
+  '@expo/require-utils@58.0.4(typescript@6.0.3)':
     dependencies:
       '@babel/code-frame': 7.29.7
       '@babel/core': 7.29.6
@@ -11058,7 +11112,7 @@ snapshots:
 
   baseline-browser-mapping@2.11.25: {}
 
-  baseline-browser-mapping@2.11.29: {}
+  baseline-browser-mapping@2.11.30: {}
 
   big-integer@1.6.52: {}
 
@@ -11106,7 +11160,7 @@ snapshots:
 
   browserslist@4.29.4:
     dependencies:
-      baseline-browser-mapping: 2.11.29
+      baseline-browser-mapping: 2.11.30
       caniuse-lite: 1.0.30001816
       electron-to-chromium: 1.5.459
       node-releases: 2.0.59
@@ -11849,7 +11903,7 @@ snapshots:
       react: 19.2.3
       react-native: 0.85.3(@babel/core@7.29.6)(@react-native/metro-config@0.85.3(@babel/core@7.29.6)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.3)(utf-8-validate@6.0.6)
 
-  expo-application@56.0.3(expo@56.0.15):
+  expo-application@58.1.2(expo@56.0.15):
     dependencies:
       expo: 56.0.15(@babel/core@7.29.6)(@expo/dom-webview@56.0.6)(@expo/metro-runtime@56.0.16)(bufferutil@4.1.0)(expo-router@56.2.14)(react-dom@19.2.3(react@19.2.3))(react-native-web@0.21.4(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react-native-worklets@0.8.3(@babel/core@7.29.6)(@react-native/metro-config@0.85.3(@babel/core@7.29.6)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(react-native@0.85.3(@babel/core@7.29.6)(@react-native/metro-config@0.85.3(@babel/core@7.29.6)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.3)(utf-8-validate@6.0.6))(react@19.2.3))(react-native@0.85.3(@babel/core@7.29.6)(@react-native/metro-config@0.85.3(@babel/core@7.29.6)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.3)(utf-8-validate@6.0.6))(react@19.2.3)(typescript@6.0.3)(utf-8-validate@6.0.6)
 
@@ -11864,19 +11918,20 @@ snapshots:
       - supports-color
       - typescript
 
-  expo-auth-session@56.0.15(expo@56.0.15)(react-native@0.85.3(@babel/core@7.29.6)(@react-native/metro-config@0.85.3(@babel/core@7.29.6)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.3)(utf-8-validate@6.0.6))(react@19.2.3):
+  expo-auth-session@58.0.13(expo@56.0.15)(react-native@0.85.3(@babel/core@7.29.6)(@react-native/metro-config@0.85.3(@babel/core@7.29.6)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.3)(utf-8-validate@6.0.6))(react@19.2.3)(typescript@6.0.3):
     dependencies:
-      expo-application: 56.0.3(expo@56.0.15)
-      expo-constants: 56.0.20(expo@56.0.15)(react-native@0.85.3(@babel/core@7.29.6)(@react-native/metro-config@0.85.3(@babel/core@7.29.6)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.3)(utf-8-validate@6.0.6))
-      expo-crypto: 56.0.4(expo@56.0.15)
-      expo-linking: 56.0.15(expo@56.0.15)(react-native@0.85.3(@babel/core@7.29.6)(@react-native/metro-config@0.85.3(@babel/core@7.29.6)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.3)(utf-8-validate@6.0.6))(react@19.2.3)
-      expo-web-browser: 56.0.5(expo@56.0.15)(react-native@0.85.3(@babel/core@7.29.6)(@react-native/metro-config@0.85.3(@babel/core@7.29.6)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.3)(utf-8-validate@6.0.6))
+      expo-application: 58.1.2(expo@56.0.15)
+      expo-constants: 58.0.12(expo@56.0.15)(react-native@0.85.3(@babel/core@7.29.6)(@react-native/metro-config@0.85.3(@babel/core@7.29.6)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.3)(utf-8-validate@6.0.6))(typescript@6.0.3)
+      expo-crypto: 58.0.7(expo@56.0.15)
+      expo-linking: 58.0.13(expo@56.0.15)(react-native@0.85.3(@babel/core@7.29.6)(@react-native/metro-config@0.85.3(@babel/core@7.29.6)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.3)(utf-8-validate@6.0.6))(react@19.2.3)(typescript@6.0.3)
+      expo-web-browser: 58.0.6(expo@56.0.15)(react-native@0.85.3(@babel/core@7.29.6)(@react-native/metro-config@0.85.3(@babel/core@7.29.6)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.3)(utf-8-validate@6.0.6))
       invariant: 2.2.4
       react: 19.2.3
       react-native: 0.85.3(@babel/core@7.29.6)(@react-native/metro-config@0.85.3(@babel/core@7.29.6)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.3)(utf-8-validate@6.0.6)
     transitivePeerDependencies:
       - expo
       - supports-color
+      - typescript
 
   expo-blur@56.0.3(expo@56.0.15)(react-native@0.85.3(@babel/core@7.29.6)(@react-native/metro-config@0.85.3(@babel/core@7.29.6)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.3)(utf-8-validate@6.0.6))(react@19.2.3):
     dependencies:
@@ -11892,7 +11947,21 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
+  expo-constants@58.0.12(expo@56.0.15)(react-native@0.85.3(@babel/core@7.29.6)(@react-native/metro-config@0.85.3(@babel/core@7.29.6)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.3)(utf-8-validate@6.0.6))(typescript@6.0.3):
+    dependencies:
+      '@expo/env': 2.5.2
+      '@expo/require-utils': 58.0.4(typescript@6.0.3)
+      expo: 56.0.15(@babel/core@7.29.6)(@expo/dom-webview@56.0.6)(@expo/metro-runtime@56.0.16)(bufferutil@4.1.0)(expo-router@56.2.14)(react-dom@19.2.3(react@19.2.3))(react-native-web@0.21.4(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react-native-worklets@0.8.3(@babel/core@7.29.6)(@react-native/metro-config@0.85.3(@babel/core@7.29.6)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(react-native@0.85.3(@babel/core@7.29.6)(@react-native/metro-config@0.85.3(@babel/core@7.29.6)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.3)(utf-8-validate@6.0.6))(react@19.2.3))(react-native@0.85.3(@babel/core@7.29.6)(@react-native/metro-config@0.85.3(@babel/core@7.29.6)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.3)(utf-8-validate@6.0.6))(react@19.2.3)(typescript@6.0.3)(utf-8-validate@6.0.6)
+      react-native: 0.85.3(@babel/core@7.29.6)(@react-native/metro-config@0.85.3(@babel/core@7.29.6)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.3)(utf-8-validate@6.0.6)
+    transitivePeerDependencies:
+      - supports-color
+      - typescript
+
   expo-crypto@56.0.4(expo@56.0.15):
+    dependencies:
+      expo: 56.0.15(@babel/core@7.29.6)(@expo/dom-webview@56.0.6)(@expo/metro-runtime@56.0.16)(bufferutil@4.1.0)(expo-router@56.2.14)(react-dom@19.2.3(react@19.2.3))(react-native-web@0.21.4(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react-native-worklets@0.8.3(@babel/core@7.29.6)(@react-native/metro-config@0.85.3(@babel/core@7.29.6)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(react-native@0.85.3(@babel/core@7.29.6)(@react-native/metro-config@0.85.3(@babel/core@7.29.6)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.3)(utf-8-validate@6.0.6))(react@19.2.3))(react-native@0.85.3(@babel/core@7.29.6)(@react-native/metro-config@0.85.3(@babel/core@7.29.6)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.3)(utf-8-validate@6.0.6))(react@19.2.3)(typescript@6.0.3)(utf-8-validate@6.0.6)
+
+  expo-crypto@58.0.7(expo@56.0.15):
     dependencies:
       expo: 56.0.15(@babel/core@7.29.6)(@expo/dom-webview@56.0.6)(@expo/metro-runtime@56.0.16)(bufferutil@4.1.0)(expo-router@56.2.14)(react-dom@19.2.3(react@19.2.3))(react-native-web@0.21.4(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react-native-worklets@0.8.3(@babel/core@7.29.6)(@react-native/metro-config@0.85.3(@babel/core@7.29.6)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(react-native@0.85.3(@babel/core@7.29.6)(@react-native/metro-config@0.85.3(@babel/core@7.29.6)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.3)(utf-8-validate@6.0.6))(react@19.2.3))(react-native@0.85.3(@babel/core@7.29.6)(@react-native/metro-config@0.85.3(@babel/core@7.29.6)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.3)(utf-8-validate@6.0.6))(react@19.2.3)(typescript@6.0.3)(utf-8-validate@6.0.6)
 
@@ -11946,6 +12015,17 @@ snapshots:
     transitivePeerDependencies:
       - expo
       - supports-color
+
+  expo-linking@58.0.13(expo@56.0.15)(react-native@0.85.3(@babel/core@7.29.6)(@react-native/metro-config@0.85.3(@babel/core@7.29.6)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.3)(utf-8-validate@6.0.6))(react@19.2.3)(typescript@6.0.3):
+    dependencies:
+      expo: 56.0.15(@babel/core@7.29.6)(@expo/dom-webview@56.0.6)(@expo/metro-runtime@56.0.16)(bufferutil@4.1.0)(expo-router@56.2.14)(react-dom@19.2.3(react@19.2.3))(react-native-web@0.21.4(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react-native-worklets@0.8.3(@babel/core@7.29.6)(@react-native/metro-config@0.85.3(@babel/core@7.29.6)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(react-native@0.85.3(@babel/core@7.29.6)(@react-native/metro-config@0.85.3(@babel/core@7.29.6)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.3)(utf-8-validate@6.0.6))(react@19.2.3))(react-native@0.85.3(@babel/core@7.29.6)(@react-native/metro-config@0.85.3(@babel/core@7.29.6)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.3)(utf-8-validate@6.0.6))(react@19.2.3)(typescript@6.0.3)(utf-8-validate@6.0.6)
+      expo-constants: 58.0.12(expo@56.0.15)(react-native@0.85.3(@babel/core@7.29.6)(@react-native/metro-config@0.85.3(@babel/core@7.29.6)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.3)(utf-8-validate@6.0.6))(typescript@6.0.3)
+      invariant: 2.2.4
+      react: 19.2.3
+      react-native: 0.85.3(@babel/core@7.29.6)(@react-native/metro-config@0.85.3(@babel/core@7.29.6)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.3)(utf-8-validate@6.0.6)
+    transitivePeerDependencies:
+      - supports-color
+      - typescript
 
   expo-modules-autolinking@56.0.19(typescript@6.0.3):
     dependencies:
@@ -12082,6 +12162,11 @@ snapshots:
       - supports-color
 
   expo-web-browser@56.0.5(expo@56.0.15)(react-native@0.85.3(@babel/core@7.29.6)(@react-native/metro-config@0.85.3(@babel/core@7.29.6)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.3)(utf-8-validate@6.0.6)):
+    dependencies:
+      expo: 56.0.15(@babel/core@7.29.6)(@expo/dom-webview@56.0.6)(@expo/metro-runtime@56.0.16)(bufferutil@4.1.0)(expo-router@56.2.14)(react-dom@19.2.3(react@19.2.3))(react-native-web@0.21.4(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react-native-worklets@0.8.3(@babel/core@7.29.6)(@react-native/metro-config@0.85.3(@babel/core@7.29.6)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(react-native@0.85.3(@babel/core@7.29.6)(@react-native/metro-config@0.85.3(@babel/core@7.29.6)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.3)(utf-8-validate@6.0.6))(react@19.2.3))(react-native@0.85.3(@babel/core@7.29.6)(@react-native/metro-config@0.85.3(@babel/core@7.29.6)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.3)(utf-8-validate@6.0.6))(react@19.2.3)(typescript@6.0.3)(utf-8-validate@6.0.6)
+      react-native: 0.85.3(@babel/core@7.29.6)(@react-native/metro-config@0.85.3(@babel/core@7.29.6)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.3)(utf-8-validate@6.0.6)
+
+  expo-web-browser@58.0.6(expo@56.0.15)(react-native@0.85.3(@babel/core@7.29.6)(@react-native/metro-config@0.85.3(@babel/core@7.29.6)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.3)(utf-8-validate@6.0.6)):
     dependencies:
       expo: 56.0.15(@babel/core@7.29.6)(@expo/dom-webview@56.0.6)(@expo/metro-runtime@56.0.16)(bufferutil@4.1.0)(expo-router@56.2.14)(react-dom@19.2.3(react@19.2.3))(react-native-web@0.21.4(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react-native-worklets@0.8.3(@babel/core@7.29.6)(@react-native/metro-config@0.85.3(@babel/core@7.29.6)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(react-native@0.85.3(@babel/core@7.29.6)(@react-native/metro-config@0.85.3(@babel/core@7.29.6)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.3)(utf-8-validate@6.0.6))(react@19.2.3))(react-native@0.85.3(@babel/core@7.29.6)(@react-native/metro-config@0.85.3(@babel/core@7.29.6)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.3)(utf-8-validate@6.0.6))(react@19.2.3)(typescript@6.0.3)(utf-8-validate@6.0.6)
       react-native: 0.85.3(@babel/core@7.29.6)(@react-native/metro-config@0.85.3(@babel/core@7.29.6)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.3)(utf-8-validate@6.0.6)
