@@ -30,8 +30,10 @@ import type { DetectionResult } from "../types.js";
  * list and method (no LLM), and the text-cleanup LLM pass no longer runs on links.
  * 2026-10-18.2: TikTok captions get their line breaks back before parsing; an older
  * entry may hold a caption read as one run-on line.
+ * 2026-10-19.1: TikTok captions fall back to the embed page when oEmbed sends no caption; an
+ * older entry may hold a failure from an empty caption.
  */
-export const EXTRACTOR_CACHE_VERSION = "2026-10-18.2";
+export const EXTRACTOR_CACHE_VERSION = "2026-10-19.1";
 
 const cacheKeyPrefix = "linkdish:extract-cache:v1";
 
