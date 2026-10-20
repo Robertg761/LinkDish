@@ -14,11 +14,19 @@ updates:
     groups:
       # Expo packages are versioned with the SDK and only work as a set, so a new SDK
       # arrives as one PR to upgrade together (`npx expo install --fix`), not one per package.
+      # React and React Native are pinned to the versions the SDK expects, and
+      # react-test-renderer must match react exactly, so they move with the SDK too.
       expo-sdk:
         patterns:
           - "expo"
           - "expo-*"
           - "@expo/*"
+          - "react"
+          - "react-dom"
+          - "react-native"
+          - "react-test-renderer"
+          - "@types/react"
+          - "@types/react-test-renderer"
       dev-dependencies:
         dependency-type: development
         update-types:
