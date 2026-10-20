@@ -11,14 +11,38 @@ updates:
     versioning-strategy: increase
     labels:
       - dependencies
+    # React and React Native are pinned to the versions the Expo SDK expects, and
+    # react-test-renderer must match react exactly. Their minor and major versions move only
+    # during an SDK upgrade (`npx expo install --fix`, then the renderer by hand); grouping
+    # alone would still open a PR for whichever of them has a release.
+    ignore:
+      - dependency-name: "react"
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
+      - dependency-name: "react-dom"
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
+      - dependency-name: "react-native"
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
+      - dependency-name: "react-test-renderer"
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
+      - dependency-name: "@types/react"
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
+      - dependency-name: "@types/react-test-renderer"
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
     groups:
       # Expo packages are versioned with the SDK and only work as a set, so a new SDK
       # arrives as one PR to upgrade together (`npx expo install --fix`), not one per package.
+      # React's patch releases ship in lockstep, so they are grouped here to land together.
       expo-sdk:
         patterns:
           - "expo"
           - "expo-*"
           - "@expo/*"
+          - "react"
+          - "react-dom"
+          - "react-native"
+          - "react-test-renderer"
+          - "@types/react"
+          - "@types/react-test-renderer"
       dev-dependencies:
         dependency-type: development
         update-types:
