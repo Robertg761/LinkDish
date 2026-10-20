@@ -593,6 +593,25 @@ describe("parseRecipeText on a numbered method without an ingredient list", () =
     ]);
   });
 
+  it("ends a seasoning list where the method goes on", () => {
+    const parsed = parseRecipeText(
+      [
+        "1. Season 2 chicken breasts with salt and pepper and cook until browned.",
+        "2. Add 1 cup cream and 2 tbsp butter.",
+        "3. Garnish with parsley and serve immediately."
+      ].join("\n")
+    );
+
+    expect(parsed.ingredients.map((ingredient) => ingredient.text)).toEqual([
+      "2 chicken breasts",
+      "Salt",
+      "Pepper",
+      "1 cup cream",
+      "2 tbsp butter",
+      "Parsley"
+    ]);
+  });
+
   it("finds no recipe in steps that name no amounts, or in fewer than three steps", () => {
     expect(
       parseRecipeText(

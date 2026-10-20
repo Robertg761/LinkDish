@@ -211,9 +211,7 @@ const isNoiseLine = (rawLine: string, cleaned: string): boolean =>
   !/[\p{L}\p{N}]/u.test(cleaned);
 
 type Heading =
-  | { kind: "ingredients"; inline: string }
-  | { kind: "steps"; inline: string }
-  | { kind: "stop" };
+  { kind: "ingredients"; inline: string } | { kind: "steps"; inline: string } | { kind: "stop" };
 
 /*
  * A heading is the label alone ("Ingredients", "Method:"), the label with a short qualifier
@@ -1052,15 +1050,33 @@ const readMeasuredIngredients = (step: string): StepMention[] => {
 /* "Season well with smoked paprika, pepper and Italian seasoning.": ingredients without amounts. */
 const seasoningListPattern = /\b(?:season(?:ed)?|garnish(?:ed)?)\b[^.;!?]*?\bwith\s+([^.;!?]+)/giu;
 
+/* "... and cook until browned", "... then serve": the list has ended and the method goes on. */
+const startsClause = (item: string): boolean => {
+  const firstWord = item.trim().split(/\s+/u)[0] ?? "";
+
+  return (
+    cookingVerbWordPattern.test(firstWord) ||
+    pronounOrDeterminerPattern.test(firstWord) ||
+    /^(?:then|now|until|before|after|while)$/iu.test(firstWord)
+  );
+};
+
 const readSeasonings = (step: string): StepMention[] =>
-  [...step.matchAll(seasoningListPattern)].flatMap((match) =>
-    (match[1] ?? "")
+  [...step.matchAll(seasoningListPattern)].flatMap((match) => {
+    const list = match[1] ?? "";
+    const items = list
       .replace(/\s+(?:to taste|as needed)\b.*$/iu, "")
-      .split(/\s*,\s*|\s+(?:and|&)\s+/u)
+      .split(/\s*,\s*|\s+(?:and|&)\s+/u);
+    const clauseStart = items.findIndex(startsClause);
+
+    return (clauseStart === -1 ? items : items.slice(0, clauseStart))
       .map((item) => (/\d/u.test(item) ? null : readIngredientName(item.trim())))
       .filter((item): item is string => item !== null && item.split(/\s+/u).length <= 3)
-      .map((item) => ({ index: match.index, text: capitalize(item) }))
-  );
+      .map((item) => ({
+        index: match.index + match[0].length - list.length,
+        text: capitalize(item)
+      }));
+  });
 
 const readIngredientsFromSteps = (steps: readonly string[]): ParsedRecipeIngredient[] => {
   const ingredients: string[] = [];
