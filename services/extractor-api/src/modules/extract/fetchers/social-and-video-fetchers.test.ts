@@ -110,7 +110,7 @@ describe("fetchTikTokDocument", () => {
       )
     );
 
-    const document = await fetchTikTokDocument(videoUrl, fetchMock as unknown as typeof fetch, {
+    const document = await fetchTikTokDocument(videoUrl, fetchMock, {
       timeoutMs: 1_000,
       validateUrl: safe
     });
@@ -134,7 +134,7 @@ describe("fetchTikTokDocument", () => {
       )
     );
 
-    const document = await fetchTikTokDocument(videoUrl, fetchMock as unknown as typeof fetch, {
+    const document = await fetchTikTokDocument(videoUrl, fetchMock, {
       timeoutMs: 1_000,
       validateUrl: safe
     });
@@ -167,7 +167,7 @@ describe("fetchTikTokDocument", () => {
       )
     );
 
-    const document = await fetchTikTokDocument(videoUrl, fetchMock as unknown as typeof fetch, {
+    const document = await fetchTikTokDocument(videoUrl, fetchMock, {
       timeoutMs: 1_000,
       validateUrl: safe
     });
@@ -186,7 +186,7 @@ describe("fetchTikTokDocument", () => {
         : Promise.resolve(json({ author_name: "Cook Creator" }))
     );
 
-    const document = await fetchTikTokDocument(videoUrl, fetchMock as unknown as typeof fetch, {
+    const document = await fetchTikTokDocument(videoUrl, fetchMock, {
       timeoutMs: 1_000,
       validateUrl: safe
     });
