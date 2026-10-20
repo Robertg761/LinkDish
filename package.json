@@ -52,7 +52,7 @@
     "vitest": "^4.1.11"
   },
   "dependencies": {
-    "@vercel/functions": "^3.6.0"
+    "@vercel/functions": "^3.10.1"
   },
   "pnpm": {
     "auditConfig": {
