@@ -58,7 +58,7 @@
     "expo-sharing": "~56.0.21",
     "expo-splash-screen": "~56.0.12",
     "expo-status-bar": "~56.0.4",
-    "expo-store-review": "~56.0.3",
+    "expo-store-review": "~58.0.2",
     "expo-system-ui": "^56.0.5",
     "expo-web-browser": "~56.0.5",
     "react": "19.2.3",
