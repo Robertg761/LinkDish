@@ -912,11 +912,14 @@ const stepAmountPattern = new RegExp(
   `(?<![\\p{L}\\p{N}/.,])(?:(?:about|around|approximately|roughly|approx\\.?)\\s+)?(?:(\\d+\\s+\\d+\\/\\d+|\\d+(?:[.,/]\\d+)?[${fractionCharacters}]?|[${fractionCharacters}])(?:\\s*(?:-|–|to)\\s*\\d+(?:[.,/]\\d+)?)?(?:\\s*(${unitWords})\\.?)?\\s+|(half an?|an?|one|two|three|four|five|six)\\s+(${measuringUnitWords})\\s+)(?:of\\s+)?`,
   "giu"
 );
-/* "making 4 thin ones", "cut into 2 pieces", "another 3 minutes": amounts of something else. */
+/*
+ * "making 4 thin ones", "cut into 2 pieces", "another 3 minutes", "preheat to 350 F", "reduce to
+ * 1 cup": amounts of something else.
+ */
 const nonIngredientLeadPattern =
-  /\b(?:into|making|makes|serves|feeds|yields|another|every|each|than|by|per|at|step)\s+$/iu;
+  /\b(?:into|making|makes|serves|feeds|yields|another|every|each|than|by|per|at|to|step)\s+$/iu;
 const nonIngredientWordPattern =
-  /^(?:ones?|more|minutes?|mins?|seconds?|secs?|hours?|hrs?|days?|weeks?|times?|sides?|batch(?:es)?|portions?|servings?|people|persons?|degrees?|°.*|halves|parts?|equal|layers?|rounds?|rows?|inch(?:es)?|cm|percent|steps?|ingredients?|of|to|and|the|your|my|our|this|that|these|those|it|them|remaining|reserved|other|rest)$/iu;
+  /^(?:ones?|more|minutes?|mins?|seconds?|secs?|hours?|hrs?|days?|weeks?|times?|sides?|batch(?:es)?|portions?|servings?|people|persons?|degrees?|°.*|[fc]|fahrenheit|celsius|halves|parts?|equal|layers?|rounds?|rows?|inch(?:es)?|cm|percent|steps?|ingredients?|of|to|and|the|your|my|our|this|that|these|those|it|them|remaining|reserved|other|rest)$/iu;
 /* Where an ingredient's name ends: "12 ounces of bacon | at a low heat". */
 const ingredientStopWords = new Set([
   "at",

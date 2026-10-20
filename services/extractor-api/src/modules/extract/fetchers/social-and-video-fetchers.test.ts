@@ -411,6 +411,11 @@ describe("YouTube creator comments", () => {
       token: commentsToken,
       clientVersion: "2.20261019.01.00"
     });
+    expect(
+      readYouTubeCommentsRequest(
+        watchPage.replace("var ytInitialData = ", 'window["ytInitialData"] = ')
+      )
+    ).toEqual({ token: commentsToken, clientVersion: "2.20261019.01.00" });
     expect(readYouTubeCommentsRequest("<html></html>")).toBeNull();
   });
 

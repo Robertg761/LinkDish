@@ -180,19 +180,25 @@ export const extractYouTubeShortDescription = (pageHtml: string): string | null 
 const maxCreatorComments = 3;
 const maxCommentChars = 10_000;
 
-/* The JSON object a watch page assigns to `var <name> = {...};`, or null. */
+/*
+ * The JSON object a watch page assigns to `var <name> = {...};` or `window["<name>"] = {...};`
+ * (YouTube serves both), or null.
+ */
 const readAssignedJson = (pageHtml: string, name: string): unknown => {
-  const marker = `var ${name} = `;
-  const start = pageHtml.indexOf(marker);
+  const assignment = new RegExp(
+    `(?:var\\s+${name}|window\\[["']${name}["']\\])\\s*=\\s*`,
+    "u"
+  ).exec(pageHtml);
 
-  if (start === -1) {
+  if (!assignment) {
     return null;
   }
 
+  const start = assignment.index + assignment[0].length;
   const end = pageHtml.indexOf(";</script>", start);
 
   try {
-    return JSON.parse(pageHtml.slice(start + marker.length, end === -1 ? undefined : end));
+    return JSON.parse(pageHtml.slice(start, end === -1 ? undefined : end));
   } catch {
     return null;
   }

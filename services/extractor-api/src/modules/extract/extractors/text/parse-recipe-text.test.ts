@@ -593,6 +593,23 @@ describe("parseRecipeText on a numbered method without an ingredient list", () =
     ]);
   });
 
+  it("leaves oven temperatures and target amounts out of the ingredients", () => {
+    const parsed = parseRecipeText(
+      [
+        "1. Preheat oven to 350 F.",
+        "2. Mix 2 cups flour with 1 cup sugar.",
+        "3. Bake at 180 C for 20 minutes, then simmer the juices and reduce to 1 cup.",
+        "4. Brush with 2 eggs, beaten."
+      ].join("\n")
+    );
+
+    expect(parsed.ingredients.map((ingredient) => ingredient.text)).toEqual([
+      "2 cups flour",
+      "1 cup sugar",
+      "2 eggs"
+    ]);
+  });
+
   it("ends a seasoning list where the method goes on", () => {
     const parsed = parseRecipeText(
       [
