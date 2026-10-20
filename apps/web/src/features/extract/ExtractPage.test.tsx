@@ -98,6 +98,7 @@ const authMocks = vi.hoisted(() => {
         listeners.delete(listener);
       };
     },
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- widens the literal type; typescript-eslint 8.7x misreports this
     user: { billingPlan: "free", email: "cook@example.com", id: "user_1" } as {
       billingPlan?: "free" | "plus" | "family";
       email: string;

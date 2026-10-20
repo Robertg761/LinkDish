@@ -6,7 +6,7 @@ import { useImportUsageState } from "./use-import-usage";
 import type { QuotaStatus } from "@linkdish/api-contracts";
 
 const mocks = vi.hoisted(() => ({
-  auth: { credentialsKey: "clerk:user_1" as string | null, isAuthenticated: true, loading: false },
+  auth: { credentialsKey: "clerk:user_1", isAuthenticated: true, loading: false },
   getBillingUsage: vi.fn()
 }));
 

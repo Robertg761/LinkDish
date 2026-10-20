@@ -39,7 +39,7 @@ describe("fetchTikTokDocument", () => {
 
     const document = await fetchTikTokDocument(
       `${videoUrl}?is_from_webapp=1&sender_device=pc`,
-      fetchMock as unknown as typeof fetch,
+      fetchMock,
       { timeoutMs: 1_000, validateUrl: safe }
     );
 
@@ -65,7 +65,7 @@ describe("fetchTikTokDocument", () => {
       )
     );
 
-    const document = await fetchTikTokDocument(videoUrl, fetchMock as unknown as typeof fetch, {
+    const document = await fetchTikTokDocument(videoUrl, fetchMock, {
       timeoutMs: 1_000,
       validateUrl: safe
     });
@@ -91,11 +91,10 @@ describe("fetchTikTokDocument", () => {
       return Promise.resolve(json({ title: "caption" }));
     });
 
-    const document = await fetchTikTokDocument(
-      "https://vm.tiktok.com/ZMabc123/",
-      fetchMock as unknown as typeof fetch,
-      { timeoutMs: 1_000, validateUrl }
-    );
+    const document = await fetchTikTokDocument("https://vm.tiktok.com/ZMabc123/", fetchMock, {
+      timeoutMs: 1_000,
+      validateUrl
+    });
 
     expect(document.url).toBe(videoUrl);
     expect(validateUrl.mock.calls.map(([url]) => url)).toEqual([
@@ -133,11 +132,10 @@ describe("fetchTikTokDocument", () => {
 
   it("classifies oEmbed failures", async () => {
     const statusFor = async (status: number) =>
-      fetchTikTokDocument(
-        videoUrl,
-        (() => Promise.resolve(json({}, status))) as unknown as typeof fetch,
-        { timeoutMs: 1_000, validateUrl: safe }
-      ).catch((error: unknown) => (error as SocialFetchError).reason);
+      fetchTikTokDocument(videoUrl, () => Promise.resolve(json({}, status)), {
+        timeoutMs: 1_000,
+        validateUrl: safe
+      }).catch((error: unknown) => (error as SocialFetchError).reason);
 
     await expect(statusFor(404)).resolves.toBe("not_found");
     await expect(statusFor(400)).resolves.toBe("not_found");
@@ -148,10 +146,7 @@ describe("fetchTikTokDocument", () => {
   it("drops non-http thumbnails", async () => {
     const document = await fetchTikTokDocument(
       videoUrl,
-      (() =>
-        Promise.resolve(
-          json({ title: "caption", thumbnail_url: "javascript:alert(1)" })
-        )) as unknown as typeof fetch,
+      () => Promise.resolve(json({ title: "caption", thumbnail_url: "javascript:alert(1)" })),
       { timeoutMs: 1_000, validateUrl: safe }
     );
 
@@ -169,7 +164,7 @@ describe("fetchTikTokDocument", () => {
       });
 
     await expect(
-      fetchTikTokDocument(videoUrl, hanging as unknown as typeof fetch, {
+      fetchTikTokDocument(videoUrl, hanging, {
         timeoutMs: 10,
         validateUrl: safe
       })
@@ -208,7 +203,7 @@ describe("YouTube descriptions", () => {
     const document = await fetchYouTubeDocument(
       "https://www.youtube.com/shorts/dQw4w9WgXcQ",
       "dQw4w9WgXcQ",
-      fetchMock as unknown as typeof fetch,
+      fetchMock,
       50,
       { validateUrl: safe }
     );

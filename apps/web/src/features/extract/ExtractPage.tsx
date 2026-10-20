@@ -220,11 +220,10 @@ export const ExtractPage: React.FC = () => {
   }, [phase.status]);
 
   useEffect(() => {
-    const idle = window.requestIdleCallback;
     const warm = () => preload(ImportPhotoPanel);
 
-    if (typeof idle === "function") {
-      const id = idle(warm, { timeout: 4000 });
+    if (typeof window.requestIdleCallback === "function") {
+      const id = window.requestIdleCallback(warm, { timeout: 4000 });
       return () => window.cancelIdleCallback?.(id);
     }
 

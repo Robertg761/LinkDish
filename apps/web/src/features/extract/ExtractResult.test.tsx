@@ -44,11 +44,7 @@ vi.mock("../../analytics/client", () => ({
 }));
 
 const authMocks = vi.hoisted(() => ({
-  user: { billingPlan: "plus", email: "cook@example.com", id: "user_1" } as {
-    billingPlan?: "free" | "plus" | "family";
-    email: string;
-    id: string;
-  }
+  user: { billingPlan: "plus", email: "cook@example.com", id: "user_1" }
 }));
 
 vi.mock("../../auth/AuthProvider", () => ({

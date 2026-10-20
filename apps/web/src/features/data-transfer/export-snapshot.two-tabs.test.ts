@@ -74,7 +74,7 @@ const captureDownload = () => {
     const text = await new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(reader.result as string);
-      reader.onerror = () => reject(reader.error as Error);
+      reader.onerror = () => reject(reader.error ?? new Error("Could not read the blob."));
       reader.readAsText(blob!);
     });
     return JSON.parse(text) as WebLinkDishBackup;

@@ -203,7 +203,7 @@ export const validatePublicSourceUrl = async (
   let resolvedAddresses: Array<{ address: string; family: number }>;
 
   try {
-    const resolveHostname = (options?.resolveHostname ?? lookup) as ResolveHostname;
+    const resolveHostname: ResolveHostname = options?.resolveHostname ?? lookup;
     resolvedAddresses = await resolveHostname(hostname, {
       all: true,
       verbatim: true

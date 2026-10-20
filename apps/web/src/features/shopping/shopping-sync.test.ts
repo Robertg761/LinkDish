@@ -50,7 +50,7 @@ const authMocks = vi.hoisted(() => ({
     credentialsKey: null as string | null,
     isAuthenticated: true,
     loading: false,
-    user: { id: "u1" } as { id: string } | null
+    user: { id: "u1" }
   }
 }));
 

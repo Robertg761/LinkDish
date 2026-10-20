@@ -12,6 +12,13 @@ updates:
     labels:
       - dependencies
     groups:
+      # Expo packages are versioned with the SDK and only work as a set, so a new SDK
+      # arrives as one PR to upgrade together (`npx expo install --fix`), not one per package.
+      expo-sdk:
+        patterns:
+          - "expo"
+          - "expo-*"
+          - "@expo/*"
       dev-dependencies:
         dependency-type: development
         update-types:

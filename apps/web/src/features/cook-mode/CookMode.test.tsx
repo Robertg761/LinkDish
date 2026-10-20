@@ -100,7 +100,7 @@ const flushAsync = async () => {
 };
 
 const mockPointer = (coarse: boolean) => {
-  vi.mocked(window.matchMedia).mockImplementation((query: string) => ({
+  vi.mocked(window).matchMedia.mockImplementation((query: string) => ({
     addEventListener: vi.fn(),
     addListener: vi.fn(),
     dispatchEvent: vi.fn(),

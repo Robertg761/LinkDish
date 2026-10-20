@@ -165,9 +165,7 @@ describe("shopping-list-store", () => {
     const db = await getLinkDishWebDb();
     const originalTransaction = db.transaction.bind(db);
     let puts = 0;
-    vi.spyOn(db, "transaction").mockImplementation(((
-      ...args: Parameters<typeof db.transaction>
-    ) => {
+    vi.spyOn(db, "transaction").mockImplementation((...args: Parameters<typeof db.transaction>) => {
       const tx = originalTransaction(...args);
       const originalObjectStore = tx.objectStore.bind(tx);
 
@@ -180,12 +178,12 @@ describe("shopping-list-store", () => {
           return Object.assign(store, {
             put: (value: unknown) => {
               puts += 1;
-              return originalPut(value as never);
+              return originalPut(value);
             }
           });
         }
       });
-    }) as typeof db.transaction);
+    });
 
     await addShoppingItems([{ text: "4 item-3" }], { canSync: false });
 

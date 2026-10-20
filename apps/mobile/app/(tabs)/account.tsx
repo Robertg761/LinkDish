@@ -679,7 +679,7 @@ export default function AccountScreen() {
         setInviteCode("");
         setIsJoinHouseholdModalVisible(false);
         setIsJoiningHousehold(false);
-        router.push("/household" as never);
+        router.push("/household");
       })
       .catch((error) => {
         setInviteError(getAccountActionErrorMessage(error));
@@ -689,7 +689,7 @@ export default function AccountScreen() {
 
   const handleDebugHouseholdSignIn = () => {
     void signInWithDebugHousehold()
-      .then(() => router.replace("/household" as never))
+      .then(() => router.replace("/household"))
       .catch(() => undefined);
   };
 
@@ -792,7 +792,7 @@ export default function AccountScreen() {
                 <View style={styles.accountPrimaryActions}>
                   <AppButton
                     label="Manage Household"
-                    onPress={() => router.push("/household" as never)}
+                    onPress={() => router.push("/household")}
                     style={styles.accountPrimaryButton}
                     variant="outline"
                   />
@@ -805,7 +805,7 @@ export default function AccountScreen() {
                   />
                   <AppButton
                     label="View Plans"
-                    onPress={() => router.push("/upgrade" as never)}
+                    onPress={() => router.push("/upgrade")}
                     style={styles.accountPrimaryButton}
                     variant="outline"
                   />
@@ -1027,7 +1027,7 @@ export default function AccountScreen() {
             onPress: () => {
               setIsDeleteAccountDialogVisible(false);
               void deleteAccount(confirmEmail)
-                .then(() => router.replace("/" as never))
+                .then(() => router.replace("/"))
                 .catch(() => undefined);
             },
             variant: "danger"

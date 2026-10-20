@@ -310,7 +310,7 @@ export const canDecompress = (format: "gzip" | "deflate-raw"): boolean => {
   }
 
   try {
-    new DecompressionStream(format as CompressionFormat);
+    new DecompressionStream(format);
     return true;
   } catch {
     return false;
@@ -339,7 +339,7 @@ const decompress = async (
     throw new DataTransferError("unsupported_browser");
   }
 
-  const stream = new DecompressionStream(format as CompressionFormat);
+  const stream = new DecompressionStream(format);
   const writer = stream.writable.getWriter();
   // Errors surface on the readable side too; these would otherwise be unhandled rejections.
   writer.write(bytes as Uint8Array<ArrayBuffer>).catch(() => undefined);

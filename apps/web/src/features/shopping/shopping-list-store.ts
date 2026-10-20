@@ -414,7 +414,7 @@ const defaultChannelFactory: ShoppingChannelFactory = () => {
   try {
     const created = new BroadcastChannel(SHOPPING_CHANNEL_NAME);
     (created as unknown as { unref?: () => void }).unref?.();
-    return created as unknown as ShoppingChannel;
+    return created;
   } catch {
     return null;
   }

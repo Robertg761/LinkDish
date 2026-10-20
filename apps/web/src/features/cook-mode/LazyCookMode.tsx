@@ -31,10 +31,10 @@ export const LazyCookMode: React.FC<CookModeProps> = (props) => {
   }, [props.open]);
 
   useEffect(() => {
-    const idle = window.requestIdleCallback;
-
-    if (typeof idle === "function") {
-      const id = idle(preloadCookMode, { timeout: IDLE_PRELOAD_DELAY_MS * 2 });
+    if (typeof window.requestIdleCallback === "function") {
+      const id = window.requestIdleCallback(preloadCookMode, {
+        timeout: IDLE_PRELOAD_DELAY_MS * 2
+      });
       return () => window.cancelIdleCallback?.(id);
     }
 
