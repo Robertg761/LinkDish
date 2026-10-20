@@ -1,37 +1,57 @@
 import { toYouTubeWatchUrl } from "../../source-detection/parse-youtube-video-id.js";
 import {
   buildTextRecipeCandidate,
+  hasRecipeIngredients,
   isCompleteRecipeParse,
   type TextRecipeExtraction
 } from "../text/extract-text-recipe.js";
-import { findTextLinks, parseRecipeText } from "../text/parse-recipe-text.js";
+import {
+  findTextLinks,
+  parseRecipeText,
+  withoutRecipePointer,
+  type ParsedRecipeText
+} from "../text/parse-recipe-text.js";
 
 import type { YouTubeSourceDocument } from "../../types.js";
 
 /*
- * A YouTube recipe is read from what the creator wrote: the description (or, where the server
- * can get one, a transcript that happens to be laid out as a recipe). Spoken transcripts are
- * not turned into recipes; a video whose description has no recipe is reported as such, and
- * the caller can follow a "full recipe" link instead (see findYouTubeRecipeLinks).
+ * A YouTube recipe is read from what the creator wrote: the description, a transcript that
+ * happens to be laid out as a recipe, or the creator's own comment ("written recipe in the
+ * comments"), in that order; the first complete recipe wins. Spoken transcripts are not turned
+ * into recipes; a video with no written recipe is reported as such, and the caller can follow a
+ * "full recipe" link instead (see findYouTubeRecipeLinks).
  */
 export const extractYouTubeRecipe = (
   document: YouTubeSourceDocument
 ): TextRecipeExtraction | null => {
-  const descriptionParse = parseRecipeText(document.description ?? "");
-  const transcriptParse = document.transcript ? parseRecipeText(document.transcript) : null;
-  const usesTranscript =
-    transcriptParse !== null &&
-    isCompleteRecipeParse(transcriptParse) &&
-    !isCompleteRecipeParse(descriptionParse);
-  const parsed = usesTranscript ? transcriptParse : descriptionParse;
-  const provenance = usesTranscript ? "transcript" : "visible-text";
+  const sources: { parsed: ParsedRecipeText; source: "description" | "transcript" | "comment" }[] =
+    [
+      { parsed: parseRecipeText(document.description ?? ""), source: "description" },
+      ...(document.transcript
+        ? [{ parsed: parseRecipeText(document.transcript), source: "transcript" as const }]
+        : []),
+      ...(document.creatorComments ?? []).map((comment) => ({
+        parsed: parseRecipeText(comment),
+        source: "comment" as const
+      }))
+    ];
+  /*
+   * Without a complete recipe anywhere, an ingredient list stands (the method is in the video):
+   * the description's, else a creator comment's. A spoken transcript is never read as a list.
+   */
+  const chosen =
+    sources.find((entry) => isCompleteRecipeParse(entry.parsed)) ??
+    sources.find((entry) => entry.source !== "transcript" && hasRecipeIngredients(entry.parsed)) ??
+    sources[0]!;
+  const videoTitle = document.title ? withoutRecipePointer(document.title) : null;
 
-  return buildTextRecipeCandidate(parsed, {
-    sourceTitle: document.title,
+  return buildTextRecipeCandidate(chosen.parsed, {
+    /* A comment's own title line ("Marry Me Chicken Gnocchi") names the dish better than a video title. */
+    sourceTitle: chosen.source === "comment" ? (chosen.parsed.title ?? videoTitle) : videoTitle,
     fallbackTitle: `YouTube recipe ${document.videoId}`,
     isVideo: true,
     strategy: "youtube-transcript",
-    provenance,
+    provenance: chosen.source === "transcript" ? "transcript" : "visible-text",
     recipe: {
       sourceUrl: document.url,
       sourceType: "youtube",

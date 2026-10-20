@@ -740,6 +740,32 @@ describe("YouTube recipe links", () => {
     });
   });
 
+  it("prefers a linked full recipe over ingredients put together from a numbered method", async () => {
+    const fetchHtmlDocument = vi.fn((url: string) =>
+      Promise.resolve(htmlResult(url, recipeJsonLd))
+    );
+    const runtime = createRuntime({
+      fetchHtmlDocument,
+      validateSourceUrl: vi.fn(() => Promise.resolve({ safe: true as const })),
+      fetchYouTubeDocument: youtubeDocument(
+        [
+          "1. Boil 200g pasta in salted water.",
+          "2. Fry 2 cloves garlic in 2 tbsp olive oil.",
+          "3. Add 1 can tomatoes and simmer, then toss with the pasta.",
+          `Full recipe: ${recipeUrl}`
+        ].join("\n")
+      )
+    });
+
+    const { response } = await extractRecipe({ url: videoUrl, attempt: "primary" }, runtime);
+
+    expect(fetchHtmlDocument.mock.calls.map(([url]) => url)).toEqual([recipeUrl]);
+    expect(response).toMatchObject({
+      status: "success",
+      recipe: { title: "One-Pan Tomato Pasta", sourceUrl: recipeUrl, videoUrl }
+    });
+  });
+
   it("explains that the video has no written recipe when neither the description nor a link has one", async () => {
     const fetchHtmlDocument = vi.fn((url: string) => Promise.resolve(htmlResult(url, articleWeak)));
     const runtime = createRuntime({
@@ -754,7 +780,7 @@ describe("YouTube recipe links", () => {
       status: "failure",
       reason: "parse_failed",
       userMessage:
-        "That video's description doesn't include a written recipe. Try the recipe's website instead."
+        "That video's description and the creator's comments don't include a written recipe. Try the recipe's website instead."
     });
   });
 });

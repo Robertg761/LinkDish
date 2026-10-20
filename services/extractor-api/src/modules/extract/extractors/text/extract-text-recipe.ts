@@ -52,18 +52,19 @@ const hasPartialMethod = (parsed: ParsedRecipeText): boolean =>
     parsed.steps.length <= maxPartialMethodSteps &&
     parsed.steps.join(" ").length < maxPartialMethodLength);
 
+/** Whether a parse found an ingredient list a video recipe can be built on (the method may be in the video). */
+export const hasRecipeIngredients = (parsed: ParsedRecipeText): boolean =>
+  parsed.structure !== null && parsed.ingredients.length >= minimumIngredientCount;
+
 /** Whether a parse found a whole recipe: ingredients and a method that is more than a few notes. */
 export const isCompleteRecipeParse = (parsed: ParsedRecipeText): boolean =>
-  parsed.structure !== null &&
-  parsed.ingredients.length >= minimumIngredientCount &&
-  parsed.steps.length >= 1 &&
-  !hasPartialMethod(parsed);
+  hasRecipeIngredients(parsed) && parsed.steps.length >= 1 && !hasPartialMethod(parsed);
 
 export const buildTextRecipeCandidate = (
   parsed: ParsedRecipeText,
   options: TextRecipeOptions
 ): TextRecipeExtraction | null => {
-  if (parsed.structure === null || parsed.ingredients.length < minimumIngredientCount) {
+  if (!hasRecipeIngredients(parsed)) {
     return null;
   }
 
@@ -101,7 +102,9 @@ export const buildTextRecipeCandidate = (
       evidence: [
         parsed.structure === "headings"
           ? "Read the ingredients and method under the text's own headings."
-          : "Read a list of measured ingredients followed by method lines."
+          : parsed.structure === "method"
+            ? "Read a numbered method, and the ingredients from the amounts its steps name."
+            : "Read a list of measured ingredients followed by method lines."
       ],
       warnings: methodInVideo
         ? [
@@ -109,7 +112,9 @@ export const buildTextRecipeCandidate = (
               ? "The text lists the ingredients only, so the method is in the video."
               : "The text has only a few notes on the method, so the rest is in the video."
           ]
-        : [],
+        : parsed.structure === "method"
+          ? ["The recipe had no ingredient list, so this one was put together from its steps."]
+          : [],
       provenance: [provenance],
       fieldProvenance: buildFieldProvenance({
         title: "visible-text",
@@ -121,7 +126,8 @@ export const buildTextRecipeCandidate = (
         nutrition: null
       }),
       signals: {
-        requiredFieldsInferred: methodInVideo,
+        /* A list put together from the steps is inferred too, so a linked full recipe is still tried. */
+        requiredFieldsInferred: methodInVideo || parsed.structure === "method",
         titleConfidence: sourceTitle || parsed.title ? "strong" : "weak",
         timesFromStructuredMetadata: false,
         recipeLike: true,

@@ -11,7 +11,12 @@ import {
   TIKTOK_EMBED_PAGE_ENDPOINT,
   TIKTOK_OEMBED_ENDPOINT
 } from "./fetch-tiktok-document";
-import { extractYouTubeShortDescription, fetchYouTubeDocument } from "./fetch-youtube-document";
+import {
+  extractYouTubeShortDescription,
+  fetchYouTubeDocument,
+  readYouTubeCommentsRequest,
+  readYouTubeCreatorComments
+} from "./fetch-youtube-document";
 
 import type { ValidateSourceUrl } from "../source-url-safety";
 
@@ -341,5 +346,172 @@ describe("YouTube descriptions", () => {
       description: fullDescription,
       authorName: "Cook Channel"
     });
+  });
+});
+
+describe("YouTube creator comments", () => {
+  const commentsToken = "Eg0SC2NvbW1lbnRzLXNlY3Rpb24";
+  const initialData = {
+    contents: {
+      twoColumnWatchNextResults: {
+        results: {
+          results: {
+            contents: [
+              { videoPrimaryInfoRenderer: {} },
+              {
+                itemSectionRenderer: {
+                  contents: [
+                    {
+                      continuationItemRenderer: {
+                        continuationEndpoint: {
+                          continuationCommand: { token: commentsToken }
+                        }
+                      }
+                    }
+                  ],
+                  sectionIdentifier: "comment-item-section"
+                }
+              }
+            ]
+          }
+        },
+        secondaryResults: {
+          continuationItemRenderer: {
+            continuationEndpoint: { continuationCommand: { token: "related-videos" } }
+          }
+        }
+      }
+    }
+  };
+  const watchPage = `<html><body><script>ytcfg.set({"INNERTUBE_CLIENT_VERSION":"2.20261019.01.00"});</script><script>var ytInitialPlayerResponse = {"videoDetails":{"videoId":"dQw4w9WgXcQ","shortDescription":""}};</script><script>var ytInitialData = ${JSON.stringify(
+    initialData
+  )};</script></body></html>`;
+  const comment = (content: string, isCreator: boolean, replyLevel = 0) => ({
+    payload: {
+      commentEntityPayload: {
+        properties: { content: { content }, replyLevel },
+        author: { displayName: isCreator ? "@cook" : "@fan", isCreator }
+      }
+    }
+  });
+  const commentsResponse = {
+    frameworkUpdates: {
+      entityBatchUpdate: {
+        mutations: [
+          comment("Looks delicious!", false),
+          comment("Gnocchi\n1. Add 1 cup cream", true),
+          comment("Thanks!", true, 1)
+        ]
+      }
+    }
+  };
+
+  it("reads the comment section's token and the client version from the watch page", () => {
+    expect(readYouTubeCommentsRequest(watchPage)).toEqual({
+      token: commentsToken,
+      clientVersion: "2.20261019.01.00"
+    });
+    expect(
+      readYouTubeCommentsRequest(
+        watchPage.replace("var ytInitialData = ", 'window["ytInitialData"] = ')
+      )
+    ).toEqual({ token: commentsToken, clientVersion: "2.20261019.01.00" });
+    expect(readYouTubeCommentsRequest("<html></html>")).toBeNull();
+  });
+
+  it("keeps only the creator's own top-level comments", () => {
+    expect(readYouTubeCreatorComments(commentsResponse)).toEqual(["Gnocchi\n1. Add 1 cup cream"]);
+    expect(
+      readYouTubeCreatorComments({
+        commentRenderer: {
+          authorIsChannelOwner: true,
+          contentText: { runs: [{ text: "Older " }, { text: "layout" }] }
+        }
+      })
+    ).toEqual(["Older layout"]);
+    expect(
+      readYouTubeCreatorComments({
+        commentThreadRenderer: {
+          comment: {
+            commentRenderer: {
+              authorIsChannelOwner: false,
+              contentText: { runs: [{ text: "Where's the recipe?" }] }
+            }
+          },
+          replies: {
+            commentRepliesRenderer: {
+              contents: [
+                {
+                  commentRenderer: {
+                    authorIsChannelOwner: true,
+                    contentText: { runs: [{ text: "Coming soon!" }] }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      })
+    ).toEqual([]);
+  });
+
+  it("loads the creator's comments with the video", async () => {
+    const fetchMock = vi.fn<FetchSignature>((input, init) => {
+      const url = requestedUrl(input);
+
+      if (url.startsWith("https://www.youtube.com/oembed")) {
+        return Promise.resolve(json({ title: "Gnocchi", author_name: "Cook" }));
+      }
+
+      if (url.startsWith("https://www.youtube.com/youtubei/v1/next")) {
+        expect(JSON.parse(init?.body as string)).toMatchObject({
+          context: { client: { clientName: "WEB", clientVersion: "2.20261019.01.00" } },
+          continuation: commentsToken
+        });
+        return Promise.resolve(json(commentsResponse));
+      }
+
+      return Promise.resolve(
+        new Response(watchPage, { status: 200, headers: { "content-type": "text/html" } })
+      );
+    });
+
+    const document = await fetchYouTubeDocument(
+      "https://www.youtube.com/shorts/dQw4w9WgXcQ",
+      "dQw4w9WgXcQ",
+      fetchMock,
+      50,
+      { validateUrl: safe }
+    );
+
+    expect(document.creatorComments).toEqual(["Gnocchi\n1. Add 1 cup cream"]);
+  });
+
+  it("treats a failed comments request as no comments", async () => {
+    const fetchMock = vi.fn<FetchSignature>((input) => {
+      const url = requestedUrl(input);
+
+      if (url.startsWith("https://www.youtube.com/oembed")) {
+        return Promise.resolve(json({ title: "Gnocchi" }));
+      }
+
+      if (url.startsWith("https://www.youtube.com/youtubei/v1/next")) {
+        return Promise.reject(new Error("socket hang up"));
+      }
+
+      return Promise.resolve(
+        new Response(watchPage, { status: 200, headers: { "content-type": "text/html" } })
+      );
+    });
+
+    const document = await fetchYouTubeDocument(
+      "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      "dQw4w9WgXcQ",
+      fetchMock,
+      50,
+      { validateUrl: safe }
+    );
+
+    expect(document.creatorComments).toEqual([]);
   });
 });

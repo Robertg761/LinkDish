@@ -405,5 +405,12 @@
     "expectedMinimumOutcome": "success",
     "url": "https://www.tiktok.com/@meghanmerrigan/video/7348529797066132778",
     "expectedFinalUrlPattern": "tiktok\\.com/@meghanmerrigan/video/7348529797066132778"
+  },
+  {
+    "id": "youtube-6jrjfsen4n0",
+    "kind": "youtube",
+    "expectedMinimumOutcome": "success",
+    "url": "https://www.youtube.com/watch?v=6jRjfsEN4n0",
+    "expectedFinalUrlPattern": "youtube\\.com/watch\\?v=6jRjfsEN4n0"
   }
 ]

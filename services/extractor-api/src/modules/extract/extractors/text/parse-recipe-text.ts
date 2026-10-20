@@ -22,9 +22,11 @@ export interface ParsedRecipeText {
   totalTimeMinutes: number | null;
   /**
    * "headings": the text labels its ingredients (and usually its method); "layout": no headings,
-   * but a run of quantity lines followed by method sentences; null: no recipe structure found.
+   * but a run of quantity lines followed by method sentences; "method": no ingredient list, only
+   * numbered steps, and the ingredients are the amounts those steps name; null: no recipe
+   * structure found.
    */
-  structure: "headings" | "layout" | null;
+  structure: "headings" | "layout" | "method" | null;
   /**
    * Where the steps came from: a method heading, method lines after an unlabelled list, or only
    * short notes between the ingredient groups ("*Chill for 30 minutes"); null when there are none.
@@ -209,9 +211,7 @@ const isNoiseLine = (rawLine: string, cleaned: string): boolean =>
   !/[\p{L}\p{N}]/u.test(cleaned);
 
 type Heading =
-  | { kind: "ingredients"; inline: string }
-  | { kind: "steps"; inline: string }
-  | { kind: "stop" };
+  { kind: "ingredients"; inline: string } | { kind: "steps"; inline: string } | { kind: "stop" };
 
 /*
  * A heading is the label alone ("Ingredients", "Method:"), the label with a short qualifier
@@ -448,11 +448,21 @@ const splitSentences = (value: string): string[] => {
   return sentences.map((sentence) => sentence.trim()).filter(Boolean);
 };
 
-/* "Pasta (recipe below)", "Pasta Recipe in caption, instructions in video": the dish alone. */
+/*
+ * "Pasta (recipe below)", "Pasta Recipe in caption, instructions in video", "One pan dinner! I'll
+ * have the written recipe up in comments soon!": the dish alone.
+ */
 export const withoutRecipePointer = (title: string): string =>
   title
     .replace(/\s*\((?:full )?recipe (?:below|in (?:the )?(?:caption|comments|bio))\)/iu, "")
-    .replace(/[\s,.!-]+(?:full )?recipe (?:is )?in (?:the )?caption\b.*$/iu, "")
+    .replace(
+      /[\s,.!-]+(?:full )?recipe (?:is )?in (?:the )?(?:caption|comments?|description|bio)\b.*$/iu,
+      ""
+    )
+    .replace(
+      /(?<=[.!?])\s+[^.!?]*\b(?:recipes?|measurements)\b[^.!?]*\b(?:comments?|description|caption|bio|below|pinned)\b[^.!?]*[.!?]*$/iu,
+      ""
+    )
     .trim();
 
 const cleanTitle = (line: string): string | null => {
@@ -879,6 +889,292 @@ const parseByLayout = (lines: TextLine[], metadata: Metadata): ParsedRecipeText 
   };
 };
 
+/*
+ * A method without an ingredient list ("2. Mix 1/2 cup of grated Parmesan with 1/2 cup of bread
+ * crumbs") names its ingredients, with their amounts, as it goes. They are read back out of the
+ * steps in order: an amount, an optional unit and "of", then the words up to a clause boundary.
+ */
+const measuringUnitWords =
+  "cups?|tbsps?|tablespoons?|tbs|tsps?|teaspoons?|grams?|kg|kilos?|kilograms?|ml|millilit(?:er|re)s?|lit(?:er|re)s?|oz|ounces?|lbs?|pounds?|cloves?|pinch(?:es)?|dash(?:es)?|cans?|tins?|jars?|sticks?|slices?|packets?|packages?|pkgs?|bunch(?:es)?|handfuls?|sprigs?|stalks?|knobs?|quarts?|pints?";
+const wordAmounts: Record<string, string> = {
+  a: "1",
+  an: "1",
+  one: "1",
+  two: "2",
+  three: "3",
+  four: "4",
+  five: "5",
+  six: "6",
+  "half a": "1/2",
+  "half an": "1/2"
+};
+const stepAmountPattern = new RegExp(
+  `(?<![\\p{L}\\p{N}/.,])(?:(?:about|around|approximately|roughly|approx\\.?)\\s+)?(?:(\\d+\\s+\\d+\\/\\d+|\\d+(?:[.,/]\\d+)?[${fractionCharacters}]?|[${fractionCharacters}])(?:\\s*(?:-|–|to)\\s*\\d+(?:[.,/]\\d+)?)?(?:\\s*(${unitWords})\\.?)?\\s+|(half an?|an?|one|two|three|four|five|six)\\s+(${measuringUnitWords})\\s+)(?:of\\s+)?`,
+  "giu"
+);
+/*
+ * "making 4 thin ones", "cut into 2 pieces", "another 3 minutes", "preheat to 350 F", "reduce to
+ * 1 cup": amounts of something else.
+ */
+const nonIngredientLeadPattern =
+  /\b(?:into|making|makes|serves|feeds|yields|another|every|each|than|by|per|at|to|step)\s+$/iu;
+const nonIngredientWordPattern =
+  /^(?:ones?|more|minutes?|mins?|seconds?|secs?|hours?|hrs?|days?|weeks?|times?|sides?|batch(?:es)?|portions?|servings?|people|persons?|degrees?|°.*|[fc]|fahrenheit|celsius|halves|parts?|equal|layers?|rounds?|rows?|inch(?:es)?|cm|percent|steps?|ingredients?|of|to|and|the|your|my|our|this|that|these|those|it|them|remaining|reserved|other|rest)$/iu;
+/* Where an ingredient's name ends: "12 ounces of bacon | at a low heat". */
+const ingredientStopWords = new Set([
+  "at",
+  "to",
+  "into",
+  "in",
+  "until",
+  "with",
+  "on",
+  "onto",
+  "for",
+  "from",
+  "then",
+  "while",
+  "along",
+  "over",
+  "under",
+  "before",
+  "after",
+  "so",
+  "that",
+  "which",
+  "if",
+  "or",
+  "as",
+  "by",
+  "per",
+  "but",
+  "when",
+  "together",
+  "now",
+  "evenly",
+  "back",
+  "here",
+  "there"
+]);
+const pronounOrDeterminerPattern =
+  /^(?:the|your|my|our|this|that|these|those|it|its|them|they|you|everything|all|some|more|remaining|reserved)$/iu;
+const trailingDescriptorPattern =
+  /^(?:chopped|diced|minced|sliced|grated|shredded|cubed|melted|softened|crushed|peeled|drained|rinsed|halved|quartered|beaten|divided|sifted|thawed|cooked|torn|julienned)$/iu;
+const cookingVerbWordPattern = new RegExp(`^(?:${cookingVerbs})$`, "iu");
+const maxIngredientNameWords = 6;
+
+/*
+ * The ingredient's name in the words after an amount: up to a clause word ("at", "until"), a
+ * punctuation mark, or an "and" that starts a new clause ("and cut them", "and 1 cup of cream").
+ */
+const readIngredientName = (rest: string): string | null => {
+  const words = (rest.match(/^[^.,;:!?()]*/u)?.[0] ?? "").split(/\s+/u).filter(Boolean);
+  const name: string[] = [];
+
+  for (const [index, word] of words.entries()) {
+    const lower = word.toLowerCase();
+
+    if (
+      ingredientStopWords.has(lower) ||
+      /\d/u.test(word) ||
+      name.length >= maxIngredientNameWords
+    ) {
+      break;
+    }
+
+    if (lower === "and" || lower === "&") {
+      const next = words[index + 1] ?? "";
+
+      if (
+        next === "" ||
+        cookingVerbWordPattern.test(next) ||
+        pronounOrDeterminerPattern.test(next) ||
+        startsWithQuantity(words.slice(index + 1).join(" ")) ||
+        /^(?:about|around|approximately|roughly|then|a|an)$/iu.test(next)
+      ) {
+        break;
+      }
+    }
+
+    name.push(word);
+  }
+
+  if (name.length === 0 || pronounOrDeterminerPattern.test(name[0]!)) {
+    return null;
+  }
+
+  /* "bacon chopped" reads as "bacon, chopped"; "freshly shredded Parmesan" stays as it is. */
+  const descriptorStart = name.findIndex(
+    (_word, index) =>
+      index > 0 && name.slice(index).every((word) => trailingDescriptorPattern.test(word))
+  );
+
+  return descriptorStart > 0
+    ? `${name.slice(0, descriptorStart).join(" ")}, ${name.slice(descriptorStart).join(" ")}`
+    : name.join(" ");
+};
+
+interface StepMention {
+  index: number;
+  text: string;
+}
+
+const readMeasuredIngredients = (step: string): StepMention[] => {
+  const found: StepMention[] = [];
+
+  for (const match of step.matchAll(stepAmountPattern)) {
+    const [whole, digits, digitUnit, words, wordUnit] = match;
+    const before = step.slice(0, match.index);
+    const unit = digitUnit ?? wordUnit ?? null;
+    const name = readIngredientName(step.slice(match.index + whole.length));
+
+    if (
+      !name ||
+      nonIngredientLeadPattern.test(before) ||
+      nonIngredientWordPattern.test(name.split(/[\s,]+/u)[0]!) ||
+      (unit !== null && /^(?:inch(?:es)?|cm)$/iu.test(unit))
+    ) {
+      continue;
+    }
+
+    /* "200g", "1-2 cups" as written; "around a tablespoon" as "1 tablespoon". */
+    const amount = digits
+      ? whole
+          .replace(/^(?:about|around|approximately|roughly|approx\.?)\s+/iu, "")
+          .replace(/\s+(?:of\s+)?$/iu, "")
+      : `${wordAmounts[words!.toLowerCase().replace(/\s+/gu, " ")] ?? "1"} ${unit}`;
+
+    found.push({ index: match.index, text: `${amount} ${name}` });
+  }
+
+  return found;
+};
+
+/* "Season well with smoked paprika, pepper and Italian seasoning.": ingredients without amounts. */
+const seasoningListPattern = /\b(?:season(?:ed)?|garnish(?:ed)?)\b[^.;!?]*?\bwith\s+([^.;!?]+)/giu;
+
+/* "... and cook until browned", "... then serve": the list has ended and the method goes on. */
+const startsClause = (item: string): boolean => {
+  const firstWord = item.trim().split(/\s+/u)[0] ?? "";
+
+  return (
+    cookingVerbWordPattern.test(firstWord) ||
+    pronounOrDeterminerPattern.test(firstWord) ||
+    /^(?:then|now|until|before|after|while)$/iu.test(firstWord)
+  );
+};
+
+const readSeasonings = (step: string): StepMention[] =>
+  [...step.matchAll(seasoningListPattern)].flatMap((match) => {
+    const list = match[1] ?? "";
+    const items = list
+      .replace(/\s+(?:to taste|as needed)\b.*$/iu, "")
+      .split(/\s*,\s*|\s+(?:and|&)\s+/u);
+    const clauseStart = items.findIndex(startsClause);
+
+    return (clauseStart === -1 ? items : items.slice(0, clauseStart))
+      .map((item) => (/\d/u.test(item) ? null : readIngredientName(item.trim())))
+      .filter((item): item is string => item !== null && item.split(/\s+/u).length <= 3)
+      .map((item) => ({
+        index: match.index + match[0].length - list.length,
+        text: capitalize(item)
+      }));
+  });
+
+const readIngredientsFromSteps = (steps: readonly string[]): ParsedRecipeIngredient[] => {
+  const ingredients: string[] = [];
+
+  for (const step of steps) {
+    const measured = readMeasuredIngredients(step).map((mention) => ({
+      ...mention,
+      measured: true
+    }));
+    const seasonings = readSeasonings(step).map((mention) => ({ ...mention, measured: false }));
+
+    for (const { text, measured: isMeasured } of [...measured, ...seasonings].sort(
+      (left, right) => left.index - right.index
+    )) {
+      const lower = text.toLowerCase();
+
+      /* "Season with Parmesan" after "1 cup Parmesan" is the same ingredient. */
+      const isDuplicate = isMeasured
+        ? ingredients.includes(text)
+        : ingredients.some((ingredient) => ingredient.toLowerCase().includes(lower));
+
+      if (!isDuplicate) {
+        ingredients.push(text);
+      }
+    }
+  }
+
+  return ingredients.map((text) => ({ text, section: null }));
+};
+
+const minimumMethodSteps = 3;
+const minimumMethodIngredients = 3;
+/* "Enjoy!!" closes a method; it is not a step. */
+const signOffStepPattern = /^(?:enjoy|bon app[eé]tit|happy cooking|dig in)\W*$/iu;
+
+/*
+ * No ingredient list at all, only a numbered method that names its amounts as it goes (a creator's
+ * comment under a video, often). It needs at least three numbered steps, and at least three
+ * ingredients (two of them measured) read out of them.
+ */
+const parseMethodOnly = (lines: TextLine[], metadata: Metadata): ParsedRecipeText | null => {
+  const contentLines = lines.filter((line) => !readMetadataLine(line.text, metadata));
+  const isNumbered = (line: string) =>
+    stepMarkerPattern.test(line) || stepWordMarkerPattern.test(line);
+  const start = contentLines.findIndex((line) => isNumbered(line.text));
+
+  if (start < 0) {
+    return null;
+  }
+
+  const stepBuilder: StepBuilder = { steps: [], numbered: false, pendingPrefix: null };
+  let numberedSteps = 0;
+
+  for (const { text: line } of contentLines.slice(start)) {
+    const heading = readHeading(line);
+
+    if (heading?.kind === "stop" || heading?.kind === "ingredients") {
+      break;
+    }
+
+    if (heading?.kind === "steps") {
+      continue;
+    }
+
+    numberedSteps += isNumbered(line) ? 1 : 0;
+    addStepLine(stepBuilder, line);
+  }
+
+  const steps = stepBuilder.steps.filter((step) => !signOffStepPattern.test(step));
+  const ingredients = readIngredientsFromSteps(steps);
+  const measured = ingredients.filter((ingredient) => startsWithQuantity(ingredient.text)).length;
+
+  if (
+    numberedSteps < minimumMethodSteps ||
+    ingredients.length < minimumMethodIngredients ||
+    measured < 2
+  ) {
+    return null;
+  }
+
+  const preamble = contentLines.slice(0, start).map((line) => line.text);
+  const titleLine = preamble.find(looksLikeTitleLine);
+
+  return {
+    title: titleLine ? cleanTitle(titleLine) : null,
+    ingredients,
+    steps,
+    ...metadata,
+    structure: "method",
+    methodSource: preamble.some((line) => readHeading(line)?.kind === "steps")
+      ? "heading"
+      : "layout"
+  };
+};
+
 const emptyParse = (metadata: Metadata): ParsedRecipeText => ({
   title: null,
   ingredients: [],
@@ -934,8 +1230,11 @@ export const parseRecipeText = (text: string): ParsedRecipeText => {
     return withHeadings;
   }
 
-  const layoutMetadata = newMetadata();
-  return parseByLayout(lines, layoutMetadata) ?? emptyParse(headingMetadata);
+  return (
+    parseByLayout(lines, newMetadata()) ??
+    parseMethodOnly(lines, newMetadata()) ??
+    emptyParse(headingMetadata)
+  );
 };
 
 /** Links in free text (a YouTube description), in order of appearance, with the line around each. */

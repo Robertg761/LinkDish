@@ -1,6 +1,8 @@
+import { readFileSync } from "node:fs";
+
 import { describe, expect, it } from "vitest";
 
-import { findTextLinks, parseRecipeText } from "./parse-recipe-text";
+import { findTextLinks, parseRecipeText, withoutRecipePointer } from "./parse-recipe-text";
 
 describe("parseRecipeText", () => {
   it("reads a labelled recipe with metadata, bullets, numbered steps and notes", () => {
@@ -529,6 +531,136 @@ describe("parseRecipeText", () => {
         "My chili: brown 1 lb beef with 2 tbsp chili powder, then add 1 can beans and simmer."
       ).structure
     ).toBeNull();
+  });
+});
+
+describe("parseRecipeText on a numbered method without an ingredient list", () => {
+  const creatorComment = readFileSync(
+    new URL("../../__fixtures__/youtube-creator-comment.txt", import.meta.url),
+    "utf8"
+  );
+
+  it("reads the ingredients from the amounts the steps name", () => {
+    const parsed = parseRecipeText(creatorComment);
+
+    expect(parsed.structure).toBe("method");
+    expect(parsed.methodSource).toBe("layout");
+    expect(parsed.title).toBe("Marry Me Bacon Chicken Gnocchi");
+    expect(parsed.ingredients.map((ingredient) => ingredient.text)).toEqual([
+      "12 ounces bacon, chopped",
+      "2 chicken breasts",
+      "1/2 cup grated Parmesan",
+      "1/2 cup Italian style bread crumbs",
+      "1 tablespoon sun dried tomato oil",
+      "1/4 cup chopped sun dried tomatoes",
+      "1 package gnocchi",
+      "1 tablespoon minced garlic",
+      "3/4 cups low sodium chicken broth",
+      "1 cup heavy cream",
+      "Smoked paprika",
+      "Pepper",
+      "Italian seasoning",
+      "1 cup freshly shredded Parmesan cheese",
+      "1-2 cups chopped fresh spinach"
+    ]);
+    /* "Enjoy!!" closes the method; it is not a step. */
+    expect(parsed.steps).toHaveLength(7);
+    expect(parsed.steps[0]).toBe(
+      "To a large skillet add 12 ounces of bacon chopped at a low to medium heat. Cook until crispy. Remove from pan leaving the bacon grease."
+    );
+  });
+
+  it("leaves out times, counts and the ingredients already in the pan", () => {
+    const parsed = parseRecipeText(
+      [
+        "Method:",
+        "1. Cut 2 chicken breasts into 4 pieces and season with salt and pepper to taste.",
+        "2. Fry in 2 tbsp olive oil for 5 minutes, then add 200g mushrooms.",
+        "3. Pour in a cup of cream and the rest of the oil, then bake at 180 degrees for 20 minutes.",
+        "4. Cook another 3 minutes and serve with your rice."
+      ].join("\n")
+    );
+
+    expect(parsed.structure).toBe("method");
+    expect(parsed.methodSource).toBe("heading");
+    expect(parsed.ingredients.map((ingredient) => ingredient.text)).toEqual([
+      "2 chicken breasts",
+      "Salt",
+      "Pepper",
+      "2 tbsp olive oil",
+      "200g mushrooms",
+      "1 cup cream"
+    ]);
+  });
+
+  it("leaves oven temperatures and target amounts out of the ingredients", () => {
+    const parsed = parseRecipeText(
+      [
+        "1. Preheat oven to 350 F.",
+        "2. Mix 2 cups flour with 1 cup sugar.",
+        "3. Bake at 180 C for 20 minutes, then simmer the juices and reduce to 1 cup.",
+        "4. Brush with 2 eggs, beaten."
+      ].join("\n")
+    );
+
+    expect(parsed.ingredients.map((ingredient) => ingredient.text)).toEqual([
+      "2 cups flour",
+      "1 cup sugar",
+      "2 eggs"
+    ]);
+  });
+
+  it("ends a seasoning list where the method goes on", () => {
+    const parsed = parseRecipeText(
+      [
+        "1. Season 2 chicken breasts with salt and pepper and cook until browned.",
+        "2. Add 1 cup cream and 2 tbsp butter.",
+        "3. Garnish with parsley and serve immediately."
+      ].join("\n")
+    );
+
+    expect(parsed.ingredients.map((ingredient) => ingredient.text)).toEqual([
+      "2 chicken breasts",
+      "Salt",
+      "Pepper",
+      "1 cup cream",
+      "2 tbsp butter",
+      "Parsley"
+    ]);
+  });
+
+  it("finds no recipe in steps that name no amounts, or in fewer than three steps", () => {
+    expect(
+      parseRecipeText(
+        [
+          "1. Brown the beef in a hot pan.",
+          "2. Add the beans and the tomatoes.",
+          "3. Simmer until thick, then serve."
+        ].join("\n")
+      ).structure
+    ).toBeNull();
+    expect(
+      parseRecipeText(
+        ["1. Add 2 cups flour and 1 cup milk.", "2. Whisk in 2 eggs and fry."].join("\n")
+      ).structure
+    ).toBeNull();
+  });
+});
+
+describe("withoutRecipePointer", () => {
+  it("drops a sentence that says where the recipe is", () => {
+    expect(
+      withoutRecipePointer(
+        "The best one pan dinner! I’ll have the written recipe up in comments soon!"
+      )
+    ).toBe("The best one pan dinner!");
+    expect(withoutRecipePointer("Creamy Tuscan Gnocchi - recipe in comments")).toBe(
+      "Creamy Tuscan Gnocchi"
+    );
+    expect(withoutRecipePointer("Tomato Soup (recipe below)")).toBe("Tomato Soup");
+    expect(withoutRecipePointer("My favourite recipe! So easy.")).toBe(
+      "My favourite recipe! So easy."
+    );
   });
 });
 
