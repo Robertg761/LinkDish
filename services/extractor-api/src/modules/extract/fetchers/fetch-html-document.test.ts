@@ -34,11 +34,11 @@ describe("fetchHtmlDocument", () => {
         )
       );
 
-    const result = await fetchHtmlDocument(
-      "https://example.com/recipe",
-      fetchImplementation as unknown as typeof fetch,
-      { validateUrl: allowUrl, timeoutMs: 1_000, retries: 0 }
-    );
+    const result = await fetchHtmlDocument("https://example.com/recipe", fetchImplementation, {
+      validateUrl: allowUrl,
+      timeoutMs: 1_000,
+      retries: 0
+    });
 
     expect(result.blockedSignals).toEqual([]);
     expect(fetchImplementation).toHaveBeenCalledTimes(2);
@@ -51,11 +51,11 @@ describe("fetchHtmlDocument", () => {
       .mockResolvedValueOnce(createHtmlResponse(200, challengeHtml))
       .mockResolvedValueOnce(createHtmlResponse(200, recipeHtml));
 
-    const result = await fetchHtmlDocument(
-      "https://example.com/recipe",
-      fetchImplementation as unknown as typeof fetch,
-      { validateUrl: allowUrl, timeoutMs: 1_000, retries: 0 }
-    );
+    const result = await fetchHtmlDocument("https://example.com/recipe", fetchImplementation, {
+      validateUrl: allowUrl,
+      timeoutMs: 1_000,
+      retries: 0
+    });
 
     expect(result.blockedSignals).toEqual([]);
     expect(fetchImplementation).toHaveBeenCalledTimes(2);

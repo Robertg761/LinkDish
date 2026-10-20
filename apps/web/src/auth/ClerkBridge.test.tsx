@@ -12,6 +12,7 @@ const clerk = vi.hoisted(() => ({
   auth: {
     getToken: vi.fn(),
     isLoaded: false,
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- widens the literal type; typescript-eslint 8.7x misreports this
     isSignedIn: false as boolean | undefined,
     sessionId: null as string | null,
     signOut: vi.fn()
@@ -23,6 +24,7 @@ const clerk = vi.hoisted(() => ({
   },
   signIn: {
     isLoaded: false,
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- widens the literal type; typescript-eslint 8.7x misreports this
     signIn: { authenticateWithRedirect: vi.fn() } as {
       authenticateWithRedirect: ReturnType<typeof vi.fn>;
     } | null

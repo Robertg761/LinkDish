@@ -13,7 +13,7 @@ const jsonResponse = (body: unknown, status = 200): Response =>
 const createClient = (fetchImplementation: FetchSignature, timeoutMs?: number) =>
   createExtractorApiClient({
     baseUrl: "https://api.test",
-    fetchImplementation: fetchImplementation as unknown as typeof fetch,
+    fetchImplementation: fetchImplementation,
     ...(timeoutMs === undefined ? {} : { timeoutMs })
   });
 
@@ -127,7 +127,7 @@ describe("input validation", () => {
   it("surfaces a failing header provider as a rejection", async () => {
     const client = createExtractorApiClient({
       baseUrl: "https://api.test",
-      fetchImplementation: vi.fn<FetchSignature>() as unknown as typeof fetch,
+      fetchImplementation: vi.fn<FetchSignature>(),
       getHeaders: () => {
         throw new Error("no token");
       }
@@ -281,7 +281,7 @@ describe("header acquisition is bounded and cancellable", () => {
   ) =>
     createExtractorApiClient({
       baseUrl: "https://api.test",
-      fetchImplementation: fetchImplementation as unknown as typeof fetch,
+      fetchImplementation: fetchImplementation,
       getHeaders,
       ...(timeoutMs === undefined ? {} : { timeoutMs })
     });
@@ -302,7 +302,7 @@ describe("header acquisition is bounded and cancellable", () => {
     const fetchImplementation = vi.fn<FetchSignature>();
     const client = createExtractorApiClient({
       baseUrl: "https://api.test",
-      fetchImplementation: fetchImplementation as unknown as typeof fetch,
+      fetchImplementation: fetchImplementation,
       getHeaders: hangingHeaders,
       extractTimeoutMs: 15
     });

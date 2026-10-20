@@ -179,7 +179,7 @@ describe("Menu", () => {
   });
 
   it("becomes a bottom action sheet on touch phones when adaptive", () => {
-    vi.mocked(window.matchMedia).mockImplementation((query: string) => ({
+    vi.mocked(window).matchMedia.mockImplementation((query: string) => ({
       matches: query === MENU_SHEET_MEDIA_QUERY,
       media: query,
       onchange: null,
@@ -226,7 +226,7 @@ describe("Menu", () => {
       fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
       expect(onDelete).toHaveBeenCalledTimes(1);
     } finally {
-      vi.mocked(window.matchMedia).mockImplementation((query: string) => ({
+      vi.mocked(window).matchMedia.mockImplementation((query: string) => ({
         matches: false,
         media: query,
         onchange: null,

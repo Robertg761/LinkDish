@@ -22,8 +22,14 @@ import type { TextSourceDocument } from "../types.js";
  * SSRF rules as every other fetch: manual redirects, each hop validated, TikTok hosts only.
  */
 export const TIKTOK_OEMBED_ENDPOINT = "https://www.tiktok.com/oembed";
+/*
+ * Since October 2026 oEmbed can answer with a bare player iframe and no caption. The embed page
+ * TikTok serves for that player still carries the caption, author and cover in its page state.
+ */
+export const TIKTOK_EMBED_PAGE_ENDPOINT = "https://www.tiktok.com/embed/v2";
 
 const oEmbedMaxBytes = 256 * 1024;
+const embedPageMaxBytes = 2 * 1024 * 1024;
 const maxShortLinkRedirects = 5;
 const maxCaptionChars = 5_000;
 
@@ -128,6 +134,85 @@ const restoreCaptionLines = (caption: string): string => caption.replace(/[^\S\n
 const readString = (value: unknown): string | null =>
   typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 
+const readRecord = (value: unknown): Record<string, unknown> =>
+  value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+
+interface TikTokPost {
+  caption: string | null;
+  authorName: string | null;
+  thumbnailUrl: string | null;
+}
+
+/* https://www.tiktok.com/@cook/video/123 → 123; oEmbed's embed_product_id names it too. */
+const readVideoId = (videoUrl: string, payload: Record<string, unknown>): string | null =>
+  new URL(videoUrl).pathname.match(/\/(?:video|photo)\/(\d+)/u)?.[1] ??
+  readString(payload.embed_product_id)?.match(/^\d+$/u)?.[0] ??
+  null;
+
+const fetchEmbedPagePost = async (
+  videoId: string,
+  fetchImplementation: typeof fetch,
+  validateUrl: ValidateSourceUrl,
+  signal: AbortSignal
+): Promise<TikTokPost | null> => {
+  const embedUrl = `${TIKTOK_EMBED_PAGE_ENDPOINT}/${videoId}`;
+
+  await assertSafe(embedUrl, validateUrl);
+
+  const response = await fetchImplementation(embedUrl, {
+    headers: browserLikeHeaders,
+    redirect: "manual",
+    signal
+  });
+
+  if (!response.ok) {
+    discardBody(response);
+    return null;
+  }
+
+  let html: string;
+
+  try {
+    html = await readLimitedResponseText(response, embedPageMaxBytes);
+  } catch (error) {
+    if (error instanceof ResponseBodyTooLargeError) {
+      return null;
+    }
+
+    throw error;
+  }
+
+  const stateJson = html.match(
+    /<script[^>]*id="__FRONTITY_CONNECT_STATE__"[^>]*>([\s\S]*?)<\/script>/u
+  )?.[1];
+
+  if (!stateJson) {
+    return null;
+  }
+
+  let state: unknown;
+
+  try {
+    state = JSON.parse(stateJson);
+  } catch {
+    return null;
+  }
+
+  const pageData = readRecord(readRecord(readRecord(state).source).data);
+  const videoData = readRecord(readRecord(pageData[`/embed/v2/${videoId}`]).videoData);
+  const itemInfos = readRecord(videoData.itemInfos);
+  const authorInfos = readRecord(videoData.authorInfos);
+  const covers = Array.isArray(itemInfos.covers) ? (itemInfos.covers as unknown[]) : [];
+
+  return {
+    caption: readString(itemInfos.text),
+    authorName: readString(authorInfos.nickName) ?? readString(authorInfos.uniqueId),
+    thumbnailUrl: readString(covers[0])
+  };
+};
+
 export const fetchTikTokDocument = async (
   url: string,
   fetchImplementation: typeof fetch,
@@ -182,17 +267,43 @@ export const fetchTikTokDocument = async (
       throw new SocialFetchError("TikTok oEmbed returned invalid JSON.", "unreachable");
     }
 
-    const caption = readString(payload.title);
-    const thumbnailUrl = readString(payload.thumbnail_url);
+    let post: TikTokPost = {
+      caption: readString(payload.title),
+      authorName: readString(payload.author_name),
+      thumbnailUrl: readString(payload.thumbnail_url)
+    };
+    const videoId = post.caption ? null : readVideoId(videoUrl, payload);
+
+    if (videoId) {
+      /* The embed page is a best-effort extra: if it fails, the oEmbed answer still stands. */
+      const embedPost = await fetchEmbedPagePost(
+        videoId,
+        fetchImplementation,
+        validateUrl,
+        timeout.signal
+      ).catch((error: unknown) => {
+        if (timeout.signal.aborted || isAbortError(error)) {
+          throw error;
+        }
+
+        return null;
+      });
+
+      post = {
+        caption: embedPost?.caption ?? post.caption,
+        authorName: post.authorName ?? embedPost?.authorName ?? null,
+        thumbnailUrl: post.thumbnailUrl ?? embedPost?.thumbnailUrl ?? null
+      };
+    }
 
     return {
       kind: "text",
       url: videoUrl,
       origin: "tiktok",
-      text: restoreCaptionLines(caption ?? "").slice(0, maxCaptionChars),
+      text: restoreCaptionLines(post.caption ?? "").slice(0, maxCaptionChars),
       title: null,
-      authorName: readString(payload.author_name),
-      thumbnailUrl: thumbnailUrl && isHttpUrl(thumbnailUrl) ? thumbnailUrl : null
+      authorName: post.authorName,
+      thumbnailUrl: post.thumbnailUrl && isHttpUrl(post.thumbnailUrl) ? post.thumbnailUrl : null
     };
   } catch (error) {
     if (error instanceof SocialFetchError) {

@@ -39,6 +39,7 @@ const recipe = (overrides: Partial<Recipe> = {}): Recipe =>
   }) as Recipe;
 
 const saved = (id: string, overrides: Partial<WebSavedRecipe> = {}, recipeOverrides = {}) =>
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- widens the literal type; typescript-eslint 8.7x misreports this
   ({
     createdAt: "2026-09-01T00:00:00.000Z",
     extraction: { fetchMode: "http", provenance: [], strategy: "recipe-schema", warnings: [] },

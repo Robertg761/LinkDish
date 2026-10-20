@@ -96,7 +96,7 @@ export default function HomeScreen() {
 
   const handleSubmit = (url: string) => {
     if (!useServerBillingGate && !importGate.allowed) {
-      router.push("/upgrade" as never);
+      router.push("/upgrade");
       return;
     }
 
@@ -165,7 +165,7 @@ export default function HomeScreen() {
     }
 
     if (!useServerBillingGate && !importGate.allowed) {
-      router.push("/upgrade" as never);
+      router.push("/upgrade");
       return;
     }
 

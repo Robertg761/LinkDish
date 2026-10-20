@@ -16,7 +16,6 @@ import {
   starterRecipeSeedRecordToSavedRecipeRecord
 } from "./store";
 
-import type { BillingTier } from "../billing/plans";
 import type { SuccessfulExtractionState } from "../recipe-results/types";
 import type { ExtractorApiClient } from "@linkdish/api-client";
 import type { HouseholdDetails, SharedRecipe } from "@linkdish/api-contracts";
@@ -30,7 +29,7 @@ const accountState = vi.hoisted(() => ({
 }));
 
 const billingState = vi.hoisted(() => ({
-  tier: "free" as BillingTier
+  tier: "free"
 }));
 
 const apiMocks = vi.hoisted(() => ({
@@ -247,37 +246,36 @@ const buildSharedRecipe = (index: number, id = `shared_recipe_${index}`): Shared
   warnings: []
 });
 
-const createMockClient = (): ExtractorApiClient =>
-  ({
-    acceptHouseholdInvite: vi.fn(),
-    cancelHouseholdInvite: vi.fn(),
-    createHousehold: vi.fn(),
-    createHouseholdInvite: vi.fn(),
-    createWebBillingCheckout: vi.fn(),
-    createWebBillingPortal: vi.fn(),
-    createSharedRecipe: apiMocks.createSharedRecipe,
-    deleteAccount: vi.fn(),
-    deleteShoppingItems: vi.fn(),
-    deleteSharedRecipe: apiMocks.deleteSharedRecipe,
-    extractRecipe: vi.fn(),
-    extractRecipeFromText: vi.fn(),
-    getAuthConfig: vi.fn(),
-    getBillingUsage: vi.fn(),
-    getHousehold: apiMocks.getHousehold,
-    getSession: vi.fn(),
-    getShoppingList: vi.fn(),
-    getSharedRecipes: apiMocks.getSharedRecipes,
-    getWebBillingAvailability: vi.fn(),
-    leaveHousehold: vi.fn(),
-    logout: vi.fn(),
-    removeHouseholdMember: vi.fn(),
-    requestLoginCode: vi.fn(),
-    sendAnalyticsEvents: vi.fn(),
-    updateAccountProfile: vi.fn(),
-    upsertShoppingItems: vi.fn(),
-    updateSharedRecipe: apiMocks.updateSharedRecipe,
-    verifyLoginCode: vi.fn()
-  }) as ExtractorApiClient;
+const createMockClient = (): ExtractorApiClient => ({
+  acceptHouseholdInvite: vi.fn(),
+  cancelHouseholdInvite: vi.fn(),
+  createHousehold: vi.fn(),
+  createHouseholdInvite: vi.fn(),
+  createWebBillingCheckout: vi.fn(),
+  createWebBillingPortal: vi.fn(),
+  createSharedRecipe: apiMocks.createSharedRecipe,
+  deleteAccount: vi.fn(),
+  deleteShoppingItems: vi.fn(),
+  deleteSharedRecipe: apiMocks.deleteSharedRecipe,
+  extractRecipe: vi.fn(),
+  extractRecipeFromText: vi.fn(),
+  getAuthConfig: vi.fn(),
+  getBillingUsage: vi.fn(),
+  getHousehold: apiMocks.getHousehold,
+  getSession: vi.fn(),
+  getShoppingList: vi.fn(),
+  getSharedRecipes: apiMocks.getSharedRecipes,
+  getWebBillingAvailability: vi.fn(),
+  leaveHousehold: vi.fn(),
+  logout: vi.fn(),
+  removeHouseholdMember: vi.fn(),
+  requestLoginCode: vi.fn(),
+  sendAnalyticsEvents: vi.fn(),
+  updateAccountProfile: vi.fn(),
+  upsertShoppingItems: vi.fn(),
+  updateSharedRecipe: apiMocks.updateSharedRecipe,
+  verifyLoginCode: vi.fn()
+});
 
 let latestSavedRecipes: ReturnType<typeof useSavedRecipes> | null = null;
 

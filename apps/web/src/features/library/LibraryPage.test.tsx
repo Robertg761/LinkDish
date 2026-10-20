@@ -157,7 +157,7 @@ const makeRecipe = (id: string, options: RecipeOptions): WebSavedRecipe => {
     timesCooked: 0,
     updatedAt: iso(options.daysAgo ?? 1),
     ...options.extra
-  } as WebSavedRecipe;
+  };
 };
 
 const seedRecipes = (recipes: WebSavedRecipe[]) => fakeIdb.seed(SAVED_RECIPES_STORE_NAME, recipes);
@@ -1133,7 +1133,7 @@ describe("LibraryPage", () => {
       removeEventListener: vi.fn(),
       removeListener: vi.fn()
     });
-    vi.mocked(window.matchMedia).mockImplementation(
+    vi.mocked(window).matchMedia.mockImplementation(
       mediaQuery((query) => query === MENU_SHEET_MEDIA_QUERY)
     );
 
@@ -1170,7 +1170,7 @@ describe("LibraryPage", () => {
           .map((item) => item.textContent)
       ).toEqual(["Add to collection…", "Edit tags…", "Add to meal plan…", "Add to shopping list"]);
     } finally {
-      vi.mocked(window.matchMedia).mockImplementation(mediaQuery(() => false));
+      vi.mocked(window).matchMedia.mockImplementation(mediaQuery(() => false));
     }
   });
 

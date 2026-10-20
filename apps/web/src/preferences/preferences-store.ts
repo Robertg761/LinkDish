@@ -138,7 +138,7 @@ export const setPreferences = (patch: Partial<Preferences>): void => {
 };
 
 export const setPreference = <K extends keyof Preferences>(key: K, value: Preferences[K]): void => {
-  setPreferences({ [key]: value } as Pick<Preferences, K>);
+  setPreferences({ [key]: value });
 };
 
 export const subscribePreferences = (listener: () => void): (() => void) => {

@@ -138,7 +138,7 @@ beforeEach(() => {
   revenueCatMocks.isRevenueCatPurchaseCancelled.mockReturnValue(false);
   revenueCatMocks.loginRevenueCatAccount.mockResolvedValue(null);
   revenueCatMocks.logoutRevenueCatAccount.mockResolvedValue(null);
-  revenueCatMocks.purchaseRevenueCatPackage.mockResolvedValue({} as never);
+  revenueCatMocks.purchaseRevenueCatPackage.mockResolvedValue({});
 });
 
 const fakePurchasePackage = {

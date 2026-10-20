@@ -63,6 +63,24 @@
     return;
   }
 
+  // Privacy-friendly analytics by Plausible, shared by every public page.
+  window.plausible =
+    window.plausible ||
+    function () {
+      (window.plausible.q = window.plausible.q || []).push(arguments);
+    };
+  window.plausible.init =
+    window.plausible.init ||
+    function (options) {
+      window.plausible.o = options || {};
+    };
+  window.plausible.init();
+
+  var plausibleScript = document.createElement("script");
+  plausibleScript.async = true;
+  plausibleScript.src = "https://plausible.io/js/pa-QTcFHtiUYj4Ui3HBYuJ31.js";
+  document.head.appendChild(plausibleScript);
+
   var apiBaseUrl = "https://api.linkdish.ca";
   var clientKey = "linkdish:marketing:analytics-client-id:v1";
   var sessionKey = "linkdish:marketing:analytics-session-id:v1";

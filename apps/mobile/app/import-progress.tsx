@@ -255,7 +255,7 @@ export default function ImportProgressScreen() {
               {sharedUrl ? <AppButton label="Retry" onPress={retry} /> : null}
               <AppButton
                 label="Import manually"
-                onPress={() => router.replace("/import" as never)}
+                onPress={() => router.replace("/import")}
                 variant={sharedUrl ? "secondary" : "primary"}
               />
             </View>

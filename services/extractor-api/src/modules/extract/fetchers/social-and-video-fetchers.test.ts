@@ -6,7 +6,11 @@ vi.mock("youtube-transcript", () => ({
 }));
 
 import { SocialFetchError } from "./errors";
-import { fetchTikTokDocument, TIKTOK_OEMBED_ENDPOINT } from "./fetch-tiktok-document";
+import {
+  fetchTikTokDocument,
+  TIKTOK_EMBED_PAGE_ENDPOINT,
+  TIKTOK_OEMBED_ENDPOINT
+} from "./fetch-tiktok-document";
 import {
   extractYouTubeShortDescription,
   fetchYouTubeDocument,
@@ -44,7 +48,7 @@ describe("fetchTikTokDocument", () => {
 
     const document = await fetchTikTokDocument(
       `${videoUrl}?is_from_webapp=1&sender_device=pc`,
-      fetchMock as unknown as typeof fetch,
+      fetchMock,
       { timeoutMs: 1_000, validateUrl: safe }
     );
 
@@ -70,7 +74,7 @@ describe("fetchTikTokDocument", () => {
       )
     );
 
-    const document = await fetchTikTokDocument(videoUrl, fetchMock as unknown as typeof fetch, {
+    const document = await fetchTikTokDocument(videoUrl, fetchMock, {
       timeoutMs: 1_000,
       validateUrl: safe
     });
@@ -78,6 +82,121 @@ describe("fetchTikTokDocument", () => {
     expect(document.text).toBe(
       "Pasta salad\nIngredients\nPasta screws cooked\nParsley\n#easyrecipes"
     );
+  });
+
+  it("reads the caption from the embed page when oEmbed sends only a player", async () => {
+    const embedState = {
+      source: {
+        data: {
+          "/embed/v2/7234567890123456789": {
+            videoData: {
+              itemInfos: {
+                text: "Chili  Ingredients  1 lb beef  1 can beans  #dinner",
+                covers: ["https://p16-common-sign.tiktokcdn-us.com/cover.jpeg"]
+              },
+              authorInfos: { uniqueId: "cook", nickName: "Cook Creator" }
+            }
+          }
+        }
+      }
+    };
+    const fetchMock = vi.fn<FetchSignature>((input) =>
+      Promise.resolve(
+        requestedUrl(input).startsWith(TIKTOK_EMBED_PAGE_ENDPOINT)
+          ? new Response(
+              `<html><script id="__FRONTITY_CONNECT_STATE__" type="application/json">${JSON.stringify(embedState)}</script></html>`,
+              { status: 200, headers: { "content-type": "text/html" } }
+            )
+          : json({
+              type: "video",
+              html: '<iframe src="https://www.tiktok.com/player/v1/7234567890123456789"></iframe>',
+              embed_product_id: "7234567890123456789"
+            })
+      )
+    );
+
+    const document = await fetchTikTokDocument(videoUrl, fetchMock, {
+      timeoutMs: 1_000,
+      validateUrl: safe
+    });
+
+    expect(requestedUrl(fetchMock.mock.calls[1]![0])).toBe(
+      `${TIKTOK_EMBED_PAGE_ENDPOINT}/7234567890123456789`
+    );
+    expect(document).toMatchObject({
+      text: "Chili\nIngredients\n1 lb beef\n1 can beans\n#dinner",
+      authorName: "Cook Creator",
+      thumbnailUrl: "https://p16-common-sign.tiktokcdn-us.com/cover.jpeg"
+    });
+  });
+
+  it("returns an empty caption when neither oEmbed nor the embed page has one", async () => {
+    const fetchMock = vi.fn<FetchSignature>((input) =>
+      Promise.resolve(
+        requestedUrl(input).startsWith(TIKTOK_EMBED_PAGE_ENDPOINT)
+          ? new Response("blocked", { status: 403 })
+          : json({ type: "video", embed_product_id: "7234567890123456789" })
+      )
+    );
+
+    const document = await fetchTikTokDocument(videoUrl, fetchMock, {
+      timeoutMs: 1_000,
+      validateUrl: safe
+    });
+
+    expect(document.text).toBe("");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps oEmbed's author and thumbnail when the embed page has only the caption", async () => {
+    const embedState = {
+      source: {
+        data: {
+          "/embed/v2/7234567890123456789": {
+            videoData: { itemInfos: { text: "Chili  Ingredients  1 lb beef" } }
+          }
+        }
+      }
+    };
+    const fetchMock = vi.fn<FetchSignature>((input) =>
+      Promise.resolve(
+        requestedUrl(input).startsWith(TIKTOK_EMBED_PAGE_ENDPOINT)
+          ? new Response(
+              `<script id="__FRONTITY_CONNECT_STATE__">${JSON.stringify(embedState)}</script>`,
+              { status: 200, headers: { "content-type": "text/html" } }
+            )
+          : json({
+              author_name: "Cook Creator",
+              thumbnail_url: "https://p16-sign.tiktokcdn-us.com/thumb.jpeg"
+            })
+      )
+    );
+
+    const document = await fetchTikTokDocument(videoUrl, fetchMock, {
+      timeoutMs: 1_000,
+      validateUrl: safe
+    });
+
+    expect(document).toMatchObject({
+      text: "Chili\nIngredients\n1 lb beef",
+      authorName: "Cook Creator",
+      thumbnailUrl: "https://p16-sign.tiktokcdn-us.com/thumb.jpeg"
+    });
+  });
+
+  it("keeps the oEmbed answer when the embed page request fails", async () => {
+    const fetchMock = vi.fn<FetchSignature>((input) =>
+      requestedUrl(input).startsWith(TIKTOK_EMBED_PAGE_ENDPOINT)
+        ? Promise.reject(new TypeError("fetch failed"))
+        : Promise.resolve(json({ author_name: "Cook Creator" }))
+    );
+
+    const document = await fetchTikTokDocument(videoUrl, fetchMock, {
+      timeoutMs: 1_000,
+      validateUrl: safe
+    });
+
+    expect(document).toMatchObject({ text: "", authorName: "Cook Creator" });
   });
 
   it("resolves short links one validated hop at a time", async () => {
@@ -96,11 +215,10 @@ describe("fetchTikTokDocument", () => {
       return Promise.resolve(json({ title: "caption" }));
     });
 
-    const document = await fetchTikTokDocument(
-      "https://vm.tiktok.com/ZMabc123/",
-      fetchMock as unknown as typeof fetch,
-      { timeoutMs: 1_000, validateUrl }
-    );
+    const document = await fetchTikTokDocument("https://vm.tiktok.com/ZMabc123/", fetchMock, {
+      timeoutMs: 1_000,
+      validateUrl
+    });
 
     expect(document.url).toBe(videoUrl);
     expect(validateUrl.mock.calls.map(([url]) => url)).toEqual([
@@ -138,11 +256,10 @@ describe("fetchTikTokDocument", () => {
 
   it("classifies oEmbed failures", async () => {
     const statusFor = async (status: number) =>
-      fetchTikTokDocument(
-        videoUrl,
-        (() => Promise.resolve(json({}, status))) as unknown as typeof fetch,
-        { timeoutMs: 1_000, validateUrl: safe }
-      ).catch((error: unknown) => (error as SocialFetchError).reason);
+      fetchTikTokDocument(videoUrl, () => Promise.resolve(json({}, status)), {
+        timeoutMs: 1_000,
+        validateUrl: safe
+      }).catch((error: unknown) => (error as SocialFetchError).reason);
 
     await expect(statusFor(404)).resolves.toBe("not_found");
     await expect(statusFor(400)).resolves.toBe("not_found");
@@ -153,10 +270,7 @@ describe("fetchTikTokDocument", () => {
   it("drops non-http thumbnails", async () => {
     const document = await fetchTikTokDocument(
       videoUrl,
-      (() =>
-        Promise.resolve(
-          json({ title: "caption", thumbnail_url: "javascript:alert(1)" })
-        )) as unknown as typeof fetch,
+      () => Promise.resolve(json({ title: "caption", thumbnail_url: "javascript:alert(1)" })),
       { timeoutMs: 1_000, validateUrl: safe }
     );
 
@@ -174,7 +288,7 @@ describe("fetchTikTokDocument", () => {
       });
 
     await expect(
-      fetchTikTokDocument(videoUrl, hanging as unknown as typeof fetch, {
+      fetchTikTokDocument(videoUrl, hanging, {
         timeoutMs: 10,
         validateUrl: safe
       })
@@ -213,7 +327,7 @@ describe("YouTube descriptions", () => {
     const document = await fetchYouTubeDocument(
       "https://www.youtube.com/shorts/dQw4w9WgXcQ",
       "dQw4w9WgXcQ",
-      fetchMock as unknown as typeof fetch,
+      fetchMock,
       50,
       { validateUrl: safe }
     );
@@ -336,7 +450,7 @@ describe("YouTube creator comments", () => {
     const document = await fetchYouTubeDocument(
       "https://www.youtube.com/shorts/dQw4w9WgXcQ",
       "dQw4w9WgXcQ",
-      fetchMock as unknown as typeof fetch,
+      fetchMock,
       50,
       { validateUrl: safe }
     );
@@ -364,7 +478,7 @@ describe("YouTube creator comments", () => {
     const document = await fetchYouTubeDocument(
       "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
       "dQw4w9WgXcQ",
-      fetchMock as unknown as typeof fetch,
+      fetchMock,
       50,
       { validateUrl: safe }
     );

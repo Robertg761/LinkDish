@@ -126,8 +126,7 @@ export const holdAutoApplyUpdate = (ms: number, now: number = Date.now()): void 
   autoApplyHeldUntil = Math.max(autoApplyHeldUntil, now + ms);
 };
 
-const loadRegisterSW = (): Promise<RegisterSWModule> =>
-  import("virtual:pwa-register") as Promise<RegisterSWModule>;
+const loadRegisterSW = (): Promise<RegisterSWModule> => import("virtual:pwa-register");
 
 /**
  * Registering failed: forget it, so the next try registers afresh, and try again after a while or
