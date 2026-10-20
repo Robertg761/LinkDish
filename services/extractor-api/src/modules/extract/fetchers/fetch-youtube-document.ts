@@ -198,22 +198,30 @@ const readAssignedJson = (pageHtml: string, name: string): unknown => {
   }
 };
 
-/* Every object in a parsed JSON tree, depth first. */
-function* walkJsonObjects(value: unknown): Generator<Record<string, unknown>> {
+/* Every object in a parsed JSON tree, depth first, except under the keys in `skipKeys`. */
+function* walkJsonObjects(
+  value: unknown,
+  skipKeys: ReadonlySet<string> = new Set()
+): Generator<Record<string, unknown>> {
   if (Array.isArray(value)) {
     for (const entry of value) {
-      yield* walkJsonObjects(entry);
+      yield* walkJsonObjects(entry, skipKeys);
     }
   } else if (value !== null && typeof value === "object") {
     const record = value as Record<string, unknown>;
 
     yield record;
 
-    for (const entry of Object.values(record)) {
-      yield* walkJsonObjects(entry);
+    for (const [key, entry] of Object.entries(record)) {
+      if (!skipKeys.has(key)) {
+        yield* walkJsonObjects(entry, skipKeys);
+      }
     }
   }
 }
+
+/* The older layout nests a thread's replies (creator replies included) under these keys. */
+const commentReplyKeys = new Set(["replies", "commentRepliesRenderer"]);
 
 const readRecord = (value: unknown, key: string): Record<string, unknown> | null => {
   const entry =
@@ -262,7 +270,7 @@ export const readYouTubeCommentsRequest = (
 export const readYouTubeCreatorComments = (response: unknown): string[] => {
   const comments: string[] = [];
 
-  for (const record of walkJsonObjects(response)) {
+  for (const record of walkJsonObjects(response, commentReplyKeys)) {
     const entity = readRecord(record, "commentEntityPayload");
     const renderer = readRecord(record, "commentRenderer");
     let text: unknown = null;

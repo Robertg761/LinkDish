@@ -424,6 +424,30 @@ describe("YouTube creator comments", () => {
         }
       })
     ).toEqual(["Older layout"]);
+    expect(
+      readYouTubeCreatorComments({
+        commentThreadRenderer: {
+          comment: {
+            commentRenderer: {
+              authorIsChannelOwner: false,
+              contentText: { runs: [{ text: "Where's the recipe?" }] }
+            }
+          },
+          replies: {
+            commentRepliesRenderer: {
+              contents: [
+                {
+                  commentRenderer: {
+                    authorIsChannelOwner: true,
+                    contentText: { runs: [{ text: "Coming soon!" }] }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      })
+    ).toEqual([]);
   });
 
   it("loads the creator's comments with the video", async () => {

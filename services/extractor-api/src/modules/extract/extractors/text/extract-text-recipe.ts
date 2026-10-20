@@ -126,7 +126,8 @@ export const buildTextRecipeCandidate = (
         nutrition: null
       }),
       signals: {
-        requiredFieldsInferred: methodInVideo,
+        /* A list put together from the steps is inferred too, so a linked full recipe is still tried. */
+        requiredFieldsInferred: methodInVideo || parsed.structure === "method",
         titleConfidence: sourceTitle || parsed.title ? "strong" : "weak",
         timesFromStructuredMetadata: false,
         recipeLike: true,
