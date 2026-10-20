@@ -53,6 +53,19 @@ describe("extractYouTubeRecipe", () => {
     expect(extraction?.candidate.recipe.steps).toHaveLength(7);
   });
 
+  it("keeps an ingredients-only creator comment when the description has no recipe", () => {
+    const extraction = extractYouTubeRecipe(
+      video({
+        description: "Dinner in 20 minutes!",
+        creatorComments: ["Ingredients:\n1 lb ground beef\n1 can black beans\n2 tbsp chili powder"]
+      })
+    );
+
+    expect(extraction?.methodInVideo).toBe(true);
+    expect(extraction?.candidate.recipe.ingredients).toHaveLength(3);
+    expect(extraction?.candidate.recipe.steps).toEqual([{ index: 1, text: VIDEO_METHOD_STEP }]);
+  });
+
   it("keeps the description's recipe ahead of a creator comment", () => {
     const extraction = extractYouTubeRecipe(
       video({ description: recipeText, creatorComments: [creatorComment] })

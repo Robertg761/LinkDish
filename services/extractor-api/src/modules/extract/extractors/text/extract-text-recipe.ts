@@ -52,18 +52,19 @@ const hasPartialMethod = (parsed: ParsedRecipeText): boolean =>
     parsed.steps.length <= maxPartialMethodSteps &&
     parsed.steps.join(" ").length < maxPartialMethodLength);
 
+/** Whether a parse found an ingredient list a video recipe can be built on (the method may be in the video). */
+export const hasRecipeIngredients = (parsed: ParsedRecipeText): boolean =>
+  parsed.structure !== null && parsed.ingredients.length >= minimumIngredientCount;
+
 /** Whether a parse found a whole recipe: ingredients and a method that is more than a few notes. */
 export const isCompleteRecipeParse = (parsed: ParsedRecipeText): boolean =>
-  parsed.structure !== null &&
-  parsed.ingredients.length >= minimumIngredientCount &&
-  parsed.steps.length >= 1 &&
-  !hasPartialMethod(parsed);
+  hasRecipeIngredients(parsed) && parsed.steps.length >= 1 && !hasPartialMethod(parsed);
 
 export const buildTextRecipeCandidate = (
   parsed: ParsedRecipeText,
   options: TextRecipeOptions
 ): TextRecipeExtraction | null => {
-  if (parsed.structure === null || parsed.ingredients.length < minimumIngredientCount) {
+  if (!hasRecipeIngredients(parsed)) {
     return null;
   }
 

@@ -1,6 +1,7 @@
 import { toYouTubeWatchUrl } from "../../source-detection/parse-youtube-video-id.js";
 import {
   buildTextRecipeCandidate,
+  hasRecipeIngredients,
   isCompleteRecipeParse,
   type TextRecipeExtraction
 } from "../text/extract-text-recipe.js";
@@ -34,8 +35,14 @@ export const extractYouTubeRecipe = (
         source: "comment" as const
       }))
     ];
-  /* Without a complete recipe anywhere, the description's partial one (ingredients only) stands. */
-  const chosen = sources.find((entry) => isCompleteRecipeParse(entry.parsed)) ?? sources[0]!;
+  /*
+   * Without a complete recipe anywhere, an ingredient list stands (the method is in the video):
+   * the description's, else a creator comment's. A spoken transcript is never read as a list.
+   */
+  const chosen =
+    sources.find((entry) => isCompleteRecipeParse(entry.parsed)) ??
+    sources.find((entry) => entry.source !== "transcript" && hasRecipeIngredients(entry.parsed)) ??
+    sources[0]!;
   const videoTitle = document.title ? withoutRecipePointer(document.title) : null;
 
   return buildTextRecipeCandidate(chosen.parsed, {
