@@ -151,12 +151,16 @@ const readVideoId = (videoUrl: string, payload: Record<string, unknown>): string
   readString(payload.embed_product_id)?.match(/^\d+$/u)?.[0] ??
   null;
 
-const fetchEmbedPagePost = async (
+/**
+ * The video's record in the embed page's state (caption, author, covers and a playable MP4
+ * link), or null when the page is missing, too large or carries no state.
+ */
+export const fetchTikTokEmbedVideoData = async (
   videoId: string,
   fetchImplementation: typeof fetch,
   validateUrl: ValidateSourceUrl,
   signal: AbortSignal
-): Promise<TikTokPost | null> => {
+): Promise<Record<string, unknown> | null> => {
   const embedUrl = `${TIKTOK_EMBED_PAGE_ENDPOINT}/${videoId}`;
 
   await assertSafe(embedUrl, validateUrl);
@@ -202,6 +206,27 @@ const fetchEmbedPagePost = async (
 
   const pageData = readRecord(readRecord(readRecord(state).source).data);
   const videoData = readRecord(readRecord(pageData[`/embed/v2/${videoId}`]).videoData);
+
+  return Object.keys(videoData).length > 0 ? videoData : null;
+};
+
+const fetchEmbedPagePost = async (
+  videoId: string,
+  fetchImplementation: typeof fetch,
+  validateUrl: ValidateSourceUrl,
+  signal: AbortSignal
+): Promise<TikTokPost | null> => {
+  const videoData = await fetchTikTokEmbedVideoData(
+    videoId,
+    fetchImplementation,
+    validateUrl,
+    signal
+  );
+
+  if (!videoData) {
+    return null;
+  }
+
   const itemInfos = readRecord(videoData.itemInfos);
   const authorInfos = readRecord(videoData.authorInfos);
   const covers = Array.isArray(itemInfos.covers) ? (itemInfos.covers as unknown[]) : [];

@@ -1,5 +1,7 @@
 import type { ExtractionResultCache } from "./cache/extraction-cache.js";
 import type { RequestDeadline } from "./deadline.js";
+import type { VideoRecipeReader } from "./extractors/video/gemini-video-recipe-reader.js";
+import type { TikTokVideoFile } from "./fetchers/fetch-tiktok-video.js";
 import type { ValidateSourceUrl } from "./source-url-safety.js";
 import type {
   ExtractRecipeImage,
@@ -45,6 +47,8 @@ export interface YouTubeSourceDocument {
    * written recipe as a (pinned) comment instead of in the description.
    */
   creatorComments?: string[] | undefined;
+  /** The video's length, when the watch page says. */
+  durationSeconds?: number | null | undefined;
 }
 
 /**
@@ -69,10 +73,7 @@ export interface ImageSourceDocument {
 }
 
 export type SourceDocument =
-  | HtmlSourceDocument
-  | YouTubeSourceDocument
-  | ImageSourceDocument
-  | TextSourceDocument;
+  HtmlSourceDocument | YouTubeSourceDocument | ImageSourceDocument | TextSourceDocument;
 
 export interface FetchResult {
   document: HtmlSourceDocument;
@@ -81,12 +82,7 @@ export interface FetchResult {
 }
 
 export type InternalFetchFailureKind =
-  | "blocked"
-  | "not_found"
-  | "timeout"
-  | "too_large"
-  | "unreachable"
-  | "unsupported_content_type";
+  "blocked" | "not_found" | "timeout" | "too_large" | "unreachable" | "unsupported_content_type";
 
 export interface BrowserFetchOptions {
   /** Aborts the render (request deadline or cancellation). */
@@ -201,6 +197,13 @@ export interface ExtractorRuntime {
    * links as unsupported.
    */
   fetchSocialDocument?: (url: string, options?: SourceFetchOptions) => Promise<TextSourceDocument>;
+  /** Downloads a TikTok post's video for the video recipe reader. */
+  fetchSocialVideo?: (videoUrl: string, options?: SourceFetchOptions) => Promise<TikTokVideoFile>;
+  /**
+   * Gemini watching a TikTok or YouTube video whose caption, description and linked pages hold no
+   * written recipe. Absent, or unavailable, while VIDEO_RECIPE_READER_ENABLED is off.
+   */
+  videoRecipeReader?: VideoRecipeReader;
   fallbackExtractor: FallbackRecipeExtractor;
   recipeTextCleaner?: RecipeTextCleaner;
   /** URL-keyed store of validated success responses. Test runtimes omit it unless they opt in. */
@@ -208,6 +211,9 @@ export interface ExtractorRuntime {
   validateSourceUrl: ValidateSourceUrl;
   dispose(): Promise<void>;
 }
+
+export type VideoReadOutcome =
+  "read" | "no_recipe" | "failed" | "download_failed" | "too_long" | "skipped_budget";
 
 export type ExtractionFailureReason = ExtractRecipeFailure["reason"];
 
@@ -252,5 +258,7 @@ export interface ExtractionLogContext {
   cacheStatus?: "hit" | "miss" | "bypass";
   /** Whether the Gemini text cleanup ran for a success, and why not when it did not. */
   textCleanup?: "applied" | "not_needed" | "disabled" | "skipped_budget";
+  /** Whether Gemini watched the video, and how that went, when nothing written held the recipe. */
+  videoRead?: VideoReadOutcome;
   latencyMs: number;
 }

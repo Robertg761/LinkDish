@@ -161,6 +161,61 @@ export const readLimitedResponseText = async (
   return text + decoder.decode();
 };
 
+/** readLimitedResponseText for binary bodies (videos), with the same hard byte cap. */
+export const readLimitedResponseBytes = async (
+  response: Response,
+  maxBytes: number
+): Promise<Uint8Array> => {
+  const declaredContentLength = getDeclaredContentLength(response);
+
+  if (declaredContentLength !== null && declaredContentLength > maxBytes) {
+    throw new ResponseBodyTooLargeError(maxBytes);
+  }
+
+  const body = response.body as ReadableStream<Uint8Array> | null | undefined;
+
+  if (!body || typeof body.getReader !== "function") {
+    const bytes = new Uint8Array(await response.arrayBuffer());
+
+    if (bytes.byteLength > maxBytes) {
+      throw new ResponseBodyTooLargeError(maxBytes);
+    }
+
+    return bytes;
+  }
+
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+
+  try {
+    for (;;) {
+      const result = await reader.read();
+
+      if (result.done) {
+        break;
+      }
+
+      if (!result.value) {
+        continue;
+      }
+
+      totalBytes += result.value.byteLength;
+
+      if (totalBytes > maxBytes) {
+        throw new ResponseBodyTooLargeError(maxBytes);
+      }
+
+      chunks.push(result.value);
+    }
+  } catch (error) {
+    await reader.cancel().catch(() => undefined);
+    throw error;
+  }
+
+  return Buffer.concat(chunks, totalBytes);
+};
+
 export const sleep = async (durationMs: number) =>
   new Promise((resolve) => {
     setTimeout(resolve, durationMs);
