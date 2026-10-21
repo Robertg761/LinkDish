@@ -11,22 +11,19 @@ updates:
     versioning-strategy: increase
     labels:
       - dependencies
-    # React and React Native are pinned to the versions the Expo SDK expects, and
-    # react-test-renderer must match react exactly. Their minor and major versions move only
-    # during an SDK upgrade (`npx expo install --fix`, then the renderer by hand); grouping
-    # alone would still open a PR for whichever of them has a release.
+    # Expo pins react exactly and sets it during an SDK upgrade (`npx expo install --fix`), and
+    # react-dom and react-test-renderer must match react exactly. Dependabot bumps whichever has
+    # a release on its own (#54 moved only react-test-renderer), so these three move by hand,
+    # together, with the SDK. React Native and the React types move only within the SDK's
+    # minor version.
     ignore:
       - dependency-name: "react"
-        update-types: ["version-update:semver-minor", "version-update:semver-major"]
       - dependency-name: "react-dom"
-        update-types: ["version-update:semver-minor", "version-update:semver-major"]
+      - dependency-name: "react-test-renderer"
+      - dependency-name: "@types/react-test-renderer"
       - dependency-name: "react-native"
         update-types: ["version-update:semver-minor", "version-update:semver-major"]
-      - dependency-name: "react-test-renderer"
-        update-types: ["version-update:semver-minor", "version-update:semver-major"]
       - dependency-name: "@types/react"
-        update-types: ["version-update:semver-minor", "version-update:semver-major"]
-      - dependency-name: "@types/react-test-renderer"
         update-types: ["version-update:semver-minor", "version-update:semver-major"]
       # A new Expo SDK is a major version of every Expo package plus a React Native bump, and
       # needs `npx expo install --fix`; Dependabot can only bump packages one by one, which
@@ -39,18 +36,14 @@ updates:
         update-types: ["version-update:semver-major"]
     groups:
       # Expo packages within one SDK release together, so their minor and patch updates
-      # land as one PR. React's patch releases ship in lockstep and are grouped here too.
+      # land as one PR, along with React Native and React type patches.
       expo-sdk:
         patterns:
           - "expo"
           - "expo-*"
           - "@expo/*"
-          - "react"
-          - "react-dom"
           - "react-native"
-          - "react-test-renderer"
           - "@types/react"
-          - "@types/react-test-renderer"
       dev-dependencies:
         dependency-type: development
         update-types:
