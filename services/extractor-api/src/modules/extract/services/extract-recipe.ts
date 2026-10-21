@@ -890,6 +890,8 @@ const buildCacheHitResult = (
 
 /* Below this much request time a video read cannot finish, so it is not started. */
 const minimumVideoReadBudgetMs = 15_000;
+/* After a TikTok download, below this much time Gemini could not answer before the deadline. */
+const minimumGeminiReadBudgetMs = 10_000;
 
 const loadVideoRecipeCandidateBuilder = async () =>
   (await import("../extractors/video/build-video-recipe-candidate.js")).buildVideoRecipeCandidate;
@@ -981,6 +983,12 @@ const readRecipeFromVideo = async (request: VideoReadRequest): Promise<VideoRead
           : "download_failed";
       logVideoRead(outcome, { message: error instanceof Error ? error.message : "unknown" });
       return { outcome, response: null };
+    }
+
+    /* A slow download can leave too little time; Gemini is not paid for a read it cannot finish. */
+    if (deadline.remainingMs() < minimumGeminiReadBudgetMs) {
+      logVideoRead("skipped_budget", { message: "too little time left after the download" });
+      return { outcome: "skipped_budget", response: null };
     }
   }
 
