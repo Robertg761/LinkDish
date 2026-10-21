@@ -108,7 +108,8 @@ const measure = async (video: TestVideo) => {
       const file = await fetchTikTokVideo(document.url, fetch, {
         timeoutMs: 20_000,
         maxBytes: 60 * 1024 * 1024,
-        maxSeconds: 600
+        maxSeconds: 600,
+        locator: document.tiktokVideo
       });
       result.downloadMs = Date.now() - downloadStartedAt;
       result.videoBytes = file.bytes.byteLength;
