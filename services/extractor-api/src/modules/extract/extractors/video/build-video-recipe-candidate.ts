@@ -13,9 +13,8 @@ import type { ExtractionCandidate } from "../../types.js";
 const minimumIngredientCount = 2;
 const maxQuoteChars = 600;
 
-const numberWords: Record<string, number> = {
-  a: 1,
-  an: 1,
+/* Spoken whole numbers: "twenty five" and "two hundred" are read as one number. */
+const unitWords: Record<string, number> = {
   one: 1,
   two: 2,
   couple: 2,
@@ -29,13 +28,26 @@ const numberWords: Record<string, number> = {
   ten: 10,
   eleven: 11,
   twelve: 12,
-  dozen: 12,
+  thirteen: 13,
+  fourteen: 14,
   fifteen: 15,
+  sixteen: 16,
+  seventeen: 17,
+  eighteen: 18,
+  nineteen: 19
+};
+const tensWords: Record<string, number> = {
   twenty: 20,
   thirty: 30,
   forty: 40,
   fifty: 50,
-  hundred: 100,
+  sixty: 60,
+  seventy: 70,
+  eighty: 80,
+  ninety: 90
+};
+const scaleWords: Record<string, number> = { dozen: 12, hundred: 100, thousand: 1000 };
+const fractionWords: Record<string, number> = {
   half: 0.5,
   halves: 0.5,
   third: 1 / 3,
@@ -43,6 +55,21 @@ const numberWords: Record<string, number> = {
   quarter: 0.25,
   quarters: 0.25
 };
+const articles = new Set(["a", "an"]);
+/* "a heaping cup", "a large egg": one of these may sit between an article and what it counts. */
+const sizeWords = new Set([
+  "heaping",
+  "heaped",
+  "level",
+  "big",
+  "large",
+  "small",
+  "medium",
+  "generous",
+  "good",
+  "full",
+  "whole"
+]);
 
 /* Unit spellings, by unit: an amount's unit must be the one its quote says. */
 const unitFamilies: string[][] = [
@@ -104,76 +131,250 @@ const normalize = (value: string): string =>
     .replace(/\s+/gu, " ")
     .trim();
 
-/* A crude stem so "tomatoes" in the item matches "tomato" in the quote. */
-const stem = (word: string): string =>
-  word
-    .replace(/(?:ies)$/u, "y")
-    .replace(/(?:oes|es|s)$/u, (suffix) => (suffix === "oes" ? "o" : ""));
+/*
+ * The forms a word can take in the singular, so "tomatoes" matches "tomato", "spices" "spice"
+ * and "berries" "berry": two words match when they share a form.
+ */
+const singularForms = (word: string): string[] => {
+  const forms = [word];
+
+  if (word.endsWith("ies")) {
+    forms.push(`${word.slice(0, -3)}y`);
+  }
+
+  if (word.endsWith("es")) {
+    forms.push(word.slice(0, -2));
+  }
+
+  if (word.endsWith("s") && !word.endsWith("ss")) {
+    forms.push(word.slice(0, -1));
+  }
+
+  return forms;
+};
 
 const wordsOf = (value: string): string[] => normalize(value).match(/\p{L}+/gu) ?? [];
 
-/*
- * The amounts a text states, as numbers: digits, fractions, ranges and number words. A mixed
- * number ("1 1/2", "one and a half") is one quantity, its sum.
- */
-const readQuantities = (
-  value: string,
-  articlesCount = true
-): { quantity: number; parts: number[] }[] => {
-  const tokens = normalize(value).match(/\d+\s*\/\s*\d+|\d+(?:[.,]\d+)?|\p{L}+/gu) ?? [];
-  const quantities: { quantity: number; parts: number[] }[] = [];
-  let previousWasNumber = false;
+const formsOf = (value: string): Set<string> => new Set(wordsOf(value).flatMap(singularForms));
 
-  for (const token of tokens) {
-    let current: number | null = null;
+const sharesForm = (word: string, forms: Set<string>): boolean =>
+  singularForms(word).some((form) => forms.has(form));
+
+/* A caption quote is held to the caption's own words, whatever its punctuation or emoji. */
+const wordSequence = (value: string): string =>
+  ` ${(normalize(value).match(/\d+(?:[.,/]\d+)*|\p{L}+/gu) ?? []).join(" ")} `;
+
+const isQuotedFrom = (quote: string, text: string): boolean => {
+  const quoted = wordSequence(quote);
+  return quoted.trim().length > 0 && wordSequence(text).includes(quoted);
+};
+
+const tokensOf = (value: string): string[] =>
+  normalize(value).match(/\d+\s*\/\s*\d+|\d+(?:[.,]\d+)?|\p{L}+/gu) ?? [];
+
+/* A number a text states, with the tokens it spans: "two hundred" is one, from 0 to 2. */
+interface StatedNumber {
+  value: number;
+  fraction: boolean;
+  start: number;
+  end: number;
+}
+
+/* A run of spoken whole-number words from tokens[start]: "two hundred and fifty" is 250. */
+const readSpokenWhole = (
+  tokens: string[],
+  start: number
+): { value: number; end: number } | null => {
+  let total = 0;
+  let current = 0;
+  let last: "unit" | "tens" | "scale" | null = null;
+  let index = start;
+
+  for (; index < tokens.length; index += 1) {
+    const token = tokens[index] ?? "";
+    const next = tokens[index + 1] ?? "";
+
+    if (Object.hasOwn(unitWords, token) && last !== "unit") {
+      const value = unitWords[token] ?? 0;
+
+      /* "twenty five", not "twenty twelve". */
+      if (last === "tens" && value >= 10) {
+        break;
+      }
+
+      current += value;
+      last = "unit";
+    } else if (Object.hasOwn(tensWords, token) && last !== "unit" && last !== "tens") {
+      current += tensWords[token] ?? 0;
+      last = "tens";
+    } else if (Object.hasOwn(scaleWords, token)) {
+      const scale = scaleWords[token] ?? 1;
+
+      if (scale === 1000) {
+        total += (current || 1) * scale;
+        current = 0;
+      } else {
+        current = (current || 1) * scale;
+      }
+
+      last = "scale";
+    } else if (
+      token === "and" &&
+      last === "scale" &&
+      (Object.hasOwn(unitWords, next) || Object.hasOwn(tensWords, next))
+    ) {
+      continue;
+    } else {
+      break;
+    }
+  }
+
+  return index === start ? null : { value: total + current, end: index };
+};
+
+/*
+ * Every number a text states, in order: digits, fractions, number words and fraction words. "A"
+ * and "an" state 1 only before what they count, a unit ("a cup") or the ingredient ("an egg"),
+ * and nothing at all in "half a cup".
+ */
+const readNumbers = (tokens: string[], articleCounts: Set<string> | null): StatedNumber[] => {
+  const numbers: StatedNumber[] = [];
+  let index = 0;
+
+  while (index < tokens.length) {
+    const token = tokens[index] ?? "";
+    const next = tokens[index + 1] ?? "";
+    const push = (value: number, end: number) => {
+      if (Number.isFinite(value)) {
+        numbers.push({ value, fraction: value < 1, start: index, end });
+      }
+
+      index = end;
+    };
 
     if (/^\d+\s*\/\s*\d+$/u.test(token)) {
       const [numerator = 0, denominator = 0] = token.split("/").map((part) => Number(part.trim()));
-      current = denominator ? numerator / denominator : null;
-    } else if (/^\d/u.test(token)) {
-      current = Number(token.replace(",", "."));
-    } else if (token in numberWords && (articlesCount || (token !== "a" && token !== "an"))) {
-      current = numberWords[token] ?? null;
-    } else if (token === "and" && previousWasNumber) {
+      push(denominator ? numerator / denominator : Number.NaN, index + 1);
       continue;
     }
 
-    if (current === null || !Number.isFinite(current)) {
-      previousWasNumber = false;
+    if (/^\d/u.test(token)) {
+      push(Number(token.replace(",", ".")), index + 1);
       continue;
     }
 
-    const last = quantities.at(-1);
-
-    /* "1 1/2" and "one and a half" (but not "1/2 1/2" or "2 3") are one amount. */
-    if (previousWasNumber && last && last.parts.length === 1 && last.quantity >= 1 && current < 1) {
-      last.parts.push(current);
-      last.quantity += current;
-    } else {
-      quantities.push({ quantity: current, parts: [current] });
+    if (Object.hasOwn(fractionWords, token)) {
+      push(fractionWords[token] ?? Number.NaN, index + 1);
+      continue;
     }
 
-    previousWasNumber = true;
+    const spoken = readSpokenWhole(tokens, index);
+
+    if (spoken) {
+      push(spoken.value, spoken.end);
+      continue;
+    }
+
+    if (articles.has(token) && !Object.hasOwn(fractionWords, tokens[index - 1] ?? "")) {
+      /* "a half", "a dozen", "a couple": the article is part of the number. */
+      if (Object.hasOwn(fractionWords, next)) {
+        push(fractionWords[next] ?? Number.NaN, index + 2);
+        continue;
+      }
+
+      const spokenNext =
+        next === "couple" || Object.hasOwn(scaleWords, next)
+          ? readSpokenWhole(tokens, index + 1)
+          : null;
+
+      if (spokenNext) {
+        push(spokenNext.value, spokenNext.end);
+        continue;
+      }
+
+      const counted = sizeWords.has(next) ? (tokens[index + 2] ?? "") : next;
+
+      if (articleCounts && (unitFamilyOf.has(counted) || sharesForm(counted, articleCounts))) {
+        push(1, index + 1);
+        continue;
+      }
+    }
+
+    index += 1;
   }
 
-  return quantities;
+  return numbers;
+};
+
+/*
+ * The amounts a text states. "Three quarters" is one amount, the product, and a mixed number
+ * ("1 1/2", "one and a half", "a cup and a half") is one, the sum of its parts.
+ */
+const readQuantities = (
+  value: string,
+  articleCounts: Set<string> | null
+): { quantity: number; parts: number[] }[] => {
+  const tokens = tokensOf(value);
+  const terms: StatedNumber[] = [];
+
+  for (const number of readNumbers(tokens, articleCounts)) {
+    const last = terms.at(-1);
+    const isBareFractionWord =
+      number.end - number.start === 1 && Object.hasOwn(fractionWords, tokens[number.start] ?? "");
+
+    if (last && !last.fraction && last.end === number.start && isBareFractionWord) {
+      terms[terms.length - 1] = {
+        value: last.value * number.value,
+        fraction: last.value * number.value < 1,
+        start: last.start,
+        end: number.end
+      };
+    } else {
+      terms.push(number);
+    }
+  }
+
+  const quantities: { quantity: number; parts: number[]; end: number }[] = [];
+
+  for (const term of terms) {
+    const last = quantities.at(-1);
+    const between = last ? tokens.slice(last.end, term.start) : [];
+    const joined =
+      between.length === 0 ||
+      (between.length === 1 && between[0] === "and") ||
+      (between.length === 2 && unitFamilyOf.has(between[0] ?? "") && between[1] === "and");
+
+    /* Not "1/2 1/2" or "2 3". */
+    if (last && last.parts.length === 1 && last.quantity >= 1 && term.fraction && joined) {
+      last.parts.push(term.value);
+      last.quantity += term.value;
+      last.end = term.end;
+    } else {
+      quantities.push({ quantity: term.value, parts: [term.value], end: term.end });
+    }
+  }
+
+  return quantities.map(({ quantity, parts }) => ({ quantity, parts }));
 };
 
 /** Every number a text states, mixed numbers both whole and as their parts. */
-export const readStatedNumbers = (value: string): number[] =>
-  readQuantities(value).flatMap(({ quantity, parts }) =>
+export const readStatedNumbers = (value: string, item = ""): number[] =>
+  readQuantities(value, formsOf(item)).flatMap(({ quantity, parts }) =>
     parts.length > 1 ? [quantity, ...parts] : [quantity]
   );
 
 const sameNumber = (left: number, right: number): boolean => Math.abs(left - right) < 0.01;
 
-/* Does the quote state the amount: each of its numbers, or for "a pinch" its own words. */
-export const isAmountSupported = (amount: string, quote: string): boolean => {
+/*
+ * Does the quote state the amount: each of its numbers, or for "a pinch" its own words. The item
+ * lets "an egg" in the quote state 1.
+ */
+export const isAmountSupported = (amount: string, quote: string, item = ""): boolean => {
   /* "a pinch" is checked by its words; "a cup" in the quote still states 1 cup. */
-  const amountQuantities = readQuantities(amount, false).map(({ quantity }) => quantity);
+  const amountQuantities = readQuantities(amount, null).map(({ quantity }) => quantity);
 
   if (amountQuantities.length > 0) {
-    const stated = readStatedNumbers(quote);
+    const stated = readStatedNumbers(quote, item);
     const quoteUnits = new Set(wordsOf(quote).map((word) => unitFamilyOf.get(word)));
     const amountUnits = wordsOf(amount)
       .map((word) => unitFamilyOf.get(word))
@@ -185,19 +386,19 @@ export const isAmountSupported = (amount: string, quote: string): boolean => {
     );
   }
 
-  const quoteWords = new Set(wordsOf(quote).map(stem));
+  const quoteForms = formsOf(quote);
   const amountWords = wordsOf(amount).filter((word) => !amountFillerWords.has(word));
 
-  return amountWords.length > 0 && amountWords.some((word) => quoteWords.has(stem(word)));
+  return amountWords.length > 0 && amountWords.some((word) => sharesForm(word, quoteForms));
 };
 
-/* Does the quote name the ingredient: one of its meaningful words, loosely stemmed. */
+/* Does the quote name the ingredient: one of its meaningful words, singular or plural. */
 export const isItemNamedIn = (item: string, quote: string): boolean => {
-  const quoteWords = new Set(wordsOf(quote).map(stem));
+  const quoteForms = formsOf(quote);
   const itemWords = wordsOf(item).filter((word) => word.length >= 3 && !nameStopWords.has(word));
   const candidates = itemWords.length > 0 ? itemWords : wordsOf(item);
 
-  return candidates.some((word) => quoteWords.has(stem(word)));
+  return candidates.some((word) => sharesForm(word, quoteForms));
 };
 
 const tidy = (value: string | null | undefined): string =>
@@ -244,15 +445,17 @@ export const buildVideoRecipeCandidate = (
       continue;
     }
 
-    /* A caption quote must be in the caption; spoken and on-screen quotes must name the item. */
-    const named =
-      ingredient.source === "visual"
-        ? true
-        : ingredient.source === "caption"
-          ? isItemNamedIn(item, caption)
-          : isItemNamedIn(item, quote);
+    /*
+     * A caption quote must be a line of the caption, and is then held to the same checks as a
+     * spoken or on-screen one: the quote, not the whole caption, must name the item and state
+     * the amount.
+     */
+    if (ingredient.source === "caption" && !isQuotedFrom(quote, caption)) {
+      rejections.push(`caption quote not in the caption: ${item} <- "${quote}"`);
+      continue;
+    }
 
-    if (!named) {
+    if (ingredient.source !== "visual" && !isItemNamedIn(item, quote)) {
       rejections.push(`ingredient not in its quote: ${item} <- "${quote}"`);
       continue;
     }
@@ -262,10 +465,7 @@ export const buildVideoRecipeCandidate = (
     if (amount && ingredient.source === "visual") {
       rejections.push(`amount for an ingredient only shown: ${amount} ${item}`);
       amount = "";
-    } else if (
-      amount &&
-      !isAmountSupported(amount, ingredient.source === "caption" ? caption : quote)
-    ) {
+    } else if (amount && !isAmountSupported(amount, quote, item)) {
       rejections.push(`amount not in its quote: ${amount} ${item} <- "${quote}"`);
       amount = "";
     }

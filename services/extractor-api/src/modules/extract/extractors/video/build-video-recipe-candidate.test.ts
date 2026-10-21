@@ -69,6 +69,32 @@ describe("readStatedNumbers", () => {
     expect(readStatedNumbers("200g")).toEqual([200]);
     expect(readStatedNumbers("2-3 cloves")).toEqual([2, 3]);
   });
+
+  it("reads a whole number of a fraction word as their product", () => {
+    expect(readStatedNumbers("three quarters cup of milk")).toEqual([0.75]);
+    expect(readStatedNumbers("two thirds cup")[0]).toBeCloseTo(2 / 3);
+    expect(readStatedNumbers("one and three quarters cups")).toContain(1.75);
+    expect(readStatedNumbers("a cup and a half of rice")).toContain(1.5);
+  });
+
+  it("reads compound and teen number words as one number", () => {
+    expect(readStatedNumbers("two hundred grams of pasta")).toEqual([200]);
+    expect(readStatedNumbers("two hundred and fifty grams")).toEqual([250]);
+    expect(readStatedNumbers("sixteen ounces")).toEqual([16]);
+    expect(readStatedNumbers("a fourteen ounce can")).toEqual([14]);
+    expect(readStatedNumbers("twenty five minutes")).toEqual([25]);
+    expect(readStatedNumbers("two dozen eggs")).toEqual([24]);
+    expect(readStatedNumbers("a dozen eggs")).toEqual([12]);
+  });
+
+  it("counts an article as 1 only before a unit or the ingredient", () => {
+    expect(readStatedNumbers("a cup of rice")).toEqual([1]);
+    expect(readStatedNumbers("a heaping tablespoon")).toEqual([1]);
+    expect(readStatedNumbers("add a splash of milk")).toEqual([]);
+    expect(readStatedNumbers("half a cup")).toEqual([0.5]);
+    expect(readStatedNumbers("crack in an egg", "egg")).toEqual([1]);
+    expect(readStatedNumbers("crack in an egg")).toEqual([]);
+  });
 });
 
 describe("isAmountSupported", () => {
@@ -87,6 +113,19 @@ describe("isAmountSupported", () => {
     expect(isAmountSupported("3 cups", "two cups of flour")).toBe(false);
     expect(isAmountSupported("a handful", "some spinach")).toBe(false);
   });
+
+  it("accepts spoken fractions and compound numbers", () => {
+    expect(isAmountSupported("3/4 cup", "three quarters cup of milk")).toBe(true);
+    expect(isAmountSupported("2/3 cup", "two thirds cup of sugar")).toBe(true);
+    expect(isAmountSupported("200 g", "two hundred grams of pasta")).toBe(true);
+    expect(isAmountSupported("16 oz", "sixteen ounces of beef")).toBe(true);
+    expect(isAmountSupported("1", "crack in an egg", "egg")).toBe(true);
+  });
+
+  it("does not read an unrelated article as 1", () => {
+    expect(isAmountSupported("1 cup", "add a splash of milk and 2 cups of flour")).toBe(false);
+    expect(isAmountSupported("1 cup", "half a cup of butter")).toBe(false);
+  });
 });
 
 describe("isItemNamedIn", () => {
@@ -94,6 +133,14 @@ describe("isItemNamedIn", () => {
     expect(isItemNamedIn("cherry tomatoes", "a punnet of cherry tomato")).toBe(true);
     expect(isItemNamedIn("garlic, minced", "four cloves of garlic")).toBe(true);
     expect(isItemNamedIn("heavy cream", "a splash of milk")).toBe(false);
+  });
+
+  it("matches singulars and plurals of words ending in e", () => {
+    expect(isItemNamedIn("spices", "add the spice mix")).toBe(true);
+    expect(isItemNamedIn("olive", "a handful of olives")).toBe(true);
+    expect(isItemNamedIn("cheeses", "grate the cheese")).toBe(true);
+    expect(isItemNamedIn("slices of bread", "two bread slice")).toBe(true);
+    expect(isItemNamedIn("berries", "a berry on top")).toBe(true);
   });
 });
 
@@ -187,7 +234,7 @@ describe("buildVideoRecipeCandidate", () => {
     expect(candidate?.recipe.ingredients?.at(-1)?.text).toBe("parsley");
   });
 
-  it("checks caption quotes against the caption itself", () => {
+  it("drops a caption ingredient whose quote is not in the caption", () => {
     const { candidate, rejections } = buildVideoRecipeCandidate(
       payload({
         ingredients: [
@@ -205,7 +252,42 @@ describe("buildVideoRecipeCandidate", () => {
     );
 
     expect(candidate?.recipe.ingredients).toHaveLength(3);
-    expect(rejections[0]).toMatch(/^ingredient not in its quote: chili flakes/u);
+    expect(rejections[0]).toMatch(/^caption quote not in the caption: chili flakes/u);
+  });
+
+  it("checks a caption ingredient's amount against its own line, not the whole caption", () => {
+    const captionOptions = {
+      ...options,
+      context: { ...context, caption: "2 cups flour, 1 tsp vanilla, sugar to taste 🍪" }
+    };
+    const { candidate, rejections } = buildVideoRecipeCandidate(
+      payload({
+        ingredients: [
+          ...payload().ingredients,
+          {
+            item: "sugar",
+            amount: "1 cup",
+            section: null,
+            source: "caption",
+            quote: "sugar to taste"
+          },
+          {
+            item: "flour",
+            amount: "2 cups",
+            section: null,
+            source: "caption",
+            quote: "2 cups flour,"
+          }
+        ]
+      }),
+      captionOptions
+    );
+
+    expect(candidate?.recipe.ingredients?.slice(-2)).toEqual([
+      { text: "sugar", section: null },
+      { text: "2 cups flour", section: null }
+    ]);
+    expect(rejections).toEqual(['amount not in its quote: 1 cup sugar <- "sugar to taste"']);
   });
 
   it("reports no recipe for a video that is not one", () => {
