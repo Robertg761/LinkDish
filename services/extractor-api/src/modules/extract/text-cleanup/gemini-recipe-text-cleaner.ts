@@ -4,7 +4,7 @@ import { recipeSchema, type Recipe } from "../../../../../../packages/recipe-dom
 
 import type { RecipeTextCleaner, RecipeTextCleanerOptions } from "../types.js";
 
-export const GEMINI_TEXT_CLEANUP_MODEL = "gemini-3.1-flash-lite-preview";
+export const GEMINI_TEXT_CLEANUP_MODEL = "gemini-3.5-flash-lite";
 
 const cleanedRecipePayloadSchema = z.object({
   title: z.string().min(1),
