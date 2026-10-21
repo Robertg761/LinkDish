@@ -72,17 +72,29 @@ export class AdminModelSettingsValidationError extends Error {
   }
 }
 
-// Pricing changes frequently; values here mirror provider docs as of 2026-05-10.
+// Pricing changes frequently; values here mirror provider docs as of 2026-05-10 (Flash-Lite
+// entries as of 2026-10-21, after Google shut down gemini-3.1-flash-lite-preview).
 export const adminModelCatalog: AdminModelOption[] = [
   {
     provider: "gemini",
-    model: "gemini-3.1-flash-lite-preview",
-    label: "Gemini 3.1 Flash-Lite Preview",
+    model: "gemini-3.5-flash-lite",
+    label: "Gemini 3.5 Flash-Lite",
+    price: {
+      inputUsdPerMillionTokens: 0.3,
+      outputUsdPerMillionTokens: 2.5,
+      source: "provider_docs",
+      note: "Standard tier."
+    }
+  },
+  {
+    provider: "gemini",
+    model: "gemini-3.1-flash-lite",
+    label: "Gemini 3.1 Flash-Lite",
     price: {
       inputUsdPerMillionTokens: 0.25,
       outputUsdPerMillionTokens: 1.5,
       source: "provider_docs",
-      note: "Preview model."
+      note: "Standard tier. Shutdown scheduled no earlier than 2027-05-07."
     }
   },
   {
