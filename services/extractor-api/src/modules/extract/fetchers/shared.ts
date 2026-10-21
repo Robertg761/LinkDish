@@ -165,7 +165,7 @@ export const readLimitedResponseText = async (
 export const readLimitedResponseBytes = async (
   response: Response,
   maxBytes: number
-): Promise<Uint8Array> => {
+): Promise<Uint8Array<ArrayBuffer>> => {
   const declaredContentLength = getDeclaredContentLength(response);
 
   if (declaredContentLength !== null && declaredContentLength > maxBytes) {

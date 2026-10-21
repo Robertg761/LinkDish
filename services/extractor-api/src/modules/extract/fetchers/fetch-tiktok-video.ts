@@ -20,7 +20,7 @@ import type { ValidateSourceUrl } from "../source-url-safety.js";
  * usual public-address check, on every redirect hop.
  */
 export interface TikTokVideoFile {
-  bytes: Uint8Array;
+  bytes: Uint8Array<ArrayBuffer>;
   mimeType: string;
   /** From the embed page; null when it does not say. */
   durationSeconds: number | null;
@@ -83,7 +83,7 @@ const downloadMedia = async (
   validateUrl: ValidateSourceUrl,
   maxBytes: number,
   signal: AbortSignal
-): Promise<{ bytes: Uint8Array; mimeType: string }> => {
+): Promise<{ bytes: Uint8Array<ArrayBuffer>; mimeType: string }> => {
   let current = mediaUrl;
 
   for (let hop = 0; hop <= maxMediaRedirects; hop += 1) {

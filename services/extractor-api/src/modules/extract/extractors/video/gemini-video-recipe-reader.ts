@@ -15,7 +15,8 @@ import type { RequestDeadline } from "../../deadline.js";
  * videos (TikTok) are sent as bytes: inline when small, through the Files API otherwise.
  */
 export type VideoRecipeSource =
-  { kind: "youtube"; url: string } | { kind: "file"; bytes: Uint8Array; mimeType: string };
+  | { kind: "youtube"; url: string }
+  | { kind: "file"; bytes: Uint8Array<ArrayBuffer>; mimeType: string };
 
 export interface VideoRecipeReadInput {
   source: VideoRecipeSource;
@@ -34,6 +35,8 @@ const apiBase = "https://generativelanguage.googleapis.com";
 /* Inline request bodies must stay under 20 MB, and base64 adds a third. */
 const maxInlineBytes = 14 * 1024 * 1024;
 const fileActivePollMs = 1_000;
+/* Deleting an uploaded video waits this long at most, whatever happened to the read. */
+const fileDeleteTimeoutMs = 3_000;
 /* Time kept back for checking and returning the recipe once Gemini answers. */
 const responseReserveMs = 1_500;
 
@@ -77,11 +80,15 @@ class GeminiVideoRecipeReader implements VideoRecipeReader {
     private readonly timeoutMs: number
   ) {}
 
-  /* Uploads a large video and waits until Gemini has processed it. */
+  /*
+   * Uploads a large video and waits until Gemini has processed it. onUploaded gets the file's
+   * name as soon as Gemini has it, so the caller can delete it whatever happens next.
+   */
   private async uploadFile(
-    bytes: Uint8Array,
+    bytes: Uint8Array<ArrayBuffer>,
     mimeType: string,
-    signal: AbortSignal
+    signal: AbortSignal,
+    onUploaded: (name: string) => void
   ): Promise<{ fileUri: string; mimeType: string }> {
     const start = await this.fetchImplementation(`${apiBase}/upload/v1beta/files`, {
       method: "POST",
@@ -115,7 +122,7 @@ class GeminiVideoRecipeReader implements VideoRecipeReader {
         "x-goog-upload-offset": "0",
         "x-goog-upload-command": "upload, finalize"
       },
-      body: new Blob([new Uint8Array(bytes)], { type: mimeType }),
+      body: new Blob([bytes], { type: mimeType }),
       signal
     });
 
@@ -124,6 +131,10 @@ class GeminiVideoRecipeReader implements VideoRecipeReader {
     }
 
     let file = ((await upload.json()) as { file?: unknown }).file;
+
+    if (isRecord(file) && typeof file.name === "string") {
+      onUploaded(file.name);
+    }
 
     for (;;) {
       if (!isRecord(file) || typeof file.name !== "string" || typeof file.uri !== "string") {
@@ -153,7 +164,38 @@ class GeminiVideoRecipeReader implements VideoRecipeReader {
     }
   }
 
-  private async videoPart(source: VideoRecipeSource, signal: AbortSignal) {
+  /*
+   * Gemini keeps an uploaded video for 48 hours unless it is deleted. Best effort: a failed
+   * delete is logged and the file expires on its own.
+   */
+  private async deleteFile(name: string): Promise<void> {
+    try {
+      const response = await this.fetchImplementation(`${apiBase}/v1beta/${name}`, {
+        method: "DELETE",
+        headers: { "x-goog-api-key": this.apiKey },
+        signal: AbortSignal.timeout(fileDeleteTimeoutMs)
+      });
+
+      await response.body?.cancel().catch(() => undefined);
+
+      if (!response.ok) {
+        throw new Error(`Gemini file delete failed with ${response.status}.`);
+      }
+    } catch (error) {
+      console.warn(
+        JSON.stringify({
+          event: "video_recipe_file_delete_failed",
+          message: error instanceof Error ? error.message : "unknown"
+        })
+      );
+    }
+  }
+
+  private async videoPart(
+    source: VideoRecipeSource,
+    signal: AbortSignal,
+    onUploaded: (name: string) => void
+  ) {
     if (source.kind === "youtube") {
       return { fileData: { fileUri: source.url } };
     }
@@ -167,7 +209,9 @@ class GeminiVideoRecipeReader implements VideoRecipeReader {
       };
     }
 
-    return { fileData: await this.uploadFile(source.bytes, source.mimeType, signal) };
+    return {
+      fileData: await this.uploadFile(source.bytes, source.mimeType, signal, onUploaded)
+    };
   }
 
   public async read(input: VideoRecipeReadInput): Promise<VideoRecipePayload | null> {
@@ -195,7 +239,12 @@ class GeminiVideoRecipeReader implements VideoRecipeReader {
       input.deadline?.signal.addEventListener("abort", abortFromDeadline, { once: true });
     }
 
+    let uploadedFileName: string | null = null;
+
     try {
+      const videoPart = await this.videoPart(input.source, controller.signal, (name) => {
+        uploadedFileName = name;
+      });
       const response = await this.fetchImplementation(
         `${apiBase}/v1beta/models/${this.model}:generateContent`,
         {
@@ -208,10 +257,7 @@ class GeminiVideoRecipeReader implements VideoRecipeReader {
           body: JSON.stringify({
             contents: [
               {
-                parts: [
-                  await this.videoPart(input.source, controller.signal),
-                  { text: buildVideoRecipePrompt(input.context) }
-                ]
+                parts: [videoPart, { text: buildVideoRecipePrompt(input.context) }]
               }
             ],
             generationConfig: {
@@ -256,6 +302,10 @@ class GeminiVideoRecipeReader implements VideoRecipeReader {
     } finally {
       clearTimeout(timeoutId);
       input.deadline?.signal.removeEventListener("abort", abortFromDeadline);
+
+      if (uploadedFileName) {
+        await this.deleteFile(uploadedFileName);
+      }
     }
   }
 }

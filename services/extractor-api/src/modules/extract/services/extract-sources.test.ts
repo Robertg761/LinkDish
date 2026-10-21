@@ -9,7 +9,6 @@ import { SocialFetchError } from "../fetchers/errors";
 
 import { buildTextImportSourceUrl, extractRecipe } from "./extract-recipe";
 
-import type { RequestDeadline } from "../deadline";
 import type { VideoRecipeReader } from "../extractors/video/gemini-video-recipe-reader";
 import type { VideoRecipePayload } from "../extractors/video/video-recipe-payload";
 import type {
@@ -17,6 +16,7 @@ import type {
   ExtractorRuntime,
   FallbackRecipeExtractor,
   FetchResult,
+  SourceFetchOptions,
   TextSourceDocument
 } from "../types";
 
@@ -972,7 +972,7 @@ describe("the video recipe reader", () => {
 
   it("does not call Gemini when the download left too little request time", async () => {
     const videoRecipeReader = reader();
-    const slowDownload = vi.fn((_url: string, options?: { deadline?: RequestDeadline }) => {
+    const slowDownload = vi.fn((_url: string, options?: SourceFetchOptions) => {
       /* The download ends 5 s before the deadline. */
       vi.spyOn(Date, "now").mockReturnValue((options?.deadline?.expiresAt ?? 0) - 5_000);
       return Promise.resolve({
