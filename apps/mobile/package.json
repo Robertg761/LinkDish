@@ -40,7 +40,7 @@
     "@linkdish/recipe-domain": "workspace:*",
     "@linkdish/ui": "workspace:*",
     "@linkdish/utils": "workspace:*",
-    "@react-native-async-storage/async-storage": "2.2.0",
+    "@react-native-async-storage/async-storage": "3.1.1",
     "expo": "~56.0.15",
     "expo-apple-authentication": "~56.0.4",
     "expo-auth-session": "~56.0.15",
