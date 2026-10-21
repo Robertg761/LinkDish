@@ -360,7 +360,7 @@ describe("backups", () => {
     // With the restore limit set just below this backup's size.
     await expect(downloadBackup({ includeImages: true, maxBytes: 64 })).rejects.toMatchObject({
       code: "backup_too_large",
-      message: expect.stringContaining("Turn off scanned photos") as unknown as string
+      message: expect.stringContaining("Turn off scanned photos") as string
     });
     expect(downloads).toHaveLength(0);
     expect(readLastBackupAt()).toBeNull();
