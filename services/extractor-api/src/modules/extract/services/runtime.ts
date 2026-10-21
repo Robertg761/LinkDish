@@ -23,6 +23,7 @@ import type {
   FetchResult,
   RecipeTextCleaner,
   SourceFetchOptions,
+  TikTokVideoLocator,
   YouTubeSourceDocument
 } from "../types.js";
 
@@ -231,7 +232,10 @@ export const createDefaultExtractorRuntime = (): ExtractorRuntime => {
         validateUrl: validatePublicSourceUrl
       });
     },
-    fetchSocialVideo: async (videoUrl: string, options?: SourceFetchOptions) => {
+    fetchSocialVideo: async (
+      videoUrl: string,
+      options?: SourceFetchOptions & { locator?: TikTokVideoLocator | undefined }
+    ) => {
       const deadline = options?.deadline;
       const { fetchTikTokVideo } = await loadTikTokVideoFetcher();
 
@@ -242,7 +246,8 @@ export const createDefaultExtractorRuntime = (): ExtractorRuntime => {
         maxBytes: tikTokVideoMaxBytes,
         maxSeconds: extractorApiEnv.VIDEO_RECIPE_MAX_SECONDS,
         ...(deadline ? { signal: deadline.signal } : {}),
-        validateUrl: validatePublicSourceUrl
+        validateUrl: validatePublicSourceUrl,
+        locator: options?.locator
       });
     },
     videoRecipeReader: createGeminiVideoRecipeReader({

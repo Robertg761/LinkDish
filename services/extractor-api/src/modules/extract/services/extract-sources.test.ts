@@ -880,6 +880,27 @@ describe("the video recipe reader", () => {
     );
   });
 
+  it("hands the download what the caption fetch learned about the video", async () => {
+    const locator = {
+      videoId: "7234567890123456789",
+      mediaUrl: "https://v45.tiktokcdn-us.com/abc/video.mp4",
+      durationSeconds: 40
+    };
+    const runtime = createRuntime({
+      fetchSocialDocument: () =>
+        Promise.resolve({ ...tiktokDocument("so good 😍 #foodtok"), tiktokVideo: locator }),
+      fetchSocialVideo,
+      videoRecipeReader: reader()
+    });
+
+    await extractRecipe({ url: tiktokUrl, attempt: "primary" }, runtime);
+
+    expect(fetchSocialVideo).toHaveBeenLastCalledWith(
+      tiktokUrl,
+      expect.objectContaining({ locator })
+    );
+  });
+
   it("replaces a caption that lists only the ingredients", async () => {
     const runtime = createRuntime({
       fetchSocialDocument: () =>

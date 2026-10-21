@@ -129,4 +129,34 @@ describe("fetchTikTokVideo", () => {
       reason: "unsupported_content_type"
     });
   });
+  it("downloads the MP4 the caption fetch already found, without the embed page", async () => {
+    const fetchMock = vi.fn<FetchSignature>(() => Promise.resolve(mp4()));
+
+    const video = await fetchTikTokVideo(videoUrl, fetchMock, {
+      ...options,
+      locator: { videoId, mediaUrl, durationSeconds: 42 }
+    });
+
+    expect(fetchMock.mock.calls.map(([input]) => requestedUrl(input))).toEqual([mediaUrl]);
+    expect(video.durationSeconds).toBe(42);
+  });
+
+  it("uses the video id the caption fetch found when the link does not name one", async () => {
+    const fetchMock = vi.fn<FetchSignature>((input) =>
+      Promise.resolve(
+        requestedUrl(input).startsWith(TIKTOK_EMBED_PAGE_ENDPOINT)
+          ? embedPage({ urls: [mediaUrl] })
+          : mp4()
+      )
+    );
+
+    await fetchTikTokVideo("https://www.tiktok.com/@cook", fetchMock, {
+      ...options,
+      locator: { videoId, mediaUrl: null, durationSeconds: null }
+    });
+
+    expect(requestedUrl(fetchMock.mock.calls[0]![0])).toBe(
+      `${TIKTOK_EMBED_PAGE_ENDPOINT}/${videoId}`
+    );
+  });
 });

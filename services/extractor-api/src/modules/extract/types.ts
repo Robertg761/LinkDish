@@ -64,6 +64,15 @@ export interface TextSourceDocument {
   title: string | null;
   authorName: string | null;
   thumbnailUrl: string | null;
+  /** For a TikTok, what the caption fetch learned about the video, for the video reader. */
+  tiktokVideo?: TikTokVideoLocator | undefined;
+}
+
+/** Which TikTok video a post is, and, when the caption fetch read the embed page, its MP4. */
+export interface TikTokVideoLocator {
+  videoId: string;
+  mediaUrl: string | null;
+  durationSeconds: number | null;
 }
 
 export interface ImageSourceDocument {
@@ -198,7 +207,10 @@ export interface ExtractorRuntime {
    */
   fetchSocialDocument?: (url: string, options?: SourceFetchOptions) => Promise<TextSourceDocument>;
   /** Downloads a TikTok post's video for the video recipe reader. */
-  fetchSocialVideo?: (videoUrl: string, options?: SourceFetchOptions) => Promise<TikTokVideoFile>;
+  fetchSocialVideo?: (
+    videoUrl: string,
+    options?: SourceFetchOptions & { locator?: TikTokVideoLocator | undefined }
+  ) => Promise<TikTokVideoFile>;
   /**
    * Gemini watching a TikTok or YouTube video whose caption, description and linked pages hold no
    * written recipe. Absent, or unavailable, while VIDEO_RECIPE_READER_ENABLED is off.

@@ -2,7 +2,12 @@ import { isAbortError } from "../deadline.js";
 import { isSourceUrlRejection, validatePublicSourceUrl } from "../source-url-safety.js";
 
 import { SocialFetchError } from "./errors.js";
-import { fetchTikTokEmbedVideoData } from "./fetch-tiktok-document.js";
+import {
+  discardBody,
+  fetchTikTokEmbedVideoData,
+  readTikTokEmbedMedia,
+  readTikTokVideoId
+} from "./fetch-tiktok-document.js";
 import {
   browserLikeHeaders,
   createTimeoutSignal,
@@ -12,6 +17,7 @@ import {
 } from "./shared.js";
 
 import type { ValidateSourceUrl } from "../source-url-safety.js";
+import type { TikTokVideoLocator } from "../types.js";
 
 /*
  * The video file behind a TikTok post, for the video recipe reader. The embed page TikTok serves
@@ -33,20 +39,16 @@ export interface FetchTikTokVideoOptions {
   maxSeconds: number;
   signal?: AbortSignal | undefined;
   validateUrl?: ValidateSourceUrl | undefined;
+  /**
+   * What the caption fetch found: the video id (from the URL or oEmbed) and, when it read the
+   * embed page, the MP4 link, so that page is not fetched twice.
+   */
+  locator?: TikTokVideoLocator | undefined;
 }
 
 const tiktokMediaHostPattern =
   /(?:^|\.)(?:tiktok\.com|tiktokcdn\.com|tiktokcdn-us\.com|tiktokcdn-eu\.com|tiktokv\.com|tiktokv\.us|tiktokv\.eu|byteoversea\.com|ibytedtos\.com|muscdn\.com)$/u;
 const maxMediaRedirects = 3;
-
-const readRecord = (value: unknown): Record<string, unknown> =>
-  value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
-
-/* https://www.tiktok.com/@cook/video/123 → 123 */
-export const readTikTokVideoId = (videoUrl: string): string | null =>
-  new URL(videoUrl).pathname.match(/\/video\/(\d+)/u)?.[1] ?? null;
 
 const isTikTokMediaUrl = (url: string): boolean => {
   try {
@@ -66,14 +68,6 @@ const assertSafeMediaUrl = async (url: string, validateUrl: ValidateSourceUrl): 
 
   if (isSourceUrlRejection(safety)) {
     throw new SocialFetchError(`Refused unsafe TikTok video URL: ${safety.reason}`, "blocked");
-  }
-};
-
-const discardBody = (response: Response): void => {
-  const body = response.body as ReadableStream<Uint8Array> | null | undefined;
-
-  if (body && typeof body.cancel === "function") {
-    void body.cancel().catch(() => undefined);
   }
 };
 
@@ -137,7 +131,7 @@ export const fetchTikTokVideo = async (
   options: FetchTikTokVideoOptions
 ): Promise<TikTokVideoFile> => {
   const validateUrl = options.validateUrl ?? validatePublicSourceUrl;
-  const videoId = readTikTokVideoId(videoUrl);
+  const videoId = options.locator?.videoId ?? readTikTokVideoId(videoUrl);
 
   if (!videoId) {
     throw new SocialFetchError("That TikTok link does not name a video.", "not_found");
@@ -146,17 +140,16 @@ export const fetchTikTokVideo = async (
   const timeout = createTimeoutSignal(options.timeoutMs, options.signal);
 
   try {
-    const videoData = await fetchTikTokEmbedVideoData(
-      videoId,
-      fetchImplementation,
-      validateUrl,
-      timeout.signal
-    );
-    const video = readRecord(readRecord(videoData?.itemInfos).video);
-    const urls = Array.isArray(video.urls) ? (video.urls as unknown[]) : [];
-    const mediaUrl = urls.find((url): url is string => typeof url === "string");
-    const duration = readRecord(video.videoMeta).duration;
-    const durationSeconds = typeof duration === "number" && duration > 0 ? duration : null;
+    const { mediaUrl, durationSeconds } = options.locator?.mediaUrl
+      ? options.locator
+      : readTikTokEmbedMedia(
+          (await fetchTikTokEmbedVideoData(
+            videoId,
+            fetchImplementation,
+            validateUrl,
+            timeout.signal
+          )) ?? {}
+        );
 
     if (!mediaUrl) {
       throw new SocialFetchError("TikTok did not link a playable video.", "not_found");

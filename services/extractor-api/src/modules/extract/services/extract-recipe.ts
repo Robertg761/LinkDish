@@ -63,6 +63,7 @@ import type {
   NormalizedExtraction,
   SourceDocument,
   TextSourceDocument,
+  TikTokVideoLocator,
   VideoReadOutcome,
   YouTubeSourceDocument
 } from "../types.js";
@@ -905,7 +906,7 @@ type VideoReadRequest = {
   fallbackTitle: string;
   recipe: Partial<Recipe>;
 } & (
-  | { platform: "tiktok" }
+  | { platform: "tiktok"; locator: TikTokVideoLocator | undefined }
   | { platform: "youtube"; watchUrl: string; durationSeconds: number | null; isShort: boolean }
 );
 
@@ -970,7 +971,10 @@ const readRecipeFromVideo = async (request: VideoReadRequest): Promise<VideoRead
         return null;
       }
 
-      const video = await runtime.fetchSocialVideo(request.url, { deadline });
+      const video = await runtime.fetchSocialVideo(request.url, {
+        deadline,
+        locator: request.locator
+      });
       source = { kind: "file", bytes: video.bytes, mimeType: video.mimeType };
     } catch (error) {
       if (error instanceof ExtractionCancelledError) {
@@ -1111,6 +1115,7 @@ const runTextExtraction = async ({
           detection,
           url: document.url,
           platform: "tiktok",
+          locator: document.tiktokVideo,
           videoContext: {
             platform: "tiktok",
             caption: document.text || null,
