@@ -93,6 +93,22 @@ describe("the Gemini video recipe reader", () => {
     expect(deleteCalls(fetchMock)).toEqual([`${apiBase}/v1beta/files/abc`]);
   });
 
+  /*
+   * fetch sets content-length from the body. A second one set by hand makes the npm undici
+   * that cheerio loads reject the request ("invalid content-length header") before it is sent.
+   */
+  it("leaves the upload's content-length to fetch", async () => {
+    const fetchMock = geminiFetch(() =>
+      json({ candidates: [{ content: { parts: [{ text: JSON.stringify(answer) }] } }] })
+    );
+
+    await readerWith(fetchMock).read({ source: largeVideo(), context });
+
+    const upload = fetchMock.mock.calls.find(([input]) => requestedUrl(input) === uploadUrl);
+    expect(new Headers(upload?.[1]?.headers).has("content-length")).toBe(false);
+    expect((upload?.[1]?.body as Blob).size).toBe(15 * 1024 * 1024);
+  });
+
   it("sends a small video inline, with nothing to delete", async () => {
     const fetchMock = geminiFetch(() =>
       json({ candidates: [{ content: { parts: [{ text: JSON.stringify(answer) }] } }] })

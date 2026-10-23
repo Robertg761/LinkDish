@@ -118,7 +118,6 @@ class GeminiVideoRecipeReader implements VideoRecipeReader {
     const upload = await this.fetchImplementation(uploadUrl, {
       method: "POST",
       headers: {
-        "content-length": String(bytes.byteLength),
         "x-goog-upload-offset": "0",
         "x-goog-upload-command": "upload, finalize"
       },
