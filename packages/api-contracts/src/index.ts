@@ -38,7 +38,7 @@ const imageDataUrlSchema = z
   .min(1)
   .max(MAX_IMAGE_DATA_URL_CHARS)
   .regex(/^data:image\/(?:jpeg|jpg|png|webp);base64,[a-z0-9+/=\s]+$/iu);
-const extractionCorrelationIdSchema = z.string().uuid();
+const extractionCorrelationIdSchema = z.guid();
 
 export const extractRecipeImageSchema = z.object({
   dataUrl: imageDataUrlSchema,
@@ -709,7 +709,7 @@ export const analyticsEventNameSchema = z.enum([
   "web_vitals"
 ]);
 
-const analyticsUuidSchema = z.string().uuid();
+const analyticsUuidSchema = z.guid();
 const analyticsIdentifierSchema = z
   .string()
   .trim()
