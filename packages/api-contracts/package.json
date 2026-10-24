@@ -11,6 +11,6 @@
   },
   "dependencies": {
     "@linkdish/recipe-domain": "workspace:*",
-    "zod": "^3.24.2"
+    "zod": "^4.6.7"
   }
 }

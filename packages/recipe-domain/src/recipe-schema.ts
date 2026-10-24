@@ -44,7 +44,7 @@ export const httpUrlSchema = z
 export const buildPinnedHttpUrlSchema = (
   allowedHosts: readonly string[],
   message: string
-): z.ZodType<string, z.ZodTypeDef, unknown> =>
+): z.ZodType<string, unknown> =>
   httpUrlSchema.refine((value) => {
     const { hostname } = new URL(value);
     const normalizedHostname = hostname.toLowerCase();
@@ -306,7 +306,7 @@ export type Recipe = Omit<RecipeSchemaOutput, "image"> & {
  * The recipe contract. Typed as `ZodType<Recipe>` so the public `Recipe` type keeps its
  * optional `image`; use `recipeObjectSchema` when you need `.shape`, `.pick` or `.extend`.
  */
-export const recipeSchema: z.ZodType<Recipe, z.ZodTypeDef, unknown> = recipeSchemaBase;
+export const recipeSchema: z.ZodType<Recipe, unknown> = recipeSchemaBase;
 /** The same schema as `recipeSchema`, exposed as the underlying `ZodObject`. */
 export const recipeObjectSchema = recipeSchemaBase;
 export type RecipeFieldProvenance = z.infer<typeof recipeConfidenceSchema.shape.fieldProvenance>;
