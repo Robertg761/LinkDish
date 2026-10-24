@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 import {
   extractRecipeResponseSchema,
+  extractRecipeSuccessSchema,
   type ExtractRecipeAnyRequest,
   type ExtractRecipeImage,
   type ExtractRecipeResponse,
@@ -46,6 +47,11 @@ import { assertYouTubeVideoId, getSharedExtractorRuntime } from "./runtime.js";
 import type * as HtmlAnalysis from "./html-analysis.js";
 import type { FetchMode } from "../../../../../../packages/api-contracts/src/index.js";
 import type { CachedExtraction } from "../cache/extraction-cache.js";
+import type { VideoRecipeSource } from "../extractors/video/gemini-video-recipe-reader.js";
+import type {
+  VideoRecipeContext,
+  VideoRecipePayload
+} from "../extractors/video/video-recipe-payload.js";
 import type {
   DetectionResult,
   DeterministicDecision,
@@ -57,6 +63,8 @@ import type {
   NormalizedExtraction,
   SourceDocument,
   TextSourceDocument,
+  TikTokVideoLocator,
+  VideoReadOutcome,
   YouTubeSourceDocument
 } from "../types.js";
 
@@ -881,6 +889,165 @@ const buildCacheHitResult = (
   };
 };
 
+/* Below this much request time a video read cannot finish, so it is not started. */
+const minimumVideoReadBudgetMs = 15_000;
+/* After a TikTok download, below this much time Gemini could not answer before the deadline. */
+const minimumGeminiReadBudgetMs = 10_000;
+
+const loadVideoRecipeCandidateBuilder = async () =>
+  (await import("../extractors/video/build-video-recipe-candidate.js")).buildVideoRecipeCandidate;
+
+type VideoReadRequest = {
+  context: ExtractionContext;
+  detection: DetectionResult;
+  /** The recipe's source URL: the video's canonical URL. */
+  url: string;
+  videoContext: VideoRecipeContext;
+  fallbackTitle: string;
+  recipe: Partial<Recipe>;
+} & (
+  | { platform: "tiktok"; locator: TikTokVideoLocator | undefined }
+  | { platform: "youtube"; watchUrl: string; durationSeconds: number | null; isShort: boolean }
+);
+
+type VideoReadResult =
+  | { outcome: "read"; response: ExtractRecipeSuccess }
+  | { outcome: Exclude<VideoReadOutcome, "read">; response: null };
+
+/*
+ * The last resort for a TikTok or YouTube link with no written recipe: Gemini watches the video
+ * and the reading is kept only as far as its own quotes support it (build-video-recipe-candidate).
+ * Returns no response when the reader is off or the video yields no recipe, so the caller's own
+ * answer stands. Longer YouTube videos, and ones whose length is unknown (other than Shorts), are
+ * not sent: they cost more and cannot be read inside the request.
+ */
+const readRecipeFromVideo = async (request: VideoReadRequest): Promise<VideoReadResult | null> => {
+  const { context } = request;
+  const { runtime, deadline } = context;
+  const reader = runtime.videoRecipeReader;
+
+  if (!reader?.available) {
+    return null;
+  }
+
+  if (request.platform === "youtube") {
+    const knownShort =
+      request.durationSeconds === null
+        ? request.isShort
+        : request.durationSeconds <= extractorApiEnv.VIDEO_RECIPE_MAX_SECONDS;
+
+    if (!knownShort) {
+      return { outcome: "too_long", response: null };
+    }
+  }
+
+  if (deadline.remainingMs() < minimumVideoReadBudgetMs) {
+    return { outcome: "skipped_budget", response: null };
+  }
+
+  await ensureAuthorized(context);
+
+  const startedAt = Date.now();
+  const logVideoRead = (outcome: VideoReadOutcome, detail: Record<string, unknown> = {}) => {
+    console.info(
+      JSON.stringify({
+        event: "video_recipe_read",
+        platform: request.platform,
+        model: reader.model,
+        outcome,
+        latencyMs: Date.now() - startedAt,
+        ...detail
+      })
+    );
+  };
+
+  let source: VideoRecipeSource;
+
+  if (request.platform === "youtube") {
+    source = { kind: "youtube", url: request.watchUrl };
+  } else {
+    try {
+      if (!runtime.fetchSocialVideo) {
+        return null;
+      }
+
+      const video = await runtime.fetchSocialVideo(request.url, {
+        deadline,
+        locator: request.locator
+      });
+      source = { kind: "file", bytes: video.bytes, mimeType: video.mimeType };
+    } catch (error) {
+      if (error instanceof ExtractionCancelledError) {
+        throw error;
+      }
+
+      const outcome =
+        error instanceof SocialFetchError && error.reason === "too_large"
+          ? "too_long"
+          : "download_failed";
+      logVideoRead(outcome, { message: error instanceof Error ? error.message : "unknown" });
+      return { outcome, response: null };
+    }
+
+    /* A slow download can leave too little time; Gemini is not paid for a read it cannot finish. */
+    if (deadline.remainingMs() < minimumGeminiReadBudgetMs) {
+      logVideoRead("skipped_budget", { message: "too little time left after the download" });
+      return { outcome: "skipped_budget", response: null };
+    }
+  }
+
+  let payload: VideoRecipePayload | null;
+
+  try {
+    payload = await reader.read({ source, context: request.videoContext, deadline });
+  } catch (error) {
+    if (error instanceof ExtractionCancelledError) {
+      throw error;
+    }
+
+    logVideoRead("failed", { message: error instanceof Error ? error.message : "unknown" });
+    return { outcome: "failed", response: null };
+  }
+
+  if (!payload) {
+    logVideoRead("failed", { message: "no usable answer" });
+    return { outcome: "failed", response: null };
+  }
+
+  const { candidate, rejections } = (await loadVideoRecipeCandidateBuilder())(payload, {
+    context: request.videoContext,
+    fallbackTitle: request.fallbackTitle,
+    recipe: request.recipe
+  });
+  const normalized = candidate
+    ? normalizeExtractionCandidate(candidate, request.detection.sourceType, request.url, "http")
+    : null;
+
+  if (!normalized) {
+    logVideoRead("no_recipe", { rejections });
+    return { outcome: "no_recipe", response: null };
+  }
+
+  logVideoRead("read", { rejections, ingredientCount: normalized.recipe.ingredients.length });
+
+  return {
+    outcome: "read",
+    response: extractRecipeSuccessSchema.parse({
+      status: "success",
+      recipe: normalized.recipe,
+      extraction: {
+        sourceType: request.detection.sourceType,
+        strategy: normalized.strategy,
+        confidenceScore: normalized.confidenceScore,
+        missingFields: normalized.missingFields,
+        warnings: normalized.warnings,
+        fetchMode: normalized.fetchMode,
+        provenance: normalized.provenance
+      }
+    })
+  };
+};
+
 const noRecipeInTextResponse = (userMessage: string): ExtractRecipeResponse =>
   extractRecipeResponseSchema.parse({
     status: "failure",
@@ -937,6 +1104,50 @@ const runTextExtraction = async ({
       )
     : null;
 
+  /*
+   * A caption with no recipe, or only the ingredients, leaves the rest to the video: Gemini
+   * watches it when the video reader is on. Its recipe replaces the caption's partial one.
+   */
+  const videoRead =
+    document.origin === "tiktok" && (!normalized || extraction?.methodInVideo)
+      ? await readRecipeFromVideo({
+          context,
+          detection,
+          url: document.url,
+          platform: "tiktok",
+          locator: document.tiktokVideo,
+          videoContext: {
+            platform: "tiktok",
+            caption: document.text || null,
+            title: document.title,
+            authorName: document.authorName
+          },
+          fallbackTitle: document.authorName
+            ? `TikTok recipe from ${document.authorName}`
+            : "TikTok recipe",
+          recipe: {
+            sourceUrl: document.url,
+            image: document.thumbnailUrl ? { url: document.thumbnailUrl, source: "og" } : null,
+            siteName: "TikTok",
+            videoUrl: document.url,
+            ...(document.authorName ? { author: document.authorName } : {})
+          }
+        })
+      : null;
+  const videoLog = videoRead ? { videoRead: videoRead.outcome } : {};
+
+  if (videoRead?.response) {
+    const response = videoRead.response;
+
+    return {
+      response,
+      logContext: {
+        ...makeLogContext({ ...logBase, response, strategy: response.extraction.strategy }),
+        ...videoLog
+      }
+    };
+  }
+
   if (!normalized) {
     const isCaption = document.origin === "tiktok";
     const response = noRecipeInTextResponse(
@@ -947,7 +1158,10 @@ const runTextExtraction = async ({
           : "That text doesn't look like a recipe yet. Include the ingredients and the steps."
     );
 
-    return { response, logContext: makeLogContext({ ...logBase, response, strategy: "none" }) };
+    return {
+      response,
+      logContext: { ...makeLogContext({ ...logBase, response, strategy: "none" }), ...videoLog }
+    };
   }
 
   const response = extractRecipeResponseSchema.parse({
@@ -966,7 +1180,10 @@ const runTextExtraction = async ({
 
   return {
     response,
-    logContext: makeLogContext({ ...logBase, response, strategy: normalized.strategy })
+    logContext: {
+      ...makeLogContext({ ...logBase, response, strategy: normalized.strategy }),
+      ...videoLog
+    }
   };
 };
 
@@ -1334,6 +1551,7 @@ const extractFromUrl = async (
 
   const candidate = await runDeterministicExtraction(sourceDocument, detection, fetchMode);
   const decision = decidePrimaryOutcome(sourceRequest, detection, fetchMode, candidate);
+  let youTubeVideoRead: VideoReadOutcome | null = null;
 
   /*
    * A video whose description has no full recipe (none, or the ingredients without a method)
@@ -1348,6 +1566,60 @@ const extractFromUrl = async (
     if (linked) {
       return linked;
     }
+
+    const videoRead = await readRecipeFromVideo({
+      context,
+      detection,
+      url: sourceDocument.url,
+      platform: "youtube",
+      watchUrl: toYouTubeWatchUrl(sourceDocument.videoId),
+      durationSeconds: sourceDocument.durationSeconds ?? null,
+      isShort: /^\/shorts\//u.test(new URL(sourceDocument.url).pathname),
+      videoContext: {
+        platform: "youtube",
+        caption: sourceDocument.description,
+        title: sourceDocument.title,
+        authorName: sourceDocument.authorName ?? null
+      },
+      fallbackTitle: `YouTube recipe ${sourceDocument.videoId}`,
+      recipe: {
+        sourceUrl: sourceDocument.url,
+        sourceType: "youtube",
+        image: {
+          source: "youtube-thumb",
+          url: `https://i.ytimg.com/vi/${encodeURIComponent(sourceDocument.videoId)}/hqdefault.jpg`
+        },
+        siteName: "YouTube",
+        videoUrl: toYouTubeWatchUrl(sourceDocument.videoId),
+        ...(sourceDocument.authorName ? { author: sourceDocument.authorName } : {})
+      }
+    });
+
+    if (videoRead) {
+      youTubeVideoRead = videoRead.outcome;
+
+      if (videoRead.response) {
+        /* Not cached: LLM output is never shared (see extraction-cache.ts). */
+        const response = videoRead.response;
+
+        return {
+          response,
+          logContext: {
+            ...makeLogContext({
+              hostname,
+              detection,
+              attempt: request.attempt,
+              response,
+              strategy: response.extraction.strategy,
+              fetchMode,
+              fallbackProvider: runtime.fallbackExtractor.providerName,
+              ...documentLogFields
+            }),
+            videoRead: videoRead.outcome
+          }
+        };
+      }
+    }
   }
 
   const response = extractRecipeResponseSchema.parse(asApiResponse(decision));
@@ -1358,16 +1630,19 @@ const extractFromUrl = async (
 
   return {
     response,
-    logContext: makeLogContext({
-      hostname,
-      detection,
-      attempt: request.attempt,
-      response,
-      strategy: response.status === "success" ? response.extraction.strategy : "none",
-      fetchMode: response.status === "success" ? response.extraction.fetchMode : fetchMode,
-      fallbackProvider: runtime.fallbackExtractor.providerName,
-      ...documentLogFields
-    })
+    logContext: {
+      ...makeLogContext({
+        hostname,
+        detection,
+        attempt: request.attempt,
+        response,
+        strategy: response.status === "success" ? response.extraction.strategy : "none",
+        fetchMode: response.status === "success" ? response.extraction.fetchMode : fetchMode,
+        fallbackProvider: runtime.fallbackExtractor.providerName,
+        ...documentLogFields
+      }),
+      ...(youTubeVideoRead ? { videoRead: youTubeVideoRead } : {})
+    }
   };
 };
 

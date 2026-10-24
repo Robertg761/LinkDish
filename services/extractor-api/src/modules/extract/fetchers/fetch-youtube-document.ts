@@ -381,6 +381,19 @@ const toYouTubeRequestError = (error: unknown, signal: AbortSignal): YouTubeFetc
   );
 };
 
+/* The video's length from the watch page's player data, when the page carries it. */
+export const readYouTubeDurationSeconds = (pageHtml: string): number | null => {
+  const lengthSeconds = pageHtml.match(/"lengthSeconds":"(\d{1,7})"/u)?.[1];
+  const approxDurationMs = pageHtml.match(/"approxDurationMs":"(\d{1,10})"/u)?.[1];
+  const seconds = lengthSeconds
+    ? Number(lengthSeconds)
+    : approxDurationMs
+      ? Math.round(Number(approxDurationMs) / 1000)
+      : null;
+
+  return seconds !== null && Number.isFinite(seconds) && seconds > 0 ? seconds : null;
+};
+
 export const fetchYouTubeDocument = async (
   url: string,
   videoId: string,
@@ -490,6 +503,7 @@ export const fetchYouTubeDocument = async (
       chapters,
       pageHtml,
       creatorComments,
+      durationSeconds: readYouTubeDurationSeconds(pageHtml),
       authorName:
         typeof metadata.author_name === "string" && metadata.author_name.trim().length > 0
           ? metadata.author_name.trim()

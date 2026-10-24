@@ -2,6 +2,7 @@ import { extractorApiEnv } from "../../../config/env.js";
 import { getSharedManagedFallbackExtractor } from "../../admin/model-control.js";
 import { createExtractionResultCache } from "../cache/extraction-cache.js";
 import { ExtractionCancelledError } from "../deadline.js";
+import { createGeminiVideoRecipeReader } from "../extractors/video/gemini-video-recipe-reader.js";
 import { BrowserFetchError, HtmlFetchError } from "../fetchers/errors.js";
 import { getDomainAdapter } from "../source-detection/domain-adapters.js";
 import { parseYouTubeVideoId } from "../source-detection/parse-youtube-video-id.js";
@@ -14,6 +15,7 @@ import {
 import type * as BrowserEscalation from "./browser-escalation.js";
 import type * as HtmlFetcher from "../fetchers/fetch-html-document.js";
 import type * as TikTokFetcher from "../fetchers/fetch-tiktok-document.js";
+import type * as TikTokVideoFetcher from "../fetchers/fetch-tiktok-video.js";
 import type * as YouTubeFetcher from "../fetchers/fetch-youtube-document.js";
 import type {
   BrowserFetcher,
@@ -21,6 +23,7 @@ import type {
   FetchResult,
   RecipeTextCleaner,
   SourceFetchOptions,
+  TikTokVideoLocator,
   YouTubeSourceDocument
 } from "../types.js";
 
@@ -36,6 +39,7 @@ let htmlFetcherModule: Promise<typeof HtmlFetcher> | null = null;
 let browserEscalationModule: Promise<typeof BrowserEscalation> | null = null;
 let youTubeFetcherModule: Promise<typeof YouTubeFetcher> | null = null;
 let tikTokFetcherModule: Promise<typeof TikTokFetcher> | null = null;
+let tikTokVideoFetcherModule: Promise<typeof TikTokVideoFetcher> | null = null;
 
 const loadHtmlFetcher = () => {
   htmlFetcherModule ??= import("../fetchers/fetch-html-document.js");
@@ -51,6 +55,16 @@ const loadTikTokFetcher = () => {
   tikTokFetcherModule ??= import("../fetchers/fetch-tiktok-document.js");
   return tikTokFetcherModule;
 };
+
+const loadTikTokVideoFetcher = () => {
+  tikTokVideoFetcherModule ??= import("../fetchers/fetch-tiktok-video.js");
+  return tikTokVideoFetcherModule;
+};
+
+/* A TikTok video download gets this long at most; Gemini needs most of the request after it. */
+const tikTokVideoDownloadMaxMs = 10_000;
+/* Larger videos go to Gemini through its Files API; this caps what is held in memory. */
+const tikTokVideoMaxBytes = 60 * 1024 * 1024;
 
 const loadYouTubeFetcher = () => {
   youTubeFetcherModule ??= import("../fetchers/fetch-youtube-document.js");
@@ -218,6 +232,31 @@ export const createDefaultExtractorRuntime = (): ExtractorRuntime => {
         validateUrl: validatePublicSourceUrl
       });
     },
+    fetchSocialVideo: async (
+      videoUrl: string,
+      options?: SourceFetchOptions & { locator?: TikTokVideoLocator | undefined }
+    ) => {
+      const deadline = options?.deadline;
+      const { fetchTikTokVideo } = await loadTikTokVideoFetcher();
+
+      return fetchTikTokVideo(videoUrl, fetchImplementation, {
+        timeoutMs: deadline
+          ? deadline.budgetMs(tikTokVideoDownloadMaxMs)
+          : tikTokVideoDownloadMaxMs,
+        maxBytes: tikTokVideoMaxBytes,
+        maxSeconds: extractorApiEnv.VIDEO_RECIPE_MAX_SECONDS,
+        ...(deadline ? { signal: deadline.signal } : {}),
+        validateUrl: validatePublicSourceUrl,
+        locator: options?.locator
+      });
+    },
+    videoRecipeReader: createGeminiVideoRecipeReader({
+      enabled: extractorApiEnv.VIDEO_RECIPE_READER_ENABLED,
+      apiKey: extractorApiEnv.GEMINI_API_KEY,
+      model: extractorApiEnv.VIDEO_RECIPE_MODEL,
+      fetchImplementation,
+      timeoutMs: extractorApiEnv.VIDEO_RECIPE_TIMEOUT_MS
+    }),
     fallbackExtractor: getSharedManagedFallbackExtractor(fetchImplementation),
     recipeTextCleaner: createRecipeTextCleaner(),
     ...(extractorApiEnv.EXTRACT_CACHE_ENABLED

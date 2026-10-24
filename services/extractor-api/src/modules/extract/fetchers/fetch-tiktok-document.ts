@@ -12,7 +12,7 @@ import {
 } from "./shared.js";
 
 import type { ValidateSourceUrl } from "../source-url-safety.js";
-import type { TextSourceDocument } from "../types.js";
+import type { TextSourceDocument, TikTokVideoLocator } from "../types.js";
 
 /*
  * TikTok pages are script-rendered and bot-walled, but TikTok publishes a public oEmbed
@@ -70,7 +70,7 @@ const assertSafe = async (url: string, validateUrl: ValidateSourceUrl): Promise<
   }
 };
 
-const discardBody = (response: Response): void => {
+export const discardBody = (response: Response): void => {
   const body = response.body as ReadableStream<Uint8Array> | null | undefined;
 
   if (body && typeof body.cancel === "function") {
@@ -146,17 +146,38 @@ interface TikTokPost {
 }
 
 /* https://www.tiktok.com/@cook/video/123 → 123; oEmbed's embed_product_id names it too. */
-const readVideoId = (videoUrl: string, payload: Record<string, unknown>): string | null =>
+export const readTikTokVideoId = (
+  videoUrl: string,
+  payload: Record<string, unknown> = {}
+): string | null =>
   new URL(videoUrl).pathname.match(/\/(?:video|photo)\/(\d+)/u)?.[1] ??
   readString(payload.embed_product_id)?.match(/^\d+$/u)?.[0] ??
   null;
 
-const fetchEmbedPagePost = async (
+/** The playable MP4 link and length the embed page's video record gives, when it does. */
+export const readTikTokEmbedMedia = (
+  videoData: Record<string, unknown>
+): { mediaUrl: string | null; durationSeconds: number | null } => {
+  const video = readRecord(readRecord(videoData.itemInfos).video);
+  const urls = Array.isArray(video.urls) ? (video.urls as unknown[]) : [];
+  const duration = readRecord(video.videoMeta).duration;
+
+  return {
+    mediaUrl: urls.find((url): url is string => typeof url === "string") ?? null,
+    durationSeconds: typeof duration === "number" && duration > 0 ? duration : null
+  };
+};
+
+/**
+ * The video's record in the embed page's state (caption, author, covers and a playable MP4
+ * link), or null when the page is missing, too large or carries no state.
+ */
+export const fetchTikTokEmbedVideoData = async (
   videoId: string,
   fetchImplementation: typeof fetch,
   validateUrl: ValidateSourceUrl,
   signal: AbortSignal
-): Promise<TikTokPost | null> => {
+): Promise<Record<string, unknown> | null> => {
   const embedUrl = `${TIKTOK_EMBED_PAGE_ENDPOINT}/${videoId}`;
 
   await assertSafe(embedUrl, validateUrl);
@@ -202,6 +223,27 @@ const fetchEmbedPagePost = async (
 
   const pageData = readRecord(readRecord(readRecord(state).source).data);
   const videoData = readRecord(readRecord(pageData[`/embed/v2/${videoId}`]).videoData);
+
+  return Object.keys(videoData).length > 0 ? videoData : null;
+};
+
+const fetchEmbedPagePost = async (
+  videoId: string,
+  fetchImplementation: typeof fetch,
+  validateUrl: ValidateSourceUrl,
+  signal: AbortSignal
+): Promise<(TikTokPost & ReturnType<typeof readTikTokEmbedMedia>) | null> => {
+  const videoData = await fetchTikTokEmbedVideoData(
+    videoId,
+    fetchImplementation,
+    validateUrl,
+    signal
+  );
+
+  if (!videoData) {
+    return null;
+  }
+
   const itemInfos = readRecord(videoData.itemInfos);
   const authorInfos = readRecord(videoData.authorInfos);
   const covers = Array.isArray(itemInfos.covers) ? (itemInfos.covers as unknown[]) : [];
@@ -209,7 +251,8 @@ const fetchEmbedPagePost = async (
   return {
     caption: readString(itemInfos.text),
     authorName: readString(authorInfos.nickName) ?? readString(authorInfos.uniqueId),
-    thumbnailUrl: readString(covers[0])
+    thumbnailUrl: readString(covers[0]),
+    ...readTikTokEmbedMedia(videoData)
   };
 };
 
@@ -272,9 +315,10 @@ export const fetchTikTokDocument = async (
       authorName: readString(payload.author_name),
       thumbnailUrl: readString(payload.thumbnail_url)
     };
-    const videoId = post.caption ? null : readVideoId(videoUrl, payload);
+    const videoId = readTikTokVideoId(videoUrl, payload);
+    let media: ReturnType<typeof readTikTokEmbedMedia> | null = null;
 
-    if (videoId) {
+    if (videoId && !post.caption) {
       /* The embed page is a best-effort extra: if it fails, the oEmbed answer still stands. */
       const embedPost = await fetchEmbedPagePost(
         videoId,
@@ -294,7 +338,19 @@ export const fetchTikTokDocument = async (
         authorName: post.authorName ?? embedPost?.authorName ?? null,
         thumbnailUrl: post.thumbnailUrl ?? embedPost?.thumbnailUrl ?? null
       };
+      media = embedPost
+        ? { mediaUrl: embedPost.mediaUrl, durationSeconds: embedPost.durationSeconds }
+        : null;
     }
+
+    /* The video reader downloads this video, skipping the embed page when it was read here. */
+    const tiktokVideo: TikTokVideoLocator | undefined = videoId
+      ? {
+          videoId,
+          mediaUrl: media?.mediaUrl ?? null,
+          durationSeconds: media?.durationSeconds ?? null
+        }
+      : undefined;
 
     return {
       kind: "text",
@@ -303,7 +359,8 @@ export const fetchTikTokDocument = async (
       text: restoreCaptionLines(post.caption ?? "").slice(0, maxCaptionChars),
       title: null,
       authorName: post.authorName,
-      thumbnailUrl: post.thumbnailUrl && isHttpUrl(post.thumbnailUrl) ? post.thumbnailUrl : null
+      thumbnailUrl: post.thumbnailUrl && isHttpUrl(post.thumbnailUrl) ? post.thumbnailUrl : null,
+      ...(tiktokVideo ? { tiktokVideo } : {})
     };
   } catch (error) {
     if (error instanceof SocialFetchError) {

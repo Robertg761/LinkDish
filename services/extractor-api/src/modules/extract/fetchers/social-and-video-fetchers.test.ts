@@ -63,7 +63,8 @@ describe("fetchTikTokDocument", () => {
       text: "Chili: 1 lb beef, 1 can beans. Simmer 20 min #dinner",
       title: null,
       authorName: "Cook Creator",
-      thumbnailUrl: "https://p16-sign.tiktokcdn.com/thumb.jpeg"
+      thumbnailUrl: "https://p16-sign.tiktokcdn.com/thumb.jpeg",
+      tiktokVideo: { videoId: "7234567890123456789", mediaUrl: null, durationSeconds: null }
     });
   });
 
@@ -92,7 +93,11 @@ describe("fetchTikTokDocument", () => {
             videoData: {
               itemInfos: {
                 text: "Chili  Ingredients  1 lb beef  1 can beans  #dinner",
-                covers: ["https://p16-common-sign.tiktokcdn-us.com/cover.jpeg"]
+                covers: ["https://p16-common-sign.tiktokcdn-us.com/cover.jpeg"],
+                video: {
+                  urls: ["https://v45.tiktokcdn-us.com/abc/video.mp4"],
+                  videoMeta: { duration: 42 }
+                }
               },
               authorInfos: { uniqueId: "cook", nickName: "Cook Creator" }
             }
@@ -126,7 +131,13 @@ describe("fetchTikTokDocument", () => {
     expect(document).toMatchObject({
       text: "Chili\nIngredients\n1 lb beef\n1 can beans\n#dinner",
       authorName: "Cook Creator",
-      thumbnailUrl: "https://p16-common-sign.tiktokcdn-us.com/cover.jpeg"
+      thumbnailUrl: "https://p16-common-sign.tiktokcdn-us.com/cover.jpeg",
+      /* Handed to the video reader, so it need not fetch the embed page again. */
+      tiktokVideo: {
+        videoId: "7234567890123456789",
+        mediaUrl: "https://v45.tiktokcdn-us.com/abc/video.mp4",
+        durationSeconds: 42
+      }
     });
   });
 
