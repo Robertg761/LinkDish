@@ -77,8 +77,8 @@ describe("LinkDish backup", () => {
     expect(result.ok).toBe(true);
     expect(result.ok && result.backup.recipes).toHaveLength(1);
     expect(result.warnings).toEqual([
-      'Recipe 2 ("Ginger-Sesame Chicken Rice Skillet") was skipped: recipe.ingredients: Array must contain at least 1 element(s)',
-      'Recipe 3 ("Ginger-Sesame Chicken Rice Skillet") was skipped: meta.rating: Number must be less than or equal to 5',
+      'Recipe 2 ("Ginger-Sesame Chicken Rice Skillet") was skipped: recipe.ingredients: Too small: expected array to have >=1 items',
+      'Recipe 3 ("Ginger-Sesame Chicken Rice Skillet") was skipped: meta.rating: Too big: expected number to be <=5',
       "Meal plan entry 1 was skipped: date: Expected a YYYY-MM-DD date."
     ]);
   });
