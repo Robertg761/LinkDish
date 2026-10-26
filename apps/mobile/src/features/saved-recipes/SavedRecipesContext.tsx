@@ -250,7 +250,10 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
   const savedRecipesRef = useRef<SavedRecipeRecord[]>([]);
   /** Bumped by every Family refresh, so only the newest one lands. */
   const sharedRefreshRef = useRef(0);
-  const cookbookStorage = useMemo(() => createCookbookStorage(), []);
+  const cookbookStorage = useMemo(
+    () => createCookbookStorage(undefined, { prepareLegacyRecords: migrateLegacySourceImages }),
+    []
+  );
   const client = useMemo(
     () =>
       createExtractorApiClient({

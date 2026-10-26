@@ -1296,6 +1296,11 @@ describe("SavedRecipesProvider household save entitlement", () => {
     );
 
     await renderProvider();
+
+    // The moved copy points at the scan's file before the old value is deleted.
+    expect(asyncStorageMocks.data.has("linkdish.savedRecipes")).toBe(false);
+    expect(cookbookWritesOf()[0]).toContain("file:///documents/");
+
     await settlePersistence();
 
     expect(fileSystemMocks.writes).toHaveLength(1);

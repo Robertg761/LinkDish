@@ -87,9 +87,11 @@ size` checks the budgets after a build (entry ≤ 115 KB gzip, landing JS ≤
   doesn't list are cleaned up on launch. Builds up to 2.0.x kept the whole cookbook in one value
   (`linkdish.savedRecipes`), which got slow to rewrite and can't be read back on Android past
   about 2 MB. It is moved over on the first launch and deleted only once the copy is written; if
-  the move fails, that launch keeps writing the old value and the next one retries. An old value
-  that can't be read is never deleted (sync stays off while it is unread), and one that can't be
-  understood is backed up to `linkdish.savedRecipes.corrupt.v1` first, as before. Android's
+  the move fails, that launch keeps writing the old value and the next one retries. Inlined scan photos
+  are written to files before the move, so the moved copy points at them. An old value (or one
+  recipe's value) that can't be read is never deleted, and sync stays off while it is unread so
+  it isn't taken for a deletion; an old value that can't be understood is backed up to
+  `linkdish.savedRecipes.corrupt.v1` first, as before. Android's
   AsyncStorage database cap is raised from 6 MB to 64 MB (`AsyncStorage_db_size_in_MB`, set in
   `android/gradle.properties` and by `app.config.ts` on prebuild).
 - Search, shopping aggregation (aisle grouping, clean fractions), US/metric conversion and

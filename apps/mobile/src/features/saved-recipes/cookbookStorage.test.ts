@@ -208,7 +208,7 @@ describe("cookbook storage", () => {
     expect(data.has(cookbookRecipeStorageKey("saved-9"))).toBe(false);
   });
 
-  it("keeps a recipe value it can't read, without showing it", async () => {
+  it("keeps a recipe value it can't read, without showing it, and reports the read incomplete", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const { data } = relaunch(new Map());
     const first = relaunch(data);
@@ -217,8 +217,10 @@ describe("cookbook storage", () => {
     data.set(cookbookRecipeStorageKey("saved-2"), '{"recipe":');
 
     const next = relaunch(data);
-    const { records } = await next.cookbook.read();
+    const { incomplete, records } = await next.cookbook.read();
     expect(ids(records)).toEqual(["saved-1"]);
+    // Sync would take it for a deletion.
+    expect(incomplete).toBe(true);
 
     await next.cookbook.write([...records, buildRecord(3)]);
     expect(data.get(cookbookRecipeStorageKey("saved-2"))).toBe('{"recipe":');
@@ -265,6 +267,27 @@ describe("cookbook storage", () => {
       expect(data.has(LEGACY_COOKBOOK_STORAGE_KEY)).toBe(false);
       expect(indexOf(data)).toMatchObject({ ids: ["saved-2", "saved-1"], legacyMigrated: true });
       expect(ids((await relaunch(data).cookbook.read()).records)).toEqual(["saved-2", "saved-1"]);
+    });
+
+    it("prepares its recipes before moving them, so the moved copy has what it needs", async () => {
+      const stored = [buildRecord(1)];
+      const data = new Map([[LEGACY_COOKBOOK_STORAGE_KEY, JSON.stringify(stored)]]);
+      const { storage } = createFakeStorage(data);
+      const cookbook = createCookbookStorage(storage, {
+        prepareLegacyRecords: (records) =>
+          records.map((record) => ({
+            ...record,
+            sourceImages: [{ mimeType: "image/jpeg", uri: "file:///documents/recipe-scans/a.jpg" }]
+          }))
+      });
+
+      const { records } = await cookbook.read();
+
+      expect(records[0]!.sourceImages?.[0]?.uri).toBe("file:///documents/recipe-scans/a.jpg");
+      expect(data.get(cookbookRecipeStorageKey("saved-1"))).toContain(
+        "file:///documents/recipe-scans/a.jpg"
+      );
+      expect(data.has(LEGACY_COOKBOOK_STORAGE_KEY)).toBe(false);
     });
 
     it("keeps both of two recipes that shared an id", async () => {

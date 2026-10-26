@@ -56,8 +56,9 @@ export type CookbookKeyValueStorage = Pick<
 
 export interface CookbookReadResult {
   /**
-   * Some stored recipes couldn't be read (the old one-value cookbook was there but reading it
-   * failed). What was read is returned; the rest is left as stored.
+   * Some stored recipes couldn't be read (the old one-value cookbook, or a recipe's own value).
+   * What was read is returned and the rest is left as stored. Cloud sync must stay off then: it
+   * would take a recipe missing here for one deleted here.
    */
   incomplete?: boolean;
   /** The old one-value cookbook was moved into per-recipe storage by this read. */
@@ -147,8 +148,18 @@ const withUniqueIds = (records: SavedRecipeRecord[]): SavedRecipeRecord[] => {
 const newestSavedFirst = (left: SavedRecipeRecord, right: SavedRecipeRecord): number =>
   right.savedAt.localeCompare(left.savedAt);
 
+export interface CookbookStorageOptions {
+  /**
+   * Applied to the old one-value cookbook's recipes before they are moved over (and before the
+   * old value is deleted): the provider writes inlined scan photos to files here, so the moved
+   * copy points at them instead of losing them.
+   */
+  prepareLegacyRecords?: (records: SavedRecipeRecord[]) => SavedRecipeRecord[];
+}
+
 export const createCookbookStorage = (
-  storage: CookbookKeyValueStorage = AsyncStorage
+  storage: CookbookKeyValueStorage = AsyncStorage,
+  { prepareLegacyRecords = (records) => records }: CookbookStorageOptions = {}
 ): CookbookStorage => {
   /**
    * `legacy`: the old value couldn't be moved over this launch, so it is still written.
@@ -300,12 +311,12 @@ export const createCookbookStorage = (
         return { records: [], status: "corrupt" };
       }
 
-      const records = withUniqueIds(legacy.records);
+      const records = prepareLegacyRecords(withUniqueIds(legacy.records));
 
       if (!(await migrateLegacy(records, recipeKeys))) {
         mode = "legacy";
         lastLegacyWrite = legacyValue;
-        return { records: legacy.records, status: legacy.status };
+        return { records, status: legacy.status };
       }
 
       mode = "v2";
@@ -341,7 +352,7 @@ export const createCookbookStorage = (
       legacyMigrated = false;
     }
 
-    let incomplete = false;
+    let incomplete = unreadableIds.size > 0;
 
     if (hasLegacy) {
       if (legacyMigrated) {
@@ -361,7 +372,7 @@ export const createCookbookStorage = (
             const present = new Set(records.map((record) => record.id));
             records = withUniqueIds([
               ...records,
-              ...legacy.records.filter((record) => !present.has(record.id))
+              ...prepareLegacyRecords(legacy.records.filter((record) => !present.has(record.id)))
             ]);
             legacyMigrated = true;
             legacyNeedsRemoval = true;
