@@ -398,6 +398,60 @@ describe("SavedRecipesProvider household save entitlement", () => {
     expect(cookbookWritesOf().some((value) => value.includes('"timesCooked":1'))).toBe(true);
   });
 
+  it("restores a backup against the cookbook as it is and saves it at once", async () => {
+    const [here, fromBackup] = buildSavedRecipes(2);
+    storeSavedRecipes([here!]);
+
+    await renderProvider();
+
+    let cookbookSeen: { freeSlots: number; records: unknown[] } | null = null;
+
+    await act(async () => {
+      await latestSavedRecipes!.restoreBackup((cookbook) => {
+        cookbookSeen = cookbook;
+        return {
+          collections: [
+            {
+              createdAt: "2026-10-01T12:00:00.000Z",
+              id: "collection-soups",
+              name: "Soups",
+              sortOrder: 0,
+              updatedAt: "2026-10-01T12:00:00.000Z"
+            }
+          ],
+          counts: {
+            collectionsCreated: 1,
+            duplicates: 1,
+            imported: 1,
+            mealPlanAdded: 0,
+            overLimit: 0,
+            restoredStarters: 0
+          },
+          mealPlan: [],
+          membershipAdditions: [{ collectionIds: ["collection-soups"], recipeId: here!.id }],
+          records: [{ ...fromBackup!, id: "saved-from-backup" }]
+        };
+      });
+    });
+
+    expect(cookbookSeen).toMatchObject({ freeSlots: 14, records: [expect.anything()] });
+    expect(latestSavedRecipes?.savedRecipes.map((recipe) => recipe.id)).toEqual([
+      "saved-from-backup",
+      here!.id
+    ]);
+    expect(latestSavedRecipes?.getSavedRecipeById(here!.id)?.libraryExtras?.collectionIds).toEqual([
+      "collection-soups"
+    ]);
+    expect(latestSavedRecipes?.collections.map((collection) => collection.name)).toEqual(["Soups"]);
+    // Written at once, not after the debounce.
+    expect(cookbookWritesOf().at(-1)).toContain("saved-from-backup");
+    expect(
+      asyncStorageMocks.setItem.mock.calls.some(
+        ([key, value]) => key === "linkdish.collections.v1" && String(value).includes("Soups")
+      )
+    ).toBe(true);
+  });
+
   it("coalesces rapid small edits into one cookbook write", async () => {
     const storedRecipe = buildSavedRecipes(1)[0]!;
     storeSavedRecipes([storedRecipe]);

@@ -25,6 +25,7 @@ import { canSaveAnotherRecipe } from "../billing/store";
 import {
   COLLECTIONS_STORAGE_KEY,
   createCollectionRecord,
+  getRecipeCollectionIds,
   parseCollections,
   removeCollectionFromRecords,
   setSavedRecipeCollectionIds,
@@ -70,6 +71,7 @@ import {
   type SavedRecipeUpdate
 } from "./store";
 
+import type { RestorePlan } from "../backup/backup";
 import type { BillingTier } from "../billing/plans";
 import type { SuccessfulExtractionState } from "../recipe-results/types";
 import type { HouseholdDetails, SharedRecipe } from "@linkdish/api-contracts";
@@ -101,6 +103,11 @@ export interface SavedRecipesActions {
   incrementRecipeTimesCooked: (id: string) => boolean;
   refreshSharedRecipes: () => Promise<void>;
   removeRecipe: (id: string) => void;
+  /**
+   * Adds what `plan` decides a backup brings (see planBackupRestore), planned against the
+   * cookbook as it is now, and saves the cookbook at once. Returns the plan it applied.
+   */
+  restoreBackup: (plan: (cookbook: BackupRestoreCookbook) => RestorePlan) => Promise<RestorePlan>;
   saveRecipe: (
     state: SuccessfulExtractionState
   ) => Promise<SaveRecipeResult & { recipeId?: string }>;
@@ -122,6 +129,13 @@ export interface SavedRecipesActions {
   updateCollection: (id: string, patch: CollectionPatch) => void;
   updateRecipe: (id: string, update: SavedRecipeUpdate) => boolean;
   updateSharedRecipe: (id: string, update: SavedRecipeUpdate) => Promise<boolean>;
+}
+
+export interface BackupRestoreCookbook {
+  collections: MobileCollection[];
+  /** Personal recipes that still fit (Infinity when there is no limit). */
+  freeSlots: number;
+  records: SavedRecipeRecord[];
 }
 
 export type SavedRecipesContextValue = SavedRecipesState & SavedRecipesActions;
@@ -1288,6 +1302,57 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
     [commitCollections, commitSavedRecipes]
   );
 
+  const restoreBackup = useCallback(
+    async (plan: (cookbook: BackupRestoreCookbook) => RestorePlan): Promise<RestorePlan> => {
+      const { canUseSharedRecipeBook: unlimited, tier } = latestRef.current;
+      const limit = billingPlans[tier].limits.savedRecipes;
+      const applied = plan({
+        collections: collectionsRef.current,
+        freeSlots:
+          unlimited || limit == null
+            ? Number.POSITIVE_INFINITY
+            : Math.max(0, limit - getQuotaSavedRecipeCount(savedRecipesRef.current)),
+        records: savedRecipesRef.current
+      });
+
+      if (applied.collections.length > 0) {
+        commitCollections((current) => {
+          const known = new Set(current.map((collection) => collection.id));
+          return [...current, ...applied.collections.filter((entry) => !known.has(entry.id))];
+        });
+      }
+
+      if (applied.records.length > 0 || applied.membershipAdditions.length > 0) {
+        commitSavedRecipes((current) => {
+          const known = new Set(current.map((record) => record.id));
+          let next = [...applied.records.filter((record) => !known.has(record.id)), ...current];
+
+          for (const { collectionIds, recipeId } of applied.membershipAdditions) {
+            const record = getSavedRecipeRecordById(next, recipeId);
+
+            if (record) {
+              next = setSavedRecipeCollectionIds(next, recipeId, [
+                ...getRecipeCollectionIds(record),
+                ...collectionIds
+              ]);
+            }
+          }
+
+          return next;
+        });
+      }
+
+      // Collections that could not be read are never written over (see the schedule effect).
+      await Promise.all([
+        writer.writeNow(savedRecipesRef.current),
+        ...(collectionsReadFailed ? [] : [collectionsWriter.writeNow(collectionsRef.current)])
+      ]);
+
+      return applied;
+    },
+    [collectionsReadFailed, collectionsWriter, commitCollections, commitSavedRecipes, writer]
+  );
+
   const setRecipeFavorite = useCallback(
     (id: string, favorite: boolean): boolean => {
       if (!getSavedRecipeRecordById(savedRecipesRef.current, id)) {
@@ -1706,6 +1771,7 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
       incrementRecipeTimesCooked,
       refreshSharedRecipes,
       removeRecipe,
+      restoreBackup,
       saveRecipe,
       saveRecipeToTargets,
       setRecipeCollections,
@@ -1728,6 +1794,7 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
       incrementRecipeTimesCooked,
       refreshSharedRecipes,
       removeRecipe,
+      restoreBackup,
       saveRecipe,
       saveRecipeToTargets,
       setRecipeCollections,

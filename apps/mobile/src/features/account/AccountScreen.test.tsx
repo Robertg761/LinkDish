@@ -205,6 +205,10 @@ vi.mock("../saved-recipes/SavedRecipesContext", () => ({
   useSavedRecipes: () => savedRecipesMocks
 }));
 
+vi.mock("../backup/BackupCard", () => ({
+  BackupCard: () => null
+}));
+
 vi.mock("../saved-recipes/CookbookSyncCard", () => ({
   CookbookSyncCard: () => null
 }));
