@@ -96,6 +96,17 @@ const createFakeRedis = (nowMs: () => number) => {
       case "PEXPIRE":
         expiries.set(key, nowMs() + Number(args[0]));
         return 1;
+      case "RENAME": {
+        const target = args[0] ?? "";
+        if (!has(key)) throw new Error("ERR no such key");
+        const [string, set, zset] = [strings.get(key), sets.get(key), zsets.get(key)];
+        del(target);
+        if (string != null) strings.set(target, string);
+        if (set) sets.set(target, set);
+        if (zset) zsets.set(target, zset);
+        del(key);
+        return "OK";
+      }
       default:
         throw new Error(`Fake Redis does not know ${name}`);
     }
@@ -340,6 +351,44 @@ describe("restoreStoreSnapshot", () => {
     );
     // The snapshot had no live recipes; the kept one stays live.
     expect([...(target.sets.get("linkdish:library:v1:live:u1:recipe") ?? [])]).toEqual(["new"]);
+  });
+
+  it("keeps the live feed until an overwrite can finish, so a retry still keeps items", async () => {
+    const source = createFakeRedis(() => 0);
+    seed(source, 0);
+    const snapshot = await createStoreSnapshot(source.run, { now: () => new Date(0) });
+    const target = createFakeRedis(() => 0);
+    target.strings.set("linkdish:library:v1:rev:u1", "5");
+    target.strings.set("linkdish:library:v1:item:u1:recipe:new", JSON.stringify({ rev: 5 }));
+    target.zsets.set("linkdish:library:v1:changes:u1", new Map([["recipe:new", 5]]));
+    target.sets.set("linkdish:library:v1:live:u1:recipe", new Set(["new"]));
+    const failing: StorePipeline = (commands) =>
+      commands.some(([name, , to]) => name === "RENAME" && to?.includes(":changes:"))
+        ? Promise.reject(new Error("connection reset"))
+        : target.run(commands);
+    const options = {
+      apply: true,
+      batchSize: 1,
+      keyPrefixes: ["linkdish:library:"],
+      overwrite: true
+    };
+
+    await expect(restoreStoreSnapshot(failing, snapshot, options)).rejects.toThrow(
+      /connection reset/u
+    );
+    // The old feed is untouched, and still leads to the kept item.
+    expect([...(target.zsets.get("linkdish:library:v1:changes:u1") ?? [])]).toEqual([
+      ["recipe:new", 5]
+    ]);
+
+    await restoreStoreSnapshot(target.run, snapshot, options);
+
+    expect(
+      [...(target.zsets.get("linkdish:library:v1:changes:u1") ?? [])].map(([member]) => member)
+    ).toEqual(["recipe:a", "recipe:new"]);
+    expect([...(target.sets.get("linkdish:library:v1:live:u1:recipe") ?? [])]).toEqual(["new"]);
+    expect(target.strings.has("linkdish:library:v1:item:u1:recipe:new")).toBe(true);
+    expect(target.strings.has("linkdish:library:v1:restoring:u1")).toBe(false);
   });
 
   it("takes a whole library when a prefix selects part of it", async () => {

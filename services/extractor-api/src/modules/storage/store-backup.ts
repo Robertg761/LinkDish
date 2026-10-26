@@ -670,16 +670,47 @@ const restoreLibrary = async (
             rev: coreKeys[0] as string
           }
         );
-
-        await holdLock();
-        await run([["DEL", ...coreKeys]]);
       }
 
+      /*
+       * With overwrite nothing is deleted up front: the live feed and sets are what a retry
+       * after a failure finds the kept items through. Each set and the feed are built under a
+       * scratch key and swapped in with one RENAME, the feed last.
+       */
+      const swapIn = (entry: StoreSnapshotEntry): string[][] => {
+        const scratch = `${prefix}:restoring:${userId}`;
+        const fill =
+          entry.type === "set"
+            ? ["SADD", scratch, ...(entry.value as string[])]
+            : [
+                "ZADD",
+                scratch,
+                ...(entry.value as Array<[string, number]>).flatMap(([member, score]) => [
+                  String(score),
+                  member
+                ])
+              ];
+        return [["DEL", scratch], fill, ["RENAME", scratch, entry.key]];
+      };
       const ordered = [...restored].sort((left, right) => rank(left) - rank(right));
 
       for (const batch of chunk(ordered, options.batchSize)) {
         await holdLock();
-        await run(batch.flatMap((entry) => buildWriteCommands(entry, null, true)));
+        await run(
+          batch.flatMap((entry) =>
+            options.overwrite && entry.type !== "string"
+              ? swapIn(entry)
+              : buildWriteCommands(entry, null, true)
+          )
+        );
+      }
+
+      // A live set or feed that neither the snapshot nor a kept item fills.
+      const emptied = coreKeys.filter((key) => !restored.some((entry) => entry.key === key));
+
+      if (options.overwrite && emptied.length > 0) {
+        await holdLock();
+        await run([["DEL", ...emptied]]);
       }
     }
 
