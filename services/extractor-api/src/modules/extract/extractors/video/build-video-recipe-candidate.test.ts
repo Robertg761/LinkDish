@@ -131,6 +131,12 @@ describe("isAmountSupported", () => {
     expect(isAmountSupported("a tablespoon", "a tablespoon of honey")).toBe(true);
     expect(isAmountSupported("a heaping cup", "a heaping cup of flour")).toBe(true);
     expect(isAmountSupported("a pinch", "pinch of salt")).toBe(true);
+    expect(
+      isAmountSupported("a pinch", "add a tiny pinch of salt, then cook for 2 minutes", "salt")
+    ).toBe(true);
+    expect(isAmountSupported("a cup", "one cup of rice")).toBe(true);
+    expect(isAmountSupported("a cup", "2 heaping cups of flour")).toBe(false);
+    expect(isAmountSupported("a cup", "one and a half cups of milk")).toBe(false);
     expect(isAmountSupported("a tablespoon", "a teaspoon of salt")).toBe(false);
     expect(isAmountSupported("a cup", "half a cup of butter")).toBe(false);
     expect(isAmountSupported("a cup", "2 cups of flour")).toBe(false);

@@ -377,6 +377,25 @@ export const readStatedNumbers = (value: string, item = ""): number[] =>
 const sameNumber = (left: number, right: number): boolean => Math.abs(left - right) < 0.01;
 
 /*
+ * Does the quote say one of this unit: "a pinch", "one cup" or a bare "pinch of salt", and not
+ * "2 cups", "a teaspoon" or "half a cup". Only a number just before the unit counts ("2 heaping
+ * cups"), so "a tiny pinch of salt, then cook for 2 minutes" still says one pinch.
+ */
+const statesOneOf = (unit: number, quote: string): boolean => {
+  const tokens = tokensOf(quote);
+  const numbers = readNumbers(tokens, new Set());
+
+  return tokens.some((token, index) => {
+    if (unitFamilyOf.get(token) !== unit) {
+      return false;
+    }
+
+    const before = numbers.filter(({ end }) => end === index || end === index - 1).at(-1);
+    return !before || sameNumber(before.value, 1);
+  });
+};
+
+/*
  * Does the quote state the amount: each of its numbers, or for "a pinch" its own words. The item
  * lets "an egg" in the quote state 1.
  */
@@ -397,17 +416,9 @@ export const isAmountSupported = (amount: string, quote: string, item = ""): boo
     );
   }
 
-  /*
-   * "a tablespoon", "a pinch": one of the unit. The quote must say that unit, and must not state
-   * it as another amount, so "a teaspoon of salt" and "half a cup" do not support them.
-   */
+  /* "a tablespoon", "a pinch": one of the unit, which the quote must say. */
   if (amountUnits.length > 0) {
-    const stated = readStatedNumbers(quote, item);
-
-    return (
-      amountUnits.every((unit) => quoteUnits.has(unit)) &&
-      (stated.length === 0 || stated.some((number) => sameNumber(number, 1)))
-    );
+    return amountUnits.every((unit) => statesOneOf(unit, quote));
   }
 
   const quoteForms = formsOf(quote);
