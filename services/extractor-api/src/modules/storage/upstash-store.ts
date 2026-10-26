@@ -305,7 +305,9 @@ const runMemoryCommand = (command: string[]): UpstashResponse => {
         (left, right) => left[1] - right[1] || left[0].localeCompare(right[0])
       );
       const toIndex = (rank: number) => (rank < 0 ? ascending.length + rank : rank);
-      const selected = ascending.slice(Math.max(0, toIndex(start)), toIndex(stop) + 1);
+      const from = Math.max(0, toIndex(start));
+      const to = Math.min(ascending.length - 1, toIndex(stop));
+      const selected = to < from ? [] : ascending.slice(from, to + 1);
 
       for (const [member] of selected) {
         sortedSet.delete(member);

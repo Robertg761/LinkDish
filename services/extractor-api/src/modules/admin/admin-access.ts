@@ -42,6 +42,8 @@ export interface AdminAccessRequest {
 
 const basicChallenge = { "www-authenticate": 'Basic realm="LinkDish Admin", charset="UTF-8"' };
 const adminAuthFailureVersion = "v1";
+/* A stalled store must degrade to the token-only check, not hold every admin request. */
+const adminStoreTimeoutMs = 1_500;
 
 let cachedCredentialConfig: AdminCredentialConfig | null = null;
 
@@ -94,10 +96,13 @@ const readFailureState = async (
   key: string
 ): Promise<{ count: number; retryAfterSeconds: number }> => {
   try {
-    const [count, ttl] = await runStoreTransaction([
-      ["GET", key],
-      ["TTL", key]
-    ]);
+    const [count, ttl] = await runStoreTransaction(
+      [
+        ["GET", key],
+        ["TTL", key]
+      ],
+      { timeoutMs: adminStoreTimeoutMs }
+    );
     const ttlSeconds = toCount(ttl?.result);
 
     return {
@@ -112,10 +117,13 @@ const readFailureState = async (
 
 const incrementFailures = async (key: string): Promise<number> => {
   try {
-    const [count] = await runStoreTransaction([
-      ["INCR", key],
-      ["EXPIRE", key, String(getFailureWindowSeconds()), "NX"]
-    ]);
+    const [count] = await runStoreTransaction(
+      [
+        ["INCR", key],
+        ["EXPIRE", key, String(getFailureWindowSeconds()), "NX"]
+      ],
+      { timeoutMs: adminStoreTimeoutMs }
+    );
     return toCount(count?.result);
   } catch (error) {
     console.error("Admin auth limiter unavailable; failure not counted.", error);

@@ -498,5 +498,22 @@ describe("Vercel admin dashboard adapter", () => {
       expect(revenueCatSubscribers.size).toBe(0);
       expect(await listAudit()).toHaveLength(0);
     });
+
+    it("falls back to the token check when the store stalls", async () => {
+      await loadWithNamedTokens();
+      mockFetch.mockImplementationOnce((_url: string | URL | Request, init?: RequestInit) => {
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () =>
+            reject(new DOMException("The operation timed out.", "TimeoutError"))
+          );
+        });
+      });
+
+      const response = await adminApi.GET(
+        request("/api/admin", { headers: { authorization: basic("robert", robertToken) } })
+      );
+
+      expect(response.status).toBe(200);
+    });
   });
 });

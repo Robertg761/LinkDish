@@ -47,11 +47,14 @@ export const recordAdminAuditEvent = async (
   console.info("[admin-audit]", JSON.stringify(record));
 
   try {
-    const results = await runStoreTransaction([
-      ["ZADD", adminAuditKey, String(now.getTime()), JSON.stringify(record)],
-      ["ZREMRANGEBYSCORE", adminAuditKey, "0", String(now.getTime() - retentionMs)],
-      ["ZREMRANGEBYRANK", adminAuditKey, "0", String(-(adminAuditMaxEntries + 1))]
-    ]);
+    const results = await runStoreTransaction(
+      [
+        ["ZADD", adminAuditKey, String(now.getTime()), JSON.stringify(record)],
+        ["ZREMRANGEBYSCORE", adminAuditKey, "0", String(now.getTime() - retentionMs)],
+        ["ZREMRANGEBYRANK", adminAuditKey, "0", String(-(adminAuditMaxEntries + 1))]
+      ],
+      { timeoutMs: 2_000 }
+    );
     const failed = results.find((result) => result.error);
 
     if (failed) {
