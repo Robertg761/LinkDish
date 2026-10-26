@@ -342,6 +342,7 @@ export interface RestorePlan {
   mealPlan: MealPlanEntry[];
   /** Collections a recipe already here belongs to in the backup but not yet here. */
   membershipAdditions: Array<{ collectionIds: string[]; recipeId: string }>;
+  /** New recipes, and starters that replace the untouched copy here with the same id. */
   records: SavedRecipeRecord[];
 }
 
@@ -371,10 +372,11 @@ const recipeKey = (sourceUrl: string, title: string): string =>
 /**
  * What restoring `backup` adds to this device, as the web app decides it. A recipe already here
  * (the same id, or the same link and title) is kept as it is here, but still joins the backup's
- * collections. New recipes fit under the free limit in file order; starters come back outside
- * it. Collections match by id, then by name, and are otherwise created (an empty one only when it
- * was empty in the backup too). Planned meals already here (by id, or the same day, meal and
- * recipe) are skipped. Nothing here is overwritten or removed.
+ * collections; only a starter nobody touched here is replaced by the backup's copy. New recipes
+ * fit under the free limit in file order; starters come back outside it. Collections match by
+ * id, then by name, and are otherwise created (an empty one only when it was empty in the backup
+ * too). Planned meals already here (by id, or the same day, meal and recipe) are skipped. Nothing
+ * the cook has here is overwritten or removed.
  */
 export const planBackupRestore = (
   backup: LinkDishBackup,
@@ -463,14 +465,23 @@ export const planBackupRestore = (
   const localIdByBackupId = new Map<string, string>();
   const records: SavedRecipeRecord[] = [];
   const membershipAdditions = new Map<string, Set<string>>();
+  const restoredStarterIds = new Set<string>();
   let freeSlots = context.freeSlots;
 
   for (const entry of backup.recipes) {
     const backupId = entry.id;
     const collectionIds = backupId ? (collectionsForRecipe.get(backupId) ?? []) : [];
-    const duplicate =
-      (backupId ? existingById.get(backupId) : undefined) ??
-      existingByKey.get(recipeKey(entry.meta.sourceUrl, entry.recipe.title));
+    const isStarter = backupId != null && STARTER_IDS.has(backupId);
+    const localCopy = backupId ? existingById.get(backupId) : undefined;
+    // A starter the cook made their own replaces the untouched copy seeded on this device.
+    const replacesSeededStarter =
+      isStarter &&
+      !restoredStarterIds.has(backupId) &&
+      localCopy?.isStarter === true &&
+      !isPersonalized(localCopy);
+    const duplicate = replacesSeededStarter
+      ? undefined
+      : (localCopy ?? existingByKey.get(recipeKey(entry.meta.sourceUrl, entry.recipe.title)));
 
     if (duplicate) {
       counts.duplicates += 1;
@@ -491,8 +502,6 @@ export const planBackupRestore = (
       continue;
     }
 
-    const isStarter = backupId != null && STARTER_IDS.has(backupId);
-
     if (!isStarter && freeSlots <= 0) {
       counts.overLimit += 1;
       continue;
@@ -512,6 +521,7 @@ export const planBackupRestore = (
     }
 
     if (isStarter) {
+      restoredStarterIds.add(id);
       counts.restoredStarters += 1;
     } else {
       freeSlots -= 1;

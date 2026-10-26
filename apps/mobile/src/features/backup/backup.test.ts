@@ -239,6 +239,32 @@ describe("restoring", () => {
     expect(plan.counts).toMatchObject({ imported: 1, overLimit: 1, restoredStarters: 1 });
   });
 
+  it("replaces an untouched seeded starter with the backup's personalized copy", () => {
+    const { backup } = buildMobileBackup({
+      collections: [],
+      exportedAt: "2026-10-26T12:00:00.000Z",
+      mealPlan: [],
+      records: [{ ...plainStarter, favorite: true, notes: "Double the garlic." }]
+    });
+    const fresh = restoreFrom(JSON.stringify(backup), emptyDevice({ records: [plainStarter] }));
+
+    expect(fresh.records).toEqual([
+      expect.objectContaining({
+        favorite: true,
+        id: sample.id,
+        isStarter: true,
+        notes: "Double the garlic."
+      })
+    ]);
+    expect(fresh.counts).toMatchObject({ duplicates: 0, restoredStarters: 1 });
+
+    // A starter someone already made their own here is kept.
+    const mine = { ...plainStarter, notes: "Mine" };
+    expect(
+      restoreFrom(JSON.stringify(backup), emptyDevice({ records: [mine] })).counts
+    ).toMatchObject({ duplicates: 1, restoredStarters: 0 });
+  });
+
   it("treats a recipe with the same id as the one already here", () => {
     const { backup } = buildMobileBackup({
       collections: [],

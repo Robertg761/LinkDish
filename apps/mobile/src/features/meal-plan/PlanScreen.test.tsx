@@ -203,6 +203,17 @@ describe("PlanScreen", () => {
     expect(textOf(renderer)).toContain("Dinner · 4 servings");
   });
 
+  it("keeps this week in view when a Monday start loads after the screen", async () => {
+    asyncStorageMocks.getItem.mockImplementation((key: string) =>
+      Promise.resolve(key === "linkdish.mealPlan.weekStartsOn.v1" ? "1" : null)
+    );
+    const renderer = await render();
+
+    expect(plan?.weekStartsOn).toBe(1);
+    expect(textOf(renderer)).toContain("This week");
+    expect(textOf(renderer)).toContain("Oct 26 – Nov 1");
+  });
+
   it("plans a quick note and moves to next week", async () => {
     const renderer = await render();
 

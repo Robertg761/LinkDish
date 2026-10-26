@@ -105,7 +105,8 @@ export interface SavedRecipesActions {
   removeRecipe: (id: string) => void;
   /**
    * Adds what `plan` decides a backup brings (see planBackupRestore), planned against the
-   * cookbook as it is now, and saves the cookbook at once. Returns the plan it applied.
+   * cookbook as it is now, and saves the cookbook at once. A planned record whose id is already
+   * here replaces that record. Returns the plan it applied.
    */
   restoreBackup: (plan: (cookbook: BackupRestoreCookbook) => RestorePlan) => Promise<RestorePlan>;
   saveRecipe: (
@@ -1324,8 +1325,14 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
 
       if (applied.records.length > 0 || applied.membershipAdditions.length > 0) {
         commitSavedRecipes((current) => {
+          // A record with an id already here replaces it (a starter nobody touched; see
+          // planBackupRestore); the rest are new.
+          const byId = new Map(applied.records.map((record) => [record.id, record]));
           const known = new Set(current.map((record) => record.id));
-          let next = [...applied.records.filter((record) => !known.has(record.id)), ...current];
+          let next = [
+            ...applied.records.filter((record) => !known.has(record.id)),
+            ...current.map((record) => byId.get(record.id) ?? record)
+          ];
 
           for (const { collectionIds, recipeId } of applied.membershipAdditions) {
             const record = getSavedRecipeRecordById(next, recipeId);

@@ -65,9 +65,10 @@ export const PlanScreen = () => {
     }
   }, [requestedDate, weekStartsOn]);
 
-  // Changing the first day of the week keeps the same days in view.
+  // Changing the first day of the week (or loading the saved choice) keeps the same week in view:
+  // re-anchored on its middle, since rounding its old first day would land on the week before.
   useEffect(() => {
-    setWeekStart((current) => startOfWeek(current, weekStartsOn));
+    setWeekStart((current) => startOfWeek(addDaysToIsoDate(current, 3), weekStartsOn));
   }, [weekStartsOn]);
 
   const dates = useMemo(() => weekDays(weekStart), [weekStart]);
