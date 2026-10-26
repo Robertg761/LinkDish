@@ -171,8 +171,19 @@ const combineCooking = (
   const cookLog = [...byTime.values()]
     .sort((left, right) => (left.cookedAt < right.cookedAt ? -1 : 1))
     .slice(-MAX_COOK_LOG_ENTRIES);
+  // A full remote log has dropped its oldest entries, so a local entry older than all it kept may
+  // be one of those (shared) rather than a cook made here.
+  const remoteOldest =
+    remoteLog.length >= MAX_COOK_LOG_ENTRIES
+      ? remoteLog.reduce(
+          (oldest, entry) => (entry.cookedAt < oldest ? entry.cookedAt : oldest),
+          remoteLog[0]?.cookedAt ?? ""
+        )
+      : "";
   const localOnly = localLog.filter(
-    (entry) => !remoteLog.some((other) => other.cookedAt === entry.cookedAt)
+    (entry) =>
+      entry.cookedAt >= remoteOldest &&
+      !remoteLog.some((other) => other.cookedAt === entry.cookedAt)
   ).length;
   const timesCooked = Math.max(
     numberOr(local.timesCooked, 0),
@@ -363,6 +374,8 @@ export interface LibrarySyncOptions {
   now?: () => Date;
   /** Changes per push request (the API takes up to 25). */
   pushBatchSize?: number;
+  /** UTF-8 bytes of changes per push request, below the API's request size limit. */
+  pushBatchBytes?: number;
   /** Pages pulled per run before it stops, to bound one run. */
   maxPullPages?: number;
 }
@@ -443,14 +456,57 @@ const baseFor = (change: LibrarySyncChange): LibrarySyncBase =>
         updatedAt: change.updatedAt
       };
 
-const chunk = <Value>(values: readonly Value[], size: number): Value[][] => {
-  const chunks: Value[][] = [];
+/** UTF-8 length of a string, without a TextEncoder (not every app runtime has one). */
+export const utf8ByteLength = (text: string): number => {
+  let bytes = 0;
 
-  for (let start = 0; start < values.length; start += size) {
-    chunks.push(values.slice(start, start + size));
+  for (let index = 0; index < text.length; index += 1) {
+    const code = text.charCodeAt(index);
+
+    if (code < 0x80) {
+      bytes += 1;
+    } else if (code < 0x800) {
+      bytes += 2;
+    } else if (code >= 0xd800 && code < 0xdc00 && index + 1 < text.length) {
+      // A surrogate pair: one 4-byte character.
+      bytes += 4;
+      index += 1;
+    } else {
+      bytes += 3;
+    }
   }
 
-  return chunks;
+  return bytes;
+};
+
+/** Batches of at most `size` changes and (one change aside) `maxBytes` of JSON. */
+const batchChanges = (
+  changes: readonly LibrarySyncChange[],
+  size: number,
+  maxBytes: number
+): LibrarySyncChange[][] => {
+  const batches: LibrarySyncChange[][] = [];
+  let batch: LibrarySyncChange[] = [];
+  let batchBytes = 0;
+
+  for (const change of changes) {
+    const bytes = utf8ByteLength(JSON.stringify(change));
+
+    if (batch.length && (batch.length >= size || batchBytes + bytes > maxBytes)) {
+      batches.push(batch);
+      batch = [];
+      batchBytes = 0;
+    }
+
+    batch.push(change);
+    batchBytes += bytes;
+  }
+
+  if (batch.length) {
+    batches.push(batch);
+  }
+
+  return batches;
 };
 
 /**
@@ -464,6 +520,8 @@ export const runLibrarySync = async (
 ): Promise<LibrarySyncSummary> => {
   const now = options.now ?? (() => new Date());
   const pushBatchSize = options.pushBatchSize ?? 25;
+  // Vercel takes request bodies up to 4.5 MB; a change is at most 120,000 characters (~360 KB).
+  const pushBatchBytes = options.pushBatchBytes ?? 3_000_000;
   const maxPullPages = options.maxPullPages ?? 50;
   const ensureCurrent = () => {
     if (!adapter.isCurrent()) {
@@ -614,7 +672,7 @@ export const runLibrarySync = async (
   let pushed = 0;
   let rejected = 0;
 
-  for (const batch of chunk(outgoing, pushBatchSize)) {
+  for (const batch of batchChanges(outgoing, pushBatchSize, pushBatchBytes)) {
     ensureCurrent();
     const result = await adapter.push(batch);
     ensureCurrent();

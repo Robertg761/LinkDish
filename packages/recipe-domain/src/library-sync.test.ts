@@ -9,7 +9,8 @@ import {
   mergeLibraryPayloads,
   resolveRemoteChange,
   runLibrarySync,
-  stableStringify
+  stableStringify,
+  utf8ByteLength
 } from "./library-sync.js";
 
 import type {
@@ -212,6 +213,14 @@ describe("library sync fingerprints", () => {
   });
 });
 
+describe("utf8ByteLength", () => {
+  it("counts what the text takes in UTF-8", () => {
+    for (const text of ["soup", "crème brûlée", "塩ラーメン", "🍜 noodles", "\ud800 lone"]) {
+      expect(utf8ByteLength(text)).toBe(new TextEncoder().encode(text).length);
+    }
+  });
+});
+
 describe("mergeLibraryPayloads", () => {
   const base = recipe({ notes: "salt", tags: ["Soup"] });
   const merge = (local: LibrarySyncPayload, remote: LibrarySyncPayload) =>
@@ -265,6 +274,22 @@ describe("mergeLibraryPayloads", () => {
     ]);
     expect(merged.timesCooked).toBe(2);
     expect(merged.lastCookedAt).toBe("2026-10-22T18:00:00.000Z");
+  });
+
+  it("doesn't count a cook a full log dropped on the other side as a new one", () => {
+    const day = (index: number) => new Date(Date.UTC(2026, 0, 1) + index * 86_400_000).toISOString();
+    const shared = Array.from({ length: 100 }, (_, index) => ({ cookedAt: day(index) }));
+    const merged = merge(
+      { ...base, cookLog: [...shared.slice(1), { cookedAt: day(100) }], timesCooked: 101 },
+      {
+        ...base,
+        cookLog: [...shared.slice(2), { cookedAt: day(101) }, { cookedAt: day(102) }],
+        timesCooked: 102
+      }
+    );
+
+    expect(merged.timesCooked).toBe(103);
+    expect(merged.cookLog).toHaveLength(100);
   });
 
   it("merges against nothing on a first sync", () => {
@@ -397,6 +422,20 @@ describe("runLibrarySync", () => {
     expect(cloud.items.get("recipe:soup")?.change).toMatchObject({
       payload: recipe({ notes: "again" })
     });
+  });
+
+  it("keeps each push request under the size limit", async () => {
+    const cloud = new FakeCloud();
+    const device = new FakeDevice(cloud);
+
+    for (const id of ["r1", "r2", "r3"]) {
+      device.put(id, recipe({ notes: "塩".repeat(1_000) }));
+    }
+
+    await runLibrarySync(device, { now, pushBatchBytes: 7_000 });
+
+    expect(cloud.pushes).toBe(2);
+    expect(cloud.items.size).toBe(3);
   });
 
   it("merges every page of a long change feed", async () => {
