@@ -279,6 +279,11 @@ const ensureSchema = async (): Promise<void> => {
       properties jsonb not null default '{}'::jsonb
     );
 
+    create index if not exists error_analytics_received_idx
+      on error_analytics (received_at desc);
+    create index if not exists error_analytics_fingerprint_received_idx
+      on error_analytics (error_fingerprint, received_at desc);
+
     create table if not exists daily_analytics_rollups (
       date date not null,
       platform text not null,

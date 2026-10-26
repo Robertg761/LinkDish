@@ -11,6 +11,7 @@
     "test": "vitest run",
     "check:production": "node scripts/check-production-api.mjs",
     "canary:live": "node scripts/run-live-canary.mjs ../../docs/live-canary-manifest.json",
+    "alerts:errors": "tsx scripts/check-error-alerts.ts",
     "grant:plan": "tsx scripts/grant-plan-by-email.ts"
   },
   "dependencies": {

@@ -214,6 +214,37 @@ parses `extractRecipeAnyRequestSchema`.
   unknown names; the current one drops only those events, but they are still lost until
   the API knows them.
 
+### Error alerts and crash reports
+
+- Web and Android send `client_error` analytics events, which the API also writes to the
+  `error_analytics` table (fingerprint = platform, route and the first 120 characters of the
+  message).
+- The **Error Alerts** workflow (`.github/workflows/error-alerts.yml`, hourly at :17) runs
+  `pnpm --filter @linkdish/extractor-api alerts:errors` against that table. It alerts when the
+  last 60 minutes (by `received_at`) have any fatal error, at least 25 errors, or an error
+  fingerprint not seen in the previous 7 days that happened at least 3 times. Each run that
+  meets a rule sends one email (Resend) and/or one Slack or Discord webhook message, so a
+  spike that continues alerts again every hour.
+- The repository and its Actions logs are public: the job prints counts only. Error messages
+  go only to the email and webhook channels.
+- Setup, in GitHub repository settings: secrets `ANALYTICS_DATABASE_URL` (the API's analytics
+  database; `ANALYTICS_DATABASE_CA_CERT` too if the API uses one), `RESEND_API_KEY`,
+  `ERROR_ALERT_EMAIL_TO` (comma-separated) and/or `ERROR_ALERT_WEBHOOK_URL`; variable
+  `ERROR_ALERT_EMAIL_FROM` (a sender on the Resend-verified domain). Optional variables
+  `ERROR_ALERT_MIN_ERRORS`, `ERROR_ALERT_WINDOW_MINUTES` and `ERROR_ALERT_NEW_ERROR_MIN_COUNT`
+  change the thresholds. Without the database secret the job does nothing; if a rule fires
+  and no channel is configured, the run fails.
+- Android crash reports go to Sentry (`@sentry/react-native`), started in `app/_layout.tsx`
+  only when the build sets `EXPO_PUBLIC_SENTRY_DSN` (`EXPO_PUBLIC_SENTRY_ENVIRONMENT` is
+  optional). It catches native crashes, ANRs and fatal JS errors, which the `client_error`
+  event usually loses because the process dies before it is sent. It sends no default PII
+  and no performance traces, drops console breadcrumbs and strips query strings from request
+  URLs. Sentry's own alert rules notify about new crash issues.
+- Release builds upload JS source maps to Sentry only when the EAS build has
+  `SENTRY_AUTH_TOKEN`, `SENTRY_ORG` and `SENTRY_PROJECT`; `plugins/withSentrySourceMapUpload.js`
+  and the checked-in `android/app/build.gradle` apply `sentry.gradle` behind that check, so
+  builds without the token are unchanged. iOS source maps are not wired yet.
+
 ### Personal library sync
 
 A signed-in account's own cookbook (recipes with their notes, favorites, tags, collection
