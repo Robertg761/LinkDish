@@ -69,11 +69,14 @@ const createFakeRedis = (nowMs: () => number) => {
       }
       case "ZADD": {
         const zset = zsets.get(key) ?? new Map<string, number>();
-        for (let index = 0; index < args.length; index += 2) {
-          zset.set(args[index + 1] ?? "", Number(args[index]));
+        const nx = args[0] === "NX";
+        const pairs = nx ? args.slice(1) : args;
+        for (let index = 0; index < pairs.length; index += 2) {
+          const member = pairs[index + 1] ?? "";
+          if (!(nx && zset.has(member))) zset.set(member, Number(pairs[index]));
         }
         zsets.set(key, zset);
-        return args.length / 2;
+        return pairs.length / 2;
       }
       case "PEXPIRE":
         expiries.set(key, nowMs() + Number(args[0]));
@@ -138,14 +141,36 @@ describe("createStoreSnapshot", () => {
     expect(snapshot.entries.find((entry) => entry.key.includes("changes"))?.value).toEqual([
       ["recipe:a", 1]
     ]);
-    expect(snapshot.entries.find((entry) => entry.key.includes("session:"))?.pttlMs).toBe(60_000);
-    expect(snapshot.entries.find((entry) => entry.key.includes(":user:"))?.pttlMs).toBeUndefined();
+    expect(snapshot.entries.find((entry) => entry.key.includes("session:"))?.expiresAt).toBe(
+      new Date(nowMs + 60_000).toISOString()
+    );
+    expect(
+      snapshot.entries.find((entry) => entry.key.includes(":user:"))?.expiresAt
+    ).toBeUndefined();
     expect(snapshot.families.user).toBe(1);
     expect(snapshot.families["identity"]).toBe(0);
     expect(snapshot.skipped).toEqual({ "extract-cache": 1, library: 1, quota: 2 });
     expect(snapshot.unclassified).toEqual({ mystery: 1 });
     // Strings in one MGET per batch, never one GET per key.
     expect(redis.commands.some(([name]) => name === "GET")).toBe(false);
+  });
+
+  it("dates a TTL from when it was read, not from when the scan started", async () => {
+    let clockMs = 0;
+    const redis = createFakeRedis(() => clockMs);
+    seed(redis, 0);
+    const run: StorePipeline = (commands) => {
+      // The scan takes 30 s; the session then has 30 s left.
+      if (commands[0]?.[0] === "SCAN") clockMs = 30_000;
+      return redis.run(commands);
+    };
+
+    const snapshot = await createStoreSnapshot(run, { now: () => new Date(clockMs) });
+
+    expect(snapshot.createdAt).toBe(new Date(0).toISOString());
+    expect(snapshot.entries.find((entry) => entry.key.includes("session:"))?.expiresAt).toBe(
+      new Date(60_000).toISOString()
+    );
   });
 
   it("leaves out keys deleted between the scan and the read", async () => {
@@ -165,6 +190,24 @@ describe("createStoreSnapshot", () => {
 });
 
 describe("restoreStoreSnapshot", () => {
+  it("keeps sorted-set scores the live API wrote after the existence check", async () => {
+    const source = createFakeRedis(() => 0);
+    seed(source, 0);
+    const snapshot = await createStoreSnapshot(source.run, { now: () => new Date(0) });
+    const target = createFakeRedis(() => 0);
+    const run: StorePipeline = (commands) => {
+      if (commands[0]?.[0] !== "EXISTS") {
+        // A sync lands between EXISTS and the restore's writes.
+        target.zsets.set("linkdish:library:v1:changes:u1", new Map([["recipe:a", 9]]));
+      }
+      return target.run(commands);
+    };
+
+    await restoreStoreSnapshot(run, snapshot, { apply: true, now: () => new Date(0) });
+
+    expect(target.zsets.get("linkdish:library:v1:changes:u1")?.get("recipe:a")).toBe(9);
+  });
+
   it("does nothing without apply, then fills in only missing keys", async () => {
     const takenMs = Date.parse("2026-10-26T00:00:00.000Z");
     const source = createFakeRedis(() => takenMs);

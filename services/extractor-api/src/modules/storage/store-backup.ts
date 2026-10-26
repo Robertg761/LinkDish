@@ -21,8 +21,8 @@ export type StorePipeline = (commands: string[][]) => Promise<unknown[]>;
 
 export interface StoreSnapshotEntry {
   key: string;
-  /* Remaining TTL when the snapshot was taken, for families that expire. */
-  pttlMs?: number;
+  /* When the key expires (ISO), for families that expire; from the TTL at the time it was read. */
+  expiresAt?: string;
   type: BackupValueType;
   value: string | string[] | Array<[member: string, score: number]>;
 }
@@ -105,6 +105,7 @@ const toZsetPairs = (result: unknown): Array<[string, number]> => {
  */
 const readBatch = async (
   run: StorePipeline,
+  readAtMs: number,
   batch: Array<{ family: BackedUpKeyFamily; key: string }>
 ): Promise<StoreSnapshotEntry[]> => {
   const stringKeys = batch.filter(({ family }) => family.type === "string");
@@ -173,7 +174,7 @@ const readBatch = async (
     }
 
     if (pttlMs != null && pttlMs > 0) {
-      entry.pttlMs = pttlMs;
+      entry.expiresAt = new Date(readAtMs + pttlMs).toISOString();
     }
 
     entries.push(entry);
@@ -218,7 +219,7 @@ export const createStoreSnapshot = async (
   const entries: StoreSnapshotEntry[] = [];
 
   for (const batch of chunk(toRead, batchSize)) {
-    entries.push(...(await readBatch(run, batch)));
+    entries.push(...(await readBatch(run, now().getTime(), batch)));
   }
 
   const families: Record<string, number> = Object.fromEntries(
@@ -278,8 +279,8 @@ export interface RestoreStoreSnapshotResult {
 }
 
 /*
- * Without overwrite the key was missing a moment ago, so strings use NX and sets are added to
- * rather than cleared: a write the live API makes in between is never lost.
+ * Without overwrite the key was missing a moment ago, so strings and sorted-set members use NX
+ * and sets are added to rather than cleared: a write the live API makes in between is never lost.
  */
 const buildWriteCommands = (
   entry: StoreSnapshotEntry,
@@ -308,7 +309,13 @@ const buildWriteCommands = (
   const pairs = entry.value as Array<[string, number]>;
   return [
     ...clear,
-    ["ZADD", entry.key, ...pairs.flatMap(([member, score]) => [String(score), member])],
+    [
+      "ZADD",
+      entry.key,
+      // NX: a member the live API scored in between keeps its newer score.
+      ...(overwrite ? [] : ["NX"]),
+      ...pairs.flatMap(([member, score]) => [String(score), member])
+    ],
     ...ttl
   ];
 };
@@ -324,7 +331,7 @@ export const restoreStoreSnapshot = async (
     overwrite = false
   }: RestoreStoreSnapshotOptions = {}
 ): Promise<RestoreStoreSnapshotResult> => {
-  const elapsedMs = Math.max(0, now().getTime() - Date.parse(snapshot.createdAt));
+  const nowMs = now().getTime();
   const result: RestoreStoreSnapshotResult = {
     applied: apply,
     expired: 0,
@@ -339,12 +346,12 @@ export const restoreStoreSnapshot = async (
       continue;
     }
 
-    if (entry.pttlMs == null) {
+    if (entry.expiresAt == null) {
       candidates.push({ entry, pttlMs: null });
       continue;
     }
 
-    const remainingMs = entry.pttlMs - elapsedMs;
+    const remainingMs = Date.parse(entry.expiresAt) - nowMs;
 
     if (remainingMs <= 0) {
       result.expired += 1;
