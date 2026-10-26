@@ -342,4 +342,22 @@ describe("restoring", () => {
       })
     ).toBe("Nothing new to restore. 1 recipe was already in your cookbook.");
   });
+
+  it("says when entries in the file couldn't be read", () => {
+    const counts = {
+      collectionsCreated: 0,
+      duplicates: 0,
+      imported: 2,
+      mealPlanAdded: 0,
+      overLimit: 0,
+      restoredStarters: 0
+    };
+
+    expect(describeRestore(counts, 1)).toBe(
+      "Restored 2 recipes. 1 entry in the file couldn't be read and was skipped."
+    );
+    expect(describeRestore(counts, 3)).toBe(
+      "Restored 2 recipes. 3 entries in the file couldn't be read and were skipped."
+    );
+  });
 });

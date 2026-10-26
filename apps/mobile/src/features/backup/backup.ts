@@ -669,7 +669,7 @@ const joinList = (items: readonly string[]): string =>
     : `${items.slice(0, -1).join(", ")} and ${items[items.length - 1] ?? ""}`;
 
 /** What a restore did, for the screen ("Restored 3 recipes and 1 collection."). */
-export const describeRestore = (counts: RestoreCounts): string => {
+export const describeRestore = (counts: RestoreCounts, skippedEntries = 0): string => {
   const added = counts.imported + counts.restoredStarters;
   const restored = [
     added > 0 ? plural(added, "recipe", "recipes") : null,
@@ -691,6 +691,12 @@ export const describeRestore = (counts: RestoreCounts): string => {
   if (counts.overLimit > 0) {
     sentences.push(
       `${plural(counts.overLimit, "recipe didn't", "recipes didn't")} fit in the free cookbook.`
+    );
+  }
+
+  if (skippedEntries > 0) {
+    sentences.push(
+      `${plural(skippedEntries, "entry", "entries")} in the file couldn't be read and ${skippedEntries === 1 ? "was" : "were"} skipped.`
     );
   }
 

@@ -127,7 +127,13 @@ export const BackupCard = () => {
         },
         routeOrScreen: "account"
       });
-      setStatus({ kind: "done", message: describeRestore(plan.counts) });
+      if (validated.warnings.length) {
+        console.warn("Some backup entries were skipped.", validated.warnings);
+      }
+      setStatus({
+        kind: "done",
+        message: describeRestore(plan.counts, validated.warnings.length)
+      });
     } catch (error) {
       console.warn("Failed to restore a backup.", error);
       setStatus({ kind: "error", message: "The backup couldn't be restored. Try again." });

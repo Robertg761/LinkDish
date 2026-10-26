@@ -179,6 +179,28 @@ describe("BackupCard", () => {
     expect(textOf(renderer)).toContain("Restored 1 recipe.");
   });
 
+  it("says when the backup had entries it couldn't read", async () => {
+    const renderer = await render();
+    await pressButton(renderer, "Back up");
+    const backup = JSON.parse(fileMocks.written[0]!.text) as { recipes: unknown[] };
+    const text = JSON.stringify({ ...backup, recipes: [...backup.recipes, { id: 42 }] });
+
+    fileMocks.pickFileAsync.mockResolvedValue({
+      canceled: false,
+      result: { size: text.length, text: () => Promise.resolve(text) }
+    });
+    savedRecipesState.restoreBackup.mockImplementation(
+      (plan: (cookbook: BackupRestoreCookbook) => RestorePlan) =>
+        Promise.resolve(plan({ collections: [], freeSlots: Number.POSITIVE_INFINITY, records: [] }))
+    );
+
+    await pressButton(renderer, "Restore");
+
+    expect(textOf(renderer)).toContain(
+      "Restored 1 recipe. 1 entry in the file couldn't be read and was skipped."
+    );
+  });
+
   it("explains a file that isn't a backup and changes nothing", async () => {
     fileMocks.pickFileAsync.mockResolvedValue({
       canceled: false,
