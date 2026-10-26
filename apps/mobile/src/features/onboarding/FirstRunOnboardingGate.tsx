@@ -145,7 +145,7 @@ export const FirstRunOnboardingGate = () => {
     // A first launch from the share sheet opens straight on /import-progress; replacing it
     // with the Cookbook used to throw the shared recipe away.
     if (shouldLandOnCookbookAfterOnboarding(pathname)) {
-      router.replace("/" as never);
+      router.replace("/");
     }
 
     try {

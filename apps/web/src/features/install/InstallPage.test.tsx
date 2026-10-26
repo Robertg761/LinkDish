@@ -7,12 +7,12 @@ import { ToastProvider } from "../../components/Toast";
 import { BOOKMARKLET_HREF } from "./install-content";
 import { InstallPage } from "./InstallPage";
 
-import type { InstallOutcome, InstallPlatform } from "../../platform/install-prompt";
+import type { InstallOutcome } from "../../platform/install-prompt";
 
 const installMocks = vi.hoisted(() => ({
   canInstall: false,
   isInstalled: false,
-  platform: "desktop" as InstallPlatform,
+  platform: "desktop",
   promptInstall: vi.fn<() => Promise<InstallOutcome>>()
 }));
 

@@ -149,7 +149,7 @@ const analyticsPropertiesFor = (
   }
 
   if (request.kind === "text") {
-    return { attempt: "fallback", source, source_type: "text" };
+    return { attempt: "primary", source, source_type: "text" };
   }
 
   const sourceHost = getAnalyticsSourceHost(request.url);
@@ -340,7 +340,7 @@ export function useImportSession(): ImportSession {
     if (request.kind === "text") {
       return apiClient.extractRecipeFromText(
         {
-          attempt: "fallback",
+          attempt: "primary",
           correlationId: active.correlationId,
           text: request.text,
           ...(request.sourceUrl ? { sourceUrl: request.sourceUrl } : {})
@@ -476,7 +476,8 @@ export function useImportSession(): ImportSession {
       if (!active.startedBy.isAuthenticated) {
         spendWebImport(active.startedBy.tier);
 
-        if (attempt === "fallback") {
+        // Only photo scans use AI; links and text are read by LinkDish's own rules.
+        if (request.kind === "images") {
           spendWebStrongExtraction(active.startedBy.tier);
         }
       }
@@ -685,7 +686,7 @@ export function useImportSession(): ImportSession {
       }
     }
 
-    const needsStrong = request.kind !== "url" || options.attempt === "fallback";
+    const needsStrong = request.kind === "images";
     const limitProblem = checkLocalAllowance(needsStrong);
 
     if (limitProblem) {
@@ -724,7 +725,7 @@ export function useImportSession(): ImportSession {
           text: text.trim(),
           ...(options.sourceUrl ? { sourceUrl: options.sourceUrl } : {})
         },
-        { attempt: "fallback", source: "in_app" }
+        { attempt: "primary", source: "in_app" }
       ),
     []
   );
@@ -747,7 +748,7 @@ export function useImportSession(): ImportSession {
       return;
     }
 
-    const limitProblem = impl.checkLocalAllowance(true);
+    const limitProblem = impl.checkLocalAllowance(false);
 
     if (limitProblem) {
       endActive("import_abandoned", "superseded", { abort: false });
@@ -783,7 +784,7 @@ export function useImportSession(): ImportSession {
     }
 
     void implRef.current.start(last.request, {
-      attempt: last.request.kind === "url" ? "primary" : "fallback",
+      attempt: last.request.kind === "images" ? "fallback" : "primary",
       skipDuplicateCheck: true,
       source: last.source
     });

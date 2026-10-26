@@ -38,7 +38,7 @@ vi.mock("../../api/client", () => ({
 
 const authState = vi.hoisted(() => ({
   isAuthenticated: true,
-  plan: "free" as "free" | "plus" | "family",
+  plan: "free",
   userId: "user_1"
 }));
 

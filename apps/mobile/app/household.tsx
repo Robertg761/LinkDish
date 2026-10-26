@@ -354,7 +354,7 @@ function HouseholdView() {
       return;
     }
 
-    router.push("/account" as never);
+    router.push("/account");
   };
   const renderMemberRow = (member: HouseholdMember) => (
     <View key={member.userId} style={styles.row}>

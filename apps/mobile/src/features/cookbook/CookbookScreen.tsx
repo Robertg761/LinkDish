@@ -566,7 +566,7 @@ export const CookbookScreen = () => {
   };
 
   const openImport = useCallback(() => {
-    router.push("/import" as never);
+    router.push("/import");
   }, []);
 
   const openSavedRecipe = useCallback((id: string) => {

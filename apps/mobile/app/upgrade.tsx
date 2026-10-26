@@ -196,7 +196,7 @@ export default function UpgradeScreen() {
           </AppText>
           <AppButton
             label={user ? "Manage Household" : "Sign in to manage household"}
-            onPress={() => router.push((user ? "/household" : "/account") as never)}
+            onPress={() => router.push(user ? "/household" : "/account")}
           />
         </AppSurface>
       ) : null}
@@ -252,7 +252,7 @@ export default function UpgradeScreen() {
           ) : (
             <AppButton
               label="Sign in to restore purchases"
-              onPress={() => router.push("/account" as never)}
+              onPress={() => router.push("/account")}
               variant="ghost"
             />
           )
@@ -343,7 +343,7 @@ const PaidPlanCard = ({
           <AppButton
             disabled={isAccountLoading}
             label={isAccountLoading ? "Checking account" : "Sign in to upgrade"}
-            onPress={() => router.push("/account" as never)}
+            onPress={() => router.push("/account")}
             variant="secondary"
           />
         </View>
@@ -435,7 +435,7 @@ const FoundingPlanCard = ({
         <AppButton
           disabled={isAccountLoading}
           label={isAccountLoading ? "Checking account" : "Sign in to claim"}
-          onPress={() => router.push("/account" as never)}
+          onPress={() => router.push("/account")}
           variant="secondary"
         />
       </View>

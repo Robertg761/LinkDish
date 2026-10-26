@@ -173,7 +173,7 @@ export const validateBackup = (input: unknown): BackupValidationResult => {
     const parsed = backupRecipeSchema.safeParse(entry);
 
     if (parsed.success) {
-      recipes.push(parsed.data as BackupRecipe);
+      recipes.push(parsed.data);
     } else {
       warnings.push(
         `Recipe ${index + 1}${titleOf(entry)} was skipped: ${describeIssue(parsed.error)}`

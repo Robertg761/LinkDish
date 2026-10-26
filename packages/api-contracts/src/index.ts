@@ -38,7 +38,7 @@ const imageDataUrlSchema = z
   .min(1)
   .max(MAX_IMAGE_DATA_URL_CHARS)
   .regex(/^data:image\/(?:jpeg|jpg|png|webp);base64,[a-z0-9+/=\s]+$/iu);
-const extractionCorrelationIdSchema = z.string().uuid();
+const extractionCorrelationIdSchema = z.guid();
 
 export const extractRecipeImageSchema = z.object({
   dataUrl: imageDataUrlSchema,
@@ -112,9 +112,9 @@ export const MIN_EXTRACT_TEXT_CHARS = 20;
 export const MAX_EXTRACT_TEXT_CHARS = 20_000;
 
 /**
- * Pasted recipe text (a caption, a note, an email). It always goes to the AI extractor, so it
- * is metered like an explicit fallback attempt whatever `attempt` says; `attempt` is accepted
- * (and defaults to "fallback") so callers can reuse their URL request plumbing.
+ * Pasted recipe text (a caption, a note, an email). It is read by the rule-based text parser
+ * and metered as a plain import whatever `attempt` says; `attempt` is accepted (and defaults to
+ * "fallback") so older callers keep working.
  */
 export const extractRecipeTextRequestSchema = z.object({
   text: z.string().trim().min(MIN_EXTRACT_TEXT_CHARS).max(MAX_EXTRACT_TEXT_CHARS),
@@ -709,7 +709,7 @@ export const analyticsEventNameSchema = z.enum([
   "web_vitals"
 ]);
 
-const analyticsUuidSchema = z.string().uuid();
+const analyticsUuidSchema = z.guid();
 const analyticsIdentifierSchema = z
   .string()
   .trim()

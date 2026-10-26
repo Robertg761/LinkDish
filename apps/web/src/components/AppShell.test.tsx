@@ -60,7 +60,7 @@ const renderShell = (path: string | string[], children: React.ReactNode = <Locat
 };
 
 const mockMatchMedia = (matches: (query: string) => boolean) => {
-  vi.mocked(window.matchMedia).mockImplementation((query: string) => ({
+  vi.mocked(window).matchMedia.mockImplementation((query: string) => ({
     matches: matches(query),
     media: query,
     onchange: null,

@@ -258,7 +258,7 @@ describe("Vercel extract adapter request identity", () => {
     expect(mocks.waitUntil).toHaveBeenCalledWith(expect.any(Promise));
   });
 
-  it("accepts pasted text and meters it like an explicit fallback attempt", async () => {
+  it("accepts pasted text and meters it as a plain import", async () => {
     const extractApi = await import("./extract.js");
     const text = "Lentil soup: 1 cup red lentils, 4 cups stock. Simmer for 25 minutes.";
 
@@ -281,7 +281,7 @@ describe("Vercel extract adapter request identity", () => {
     );
     expect(mocks.authorizeExtractionRequest).toHaveBeenCalledWith(
       expect.any(Headers),
-      "fallback",
+      "primary",
       expect.any(Object)
     );
   });

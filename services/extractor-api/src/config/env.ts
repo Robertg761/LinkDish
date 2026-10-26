@@ -89,6 +89,18 @@ const parsedExtractorApiEnv = readEnv(
     OPENAI_API_KEY: trimmedOptionalString(),
     OPENAI_MODEL: trimmedOptionalString(),
     LLM_FALLBACK_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
+    /*
+     * Gemini watches a TikTok or YouTube video when its caption, description and linked pages
+     * hold no written recipe. Off by default; it needs GEMINI_API_KEY too.
+     */
+    VIDEO_RECIPE_READER_ENABLED: z
+      .union([trimmedBooleanString, z.boolean()])
+      .default("false")
+      .transform((value) => value === true || value === "true"),
+    VIDEO_RECIPE_MODEL: trimmedString().default("gemini-3.8-flash"),
+    /* Longer videos are not sent: they cost more and cannot be read inside the request deadline. */
+    VIDEO_RECIPE_MAX_SECONDS: z.coerce.number().int().positive().default(240),
+    VIDEO_RECIPE_TIMEOUT_MS: z.coerce.number().int().positive().default(40_000),
     LLM_FALLBACK_DAILY_BUDGET_USD: z.coerce.number().nonnegative().default(0),
     BILLING_ENFORCEMENT_ENABLED: z
       .union([trimmedBooleanString, z.boolean()])

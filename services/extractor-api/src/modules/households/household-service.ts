@@ -65,7 +65,7 @@ const householdRecordSchema = z
     id: z.string(),
     ownerUserId: z.string(),
     memberUserIds: z.array(z.string()),
-    memberJoinedAt: z.record(z.string().datetime()).optional(),
+    memberJoinedAt: z.record(z.string(), z.string().datetime()).optional(),
     cooldownSlots: z.array(cooldownSlotSchema),
     createdAt: z.string(),
     updatedAt: z.string()
@@ -181,7 +181,7 @@ const parseJson = <Schema extends z.ZodTypeAny>(
     return null;
   }
 
-  return schema.parse(JSON.parse(value) as unknown) as z.output<Schema>;
+  return schema.parse(JSON.parse(value) as unknown);
 };
 
 /*

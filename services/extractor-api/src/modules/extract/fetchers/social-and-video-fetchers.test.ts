@@ -6,8 +6,17 @@ vi.mock("youtube-transcript", () => ({
 }));
 
 import { SocialFetchError } from "./errors";
-import { fetchTikTokDocument, TIKTOK_OEMBED_ENDPOINT } from "./fetch-tiktok-document";
-import { extractYouTubeShortDescription, fetchYouTubeDocument } from "./fetch-youtube-document";
+import {
+  fetchTikTokDocument,
+  TIKTOK_EMBED_PAGE_ENDPOINT,
+  TIKTOK_OEMBED_ENDPOINT
+} from "./fetch-tiktok-document";
+import {
+  extractYouTubeShortDescription,
+  fetchYouTubeDocument,
+  readYouTubeCommentsRequest,
+  readYouTubeCreatorComments
+} from "./fetch-youtube-document";
 
 import type { ValidateSourceUrl } from "../source-url-safety";
 
@@ -39,7 +48,7 @@ describe("fetchTikTokDocument", () => {
 
     const document = await fetchTikTokDocument(
       `${videoUrl}?is_from_webapp=1&sender_device=pc`,
-      fetchMock as unknown as typeof fetch,
+      fetchMock,
       { timeoutMs: 1_000, validateUrl: safe }
     );
 
@@ -54,8 +63,151 @@ describe("fetchTikTokDocument", () => {
       text: "Chili: 1 lb beef, 1 can beans. Simmer 20 min #dinner",
       title: null,
       authorName: "Cook Creator",
-      thumbnailUrl: "https://p16-sign.tiktokcdn.com/thumb.jpeg"
+      thumbnailUrl: "https://p16-sign.tiktokcdn.com/thumb.jpeg",
+      tiktokVideo: { videoId: "7234567890123456789", mediaUrl: null, durationSeconds: null }
     });
+  });
+
+  it("turns the runs of spaces TikTok leaves for line breaks back into line breaks", async () => {
+    const fetchMock = vi.fn<FetchSignature>(() =>
+      Promise.resolve(
+        json({ title: "Pasta salad  Ingredients  Pasta screws cooked  Parsley  #easyrecipes " })
+      )
+    );
+
+    const document = await fetchTikTokDocument(videoUrl, fetchMock, {
+      timeoutMs: 1_000,
+      validateUrl: safe
+    });
+
+    expect(document.text).toBe(
+      "Pasta salad\nIngredients\nPasta screws cooked\nParsley\n#easyrecipes"
+    );
+  });
+
+  it("reads the caption from the embed page when oEmbed sends only a player", async () => {
+    const embedState = {
+      source: {
+        data: {
+          "/embed/v2/7234567890123456789": {
+            videoData: {
+              itemInfos: {
+                text: "Chili  Ingredients  1 lb beef  1 can beans  #dinner",
+                covers: ["https://p16-common-sign.tiktokcdn-us.com/cover.jpeg"],
+                video: {
+                  urls: ["https://v45.tiktokcdn-us.com/abc/video.mp4"],
+                  videoMeta: { duration: 42 }
+                }
+              },
+              authorInfos: { uniqueId: "cook", nickName: "Cook Creator" }
+            }
+          }
+        }
+      }
+    };
+    const fetchMock = vi.fn<FetchSignature>((input) =>
+      Promise.resolve(
+        requestedUrl(input).startsWith(TIKTOK_EMBED_PAGE_ENDPOINT)
+          ? new Response(
+              `<html><script id="__FRONTITY_CONNECT_STATE__" type="application/json">${JSON.stringify(embedState)}</script></html>`,
+              { status: 200, headers: { "content-type": "text/html" } }
+            )
+          : json({
+              type: "video",
+              html: '<iframe src="https://www.tiktok.com/player/v1/7234567890123456789"></iframe>',
+              embed_product_id: "7234567890123456789"
+            })
+      )
+    );
+
+    const document = await fetchTikTokDocument(videoUrl, fetchMock, {
+      timeoutMs: 1_000,
+      validateUrl: safe
+    });
+
+    expect(requestedUrl(fetchMock.mock.calls[1]![0])).toBe(
+      `${TIKTOK_EMBED_PAGE_ENDPOINT}/7234567890123456789`
+    );
+    expect(document).toMatchObject({
+      text: "Chili\nIngredients\n1 lb beef\n1 can beans\n#dinner",
+      authorName: "Cook Creator",
+      thumbnailUrl: "https://p16-common-sign.tiktokcdn-us.com/cover.jpeg",
+      /* Handed to the video reader, so it need not fetch the embed page again. */
+      tiktokVideo: {
+        videoId: "7234567890123456789",
+        mediaUrl: "https://v45.tiktokcdn-us.com/abc/video.mp4",
+        durationSeconds: 42
+      }
+    });
+  });
+
+  it("returns an empty caption when neither oEmbed nor the embed page has one", async () => {
+    const fetchMock = vi.fn<FetchSignature>((input) =>
+      Promise.resolve(
+        requestedUrl(input).startsWith(TIKTOK_EMBED_PAGE_ENDPOINT)
+          ? new Response("blocked", { status: 403 })
+          : json({ type: "video", embed_product_id: "7234567890123456789" })
+      )
+    );
+
+    const document = await fetchTikTokDocument(videoUrl, fetchMock, {
+      timeoutMs: 1_000,
+      validateUrl: safe
+    });
+
+    expect(document.text).toBe("");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps oEmbed's author and thumbnail when the embed page has only the caption", async () => {
+    const embedState = {
+      source: {
+        data: {
+          "/embed/v2/7234567890123456789": {
+            videoData: { itemInfos: { text: "Chili  Ingredients  1 lb beef" } }
+          }
+        }
+      }
+    };
+    const fetchMock = vi.fn<FetchSignature>((input) =>
+      Promise.resolve(
+        requestedUrl(input).startsWith(TIKTOK_EMBED_PAGE_ENDPOINT)
+          ? new Response(
+              `<script id="__FRONTITY_CONNECT_STATE__">${JSON.stringify(embedState)}</script>`,
+              { status: 200, headers: { "content-type": "text/html" } }
+            )
+          : json({
+              author_name: "Cook Creator",
+              thumbnail_url: "https://p16-sign.tiktokcdn-us.com/thumb.jpeg"
+            })
+      )
+    );
+
+    const document = await fetchTikTokDocument(videoUrl, fetchMock, {
+      timeoutMs: 1_000,
+      validateUrl: safe
+    });
+
+    expect(document).toMatchObject({
+      text: "Chili\nIngredients\n1 lb beef",
+      authorName: "Cook Creator",
+      thumbnailUrl: "https://p16-sign.tiktokcdn-us.com/thumb.jpeg"
+    });
+  });
+
+  it("keeps the oEmbed answer when the embed page request fails", async () => {
+    const fetchMock = vi.fn<FetchSignature>((input) =>
+      requestedUrl(input).startsWith(TIKTOK_EMBED_PAGE_ENDPOINT)
+        ? Promise.reject(new TypeError("fetch failed"))
+        : Promise.resolve(json({ author_name: "Cook Creator" }))
+    );
+
+    const document = await fetchTikTokDocument(videoUrl, fetchMock, {
+      timeoutMs: 1_000,
+      validateUrl: safe
+    });
+
+    expect(document).toMatchObject({ text: "", authorName: "Cook Creator" });
   });
 
   it("resolves short links one validated hop at a time", async () => {
@@ -74,11 +226,10 @@ describe("fetchTikTokDocument", () => {
       return Promise.resolve(json({ title: "caption" }));
     });
 
-    const document = await fetchTikTokDocument(
-      "https://vm.tiktok.com/ZMabc123/",
-      fetchMock as unknown as typeof fetch,
-      { timeoutMs: 1_000, validateUrl }
-    );
+    const document = await fetchTikTokDocument("https://vm.tiktok.com/ZMabc123/", fetchMock, {
+      timeoutMs: 1_000,
+      validateUrl
+    });
 
     expect(document.url).toBe(videoUrl);
     expect(validateUrl.mock.calls.map(([url]) => url)).toEqual([
@@ -116,11 +267,10 @@ describe("fetchTikTokDocument", () => {
 
   it("classifies oEmbed failures", async () => {
     const statusFor = async (status: number) =>
-      fetchTikTokDocument(
-        videoUrl,
-        (() => Promise.resolve(json({}, status))) as unknown as typeof fetch,
-        { timeoutMs: 1_000, validateUrl: safe }
-      ).catch((error: unknown) => (error as SocialFetchError).reason);
+      fetchTikTokDocument(videoUrl, () => Promise.resolve(json({}, status)), {
+        timeoutMs: 1_000,
+        validateUrl: safe
+      }).catch((error: unknown) => (error as SocialFetchError).reason);
 
     await expect(statusFor(404)).resolves.toBe("not_found");
     await expect(statusFor(400)).resolves.toBe("not_found");
@@ -131,10 +281,7 @@ describe("fetchTikTokDocument", () => {
   it("drops non-http thumbnails", async () => {
     const document = await fetchTikTokDocument(
       videoUrl,
-      (() =>
-        Promise.resolve(
-          json({ title: "caption", thumbnail_url: "javascript:alert(1)" })
-        )) as unknown as typeof fetch,
+      () => Promise.resolve(json({ title: "caption", thumbnail_url: "javascript:alert(1)" })),
       { timeoutMs: 1_000, validateUrl: safe }
     );
 
@@ -152,7 +299,7 @@ describe("fetchTikTokDocument", () => {
       });
 
     await expect(
-      fetchTikTokDocument(videoUrl, hanging as unknown as typeof fetch, {
+      fetchTikTokDocument(videoUrl, hanging, {
         timeoutMs: 10,
         validateUrl: safe
       })
@@ -191,7 +338,7 @@ describe("YouTube descriptions", () => {
     const document = await fetchYouTubeDocument(
       "https://www.youtube.com/shorts/dQw4w9WgXcQ",
       "dQw4w9WgXcQ",
-      fetchMock as unknown as typeof fetch,
+      fetchMock,
       50,
       { validateUrl: safe }
     );
@@ -210,5 +357,172 @@ describe("YouTube descriptions", () => {
       description: fullDescription,
       authorName: "Cook Channel"
     });
+  });
+});
+
+describe("YouTube creator comments", () => {
+  const commentsToken = "Eg0SC2NvbW1lbnRzLXNlY3Rpb24";
+  const initialData = {
+    contents: {
+      twoColumnWatchNextResults: {
+        results: {
+          results: {
+            contents: [
+              { videoPrimaryInfoRenderer: {} },
+              {
+                itemSectionRenderer: {
+                  contents: [
+                    {
+                      continuationItemRenderer: {
+                        continuationEndpoint: {
+                          continuationCommand: { token: commentsToken }
+                        }
+                      }
+                    }
+                  ],
+                  sectionIdentifier: "comment-item-section"
+                }
+              }
+            ]
+          }
+        },
+        secondaryResults: {
+          continuationItemRenderer: {
+            continuationEndpoint: { continuationCommand: { token: "related-videos" } }
+          }
+        }
+      }
+    }
+  };
+  const watchPage = `<html><body><script>ytcfg.set({"INNERTUBE_CLIENT_VERSION":"2.20261019.01.00"});</script><script>var ytInitialPlayerResponse = {"videoDetails":{"videoId":"dQw4w9WgXcQ","shortDescription":""}};</script><script>var ytInitialData = ${JSON.stringify(
+    initialData
+  )};</script></body></html>`;
+  const comment = (content: string, isCreator: boolean, replyLevel = 0) => ({
+    payload: {
+      commentEntityPayload: {
+        properties: { content: { content }, replyLevel },
+        author: { displayName: isCreator ? "@cook" : "@fan", isCreator }
+      }
+    }
+  });
+  const commentsResponse = {
+    frameworkUpdates: {
+      entityBatchUpdate: {
+        mutations: [
+          comment("Looks delicious!", false),
+          comment("Gnocchi\n1. Add 1 cup cream", true),
+          comment("Thanks!", true, 1)
+        ]
+      }
+    }
+  };
+
+  it("reads the comment section's token and the client version from the watch page", () => {
+    expect(readYouTubeCommentsRequest(watchPage)).toEqual({
+      token: commentsToken,
+      clientVersion: "2.20261019.01.00"
+    });
+    expect(
+      readYouTubeCommentsRequest(
+        watchPage.replace("var ytInitialData = ", 'window["ytInitialData"] = ')
+      )
+    ).toEqual({ token: commentsToken, clientVersion: "2.20261019.01.00" });
+    expect(readYouTubeCommentsRequest("<html></html>")).toBeNull();
+  });
+
+  it("keeps only the creator's own top-level comments", () => {
+    expect(readYouTubeCreatorComments(commentsResponse)).toEqual(["Gnocchi\n1. Add 1 cup cream"]);
+    expect(
+      readYouTubeCreatorComments({
+        commentRenderer: {
+          authorIsChannelOwner: true,
+          contentText: { runs: [{ text: "Older " }, { text: "layout" }] }
+        }
+      })
+    ).toEqual(["Older layout"]);
+    expect(
+      readYouTubeCreatorComments({
+        commentThreadRenderer: {
+          comment: {
+            commentRenderer: {
+              authorIsChannelOwner: false,
+              contentText: { runs: [{ text: "Where's the recipe?" }] }
+            }
+          },
+          replies: {
+            commentRepliesRenderer: {
+              contents: [
+                {
+                  commentRenderer: {
+                    authorIsChannelOwner: true,
+                    contentText: { runs: [{ text: "Coming soon!" }] }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      })
+    ).toEqual([]);
+  });
+
+  it("loads the creator's comments with the video", async () => {
+    const fetchMock = vi.fn<FetchSignature>((input, init) => {
+      const url = requestedUrl(input);
+
+      if (url.startsWith("https://www.youtube.com/oembed")) {
+        return Promise.resolve(json({ title: "Gnocchi", author_name: "Cook" }));
+      }
+
+      if (url.startsWith("https://www.youtube.com/youtubei/v1/next")) {
+        expect(JSON.parse(init?.body as string)).toMatchObject({
+          context: { client: { clientName: "WEB", clientVersion: "2.20261019.01.00" } },
+          continuation: commentsToken
+        });
+        return Promise.resolve(json(commentsResponse));
+      }
+
+      return Promise.resolve(
+        new Response(watchPage, { status: 200, headers: { "content-type": "text/html" } })
+      );
+    });
+
+    const document = await fetchYouTubeDocument(
+      "https://www.youtube.com/shorts/dQw4w9WgXcQ",
+      "dQw4w9WgXcQ",
+      fetchMock,
+      50,
+      { validateUrl: safe }
+    );
+
+    expect(document.creatorComments).toEqual(["Gnocchi\n1. Add 1 cup cream"]);
+  });
+
+  it("treats a failed comments request as no comments", async () => {
+    const fetchMock = vi.fn<FetchSignature>((input) => {
+      const url = requestedUrl(input);
+
+      if (url.startsWith("https://www.youtube.com/oembed")) {
+        return Promise.resolve(json({ title: "Gnocchi" }));
+      }
+
+      if (url.startsWith("https://www.youtube.com/youtubei/v1/next")) {
+        return Promise.reject(new Error("socket hang up"));
+      }
+
+      return Promise.resolve(
+        new Response(watchPage, { status: 200, headers: { "content-type": "text/html" } })
+      );
+    });
+
+    const document = await fetchYouTubeDocument(
+      "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      "dQw4w9WgXcQ",
+      fetchMock,
+      50,
+      { validateUrl: safe }
+    );
+
+    expect(document.creatorComments).toEqual([]);
   });
 });

@@ -38,7 +38,7 @@ const authMocks = vi.hoisted(() => ({
   isAuthenticated: true,
   refreshUser: vi.fn(),
   user: {
-    billingPlan: "family" as "free" | "plus" | "family",
+    billingPlan: "family",
     email: "cook@example.com",
     id: "user_1"
   }

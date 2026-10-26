@@ -56,7 +56,7 @@ describe("useSharedRecipes", () => {
     const { rerender, result } = renderHook(
       ({ credentialsKey }: { credentialsKey: string | null }) =>
         useSharedRecipes(true, "user_1", credentialsKey),
-      { initialProps: { credentialsKey: "session:user_1" as string | null } }
+      { initialProps: { credentialsKey: "session:user_1" } }
     );
 
     await waitFor(() => expect(result.current.status).toBe("error"));

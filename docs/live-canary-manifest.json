@@ -178,7 +178,7 @@
   {
     "id": "article-king-arthur-no-knead-bread",
     "kind": "article-blog",
-    "expectedMinimumOutcome": "needs_retry",
+    "expectedMinimumOutcome": "failure",
     "url": "https://www.kingarthurbaking.com/blog/2022/05/25/how-to-make-a-bread-recipe-no-knead",
     "expectedFinalUrlPattern": "kingarthurbaking\\.com/blog/2022/05/25/how-to-make-a-bread-recipe-no-knead",
     "expectedTitlePattern": "No-Knead|Bread Recipe"
@@ -250,7 +250,7 @@
   {
     "id": "article-king-arthur-no-knead-bread-archive",
     "kind": "article-blog",
-    "expectedMinimumOutcome": "needs_retry",
+    "expectedMinimumOutcome": "failure",
     "url": "https://www.kingarthurbaking.com/blog/2020/04/27/how-to-make-no-knead-sourdough-bread",
     "expectedFinalUrlPattern": "kingarthurbaking\\.com/blog/2020/04/27/how-to-make-no-knead-sourdough-bread",
     "expectedTitlePattern": "No-Knead|Sourdough Bread"
@@ -391,5 +391,26 @@
     "expectedMinimumOutcome": "failure",
     "url": "https://www.youtube.com/watch?v=QbyUK9DqIaI",
     "expectedFinalUrlPattern": "youtube\\.com/watch\\?v=QbyUK9DqIaI"
+  },
+  {
+    "id": "tiktok-caption-ingredients-and-directions",
+    "kind": "tiktok",
+    "expectedMinimumOutcome": "success",
+    "url": "https://www.tiktok.com/@angela_inthemoment/video/7226866528543821102",
+    "expectedFinalUrlPattern": "tiktok\\.com/@angela_inthemoment/video/7226866528543821102"
+  },
+  {
+    "id": "tiktok-caption-ingredients-only",
+    "kind": "tiktok",
+    "expectedMinimumOutcome": "success",
+    "url": "https://www.tiktok.com/@meghanmerrigan/video/7348529797066132778",
+    "expectedFinalUrlPattern": "tiktok\\.com/@meghanmerrigan/video/7348529797066132778"
+  },
+  {
+    "id": "youtube-6jrjfsen4n0",
+    "kind": "youtube",
+    "expectedMinimumOutcome": "success",
+    "url": "https://www.youtube.com/watch?v=6jRjfsEN4n0",
+    "expectedFinalUrlPattern": "youtube\\.com/watch\\?v=6jRjfsEN4n0"
   }
 ]

@@ -177,6 +177,193 @@ export const extractYouTubeShortDescription = (pageHtml: string): string | null 
   return description ? description.slice(0, maxDescriptionChars) : null;
 };
 
+const maxCreatorComments = 3;
+const maxCommentChars = 10_000;
+
+/*
+ * The JSON object a watch page assigns to `var <name> = {...};` or `window["<name>"] = {...};`
+ * (YouTube serves both), or null.
+ */
+const readAssignedJson = (pageHtml: string, name: string): unknown => {
+  const assignment = new RegExp(
+    `(?:var\\s+${name}|window\\[["']${name}["']\\])\\s*=\\s*`,
+    "u"
+  ).exec(pageHtml);
+
+  if (!assignment) {
+    return null;
+  }
+
+  const start = assignment.index + assignment[0].length;
+  const end = pageHtml.indexOf(";</script>", start);
+
+  try {
+    return JSON.parse(pageHtml.slice(start, end === -1 ? undefined : end));
+  } catch {
+    return null;
+  }
+};
+
+/* Every object in a parsed JSON tree, depth first, except under the keys in `skipKeys`. */
+function* walkJsonObjects(
+  value: unknown,
+  skipKeys: ReadonlySet<string> = new Set()
+): Generator<Record<string, unknown>> {
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      yield* walkJsonObjects(entry, skipKeys);
+    }
+  } else if (value !== null && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+
+    yield record;
+
+    for (const [key, entry] of Object.entries(record)) {
+      if (!skipKeys.has(key)) {
+        yield* walkJsonObjects(entry, skipKeys);
+      }
+    }
+  }
+}
+
+/* The older layout nests a thread's replies (creator replies included) under these keys. */
+const commentReplyKeys = new Set(["replies", "commentRepliesRenderer"]);
+
+const readRecord = (value: unknown, key: string): Record<string, unknown> | null => {
+  const entry =
+    value !== null && typeof value === "object" ? (value as Record<string, unknown>)[key] : null;
+
+  return entry !== null && typeof entry === "object" ? (entry as Record<string, unknown>) : null;
+};
+
+/**
+ * What the comments request needs from a watch page: the continuation token of its comment
+ * section (ytInitialData) and the web client version it was served with.
+ */
+export const readYouTubeCommentsRequest = (
+  pageHtml: string
+): { token: string; clientVersion: string } | null => {
+  const clientVersion = pageHtml.match(/"INNERTUBE_CLIENT_VERSION":"([\d.]+)"/u)?.[1];
+  const initialData = readAssignedJson(pageHtml, "ytInitialData");
+
+  if (!clientVersion || !initialData) {
+    return null;
+  }
+
+  for (const record of walkJsonObjects(initialData)) {
+    const section = readRecord(record, "itemSectionRenderer");
+
+    if (section?.sectionIdentifier !== "comment-item-section") {
+      continue;
+    }
+
+    for (const inner of walkJsonObjects(section.contents)) {
+      const token = readRecord(inner, "continuationCommand")?.token;
+
+      if (typeof token === "string" && token.length > 0) {
+        return { token, clientVersion };
+      }
+    }
+  }
+
+  return null;
+};
+
+/**
+ * The text of the creator's own top-level comments in a comments response: the current entity
+ * payloads (author.isCreator) and the older commentRenderer (authorIsChannelOwner).
+ */
+export const readYouTubeCreatorComments = (response: unknown): string[] => {
+  const comments: string[] = [];
+
+  for (const record of walkJsonObjects(response, commentReplyKeys)) {
+    const entity = readRecord(record, "commentEntityPayload");
+    const renderer = readRecord(record, "commentRenderer");
+    let text: unknown = null;
+
+    if (entity) {
+      const properties = readRecord(entity, "properties");
+
+      if (readRecord(entity, "author")?.isCreator === true && !properties?.replyLevel) {
+        text = readRecord(properties, "content")?.content;
+      }
+    } else if (renderer?.authorIsChannelOwner === true) {
+      const runs = readRecord(renderer, "contentText")?.runs;
+
+      text = Array.isArray(runs)
+        ? runs
+            .map((run: { text?: unknown } | null) =>
+              typeof run?.text === "string" ? run.text : ""
+            )
+            .join("")
+        : null;
+    }
+
+    if (typeof text === "string" && text.trim().length > 0) {
+      comments.push(text.trim().slice(0, maxCommentChars));
+    }
+  }
+
+  return [...new Set(comments)].slice(0, maxCreatorComments);
+};
+
+/*
+ * The first page of the video's comments, through the same endpoint the watch page uses, and the
+ * creator's own comments in it. Any failure means no comments: they are a fallback source.
+ */
+const fetchCreatorComments = async (
+  pageHtml: string,
+  fetchImplementation: typeof fetch,
+  timeoutMs: number,
+  maxBytes: number,
+  signal?: AbortSignal
+): Promise<string[]> => {
+  const commentsRequest = readYouTubeCommentsRequest(pageHtml);
+
+  if (!commentsRequest) {
+    return [];
+  }
+
+  const timeout = createTimeoutSignal(timeoutMs, signal);
+
+  try {
+    const response = await fetchImplementation(
+      "https://www.youtube.com/youtubei/v1/next?prettyPrint=false",
+      {
+        method: "POST",
+        headers: {
+          "accept-language": browserLikeHeaders["accept-language"],
+          "content-type": "application/json",
+          "user-agent": browserLikeHeaders["user-agent"]
+        },
+        body: JSON.stringify({
+          context: {
+            client: {
+              clientName: "WEB",
+              clientVersion: commentsRequest.clientVersion,
+              hl: "en"
+            }
+          },
+          continuation: commentsRequest.token
+        }),
+        signal: timeout.signal
+      }
+    );
+
+    if (!response.ok) {
+      return [];
+    }
+
+    return readYouTubeCreatorComments(
+      JSON.parse(await readLimitedResponseText(response, maxBytes)) as unknown
+    );
+  } catch {
+    return [];
+  } finally {
+    timeout.cleanup();
+  }
+};
+
 const parseChapterLines = (text: string): string[] =>
   text
     .split(/\n+/)
@@ -192,6 +379,19 @@ const toYouTubeRequestError = (error: unknown, signal: AbortSignal): YouTubeFetc
     error instanceof Error ? error.message : "YouTube request failed.",
     signal.aborted ? "timeout" : "unreachable"
   );
+};
+
+/* The video's length from the watch page's player data, when the page carries it. */
+export const readYouTubeDurationSeconds = (pageHtml: string): number | null => {
+  const lengthSeconds = pageHtml.match(/"lengthSeconds":"(\d{1,7})"/u)?.[1];
+  const approxDurationMs = pageHtml.match(/"approxDurationMs":"(\d{1,10})"/u)?.[1];
+  const seconds = lengthSeconds
+    ? Number(lengthSeconds)
+    : approxDurationMs
+      ? Math.round(Number(approxDurationMs) / 1000)
+      : null;
+
+  return seconds !== null && Number.isFinite(seconds) && seconds > 0 ? seconds : null;
 };
 
 export const fetchYouTubeDocument = async (
@@ -272,6 +472,14 @@ export const fetchYouTubeDocument = async (
       $('meta[property="og:description"]').attr("content")?.trim() ??
       $('meta[name="description"]').attr("content")?.trim() ??
       (metadata.author_name ? `Creator: ${metadata.author_name}` : null);
+    /* The creator's comments load while the transcript does. */
+    const creatorCommentsRequest = fetchCreatorComments(
+      pageHtml,
+      fetchImplementation,
+      timeoutMs,
+      maxBytes,
+      options?.signal
+    );
     const transcript =
       (await fetchTranscriptFromLibrary(videoId, timeoutMs, options?.signal)) ??
       (await fetchTranscriptFromCaptionTrack(
@@ -282,6 +490,7 @@ export const fetchYouTubeDocument = async (
         validateUrl,
         options?.signal
       ));
+    const creatorComments = await creatorCommentsRequest;
     const chapters = parseChapterLines(description ?? "");
 
     return {
@@ -293,6 +502,8 @@ export const fetchYouTubeDocument = async (
       transcript,
       chapters,
       pageHtml,
+      creatorComments,
+      durationSeconds: readYouTubeDurationSeconds(pageHtml),
       authorName:
         typeof metadata.author_name === "string" && metadata.author_name.trim().length > 0
           ? metadata.author_name.trim()

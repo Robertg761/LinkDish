@@ -74,7 +74,7 @@ describe("error responses", () => {
     );
     const client = createExtractorApiClient({
       baseUrl: "https://api.test",
-      fetchImplementation: fetchImplementation as unknown as typeof fetch
+      fetchImplementation: fetchImplementation
     });
 
     const error = await client
@@ -99,7 +99,7 @@ describe("error responses", () => {
     );
     const client = createExtractorApiClient({
       baseUrl: "https://api.test",
-      fetchImplementation: fetchImplementation as unknown as typeof fetch
+      fetchImplementation: fetchImplementation
     });
 
     const error = await client
@@ -115,7 +115,7 @@ describe("error responses", () => {
     const fetchImplementation = createFetchMock(() => jsonResponse(successEnvelope));
     const client = createExtractorApiClient({
       baseUrl: "https://api.test",
-      fetchImplementation: fetchImplementation as unknown as typeof fetch
+      fetchImplementation: fetchImplementation
     });
 
     const response = await client.extractRecipe({
@@ -132,7 +132,7 @@ describe("error responses", () => {
     );
     const client = createExtractorApiClient({
       baseUrl: "https://api.test",
-      fetchImplementation: fetchImplementation as unknown as typeof fetch
+      fetchImplementation: fetchImplementation
     });
 
     const error = await client
@@ -156,7 +156,7 @@ describe("request timeouts", () => {
   it("aborts requests that never settle", async () => {
     const client = createExtractorApiClient({
       baseUrl: "https://api.test",
-      fetchImplementation: hangingFetch as unknown as typeof fetch,
+      fetchImplementation: hangingFetch,
       timeoutMs: 20
     });
 
@@ -166,7 +166,7 @@ describe("request timeouts", () => {
   it("aborts hanging extraction requests too", async () => {
     const client = createExtractorApiClient({
       baseUrl: "https://api.test",
-      fetchImplementation: hangingFetch as unknown as typeof fetch,
+      fetchImplementation: hangingFetch,
       timeoutMs: 20
     });
 
@@ -179,7 +179,7 @@ describe("request timeouts", () => {
     const fetchImplementation = createFetchMock(() => jsonResponse({ authenticated: false }));
     const client = createExtractorApiClient({
       baseUrl: "https://api.test",
-      fetchImplementation: fetchImplementation as unknown as typeof fetch
+      fetchImplementation: fetchImplementation
     });
 
     await client.getSession();
@@ -193,7 +193,7 @@ describe("request timeouts", () => {
     const fetchImplementation = createFetchMock(() => jsonResponse(successEnvelope));
     const client = createExtractorApiClient({
       baseUrl: "https://api.test",
-      fetchImplementation: fetchImplementation as unknown as typeof fetch
+      fetchImplementation: fetchImplementation
     });
 
     await client.extractRecipe({ url: "https://example.com/soup", attempt: "primary" });
@@ -208,7 +208,7 @@ describe("base url normalization", () => {
     const fetchImplementation = createFetchMock(() => jsonResponse({ authenticated: false }));
     const client = createExtractorApiClient({
       baseUrl: "https://api.test///",
-      fetchImplementation: fetchImplementation as unknown as typeof fetch
+      fetchImplementation: fetchImplementation
     });
 
     await client.getSession();
@@ -220,7 +220,7 @@ describe("base url normalization", () => {
     const fetchImplementation = createFetchMock(() => jsonResponse(successEnvelope));
     const client = createExtractorApiClient({
       baseUrl: "https://api.test/",
-      fetchImplementation: fetchImplementation as unknown as typeof fetch
+      fetchImplementation: fetchImplementation
     });
 
     await client.extractRecipe({ url: "https://example.com/soup", attempt: "primary" });
@@ -234,7 +234,7 @@ describe("header merging", () => {
     const fetchImplementation = createFetchMock(() => jsonResponse({ authenticated: false }));
     const client = createExtractorApiClient({
       baseUrl: "https://api.test",
-      fetchImplementation: fetchImplementation as unknown as typeof fetch,
+      fetchImplementation: fetchImplementation,
       getHeaders: () => ({ "x-linkdish-platform": "web_app" })
     });
 
@@ -254,7 +254,7 @@ describe("header merging", () => {
     );
     const client = createExtractorApiClient({
       baseUrl: "https://api.test",
-      fetchImplementation: fetchImplementation as unknown as typeof fetch,
+      fetchImplementation: fetchImplementation,
       getHeaders: async () =>
         Promise.resolve({
           authorization: "Bearer token",
@@ -277,7 +277,7 @@ describe("header merging", () => {
     const fetchImplementation = createFetchMock(() => jsonResponse(successEnvelope));
     const client = createExtractorApiClient({
       baseUrl: "https://api.test",
-      fetchImplementation: fetchImplementation as unknown as typeof fetch,
+      fetchImplementation: fetchImplementation,
       getHeaders: () => ({ "x-linkdish-platform": "android_app" })
     });
 

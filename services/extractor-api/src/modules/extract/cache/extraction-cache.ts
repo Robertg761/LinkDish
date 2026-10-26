@@ -15,7 +15,7 @@ import type { DetectionResult } from "../types.js";
 /*
  * URL-keyed cache of validated deterministic extraction successes. Popular
  * recipes are imported by many people, and each import used to repeat DNS, the
- * fetch, a possible Playwright render, the parse and the text-cleanup LLM call.
+ * fetch, a possible Playwright render and the parse.
  * A hit skips all of that; rate limiting, billing authorization and usage
  * commits still run in the request pipeline exactly as for a fresh extraction.
  *
@@ -26,8 +26,17 @@ import type { DetectionResult } from "../types.js";
  * the previous version may hold it.
  * 2026-09-28.2: route fragments (#/..., #!...) are part of the key; an older
  * entry under a hash-routed app's page may hold one route's recipe.
+ * 2026-10-18.1: YouTube recipes are read from the description's own ingredient
+ * list and method (no LLM), and the text-cleanup LLM pass no longer runs on links.
+ * 2026-10-18.2: TikTok captions get their line breaks back before parsing; an older
+ * entry may hold a caption read as one run-on line.
+ * 2026-10-19.1: TikTok captions fall back to the embed page when oEmbed sends no caption; an
+ * older entry may hold a failure from an empty caption.
+ * 2026-10-20.1: YouTube recipes are also read from the creator's own comments, a
+ * numbered method without an ingredient list is read, and "recipe in the comments"
+ * pointers leave video titles.
  */
-export const EXTRACTOR_CACHE_VERSION = "2026-09-28.2";
+export const EXTRACTOR_CACHE_VERSION = "2026-10-20.1";
 
 const cacheKeyPrefix = "linkdish:extract-cache:v1";
 

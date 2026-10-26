@@ -74,9 +74,7 @@ export async function POST(request: Request) {
     /*
      * Durable analytics and extraction cache writes run after the response
      * through waitUntil, so the recipe is returned as soon as usage is
-     * committed. A needs_retry answer first waits briefly for its fallback
-     * hand-off to be stored (see FALLBACK_HANDOFF_MAX_WAIT_MS); a slower write
-     * finishes through waitUntil.
+     * committed.
      */
     const { response, headers } = await runExtractRequestPipeline({
       payload,

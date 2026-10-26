@@ -9,11 +9,11 @@ import * as canaryModule from "./run-live-canary.mjs";
 
 type LiveCanaryEntry = {
   id: string;
-  kind: "recipe-webpage" | "article-blog" | "youtube";
+  kind: "recipe-webpage" | "article-blog" | "youtube" | "tiktok";
   url: string;
   billingClientId?: string;
   billingProvider?: string;
-  expectedMinimumOutcome: "success" | "needs_retry";
+  expectedMinimumOutcome: "success" | "needs_retry" | "failure";
   expectedFinalUrlPattern?: string;
   expectedTitlePattern?: string;
 };

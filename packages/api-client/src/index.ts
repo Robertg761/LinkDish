@@ -79,7 +79,7 @@ import {
   type WebBillingRedirectResponse
 } from "@linkdish/api-contracts";
 
-import type { ZodType, ZodTypeDef } from "zod";
+import type { ZodType } from "zod";
 
 export type FetchLike = typeof fetch;
 
@@ -381,13 +381,13 @@ type HttpMethod = "DELETE" | "GET" | "PATCH" | "POST" | "PUT";
 interface RequestJsonOptions<Response> {
   body?: unknown;
   method?: HttpMethod;
-  responseSchema: ZodType<Response, ZodTypeDef, unknown>;
+  responseSchema: ZodType<Response, unknown>;
   timeoutMs?: number;
   signal?: AbortSignal | undefined;
 }
 
 /** Validates request input; a failure becomes a "validation" ExtractorApiError. */
-const validateInput = <Output>(schema: ZodType<Output, ZodTypeDef, unknown>, input: unknown) => {
+const validateInput = <Output>(schema: ZodType<Output, unknown>, input: unknown) => {
   const parsed = schema.safeParse(input);
 
   if (!parsed.success) {

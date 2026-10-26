@@ -11,7 +11,39 @@ updates:
     versioning-strategy: increase
     labels:
       - dependencies
+    # Expo pins react exactly and sets it during an SDK upgrade (`npx expo install --fix`), and
+    # react-dom and react-test-renderer must match react exactly. Dependabot bumps whichever has
+    # a release on its own (#54 moved only react-test-renderer), so these three move by hand,
+    # together, with the SDK. React Native and the React types move only within the SDK's
+    # minor version.
+    ignore:
+      - dependency-name: "react"
+      - dependency-name: "react-dom"
+      - dependency-name: "react-test-renderer"
+      - dependency-name: "@types/react-test-renderer"
+      - dependency-name: "react-native"
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
+      - dependency-name: "@types/react"
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
+      # A new Expo SDK is a major version of every Expo package plus a React Native bump, and
+      # needs `npx expo install --fix`; Dependabot can only bump packages one by one, which
+      # leaves the app on mixed SDKs. SDK upgrades are done by hand.
+      - dependency-name: "expo"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "expo-*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@expo/*"
+        update-types: ["version-update:semver-major"]
     groups:
+      # Expo packages within one SDK release together, so their minor and patch updates
+      # land as one PR, along with React Native and React type patches.
+      expo-sdk:
+        patterns:
+          - "expo"
+          - "expo-*"
+          - "@expo/*"
+          - "react-native"
+          - "@types/react"
       dev-dependencies:
         dependency-type: development
         update-types:

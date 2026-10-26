@@ -44,7 +44,6 @@ const createStreamingResponse = ({
   });
 };
 
-
 const requestUrlOf = (input: RequestInfo | URL): string => {
   if (typeof input === "string") {
     return input;

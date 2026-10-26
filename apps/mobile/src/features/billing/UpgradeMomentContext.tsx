@@ -124,12 +124,12 @@ const UpgradeMomentSheet = ({
 
   const openPlans = () => {
     onClose();
-    router.push("/upgrade" as never);
+    router.push("/upgrade");
   };
 
   const openAccount = () => {
     onClose();
-    router.push("/account" as never);
+    router.push("/account");
   };
 
   return (

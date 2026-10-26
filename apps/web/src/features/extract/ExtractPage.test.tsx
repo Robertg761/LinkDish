@@ -98,6 +98,7 @@ const authMocks = vi.hoisted(() => {
         listeners.delete(listener);
       };
     },
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- widens the literal type; typescript-eslint 8.7x misreports this
     user: { billingPlan: "free", email: "cook@example.com", id: "user_1" } as {
       billingPlan?: "free" | "plus" | "family";
       email: string;
@@ -836,7 +837,7 @@ describe("ExtractPage", () => {
     expect(screen.queryByRole("button", { name: "Start over" })).not.toBeInTheDocument();
   });
 
-  it("imports pasted text through AI help", async () => {
+  it("imports pasted text as a plain import", async () => {
     apiMocks.extractRecipeFromText.mockResolvedValue(success());
     renderPage();
 
@@ -856,11 +857,11 @@ describe("ExtractPage", () => {
 
     await screen.findByRole("heading", { level: 1, name: "Weeknight Rice" });
     expect(apiMocks.extractRecipeFromText.mock.calls[0]?.[0]).toMatchObject({
-      attempt: "fallback",
+      attempt: "primary",
       text
     });
     expect(startedEvents()[0]?.[0].properties).toMatchObject({
-      attempt: "fallback",
+      attempt: "primary",
       source_type: "text"
     });
   });
@@ -925,7 +926,7 @@ describe("ExtractPage", () => {
     expect(apiMocks.extractRecipe).not.toHaveBeenCalled();
     expect(apiMocks.extractRecipeFromText).toHaveBeenCalledOnce();
     expect(apiMocks.extractRecipeFromText.mock.calls[0]?.[0]).toMatchObject({
-      attempt: "fallback",
+      attempt: "primary",
       sourceUrl: link,
       text
     });

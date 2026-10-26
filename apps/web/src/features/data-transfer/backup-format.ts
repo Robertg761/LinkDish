@@ -73,7 +73,7 @@ const recordOf = (value: unknown): Record<string, unknown> =>
     ? (value as Record<string, unknown>)
     : {};
 
-const parseEach = <T>(value: unknown, schema: z.ZodType<T, z.ZodTypeDef, unknown>) => {
+const parseEach = <T>(value: unknown, schema: z.ZodType<T, unknown>) => {
   const parsed: Record<string, T> = {};
   let skipped = 0;
 
