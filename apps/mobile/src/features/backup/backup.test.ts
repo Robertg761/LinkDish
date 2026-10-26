@@ -265,6 +265,32 @@ describe("restoring", () => {
     ).toMatchObject({ duplicates: 1, restoredStarters: 0 });
   });
 
+  it("keeps a duplicated recipe a copy of its original", () => {
+    const original = record("orig");
+    const copy = record("copy", {
+      clonedFromId: "orig",
+      recipe: { ...original.recipe, title: "Recipe orig, my way" }
+    });
+    const { backup } = buildMobileBackup({
+      collections: [],
+      exportedAt: "2026-10-26T12:00:00.000Z",
+      mealPlan: [],
+      records: [copy, original]
+    });
+    const json = JSON.stringify(backup);
+
+    expect(restoreFrom(json, emptyDevice()).records).toEqual([
+      expect.objectContaining({ clonedFromId: "orig", id: "copy" }),
+      expect.not.objectContaining({ clonedFromId: expect.anything() as unknown })
+    ]);
+
+    // The original is already here under another id: the copy points at that one.
+    const here = { ...original, id: "saved-here" };
+    expect(restoreFrom(json, emptyDevice({ records: [here] })).records).toEqual([
+      expect.objectContaining({ clonedFromId: "saved-here", id: "copy" })
+    ]);
+  });
+
   it("treats a recipe with the same id as the one already here", () => {
     const { backup } = buildMobileBackup({
       collections: [],

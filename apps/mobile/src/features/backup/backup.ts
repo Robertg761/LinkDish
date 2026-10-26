@@ -54,6 +54,7 @@ const MAX_EXTRACTION_PROVENANCE = 12;
 const MAX_EXTRACTION_WARNINGS = 50;
 const MAX_EXTRACTION_WARNING_LENGTH = 500;
 const MAX_MEAL_TITLE_LENGTH = 200;
+const MAX_CLONED_FROM_ID_LENGTH = 200;
 const MAX_MEAL_NOTE_LENGTH = 500;
 const SAFE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,179}$/u;
 const STARTER_IDS: ReadonlySet<string> = new Set(SAMPLE_RECIPES.map((sample) => sample.id));
@@ -61,6 +62,8 @@ const STARTER_IDS: ReadonlySet<string> = new Set(SAMPLE_RECIPES.map((sample) => 
 type Extraction = Pick<SavedRecipeRecord, "fetchMode" | "provenance" | "strategy" | "warnings">;
 
 export interface BackupRecipeExtras {
+  /** The backup id of the recipe this one was duplicated from, so a copy stays a separate variation. */
+  clonedFromId?: string | undefined;
   extraction?: Extraction | undefined;
   lastCookedAt?: string | undefined;
   preferredServings?: number | undefined;
@@ -136,6 +139,7 @@ const toBackupRecipe = (record: SavedRecipeRecord): BackupRecipe => {
 };
 
 const toRecipeExtras = (record: SavedRecipeRecord): BackupRecipeExtras => ({
+  ...(record.clonedFromId ? { clonedFromId: record.clonedFromId } : {}),
   extraction: {
     fetchMode: record.fetchMode,
     provenance: record.provenance.slice(0, MAX_EXTRACTION_PROVENANCE),
@@ -276,6 +280,9 @@ export const readBackupExtras = (backupJson: unknown): BackupExtras => {
     const extraction = readExtraction(entry.extraction);
     const servings = entry.preferredServings;
     extras.recipes[id] = {
+      ...(typeof entry.clonedFromId === "string" && entry.clonedFromId.trim()
+        ? { clonedFromId: entry.clonedFromId.trim().slice(0, MAX_CLONED_FROM_ID_LENGTH) }
+        : {}),
       ...(extraction ? { extraction } : {}),
       ...(isDateTime(entry.lastCookedAt) ? { lastCookedAt: entry.lastCookedAt } : {}),
       ...(typeof servings === "number" && servings > 0 && servings <= MAX_MEAL_PLAN_SERVINGS
@@ -529,6 +536,16 @@ export const planBackupRestore = (
     }
   }
 
+  // A restored copy points at its original's id on this device (the original may come later).
+  for (const [index, record] of records.entries()) {
+    if (record.clonedFromId) {
+      records[index] = {
+        ...record,
+        clonedFromId: localIdByBackupId.get(record.clonedFromId) ?? record.clonedFromId
+      };
+    }
+  }
+
   // A collection with no recipes on this device is only created if it was empty in the backup too.
   const usedCollectionIds = new Set([
     ...records.flatMap((record) => getRecipeCollectionIds(record)),
@@ -654,6 +671,7 @@ const toRestoredRecord = (
     timesCooked: Math.max(meta.timesCooked ?? 0, cookLog.length),
     updatedAt: meta.updatedAt,
     warnings: extraction.warnings,
+    ...(recipeExtras?.clonedFromId ? { clonedFromId: recipeExtras.clonedFromId } : {}),
     ...(meta.favorite ? { favorite: true } : {}),
     ...(notes ? { notes } : {}),
     ...(Object.keys(libraryExtras).length ? { libraryExtras } : {})
