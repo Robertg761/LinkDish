@@ -13,6 +13,7 @@ const tabIcons = {
   account: "home-heart",
   import: "plus-circle-outline",
   index: "book-open-variant",
+  plan: "calendar-week",
   shopping: "cart-outline"
 } as const satisfies Record<string, ComponentProps<typeof MaterialCommunityIcons>["name"]>;
 
@@ -56,6 +57,12 @@ export default function TabLayout() {
         name="import"
         options={{
           title: "Add"
+        }}
+      />
+      <Tabs.Screen
+        name="plan"
+        options={{
+          title: "Plan"
         }}
       />
       <Tabs.Screen

@@ -1,10 +1,14 @@
 import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { addDaysToIsoDate, toIsoDate } from "@linkdish/recipe-domain";
 import { AppText } from "@linkdish/ui";
 import React, { useMemo, useState } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 
 import { pressedOpacity } from "../../theme/interactions";
 import { appColors, appSpacing } from "../../theme/tokens";
+import { AddToPlanSheet } from "../meal-plan/AddToPlanSheet";
+import { useMealPlan } from "../meal-plan/MealPlanContext";
+import { relativeDayName, SLOT_LABELS } from "../meal-plan/store";
 import {
   formatCollectionLabel,
   getRecipeCollectionIds,
@@ -18,15 +22,32 @@ import { TagEditorSheet } from "./TagEditorSheet";
 
 import type { SavedRecipeRecord } from "../saved-recipes/store";
 
-/** A saved recipe's tags and collections on its page, each with a way to change them. */
+const MAX_LISTED_PLANS = 3;
+
+/**
+ * A saved recipe's tags, collections and upcoming meal plan days on its page, each with a way to
+ * change them.
+ */
 export const RecipeOrganizeSection = ({ record }: { record: SavedRecipeRecord }) => {
   const { collections } = useSavedRecipes();
-  const [openSheet, setOpenSheet] = useState<"collections" | "tags" | null>(null);
+  const { entries } = useMealPlan();
+  const [openSheet, setOpenSheet] = useState<"collections" | "plan" | "tags" | null>(null);
   const tags = getRecipeTags(record);
   const memberCollections = useMemo(() => {
     const ids = new Set(getRecipeCollectionIds(record));
     return collections.filter((collection) => ids.has(collection.id));
   }, [collections, record]);
+  const upcomingPlans = useMemo(() => {
+    const today = toIsoDate(new Date());
+    const tomorrow = addDaysToIsoDate(today, 1);
+    return entries
+      .filter((entry) => entry.recipeId === record.id && entry.date >= today)
+      .slice(0, MAX_LISTED_PLANS)
+      .map(
+        (entry) =>
+          `${relativeDayName(entry.date, today, tomorrow)} ${SLOT_LABELS[entry.slot].toLowerCase()}`
+      );
+  }, [entries, record.id]);
 
   return (
     <View style={styles.section} testID="recipe-organize-section">
@@ -44,6 +65,14 @@ export const RecipeOrganizeSection = ({ record }: { record: SavedRecipeRecord })
         onEdit={() => setOpenSheet("collections")}
         values={memberCollections.map(formatCollectionLabel)}
       />
+      <OrganizeRow
+        editIcon="plus"
+        emptyLabel="Add to meal plan"
+        icon="calendar-week"
+        label="Meal plan"
+        onEdit={() => setOpenSheet("plan")}
+        values={upcomingPlans}
+      />
       <TagEditorSheet
         onClose={() => setOpenSheet(null)}
         recipeId={record.id}
@@ -54,17 +83,22 @@ export const RecipeOrganizeSection = ({ record }: { record: SavedRecipeRecord })
         recipeId={record.id}
         visible={openSheet === "collections"}
       />
+      {openSheet === "plan" ? (
+        <AddToPlanSheet onClose={() => setOpenSheet(null)} record={record} visible />
+      ) : null}
     </View>
   );
 };
 
 const OrganizeRow = ({
+  editIcon = "pencil-outline",
   emptyLabel,
   icon,
   label,
   onEdit,
   values
 }: {
+  editIcon?: React.ComponentProps<typeof MaterialCommunityIcons>["name"];
   emptyLabel: string;
   icon: React.ComponentProps<typeof MaterialCommunityIcons>["name"];
   label: string;
@@ -88,7 +122,7 @@ const OrganizeRow = ({
     ) : (
       <AppText style={styles.empty}>{emptyLabel}</AppText>
     )}
-    <MaterialCommunityIcons color={appColors.muted} name="pencil-outline" size={17} />
+    <MaterialCommunityIcons color={appColors.muted} name={editIcon} size={17} />
   </Pressable>
 );
 
