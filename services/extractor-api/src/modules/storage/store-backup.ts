@@ -452,49 +452,95 @@ const libraryRestoreLockMs = 120_000;
  * restore never sees feed entries without their items.
  */
 /*
- * Replacing a library that devices already sync from: the restored feed is renumbered above the
- * live counter (in its own order, each item's stored rev to match) and the counter continues
- * from there. Every device then pulls the whole restored library as new changes, whatever cursor
- * it holds, including one that read the old feed while it was being replaced.
+ * Replacing a library that devices already sync from. Devices hold their own copies, so the
+ * restore merges rather than removes: the snapshot's items replace the live ones, and items only
+ * the live library has (added since the snapshot) stay, as they are and still live if they were.
+ * The merged feed is renumbered above the live counter (snapshot items first, in their order,
+ * then the kept ones; each item's stored rev to match) and the counter continues from there, so
+ * every device pulls the whole library again as new changes, whatever cursor it holds,
+ * including one that read the old feed while it was being replaced.
  */
-const renumberLibrary = (
+const mergeLibraryForOverwrite = (
   entries: StoreSnapshotEntry[],
-  currentRev: number
+  current: {
+    feed: Array<[string, number]>;
+    items: Map<string, string>;
+    live: Record<"collection" | "recipe", string[]>;
+    rev: number;
+  },
+  keys: {
+    changes: string;
+    item: (member: string) => string;
+    live: (kind: string) => string;
+    rev: string;
+  }
 ): StoreSnapshotEntry[] => {
   const feed = entries.find((entry) => entry.type === "zset");
-  const pairs = feed ? (feed.value as Array<[string, number]>) : [];
+  const snapshotMembers = [...(feed ? (feed.value as Array<[string, number]>) : [])]
+    .sort((left, right) => left[1] - right[1])
+    .map(([member]) => member);
+  const inSnapshot = new Set(snapshotMembers);
+  const keptMembers = current.feed
+    .map(([member]) => member)
+    .filter((member) => !inSnapshot.has(member) && current.items.has(member));
+  const kept = new Set(keptMembers);
   const newRevs = new Map(
-    [...pairs]
-      .sort((left, right) => left[1] - right[1])
-      .map(([member], index) => [member, currentRev + index + 1])
+    [...snapshotMembers, ...keptMembers].map((member, index) => [member, current.rev + index + 1])
   );
-  const nextRev = currentRev + newRevs.size;
-
-  return entries.map((entry) => {
-    if (entry === feed) {
-      return {
-        ...entry,
-        value: pairs.map(([member]): [string, number] => [member, newRevs.get(member) ?? 0])
-      };
+  const withRev = (value: string, rev: number): string => {
+    try {
+      return JSON.stringify({ ...(JSON.parse(value) as object), rev });
+    } catch {
+      return value;
     }
+  };
+  const merged: StoreSnapshotEntry[] = [];
 
-    if (entry.key.includes(":rev:")) {
-      return { ...entry, value: String(nextRev) };
-    }
-
+  for (const entry of entries) {
     const member = /:item:[^:]+:(.+)$/u.exec(entry.key)?.[1];
     const rev = member ? newRevs.get(member) : undefined;
 
     if (rev != null && typeof entry.value === "string") {
-      try {
-        return { ...entry, value: JSON.stringify({ ...(JSON.parse(entry.value) as object), rev }) };
-      } catch {
-        return entry;
-      }
+      merged.push({ ...entry, value: withRev(entry.value, rev) });
+    } else if (entry.type === "string" && !entry.key.includes(":rev:")) {
+      merged.push(entry);
     }
+  }
 
-    return entry;
-  });
+  for (const member of keptMembers) {
+    merged.push({
+      key: keys.item(member),
+      type: "string",
+      value: withRev(current.items.get(member) as string, newRevs.get(member) as number)
+    });
+  }
+
+  for (const kind of ["recipe", "collection"] as const) {
+    const key = keys.live(kind);
+    const snapshotLive = entries.find((entry) => entry.key === key);
+    const keptLive = current.live[kind].filter((id) => kept.has(`${kind}:${id}`));
+    const members = [
+      ...new Set([...((snapshotLive?.value as string[] | undefined) ?? []), ...keptLive])
+    ].sort();
+
+    if (members.length > 0) {
+      merged.push({ key, type: "set", value: members });
+    }
+  }
+
+  if (current.rev + newRevs.size > 0) {
+    merged.push({ key: keys.rev, type: "string", value: String(current.rev + newRevs.size) });
+  }
+
+  if (newRevs.size > 0) {
+    merged.push({
+      key: keys.changes,
+      type: "zset",
+      value: [...newRevs].map(([member, rev]): [string, number] => [member, rev])
+    });
+  }
+
+  return merged;
 };
 
 const restoreLibrary = async (
@@ -518,6 +564,7 @@ const restoreLibrary = async (
     `${prefix}:live:${userId}:recipe`,
     `${prefix}:live:${userId}:collection`
   ];
+  const itemKey = (member: string): string => `${prefix}:item:${userId}:${member}`;
   const token = randomBytes(16).toString("base64url");
   let locked = false;
 
@@ -561,21 +608,51 @@ const restoreLibrary = async (
       let restored = entries;
 
       if (options.overwrite) {
-        const [currentRev, current] = await run([
+        const [currentRev, currentFeed, liveRecipes, liveCollections] = await run([
           ["GET", coreKeys[0] as string],
-          ["ZRANGE", coreKeys[1] as string, "0", "-1"]
+          ["ZRANGE", coreKeys[1] as string, "0", "-1", "WITHSCORES"],
+          ["SMEMBERS", coreKeys[2] as string],
+          ["SMEMBERS", coreKeys[3] as string]
         ]);
-        restored = renumberLibrary(entries, Number(currentRev) || 0);
-
-        // The items the current feed names go too: one the snapshot lacks would otherwise stay
-        // behind with no feed entry, and a later push of it would be taken as unchanged.
-        const currentItemKeys = (Array.isArray(current) ? current : []).map(
-          (member) => `${prefix}:item:${userId}:${String(member)}`
+        const feed = toZsetPairs(currentFeed);
+        const inSnapshot = new Set(
+          entries.flatMap((entry) =>
+            entry.type === "zset"
+              ? (entry.value as Array<[string, number]>).map(([member]) => member)
+              : []
+          )
         );
+        const keptMembers = feed.map(([member]) => member).filter((m) => !inSnapshot.has(m));
+        const items = new Map<string, string>();
 
-        for (const batch of chunk(currentItemKeys, 500)) {
-          await run([["DEL", ...batch]]);
+        for (const batch of chunk(keptMembers, options.batchSize)) {
+          const [values] = await run([["MGET", ...batch.map(itemKey)]]);
+          batch.forEach((member, index) => {
+            const value: unknown = Array.isArray(values) ? values[index] : null;
+            if (typeof value === "string") {
+              items.set(member, value);
+            }
+          });
         }
+
+        restored = mergeLibraryForOverwrite(
+          entries,
+          {
+            feed,
+            items,
+            live: {
+              collection: Array.isArray(liveCollections) ? liveCollections.map(String) : [],
+              recipe: Array.isArray(liveRecipes) ? liveRecipes.map(String) : []
+            },
+            rev: Number(currentRev) || 0
+          },
+          {
+            changes: coreKeys[1] as string,
+            item: itemKey,
+            live: (kind) => `${prefix}:live:${userId}:${kind}`,
+            rev: coreKeys[0] as string
+          }
+        );
 
         await run([["DEL", ...coreKeys]]);
       }

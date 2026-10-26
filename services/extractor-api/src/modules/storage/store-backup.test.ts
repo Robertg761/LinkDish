@@ -304,20 +304,38 @@ describe("restoreStoreSnapshot", () => {
     });
   });
 
-  it("drops items the current feed names that the snapshot lacks, with overwrite", async () => {
+  it("keeps items only the live library has, after the restored ones, with overwrite", async () => {
     const source = createFakeRedis(() => 0);
     seed(source, 0);
     const snapshot = await createStoreSnapshot(source.run, { now: () => new Date(0) });
     const target = createFakeRedis(() => 0);
-    target.strings.set("linkdish:library:v1:item:u1:recipe:new", JSON.stringify({ rev: 2 }));
-    target.zsets.set("linkdish:library:v1:changes:u1", new Map([["recipe:new", 2]]));
+    target.strings.set("linkdish:library:v1:rev:u1", "5");
+    target.strings.set("linkdish:library:v1:item:u1:recipe:a", JSON.stringify({ rev: 4 }));
+    target.strings.set("linkdish:library:v1:item:u1:recipe:new", JSON.stringify({ rev: 5 }));
+    target.zsets.set(
+      "linkdish:library:v1:changes:u1",
+      new Map([
+        ["recipe:a", 4],
+        ["recipe:new", 5]
+      ])
+    );
+    target.sets.set("linkdish:library:v1:live:u1:recipe", new Set(["a", "new"]));
 
     await restoreStoreSnapshot(target.run, snapshot, { apply: true, overwrite: true });
 
-    expect(target.strings.has("linkdish:library:v1:item:u1:recipe:new")).toBe(false);
-    expect([...(target.zsets.get("linkdish:library:v1:changes:u1")?.keys() ?? [])]).toEqual([
-      "recipe:a"
+    expect([...(target.zsets.get("linkdish:library:v1:changes:u1") ?? [])]).toEqual([
+      ["recipe:a", 6],
+      ["recipe:new", 7]
     ]);
+    expect(target.strings.get("linkdish:library:v1:rev:u1")).toBe("7");
+    expect(target.strings.get("linkdish:library:v1:item:u1:recipe:a")).toBe(
+      JSON.stringify({ rev: 6 })
+    );
+    expect(target.strings.get("linkdish:library:v1:item:u1:recipe:new")).toBe(
+      JSON.stringify({ rev: 7 })
+    );
+    // The snapshot had no live recipes; the kept one stays live.
+    expect([...(target.sets.get("linkdish:library:v1:live:u1:recipe") ?? [])]).toEqual(["new"]);
   });
 
   it("takes a whole library when a prefix selects part of it", async () => {
