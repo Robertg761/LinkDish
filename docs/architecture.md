@@ -109,7 +109,8 @@ size` checks the budgets after a build (entry ≤ 115 KB gzip, landing JS ≤
   counter from the same moment) and restored whole under the library service's own lock, so a
   restore never leaves pulls resetting or skipping changes. With `--overwrite` the backup's items
   replace the live ones, items added since the backup are kept, and the merged library is
-  renumbered above the live counter, so every device pulls it again as new changes.
+  renumbered above both the live and the backed-up counter, so every device pulls it again as new
+  changes.
 
 ### Sources
 

@@ -487,8 +487,17 @@ const mergeLibraryForOverwrite = (
     .map(([member]) => member)
     .filter((member) => !inSnapshot.has(member) && current.items.has(member));
   const kept = new Set(keptMembers);
+  /*
+   * Above both counters: devices may hold cursors from the live library or from the one the
+   * snapshot was taken of (after a rollback the live counter can be the lower one), and a
+   * device whose cursor is not below a change never pulls it.
+   */
+  const floor = Math.max(
+    current.rev,
+    Number(entries.find((entry) => entry.key === keys.rev)?.value) || 0
+  );
   const newRevs = new Map(
-    [...snapshotMembers, ...keptMembers].map((member, index) => [member, current.rev + index + 1])
+    [...snapshotMembers, ...keptMembers].map((member, index) => [member, floor + index + 1])
   );
   const withRev = (value: string, rev: number): string => {
     try {
@@ -531,8 +540,8 @@ const mergeLibraryForOverwrite = (
     }
   }
 
-  if (current.rev + newRevs.size > 0) {
-    merged.push({ key: keys.rev, type: "string", value: String(current.rev + newRevs.size) });
+  if (floor + newRevs.size > 0) {
+    merged.push({ key: keys.rev, type: "string", value: String(floor + newRevs.size) });
   }
 
   if (newRevs.size > 0) {

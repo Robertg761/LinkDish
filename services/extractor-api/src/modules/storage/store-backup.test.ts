@@ -391,6 +391,31 @@ describe("restoreStoreSnapshot", () => {
     expect(target.strings.has("linkdish:library:v1:restoring:u1")).toBe(false);
   });
 
+  it("renumbers above the snapshot's counter when the live one is lower", async () => {
+    const source = createFakeRedis(() => 0);
+    source.strings.set("linkdish:library:v1:rev:u1", "100");
+    source.strings.set("linkdish:library:v1:item:u1:recipe:a", JSON.stringify({ rev: 50 }));
+    source.strings.set("linkdish:library:v1:item:u1:recipe:b", JSON.stringify({ rev: 100 }));
+    source.zsets.set(
+      "linkdish:library:v1:changes:u1",
+      new Map([
+        ["recipe:a", 50],
+        ["recipe:b", 100]
+      ])
+    );
+    const snapshot = await createStoreSnapshot(source.run, { now: () => new Date(0) });
+    const target = createFakeRedis(() => 0);
+
+    await restoreStoreSnapshot(target.run, snapshot, { apply: true, overwrite: true });
+
+    // A device last synced at 100 still pulls both, and one past 102 resets.
+    expect([...(target.zsets.get("linkdish:library:v1:changes:u1") ?? [])]).toEqual([
+      ["recipe:a", 101],
+      ["recipe:b", 102]
+    ]);
+    expect(target.strings.get("linkdish:library:v1:rev:u1")).toBe("102");
+  });
+
   it("takes a whole library when a prefix selects part of it", async () => {
     const source = createFakeRedis(() => 0);
     seed(source, 0);
@@ -404,8 +429,8 @@ describe("restoreStoreSnapshot", () => {
     });
 
     expect(result.written).toBe(3);
-    expect(target.strings.get("linkdish:library:v1:rev:u1")).toBe("1");
-    expect(target.zsets.get("linkdish:library:v1:changes:u1")?.get("recipe:a")).toBe(1);
+    expect(target.strings.get("linkdish:library:v1:rev:u1")).toBe("2");
+    expect(target.zsets.get("linkdish:library:v1:changes:u1")?.get("recipe:a")).toBe(2);
     expect(target.strings.has("linkdish:user:v1:u1")).toBe(false);
   });
 
