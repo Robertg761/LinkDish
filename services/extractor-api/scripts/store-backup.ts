@@ -28,8 +28,9 @@ A private key made with a passphrase is read with LINKDISH_BACKUP_KEY_PASSPHRASE
 
 restore is a dry run without --confirm. Without --overwrite it only fills in keys that are
 missing (a synced library only when none of it is there); with it, keys in the backup
-replace what is there now. inspect --out writes the
-decrypted snapshot as JSON: it holds account data, so keep it off shared disks.`;
+replace what is there now. --only narrows it to keys with that prefix, and a synced library
+is always restored whole. inspect --out writes the decrypted snapshot as JSON: it holds
+account data, so keep it off shared disks.`;
 
 type Args = Record<string, string | string[] | true>;
 
