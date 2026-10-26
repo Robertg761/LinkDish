@@ -3,7 +3,7 @@ import { openDB, type IDBPDatabase } from "idb";
 import { safeGetItem, safeRemoveItem, safeSetItem } from "../platform/safe-storage";
 
 export const LINKDISH_WEB_DB_NAME = "linkdish-web";
-export const LINKDISH_WEB_DB_VERSION = 4;
+export const LINKDISH_WEB_DB_VERSION = 5;
 export const SAVED_RECIPES_STORE_NAME = "savedRecipes";
 export const SHOPPING_ITEMS_STORE_NAME = "shoppingItems";
 export const COLLECTIONS_STORE_NAME = "collections";
@@ -11,6 +11,8 @@ export const MEAL_PLAN_STORE_NAME = "mealPlan";
 export const IMPORT_QUEUE_STORE_NAME = "importQueue";
 export const COOK_SESSIONS_STORE_NAME = "cookSessions";
 export const RECIPE_SOURCE_IMAGES_STORE_NAME = "recipeSourceImages";
+/** Cloud sync bookkeeping: which account the cookbook syncs with, and what the cloud last had. */
+export const LIBRARY_SYNC_STORE_NAME = "librarySync";
 
 /** Every object store the current schema defines, in creation order. */
 export const LINKDISH_WEB_DB_STORE_NAMES = [
@@ -20,7 +22,8 @@ export const LINKDISH_WEB_DB_STORE_NAMES = [
   MEAL_PLAN_STORE_NAME,
   IMPORT_QUEUE_STORE_NAME,
   COOK_SESSIONS_STORE_NAME,
-  RECIPE_SOURCE_IMAGES_STORE_NAME
+  RECIPE_SOURCE_IMAGES_STORE_NAME,
+  LIBRARY_SYNC_STORE_NAME
 ] as const;
 
 export type LinkDishWebStoreName = (typeof LINKDISH_WEB_DB_STORE_NAMES)[number];
@@ -106,6 +109,11 @@ const STORE_DEFINITIONS: Record<LinkDishWebStoreName, StoreDefinition> = {
     indexes: [],
     keyPath: "recipeId",
     name: RECIPE_SOURCE_IMAGES_STORE_NAME
+  },
+  [LIBRARY_SYNC_STORE_NAME]: {
+    indexes: [],
+    keyPath: "key",
+    name: LIBRARY_SYNC_STORE_NAME
   }
 };
 
@@ -302,6 +310,10 @@ export function runLinkDishWebDbUpgrade(db: UpgradeDatabase, oldVersion: number)
       // Scans move out once the database is open (see finishSourceImageMigration).
       markSourceImageMigrationPending();
     }
+  }
+
+  if (oldVersion < 5) {
+    ensureObjectStore(db, LIBRARY_SYNC_STORE_NAME);
   }
 }
 

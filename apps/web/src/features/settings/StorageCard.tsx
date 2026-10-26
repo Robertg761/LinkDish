@@ -196,8 +196,9 @@ export const StorageCard: React.FC<StorageCardProps> = ({ counts, isFamily }) =>
       <div className="settings-data-explainer">
         <Icon name="info" size={16} />
         <p>
-          Your recipes live in this browser, on this device. Clearing browsing data or uninstalling
-          the browser removes them, so download a backup now and then.{" "}
+          Your recipes live in this browser, and sync to your account while you&apos;re signed in.
+          Signed out, clearing browsing data or uninstalling the browser removes them, so download a
+          backup now and then.{" "}
           {isFamily
             ? "Recipes you share with your Family household are also kept with the household."
             : "With Family, recipes you share are also kept with your household."}

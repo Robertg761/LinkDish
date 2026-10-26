@@ -85,7 +85,7 @@ describe("shopping-list-store", () => {
   it("opens the v4 database with the shopping store", async () => {
     await getShoppingItems();
 
-    expect(fakeIdb.openCalls[0]).toMatchObject({ name: "linkdish-web", version: 4 });
+    expect(fakeIdb.openCalls[0]).toMatchObject({ name: "linkdish-web", version: 5 });
     expect(fakeIdb.hasStore("shoppingItems")).toBe(true);
   });
 

@@ -11,7 +11,7 @@ export const PrivacyPage: React.FC = () => {
       <PageHeader
         className="privacy-header"
         eyebrow="Privacy"
-        subtitle={<span className="privacy-updated">Last updated: July 10, 2026</span>}
+        subtitle={<span className="privacy-updated">Last updated: October 26, 2026</span>}
         title="Privacy Policy"
       />
 
@@ -32,10 +32,14 @@ export const PrivacyPage: React.FC = () => {
           <section className="privacy-section">
             <h2>Saved recipes and households</h2>
             <p>
-              Personal saved recipes are stored locally in your browser. Free includes up to 15
-              personal saves and paid plans include unlimited saves. Clearing LinkDish site data
-              deletes those local recipes. Recipes shared with a Family household are stored by
-              LinkDish so active household members can access them.
+              Personal saved recipes are stored locally in your browser. When you&apos;re signed in,
+              your cookbook (saved recipes with your notes, favorites, tags, ratings, collections,
+              and cook log) is also stored by LinkDish with your account, so it stays in sync on
+              every device where you sign in; photos you scanned to import a recipe stay on the
+              device. Free includes up to 15 personal saves on a device and paid plans include
+              unlimited saves. Clearing LinkDish site data deletes the recipes in this browser, and
+              deleting your account deletes the cookbook stored with it. Recipes shared with a
+              Family household are stored by LinkDish so active household members can access them.
             </p>
           </section>
           <section className="privacy-section">

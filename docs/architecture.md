@@ -240,6 +240,32 @@ own routes. Scan photos, starter recipes, the meal plan and cook-mode sessions a
   keep working locally. In production the routes refuse to run without Upstash (503) rather than
   keep cookbooks in process memory. Deleting the account deletes every library key.
 
+On a device, sync is one shared engine (`packages/recipe-domain/src/library-sync.ts`) driven by
+each app:
+
+- A device remembers, per item, a fingerprint of the copy the cloud last had (its "base"). An item
+  whose local fingerprint differs from its base changed on the device; a pulled copy that differs
+  changed elsewhere. Fields are fingerprinted in groups (content, notes, favorite, tags,
+  collections, rating, cooking, servings, ...), so edits to different groups on two devices both
+  survive; when both changed one group the device merging keeps its own, except tags, collection
+  membership and the cook log, which combine. Apps keep their own write paths: nothing records
+  changes as they happen, a run compares.
+- A run pulls and merges every page, then pushes what still differs from its base (deletions as
+  tombstones), stamping uploads later than the cloud copy they replace. A merged write is applied
+  only while the item still is what it was merged with; an item that keeps changing meanwhile
+  keeps the pulled change as `pending` for the next run and sends nothing over it. A change the API
+  turns away is held (not sent again) until the item changes. `packages/api-client/src/
+  library-sync.ts` validates each change before sending, so one bad item never fails a batch.
+- A device's cookbook is linked to one account: the first to sign in on it (merging the two). It
+  keeps the cookbook when that account signs out. Another account that signs in doesn't sync it;
+  it can replace it with its own cookbook. Deleting the account unlinks the device; its recipes
+  stay. Starter recipes, scans and when a recipe was last opened stay on the device.
+- Web (`apps/web/src/features/cloud-sync`): the link and bases live in the `librarySync` store
+  (IndexedDB v5), so they change with the recipes they describe; runs are serialized across tabs
+  with Web Locks and start after local changes (4 s), on focus, on coming online, every 5 minutes,
+  and on sign-in. The module loads after the first screen settles, and only once someone signs in.
+  The Account page shows its state, and the switch for another account's cookbook.
+
 ### `/extract` request path and performance
 
 `api/extract.ts` and the Fastify route share `services/extract-request-pipeline.ts`:
