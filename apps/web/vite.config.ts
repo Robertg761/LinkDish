@@ -2,10 +2,10 @@ import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
 import { defineConfig } from "vitest/config";
 
-import type { HtmlTagDescriptor, Plugin, Rollup } from "vite";
+import type { HtmlTagDescriptor, Plugin, Rolldown } from "vite";
 
-type ManualChunkMeta = Parameters<Rollup.GetManualChunk>[1];
-type OutputChunk = Rollup.OutputChunk;
+type ChunkingContext = Rolldown.ChunkingContext;
+type OutputChunk = Rolldown.OutputChunk;
 
 /** Brand canvas (#fbf7f0): splash background and browser chrome for the installed app. */
 const BRAND_CANVAS = "#f4efe7";
@@ -22,7 +22,7 @@ const preloadLandingRoute = (routeModule: string): Plugin => ({
   transformIndexHtml: {
     order: "post",
     handler(_html, context) {
-      const bundle: Rollup.OutputBundle | undefined = context.bundle;
+      const bundle: Rolldown.OutputBundle | undefined = context.bundle;
       const entry = context.chunk;
 
       if (!bundle || !entry) {
@@ -170,42 +170,65 @@ const DOMAIN_FORMAT_PATTERN =
  * the import queue count; see platform/boot-settle.ts) is not in `app-core`: the Cookbook's
  * first download carries only what its first paint needs.
  */
-const createManualChunks = (bootModules: readonly string[]): Rollup.GetManualChunk => {
-  let entryGraph: Set<string> | null = null;
-  let landingGraph: Set<string> | null = null;
+const createChunkGroups = (bootModules: readonly string[]): Rolldown.CodeSplittingGroup[] => {
+  /**
+   * Whether `id` is in the static import graph of a root, found by walking up its static
+   * importers (Rolldown's chunking context can't list every module, so the graph can't be walked
+   * down from the roots). Both answers are remembered: a module under a root puts everything it
+   * imports under it too, and a module that isn't needn't be walked again.
+   */
+  const createStaticGraphCheck = (isRoot: (info: Rolldown.ModuleInfo) => boolean) => {
+    const known = new Map<string, boolean>();
 
-  const collectStaticGraph = (meta: ManualChunkMeta, roots: string[]): Set<string> => {
-    const graph = new Set<string>();
-    const visit = (id: string) => {
-      if (graph.has(id)) {
-        return;
+    return (id: string, context: ChunkingContext): boolean => {
+      const visited = new Set<string>();
+      const pending = [id];
+
+      while (pending.length > 0) {
+        const current = pending.pop()!;
+
+        if (visited.has(current) || known.get(current) === false) {
+          continue;
+        }
+
+        const info = context.getModuleInfo(current);
+
+        if (known.get(current) || (info && isRoot(info))) {
+          known.set(id, true);
+          return true;
+        }
+
+        visited.add(current);
+        pending.push(...(info?.importers ?? []));
       }
 
-      graph.add(id);
-      meta.getModuleInfo(id)?.importedIds.forEach(visit);
+      visited.forEach((visitedId) => known.set(visitedId, false));
+      return false;
     };
-
-    roots.forEach(visit);
-    return graph;
   };
 
-  const sharedChunkFor = (id: string, meta: ManualChunkMeta): string | undefined => {
+  const inEntryGraph = createStaticGraphCheck((info) => info.isEntry);
+  const inLandingGraph = createStaticGraphCheck((info) =>
+    bootModules.some((bootModule) => info.id.replaceAll("\\", "/").endsWith(bootModule))
+  );
+
+  const sharedChunkFor = (id: string, context: ChunkingContext): string | undefined => {
     const path = id.replaceAll("\\", "/");
-    const info = meta.getModuleInfo(id);
+    const info = context.getModuleInfo(id);
 
     // Entry code stays in the entry; modules only ever imported lazily keep their own chunks.
-    if (entryGraph?.has(id) || !info || info.importers.length === 0) {
+    if (!info || inEntryGraph(id, context) || info.importers.length === 0) {
       return undefined;
     }
 
     if (path.endsWith(".css")) {
       // A stylesheet follows its component, so a page's own CSS never lands in a shared chunk.
-      const owners = new Set(info.importers.map((importer) => sharedChunkFor(importer, meta)));
+      const owners = new Set(info.importers.map((importer) => sharedChunkFor(importer, context)));
       return owners.size === 1 ? [...owners][0] : undefined;
     }
 
     if (APP_SHARED_PATTERN.test(path)) {
-      return landingGraph?.has(id) ? "app-core" : "app-shared";
+      return inLandingGraph(id, context) ? "app-core" : "app-shared";
     }
 
     if (DOMAIN_CORE_PATTERN.test(path)) {
@@ -215,29 +238,17 @@ const createManualChunks = (bootModules: readonly string[]): Rollup.GetManualChu
     return DOMAIN_FORMAT_PATTERN.test(path) ? "domain-format" : undefined;
   };
 
-  return (id, meta) => {
-    if (!entryGraph || !landingGraph) {
-      const moduleIds = [...meta.getModuleIds()];
-      entryGraph = collectStaticGraph(
-        meta,
-        moduleIds.filter((moduleId) => meta.getModuleInfo(moduleId)?.isEntry)
-      );
-      landingGraph = collectStaticGraph(
-        meta,
-        moduleIds.filter((moduleId) =>
-          bootModules.some((bootModule) => moduleId.replaceAll("\\", "/").endsWith(bootModule))
-        )
-      );
-    }
-
-    // Named explicitly: Rollup moves a manual chunk's dependencies into it unless they belong to
-    // another manual chunk, which would otherwise drag shell code (React, the router) along.
-    if (entryGraph.has(id)) {
-      return "index";
-    }
-
-    return sharedChunkFor(id, meta);
-  };
+  return [
+    // Claimed first and named explicitly: a group pulls its modules' dependencies into its chunk
+    // unless another group already holds them, which would otherwise drag shell code (React, the
+    // router) into `app-core` and make every route download it.
+    {
+      debugName: "entry",
+      name: (id, context) => (inEntryGraph(id, context) ? "index" : null),
+      priority: 1
+    },
+    { debugName: "shared", name: (id, context) => sharedChunkFor(id, context) ?? null }
+  ];
 };
 
 /** The page most visits start on; see preloadLandingRoute and app/routes.ts. */
@@ -250,9 +261,11 @@ export default defineConfig({
     globals: true
   },
   build: {
-    rollupOptions: {
+    rolldownOptions: {
       output: {
-        manualChunks: createManualChunks([LANDING_ROUTE_MODULE])
+        codeSplitting: {
+          groups: createChunkGroups([LANDING_ROUTE_MODULE])
+        }
       }
     }
   },
