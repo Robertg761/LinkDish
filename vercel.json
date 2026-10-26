@@ -131,7 +131,7 @@
     },
     {
       "source": "/library/:path*",
-      "destination": "/api/library?path=:path*"
+      "destination": "/api/household?path=library/:path*"
     },
     {
       "source": "/billing",

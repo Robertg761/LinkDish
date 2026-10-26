@@ -2,9 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SAMPLE_RECIPES } from "../packages/recipe-domain/src/samples.js";
 
-import type * as LibraryModule from "./library.js";
+import type * as HouseholdModule from "./household.js";
 
-let libraryApi: typeof LibraryModule;
+/* The library routes are served by the household function (see vercel.json). */
+let libraryApi: typeof HouseholdModule;
 
 const authMocks = vi.hoisted(() => ({
   getAuthenticatedUser: vi.fn()
@@ -21,7 +22,7 @@ const user = {
 
 const request = (path: string, init?: RequestInit & { search?: string }) =>
   new Request(
-    `https://api.linkdish.ca/api/library?path=${encodeURIComponent(path)}${init?.search ?? ""}`,
+    `https://api.linkdish.ca/api/household?path=${encodeURIComponent(`library/${path}`)}${init?.search ?? ""}`,
     {
       headers: {
         authorization: "Bearer header.payload.signature",
@@ -59,7 +60,7 @@ const loadApi = async (env: Record<string, string> = {}) => {
     vi.stubEnv(key, value);
   }
 
-  libraryApi = await import("./library.js");
+  libraryApi = await import("./household.js");
 };
 
 beforeEach(async () => {

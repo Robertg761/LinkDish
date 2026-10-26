@@ -3,21 +3,14 @@ import { ZodError } from "zod";
 import {
   pullLibraryChangesQuerySchema,
   pushLibraryChangesEnvelopeSchema
-} from "../packages/api-contracts/src/index.js";
-import { extractorApiEnv } from "../services/extractor-api/src/config/env.js";
-import { corsJson, corsPreflight } from "../services/extractor-api/src/http/vercel-cors.js";
-import { getAuthenticatedUser } from "../services/extractor-api/src/modules/auth/auth-service.js";
+} from "../../packages/api-contracts/src/index.js";
+import { extractorApiEnv } from "../../services/extractor-api/src/config/env.js";
+import { corsJson } from "../../services/extractor-api/src/http/vercel-cors.js";
+import { getAuthenticatedUser } from "../../services/extractor-api/src/modules/auth/auth-service.js";
 import {
   pullLibraryChanges,
   pushLibraryChanges
-} from "../services/extractor-api/src/modules/library/library-service.js";
-
-export const config = {
-  maxDuration: 30
-};
-
-const getPath = (request: Request): string =>
-  (new URL(request.url).searchParams.get("path") ?? "").replace(/^\/+|\/+$/gu, "");
+} from "../../services/extractor-api/src/modules/library/library-service.js";
 
 const jsonError = (request: Request, message: string, status: number): Response =>
   corsJson(
@@ -98,16 +91,13 @@ const notEnabled = (request: Request): Response =>
 const notFound = (request: Request): Response =>
   jsonError(request, "Library route not found.", 404);
 
-export function OPTIONS(request: Request) {
-  return corsPreflight(request);
-}
-
-export async function GET(request: Request) {
+/** `GET /library/<path>`, served by the household function (see vercel.json). */
+export async function getLibrary(request: Request, path: string) {
   if (!extractorApiEnv.LIBRARY_SYNC_ENABLED) {
     return notEnabled(request);
   }
 
-  if (getPath(request) !== "changes") {
+  if (path !== "changes") {
     return notFound(request);
   }
 
@@ -124,12 +114,13 @@ export async function GET(request: Request) {
   }
 }
 
-export async function POST(request: Request) {
+/** `POST /library/<path>`, served by the household function (see vercel.json). */
+export async function postLibrary(request: Request, path: string) {
   if (!extractorApiEnv.LIBRARY_SYNC_ENABLED) {
     return notEnabled(request);
   }
 
-  if (getPath(request) !== "changes") {
+  if (path !== "changes") {
     return notFound(request);
   }
 
