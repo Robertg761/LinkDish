@@ -353,7 +353,12 @@ describe("restoreStoreSnapshot", () => {
     });
 
     expect(target.sets.has("linkdish:library:v1:live:u1:collection")).toBe(false);
-    expect(target.strings.get("linkdish:library:v1:rev:u1")).toBe("1");
+    // Renumbered above the live counter, so every device pulls the restored library again.
+    expect(target.strings.get("linkdish:library:v1:rev:u1")).toBe("41");
+    expect(target.zsets.get("linkdish:library:v1:changes:u1")?.get("recipe:a")).toBe(41);
+    expect(target.strings.get("linkdish:library:v1:item:u1:recipe:a")).toBe(
+      JSON.stringify({ rev: 41 })
+    );
   });
 
   it("does nothing without apply, then fills in only missing keys", async () => {

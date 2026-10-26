@@ -107,7 +107,8 @@ size` checks the budgets after a build (entry ≤ 115 KB gzip, landing JS ≤
   inspects a backup and restores it (a dry run unless `--confirm`; only missing keys unless
   `--overwrite`). A synced library is read as one unit (feed, items, live sets and revision
   counter from the same moment) and restored whole under the library service's own lock, so a
-  restore never leaves pulls resetting or skipping changes.
+  restore never leaves pulls resetting or skipping changes. With `--overwrite` a restored
+  library is renumbered above the live counter, so every device pulls it again as new changes.
 
 ### Sources
 
