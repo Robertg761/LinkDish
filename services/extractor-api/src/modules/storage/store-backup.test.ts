@@ -66,10 +66,14 @@ const createFakeRedis = (nowMs: () => number) => {
         [key, ...args].forEach(del);
         return 1;
       case "EVAL": {
-        // Only the library lock release: delete KEYS[1] while it holds ARGV[1].
-        const [, lockKey = "", token] = args;
+        // The library lock scripts: renew (pexpire) or release KEYS[1] while it holds ARGV[1].
+        const [, lockKey = "", token, ms] = args;
         if (strings.get(lockKey) !== token) return 0;
-        del(lockKey);
+        if (key.includes("pexpire")) {
+          expiries.set(lockKey, nowMs() + Number(ms));
+        } else {
+          del(lockKey);
+        }
         return 1;
       }
       case "SADD": {
@@ -354,6 +358,33 @@ describe("restoreStoreSnapshot", () => {
     expect(target.strings.get("linkdish:library:v1:rev:u1")).toBe("1");
     expect(target.zsets.get("linkdish:library:v1:changes:u1")?.get("recipe:a")).toBe(1);
     expect(target.strings.has("linkdish:user:v1:u1")).toBe(false);
+  });
+
+  it("stops writing a library once its lock has passed to someone else", async () => {
+    const source = createFakeRedis(() => 0);
+    seed(source, 0);
+    const snapshot = await createStoreSnapshot(source.run, { now: () => new Date(0) });
+    const target = createFakeRedis(() => 0);
+    const lockKey = "linkdish:library:v1:lock:u1";
+    let renewals = 0;
+    const run: StorePipeline = (commands) => {
+      if (commands[0]?.[0] === "EVAL" && commands[0][1]?.includes("pexpire") && ++renewals === 2) {
+        // The lease ran out and a push took the lock.
+        target.strings.set(lockKey, "push");
+      }
+      return target.run(commands);
+    };
+
+    await expect(
+      restoreStoreSnapshot(run, snapshot, {
+        apply: true,
+        batchSize: 1,
+        keyPrefixes: ["linkdish:library:"]
+      })
+    ).rejects.toThrow(/Lost the library lock/u);
+    expect(target.strings.has("linkdish:library:v1:item:u1:recipe:a")).toBe(true);
+    expect(target.zsets.has("linkdish:library:v1:changes:u1")).toBe(false);
+    expect(target.strings.get(lockKey)).toBe("push");
   });
 
   it("clears live sets the snapshot has no members for, with overwrite", async () => {

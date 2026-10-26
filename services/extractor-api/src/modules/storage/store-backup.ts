@@ -442,6 +442,9 @@ const buildWriteCommands = (
 /* The library service's own lock release: deletes the lock only while it still holds our token. */
 const releaseLockScript =
   "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end";
+/* Extends the lock while it still holds our token; 0 once another holder has it. */
+const renewLockScript =
+  "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('pexpire', KEYS[1], ARGV[2]) else return 0 end";
 const libraryRestoreLockMs = 120_000;
 
 /*
@@ -567,6 +570,20 @@ const restoreLibrary = async (
   const itemKey = (member: string): string => `${prefix}:item:${userId}:${member}`;
   const token = randomBytes(16).toString("base64url");
   let locked = false;
+  // Before every write: a large library on a slow link can outlast one lease, and a write after
+  // the lock has passed to a push would mix the two.
+  const holdLock = async (): Promise<void> => {
+    const [renewed] = await run([
+      ["EVAL", renewLockScript, "1", lockKey, token, String(libraryRestoreLockMs)]
+    ]);
+
+    if (Number(renewed) !== 1) {
+      locked = false;
+      throw new Error(
+        `Lost the library lock of user ${userId} part-way through; run the restore again with --overwrite.`
+      );
+    }
+  };
 
   if (options.apply) {
     for (let attempt = 1; attempt <= options.lockAttempts && !locked; attempt += 1) {
@@ -654,12 +671,14 @@ const restoreLibrary = async (
           }
         );
 
+        await holdLock();
         await run([["DEL", ...coreKeys]]);
       }
 
       const ordered = [...restored].sort((left, right) => rank(left) - rank(right));
 
       for (const batch of chunk(ordered, options.batchSize)) {
+        await holdLock();
         await run(batch.flatMap((entry) => buildWriteCommands(entry, null, true)));
       }
     }
