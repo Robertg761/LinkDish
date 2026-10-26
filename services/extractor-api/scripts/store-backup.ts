@@ -27,7 +27,8 @@ restore writes to the Upstash database in UPSTASH_REDIS_REST_URL / UPSTASH_REDIS
 A private key made with a passphrase is read with LINKDISH_BACKUP_KEY_PASSPHRASE.
 
 restore is a dry run without --confirm. Without --overwrite it only fills in keys that are
-missing; with it, keys in the backup replace what is there now. inspect --out writes the
+missing (a synced library only when none of it is there); with it, keys in the backup
+replace what is there now. inspect --out writes the
 decrypted snapshot as JSON: it holds account data, so keep it off shared disks.`;
 
 type Args = Record<string, string | string[] | true>;

@@ -35,6 +35,8 @@ const createFakeRedis = (nowMs: () => number) => {
         const half = Math.ceil(all.length / 2);
         return key === "0" ? ["7", all.slice(0, half)] : ["0", all.slice(half)];
       }
+      case "GET":
+        return strings.get(key) ?? null;
       case "MGET":
         return [key, ...args].map((name) => strings.get(name) ?? null);
       case "SMEMBERS":
@@ -99,7 +101,7 @@ const seed = (redis: ReturnType<typeof createFakeRedis>, nowMs: number) => {
   redis.sets.set("linkdish:user-sessions:v1:u1", new Set(["token"]));
   redis.strings.set("linkdish:household:v1:h1", JSON.stringify({ id: "h1" }));
   redis.sets.set("linkdish:household-recipes:v1:h1", new Set(["r2", "r1"]));
-  redis.strings.set("linkdish:library:v1:item:u1:recipe:a", "{}");
+  redis.strings.set("linkdish:library:v1:item:u1:recipe:a", JSON.stringify({ rev: 1 }));
   redis.zsets.set("linkdish:library:v1:changes:u1", new Map([["recipe:a", 1]]));
   redis.strings.set("linkdish:library:v1:rev:u1", "1");
   redis.strings.set("linkdish:quota:v2:lifetime:import:u1", "3");
@@ -151,8 +153,10 @@ describe("createStoreSnapshot", () => {
     expect(snapshot.families["identity"]).toBe(0);
     expect(snapshot.skipped).toEqual({ "extract-cache": 1, library: 1, quota: 2 });
     expect(snapshot.unclassified).toEqual({ mystery: 1 });
-    // Strings in one MGET per batch, never one GET per key.
-    expect(redis.commands.some(([name]) => name === "GET")).toBe(false);
+    // Strings in one MGET per batch, never one GET per key (a library's counter aside).
+    expect(
+      redis.commands.some(([name, key]) => name === "GET" && !key?.includes(":library:"))
+    ).toBe(false);
   });
 
   it("dates a TTL from when it was read, not from when the scan started", async () => {
@@ -171,6 +175,33 @@ describe("createStoreSnapshot", () => {
     expect(snapshot.entries.find((entry) => entry.key.includes("session:"))?.expiresAt).toBe(
       new Date(60_000).toISOString()
     );
+  });
+
+  it("reads a library again when a push lands in the middle of reading it", async () => {
+    const redis = createFakeRedis(() => 0);
+    seed(redis, 0);
+    redis.sets.set("linkdish:library:v1:live:u1:recipe", new Set(["a"]));
+    let pushed = false;
+    const run: StorePipeline = (commands) => {
+      if (!pushed && commands[0]?.[0] === "MGET" && commands[0][1]?.includes(":library:")) {
+        // The push's counter bump and its transaction, between the two reads.
+        pushed = true;
+        redis.strings.set("linkdish:library:v1:rev:u1", "2");
+        redis.strings.set("linkdish:library:v1:item:u1:recipe:a", JSON.stringify({ rev: 2 }));
+        redis.zsets.get("linkdish:library:v1:changes:u1")?.set("recipe:a", 2);
+      }
+      return redis.run(commands);
+    };
+
+    const snapshot = await createStoreSnapshot(run, { libraryRetryDelayMs: 0 });
+    const value = (key: string) => snapshot.entries.find((entry) => entry.key === key)?.value;
+
+    expect(pushed).toBe(true);
+    expect(value("linkdish:library:v1:rev:u1")).toBe("2");
+    expect(value("linkdish:library:v1:changes:u1")).toEqual([["recipe:a", 2]]);
+    expect(value("linkdish:library:v1:item:u1:recipe:a")).toBe(JSON.stringify({ rev: 2 }));
+    expect(value("linkdish:library:v1:live:u1:recipe")).toEqual(["a"]);
+    expect(snapshot.families["library-live"]).toBe(1);
   });
 
   it("leaves out keys deleted between the scan and the read", async () => {
@@ -238,6 +269,24 @@ describe("restoreStoreSnapshot", () => {
     expect(target.zsets.get("linkdish:library:v1:changes:u1")?.get("recipe:a")).toBe(1);
     // The session keeps what was left of its TTL.
     expect(target.expiries.get("linkdish:session:v1:token")).toBe(restoredMs + 40_000);
+  });
+
+  it("leaves a library that is partly there alone, without overwrite", async () => {
+    const source = createFakeRedis(() => 0);
+    seed(source, 0);
+    const snapshot = await createStoreSnapshot(source.run, { now: () => new Date(0) });
+    const target = createFakeRedis(() => 0);
+    target.strings.set("linkdish:library:v1:rev:u1", "7");
+
+    const result = await restoreStoreSnapshot(target.run, snapshot, {
+      apply: true,
+      keyPrefixes: ["linkdish:library:"],
+      now: () => new Date(0)
+    });
+
+    expect(result).toEqual({ applied: true, expired: 0, kept: 3, replaced: 0, written: 0 });
+    expect(target.strings.has("linkdish:library:v1:item:u1:recipe:a")).toBe(false);
+    expect(target.zsets.has("linkdish:library:v1:changes:u1")).toBe(false);
   });
 
   it("replaces existing keys with overwrite, limited to a prefix", async () => {

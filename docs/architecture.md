@@ -105,7 +105,9 @@ size` checks the budgets after a build (entry ≤ 115 KB gzip, landing JS ≤
   `modules/storage/store-key-families.ts`, and a test fails on any `linkdish:` key segment that
   is not listed there. `pnpm --filter @linkdish/extractor-api backup:store` makes the key pair,
   inspects a backup and restores it (a dry run unless `--confirm`; only missing keys unless
-  `--overwrite`).
+  `--overwrite`). A synced library is read and restored as one unit (feed, items, live sets
+  and revision counter from the same moment), so a restore never leaves pulls resetting or
+  skipping changes.
 
 ### Sources
 
