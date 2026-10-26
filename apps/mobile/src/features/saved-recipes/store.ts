@@ -1,3 +1,4 @@
+import { MAX_LIBRARY_COOK_LOG_ENTRIES } from "@linkdish/api-contracts";
 import {
   createRecipeSearchIndex,
   isLikelySameRecipe,
@@ -471,18 +472,34 @@ export const sharedRecipeToSavedRecipeRecord = (sharedRecipe: SharedRecipe): Sav
   warnings: sharedRecipe.warnings
 });
 
+/**
+ * Records a cook: bumps `timesCooked` and logs it in the synced cook log (as the web app does), so
+ * cooks recorded on two devices before they sync both count.
+ */
 export const incrementSavedRecipeTimesCooked = (
   savedRecipes: SavedRecipeRecord[],
-  savedRecipeId: string
+  savedRecipeId: string,
+  cookedAt: string = new Date().toISOString()
 ): SavedRecipeRecord[] =>
-  savedRecipes.map((entry) =>
-    entry.id === savedRecipeId
-      ? {
-          ...entry,
-          timesCooked: (entry.timesCooked ?? 0) + 1
-        }
-      : entry
-  );
+  savedRecipes.map((entry) => {
+    if (entry.id !== savedRecipeId) {
+      return entry;
+    }
+
+    const extras = entry.libraryExtras;
+    const lastCookedAt =
+      extras?.lastCookedAt && extras.lastCookedAt > cookedAt ? extras.lastCookedAt : cookedAt;
+
+    return {
+      ...entry,
+      libraryExtras: {
+        ...extras,
+        cookLog: [...(extras?.cookLog ?? []), { cookedAt }].slice(-MAX_LIBRARY_COOK_LOG_ENTRIES),
+        lastCookedAt
+      },
+      timesCooked: (entry.timesCooked ?? 0) + 1
+    };
+  });
 
 export const setSavedRecipeFavorite = (
   savedRecipes: SavedRecipeRecord[],

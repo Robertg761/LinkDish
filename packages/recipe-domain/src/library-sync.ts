@@ -282,6 +282,8 @@ export interface LibrarySyncChange {
   kind: LibraryItemKind;
   id: string;
   updatedAt: string;
+  /** Sent changes only: the cloud copy's `updatedAt` this was merged with (null: none seen). */
+  baseUpdatedAt?: string | null | undefined;
   deleted?: true | undefined;
   payload?: LibrarySyncPayload | undefined;
 }
@@ -585,6 +587,7 @@ export const runLibrarySync = async (
     }
 
     outgoing.push({
+      baseUpdatedAt: base?.updatedAt ?? null,
       id: item.id,
       kind: item.kind,
       payload: item.payload,
@@ -598,6 +601,7 @@ export const runLibrarySync = async (
       const separator = key.indexOf(":");
       const kind = key.slice(0, separator) as LibraryItemKind;
       outgoing.push({
+        baseUpdatedAt: base.updatedAt,
         deleted: true,
         id: key.slice(separator + 1),
         kind,
@@ -655,7 +659,7 @@ export const runLibrarySync = async (
     await adapter.saveState(null, changedBases);
 
     if (result.newer.length) {
-      // Someone else's newer copy arrived after the pull: merge it now, send the result next run.
+      // Another device's copy arrived after the pull: merge it now, send the result next run.
       await adapter.saveState(null, await applyRemote(result.newer));
     }
   }

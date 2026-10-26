@@ -9,6 +9,7 @@ import {
   syncMobileLibrary,
   unlinkMobileLibrary
 } from "./librarySync";
+import { incrementSavedRecipeTimesCooked } from "./store";
 
 import type { MobileLibraryCookbook } from "./librarySync";
 import type { SavedRecipeRecord } from "./store";
@@ -206,6 +207,52 @@ describe("mobile cookbook sync", () => {
       tags: ["Soup"]
     });
     expect(cloud.get("collection:c1")).not.toHaveProperty("deleted");
+  });
+
+  it("counts a cook made here and one made on the web before they synced", async () => {
+    const cloud = createCloud();
+    const firstCook = { cookedAt: "2026-10-20T18:00:00.000Z" };
+    const local = createCookbook([
+      record("saved-1", {
+        libraryExtras: { cookLog: [firstCook], lastCookedAt: firstCook.cookedAt },
+        timesCooked: 1
+      })
+    ]);
+    const sync = () =>
+      syncMobileLibrary({
+        account: "u1",
+        client: cloud.client,
+        cookbook: local.cookbook,
+        isCurrent: () => true
+      });
+    await sync();
+
+    const synced = cloud.get("recipe:saved-1");
+    cloud.store({
+      id: "saved-1",
+      kind: "recipe",
+      recipe: {
+        ...(synced?.recipe as LibraryRecipe),
+        cookLog: [firstCook, { cookedAt: "2026-10-25T18:00:00.000Z" }],
+        lastCookedAt: "2026-10-25T18:00:00.000Z",
+        timesCooked: 2
+      },
+      updatedAt: "2099-01-01T00:00:00.000Z"
+    });
+    local.set(
+      incrementSavedRecipeTimesCooked(
+        local.cookbook.getRecords(),
+        "saved-1",
+        "2026-10-26T18:00:00.000Z"
+      )
+    );
+    await sync();
+
+    expect(local.get("saved-1")).toMatchObject({
+      libraryExtras: { lastCookedAt: "2026-10-26T18:00:00.000Z" },
+      timesCooked: 3
+    });
+    expect(local.get("saved-1")?.libraryExtras?.cookLog).toHaveLength(3);
   });
 
   it("removes a recipe deleted elsewhere and lets go of its scans", async () => {

@@ -226,9 +226,11 @@ own routes. Scan photos, starter recipes, the meal plan and cook-mode sessions a
   `cursor` and `hasMore`. A cursor past anything the account has written (a lost or reset store)
   answers from the start with `reset: true`, so the device sends everything it holds again.
 - `POST /library/changes` takes 1 to 25 changes. Each is a recipe, a collection or a tombstone
-  (`deleted: true`, no payload) with the `updatedAt` of the device that changed it. A change is
-  stored when it is at least as new as the stored copy; otherwise the stored copy comes back in
-  `newer` for the device to apply. Invalid changes and new items past the limits (5,000 recipes,
+  (`deleted: true`, no payload) with the `updatedAt` of the device that changed it, and
+  `baseUpdatedAt`: the cloud copy the device merged it with (null for an item it never saw). A
+  change is stored when it is at least as new as the stored copy and was merged with that copy;
+  otherwise the stored copy comes back in `newer` for the device to merge, so a device never
+  overwrites a change it hasn't seen (two devices syncing at once, or clocks that disagree). Invalid changes and new items past the limits (5,000 recipes,
   200 collections; 120,000 characters per item) are `rejected` one by one and the rest are stored.
 - Storage (`modules/library/library-service.ts`) is Upstash, per LinkDish user id:
   `linkdish:library:v1:item:<user>:<kind>:<id>` holds the newest copy and the revision it was
@@ -239,6 +241,9 @@ own routes. Scan photos, starter recipes, the meal plan and cook-mode sessions a
 - `LIBRARY_SYNC_ENABLED` (off by default) switches the routes on; off, they answer 404 and clients
   keep working locally. In production the routes refuse to run without Upstash (503) rather than
   keep cookbooks in process memory. Deleting the account deletes every library key.
+- On Vercel the routes are served by the `api/household` function (`/library/*` rewrites to
+  `api/household?path=library/...`, see `api/_lib/library-routes.ts`): the Hobby plan allows 12
+  functions per deployment, and `api/vercel-config.test.ts` keeps the count within it.
 
 On a device, sync is one shared engine (`packages/recipe-domain/src/library-sync.ts`) driven by
 each app:

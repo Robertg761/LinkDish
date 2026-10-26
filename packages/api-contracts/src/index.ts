@@ -697,6 +697,12 @@ export const libraryChangeSchema = z
     kind: libraryItemKindSchema,
     id: libraryItemIdSchema,
     updatedAt: z.string().datetime(),
+    /**
+     * Pushes only: the `updatedAt` of the cloud copy the device merged this change with (null for
+     * an item it has never seen in the cloud). When the stored copy is another, a device wrote in
+     * between, and the stored copy comes back in `newer` to merge instead of being overwritten.
+     */
+    baseUpdatedAt: z.string().datetime().nullable().optional(),
     deleted: z.literal(true).optional(),
     recipe: libraryRecipeSchema.optional(),
     collection: libraryCollectionSchema.optional()

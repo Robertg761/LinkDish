@@ -231,9 +231,17 @@ describe("saved recipe store helpers", () => {
       "2026-04-19T12:05:00.000Z"
     );
 
-    const updated = incrementSavedRecipeTimesCooked([soup, pasta], soup.id);
+    const updated = incrementSavedRecipeTimesCooked(
+      [soup, pasta],
+      soup.id,
+      "2026-04-20T18:00:00.000Z"
+    );
 
     expect(updated[0]?.timesCooked).toBe(1);
+    expect(updated[0]?.libraryExtras).toEqual({
+      cookLog: [{ cookedAt: "2026-04-20T18:00:00.000Z" }],
+      lastCookedAt: "2026-04-20T18:00:00.000Z"
+    });
     expect(updated[1]).toBe(pasta);
   });
 

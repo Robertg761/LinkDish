@@ -36,7 +36,8 @@ const fingerprint = (payload: LibrarySyncPayload) =>
   fingerprintPayload(payload, LIBRARY_RECIPE_SYNC_GROUPS);
 
 /* ------------------------------------------------------------------------------------------------
- * A fake cloud (newest copy wins, like the API) and fake devices
+ * A fake cloud (like the API: the newest copy wins, unless it was merged with an older one) and
+ * fake devices
  * ---------------------------------------------------------------------------------------------- */
 
 class FakeCloud {
@@ -73,16 +74,21 @@ class FakeCloud {
         return;
       }
 
-      const key = librarySyncKey(change.kind, change.id);
+      const { baseUpdatedAt, ...item } = change;
+      const key = librarySyncKey(item.kind, item.id);
       const stored = this.items.get(key);
 
-      if (stored && stored.change.updatedAt > change.updatedAt) {
+      if (
+        stored &&
+        (stored.change.updatedAt > item.updatedAt ||
+          (baseUpdatedAt !== undefined && baseUpdatedAt !== stored.change.updatedAt))
+      ) {
         result.newer.push(structuredClone(stored.change));
         return;
       }
 
       this.rev += 1;
-      this.items.set(key, { change: structuredClone(change), rev: this.rev });
+      this.items.set(key, { change: structuredClone(item), rev: this.rev });
       result.accepted.push({ id: change.id, kind: change.kind });
     });
 
@@ -503,6 +509,33 @@ describe("runLibrarySync", () => {
 
     await sync(laptop);
     expect(laptop.get("soup")).toEqual(recipe({ favorite: true, notes: "salt" }));
+  });
+
+  it("merges an edit another device sent between its pull and its push", async () => {
+    const cloud = new FakeCloud();
+    const web = new FakeDevice(cloud);
+    const phone = new FakeDevice(cloud);
+    web.put("r1", recipe());
+    await sync(web);
+    await sync(phone);
+
+    web.put("r1", recipe({ notes: "more salt" }));
+    phone.put("r1", recipe({ favorite: true }));
+    // The web's clock runs a minute behind, so its copy reads as older than the phone's.
+    const push = phone.push.bind(phone);
+    phone.push = async (changes) => {
+      await runLibrarySync(web, { now: () => new Date(clock - 60_000) });
+      return push(changes);
+    };
+    await sync(phone);
+    phone.push = push;
+
+    expect(phone.get("r1")).toEqual(recipe({ favorite: true, notes: "more salt" }));
+
+    await sync(phone);
+    await sync(web);
+
+    expect(web.get("r1")).toEqual(phone.get("r1"));
   });
 
   it("sends everything again when the cloud lost what it had", async () => {

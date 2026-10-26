@@ -27,6 +27,7 @@ export const toLibraryChange = (change: LibrarySyncChange): unknown => ({
   id: change.id,
   kind: change.kind,
   updatedAt: change.updatedAt,
+  ...(change.baseUpdatedAt !== undefined ? { baseUpdatedAt: change.baseUpdatedAt } : {}),
   ...(change.deleted ? { deleted: true } : { [change.kind]: change.payload })
 });
 

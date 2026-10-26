@@ -260,7 +260,8 @@ const isSameChange = (left: LibraryChange, right: LibraryChange): boolean =>
 
 /**
  * Stores the changes a device sends. Each one is kept only when it is at least as new as the copy
- * already stored; otherwise that copy comes back in `newer` for the device to apply. Invalid
+ * already stored and, when it says which copy it was merged with, that copy is the one stored;
+ * otherwise the stored copy comes back in `newer` for the device to merge. Invalid
  * changes, and new items past the library limits, are turned away on their own.
  */
 export const pushLibraryChanges = async (
@@ -270,7 +271,10 @@ export const pushLibraryChanges = async (
   ensureLibraryAvailable();
 
   const rejected: PushLibraryChangesResponse["rejected"] = [];
-  const candidates = new Map<string, { change: LibraryChange; index: number }>();
+  const candidates = new Map<
+    string,
+    { baseUpdatedAt: string | null | undefined; change: LibraryChange; index: number }
+  >();
 
   rawChanges.forEach((rawChange, index) => {
     const parsed = libraryChangeSchema.safeParse(rawChange);
@@ -287,12 +291,13 @@ export const pushLibraryChanges = async (
       return;
     }
 
-    const member = toMember(parsed.data.kind, parsed.data.id);
+    const { baseUpdatedAt, ...change } = parsed.data;
+    const member = toMember(change.kind, change.id);
     const previous = candidates.get(member);
 
     // The same item twice in one batch: only its newest copy counts.
-    if (!previous || Date.parse(parsed.data.updatedAt) >= Date.parse(previous.change.updatedAt)) {
-      candidates.set(member, { change: parsed.data, index });
+    if (!previous || Date.parse(change.updatedAt) >= Date.parse(previous.change.updatedAt)) {
+      candidates.set(member, { baseUpdatedAt, change, index });
     }
   });
 
@@ -318,7 +323,7 @@ export const pushLibraryChanges = async (
     const newer: LibraryChange[] = [];
     const unchanged: LibraryChange[] = [];
 
-    pending.forEach(({ change, index }, position) => {
+    pending.forEach(({ baseUpdatedAt, change, index }, position) => {
       const key = keys[position] ?? "";
       const stored = readStoredChange(storedValues[position] ?? null, key);
 
@@ -330,6 +335,17 @@ export const pushLibraryChanges = async (
       // A device sending again what is already stored (a retry after a lost answer).
       if (stored && isSameChange(stored, change)) {
         unchanged.push(change);
+        return;
+      }
+
+      // The device merged its change with an older copy than the one stored (another device wrote
+      // in between): it gets the stored copy to merge first instead of overwriting it unseen.
+      if (
+        stored &&
+        baseUpdatedAt !== undefined &&
+        (baseUpdatedAt === null || Date.parse(baseUpdatedAt) !== Date.parse(stored.updatedAt))
+      ) {
+        newer.push(stored);
         return;
       }
 

@@ -146,6 +146,62 @@ describe("library sync", () => {
     expect(pulled.cursor).toBe("2");
   });
 
+  it("hands back the stored copy when a change was merged with an older one", async () => {
+    const library = await importLibrary();
+
+    await library.pushLibraryChanges("user_1", [
+      { ...recipeChange("recipe_a", "2026-10-26T10:00:00.000Z"), baseUpdatedAt: null }
+    ]);
+    // Another device's edit lands after this device pulled the 10:00 copy.
+    await library.pushLibraryChanges("user_1", [
+      {
+        ...recipeChange("recipe_a", "2026-10-26T11:00:00.000Z", { notes: "from the laptop" }),
+        baseUpdatedAt: "2026-10-26T10:00:00.000Z"
+      }
+    ]);
+    const unseen = await library.pushLibraryChanges("user_1", [
+      {
+        ...recipeChange("recipe_a", "2026-10-26T12:00:00.000Z", { favorite: true }),
+        baseUpdatedAt: "2026-10-26T10:00:00.000Z"
+      }
+    ]);
+
+    expect(unseen.accepted).toEqual([]);
+    expect(unseen.newer[0]?.recipe?.notes).toBe("from the laptop");
+    expect(unseen.newer[0]).not.toHaveProperty("baseUpdatedAt");
+
+    const merged = await library.pushLibraryChanges("user_1", [
+      {
+        ...recipeChange("recipe_a", "2026-10-26T12:00:01.000Z", {
+          favorite: true,
+          notes: "from the laptop"
+        }),
+        baseUpdatedAt: "2026-10-26T11:00:00.000Z"
+      }
+    ]);
+
+    expect(merged.accepted).toEqual([{ id: "recipe_a", kind: "recipe" }]);
+    const pulled = await library.pullLibraryChanges("user_1", "0");
+    expect(pulled.changes).toEqual([
+      recipeChange("recipe_a", "2026-10-26T12:00:01.000Z", {
+        favorite: true,
+        notes: "from the laptop"
+      })
+    ]);
+  });
+
+  it("doesn't let a new item overwrite one with the same id it never saw", async () => {
+    const library = await importLibrary();
+
+    await library.pushLibraryChanges("user_1", [recipeChange("recipe_a", "2026-10-26T10:00:00Z")]);
+    const clash = await library.pushLibraryChanges("user_1", [
+      { ...recipeChange("recipe_a", "2026-10-26T11:00:00Z"), baseUpdatedAt: null }
+    ]);
+
+    expect(clash.accepted).toEqual([]);
+    expect(clash.newer).toHaveLength(1);
+  });
+
   it("accepts a retry of what it already stored without writing it again", async () => {
     const library = await importLibrary();
     const change = recipeChange("recipe_a", "2026-10-26T12:00:00.000Z");
