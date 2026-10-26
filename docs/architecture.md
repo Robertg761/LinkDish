@@ -260,7 +260,7 @@ each app:
   only while the item still is what it was merged with; an item that keeps changing meanwhile
   keeps the pulled change as `pending` for the next run and sends nothing over it. A change the API
   turns away is held (not sent again) until the item changes. `packages/api-client/src/
-  library-sync.ts` validates each change before sending, so one bad item never fails a batch.
+library-sync.ts` validates each change before sending, so one bad item never fails a batch.
 - A device's cookbook is linked to one account: the first to sign in on it (merging the two). It
   keeps the cookbook when that account signs out. Another account that signs in doesn't sync it;
   it can replace it with its own cookbook. Deleting the account unlinks the device; its recipes
@@ -393,4 +393,8 @@ If production `/extract` skips the browser fetch, it is a deployment regression 
 - `pnpm validate` runs lint, every typecheck, all package tests, the Vercel handler tests
   and the site check. The web bundle budget (`pnpm --filter @linkdish/web size`) needs a
   build first, so it is not part of `validate`.
+- `pnpm test:e2e:web` runs the web app's key flows (import, cookbook, shopping list, meal
+  plan) in Playwright against a production build with the API mocked
+  (`apps/web/e2e/README.md`). CI runs it as the `e2e-web` job; it is not part of `validate`
+  because it needs a build and a browser.
 - The live canary manifest is intentionally separate from PR-blocking CI so real-world regressions can be measured without making the pipeline flaky.
