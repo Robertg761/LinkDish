@@ -311,6 +311,27 @@ describe("library sync", () => {
     expect(second.changes.map((change) => change.id)).toEqual(["recipe_c"]);
   });
 
+  it("sizes pull pages in the bytes sent, so text outside ASCII still fits", async () => {
+    const library = await importLibrary();
+    // 20,000 characters, 60,000 bytes in UTF-8: 40 of them pass a 2M-character budget.
+    const notes = "塩".repeat(20_000);
+    const changes = Array.from({ length: 40 }, (_, index) =>
+      recipeChange(`recipe_${index}`, "2026-10-26T10:00:00Z", { notes })
+    );
+    await library.pushLibraryChanges("user_1", changes.slice(0, 25));
+    await library.pushLibraryChanges("user_1", changes.slice(25));
+
+    const first = await library.pullLibraryChanges("user_1", "0");
+    const firstBytes = Buffer.byteLength(JSON.stringify(first), "utf8");
+
+    expect(first.hasMore).toBe(true);
+    expect(firstBytes).toBeLessThan(2_100_000);
+
+    const second = await library.pullLibraryChanges("user_1", first.cursor);
+    expect(first.changes.length + second.changes.length).toBe(40);
+    expect(second.hasMore).toBe(false);
+  });
+
   it("starts a device over when its cursor is past anything the account has", async () => {
     const library = await importLibrary();
 

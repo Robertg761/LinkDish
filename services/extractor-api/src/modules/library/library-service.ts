@@ -47,8 +47,8 @@ const lockTtlSeconds = 30;
 const lockRetryDelaysMs = [25, 75, 150, 300, 600];
 const releaseLockScript =
   "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end";
-/* Keeps a pull page well under Vercel's 4.5 MB response cap. */
-const MAX_PULL_PAGE_CHARS = 2_000_000;
+/* Keeps a pull page well under Vercel's 4.5 MB response cap (UTF-8 bytes, as it is sent). */
+const MAX_PULL_PAGE_BYTES = 2_000_000;
 const DELETE_KEYS_CHUNK_SIZE = 500;
 
 const libraryKeys = {
@@ -223,23 +223,23 @@ export const pullLibraryChanges = async (
   const valueByKey = new Map(itemKeys.map((key, index) => [key, values[index] ?? null]));
   const changes: LibraryChange[] = [];
   let cursor = sinceRev;
-  let pageChars = 0;
+  let pageBytes = 0;
   let truncated = false;
 
   for (const entry of keyed) {
     const change = entry.key
       ? readStoredChange(valueByKey.get(entry.key) ?? null, entry.key)
       : null;
-    const changeChars = change ? JSON.stringify(change).length : 0;
+    const changeBytes = change ? Buffer.byteLength(JSON.stringify(change), "utf8") : 0;
 
-    if (changes.length > 0 && pageChars + changeChars > MAX_PULL_PAGE_CHARS) {
+    if (changes.length > 0 && pageBytes + changeBytes > MAX_PULL_PAGE_BYTES) {
       truncated = true;
       break;
     }
 
     if (change) {
       changes.push(change);
-      pageChars += changeChars;
+      pageBytes += changeBytes;
     }
 
     cursor = Math.max(cursor, entry.score);
