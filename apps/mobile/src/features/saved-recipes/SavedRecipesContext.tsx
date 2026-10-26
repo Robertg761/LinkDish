@@ -22,6 +22,7 @@ import { useBilling } from "../billing/BillingContext";
 import { billingPlans } from "../billing/plans";
 import { canSaveAnotherRecipe } from "../billing/store";
 
+import { CookbookSyncProvider } from "./CookbookSyncContext";
 import {
   createScanVersion,
   deleteRecipeSourceImageFiles,
@@ -232,6 +233,8 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
   const [hasLoadedSharedRecipesState, setHasLoadedSharedRecipes] = useState(false);
   const [savedRecipes, setSavedRecipes] = useState<SavedRecipeRecord[]>([]);
   const [hasUnreadableStoredRecipes, setHasUnreadableStoredRecipes] = useState(false);
+  /** The stored cookbook couldn't be read at all: what shows isn't it, so nothing syncs. */
+  const [cookbookReadFailed, setCookbookReadFailed] = useState(false);
   const [sharedRecipesState, setSharedRecipes] = useState<SharedRecipe[]>([]);
   const [sharedRecipeErrorState, setSharedRecipeError] = useState<string | null>(null);
   const [shareMode, setShareModeState] = useState<RecipeBookShareMode>("none");
@@ -341,6 +344,34 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
         }
       ),
     []
+  );
+
+  /** The cookbook as cloud sync reads and changes it (see CookbookSyncProvider). */
+  const syncedCookbook = useMemo(
+    () => ({
+      commitRecords: commitSavedRecipes,
+      getRecords: () => savedRecipesRef.current,
+      persist: async (removed: readonly SavedRecipeRecord[]) => {
+        // Stored before the sync records that the cloud's copy is in the cookbook, so a crash
+        // can't leave it believing that of a cookbook that was never written.
+        await writer.writeNow(savedRecipesRef.current);
+        const orphanedScanUris = getOrphanedSourceImageUris(savedRecipesRef.current, [...removed]);
+
+        if (orphanedScanUris.length > 0) {
+          deleteRecipeSourceImageFiles(orphanedScanUris);
+        }
+      }
+    }),
+    [commitSavedRecipes, writer]
+  );
+  const createSyncClient = useCallback(
+    (account: string) =>
+      createExtractorApiClient({
+        baseUrl: mobileEnv.apiBaseUrl,
+        // Sent only as the account the sync is for.
+        getHeaders: getAuthHeadersFor(account)
+      }),
+    [getAuthHeadersFor]
   );
 
   const refreshSharedRecipes = useCallback(async () => {
@@ -474,6 +505,10 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
         );
       } catch (error) {
         console.warn("Failed to load saved recipes.", error);
+
+        if (isMounted) {
+          setCookbookReadFailed(true);
+        }
       } finally {
         if (isMounted) {
           setHasLoadedSavedRecipes(true);
@@ -1530,7 +1565,15 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
   return (
     <SavedRecipesActionsContext.Provider value={actions}>
       <SavedRecipesStateContext.Provider value={state}>
-        {children}
+        <CookbookSyncProvider
+          account={familyAccount}
+          cookbook={syncedCookbook}
+          createClient={createSyncClient}
+          hasLoaded={hasLoadedSavedRecipes && !hasUnreadableStoredRecipes && !cookbookReadFailed}
+          savedRecipes={savedRecipes}
+        >
+          {children}
+        </CookbookSyncProvider>
       </SavedRecipesStateContext.Provider>
     </SavedRecipesActionsContext.Provider>
   );

@@ -265,6 +265,14 @@ each app:
   with Web Locks and start after local changes (4 s), on focus, on coming online, every 5 minutes,
   and on sign-in. The module loads after the first screen settles, and only once someone signs in.
   The Account page shows its state, and the switch for another account's cookbook.
+- Android (`apps/mobile/src/features/saved-recipes/librarySync.ts`, `CookbookSyncContext.tsx`):
+  the link, bases and the account's collections (which the app doesn't show yet) live under
+  `linkdish.librarySync.v1` in AsyncStorage; synced fields the app doesn't show (tags, collection
+  membership, rating, cook log, preferred servings) ride along on each record as `libraryExtras`.
+  Merged changes are written to the stored cookbook before the bases that describe them. Runs
+  start after changes (4 s), when the app comes to the foreground, every 5 minutes while open, and
+  on sign-in; never while the stored cookbook couldn't be read. The Household screen shows its
+  state and the switch.
 
 ### `/extract` request path and performance
 

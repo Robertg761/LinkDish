@@ -7,6 +7,7 @@ import {
 import type { RecipeSourceImage, SuccessfulExtractionState } from "../recipe-results/types";
 import type {
   ExtractRecipeImage,
+  LibraryRecipe,
   SharedRecipe,
   UpsertSharedRecipeRequest
 } from "@linkdish/api-contracts";
@@ -19,6 +20,16 @@ import type {
 
 export type RecipeBookShareMode = "none" | "selected" | "all";
 
+/**
+ * Synced fields this app doesn't show yet (set on the web), kept so they sync through untouched.
+ */
+export type SavedRecipeLibraryExtras = Partial<
+  Pick<
+    LibraryRecipe,
+    "collectionIds" | "cookLog" | "lastCookedAt" | "preferredServings" | "rating" | "tags"
+  >
+>;
+
 export interface SavedRecipeRecord {
   clonedFromId?: string | undefined;
   /** Hearted in the Cookbook. Added later: missing means false. */
@@ -26,6 +37,7 @@ export interface SavedRecipeRecord {
   fetchMode: SuccessfulExtractionState["fetchMode"];
   id: string;
   isStarter?: boolean | undefined;
+  libraryExtras?: SavedRecipeLibraryExtras | undefined;
   notes?: string | undefined;
   provenance: SuccessfulExtractionState["provenance"];
   recipe: SuccessfulExtractionState["recipe"];
@@ -373,6 +385,22 @@ const getCloneTitle = (savedRecipes: SavedRecipeRecord[], title: string): string
   }
 };
 
+const copyableLibraryExtras = (
+  extras: SavedRecipeLibraryExtras | undefined
+): SavedRecipeLibraryExtras | undefined => {
+  if (!extras) {
+    return undefined;
+  }
+
+  const { collectionIds, preferredServings, tags } = extras;
+  const copied: SavedRecipeLibraryExtras = {
+    ...(collectionIds?.length ? { collectionIds } : {}),
+    ...(preferredServings ? { preferredServings } : {}),
+    ...(tags?.length ? { tags } : {})
+  };
+  return Object.keys(copied).length ? copied : undefined;
+};
+
 export const cloneSavedRecipeRecord = (
   savedRecipes: SavedRecipeRecord[],
   sourceRecord: SavedRecipeRecord,
@@ -386,6 +414,8 @@ export const cloneSavedRecipeRecord = (
     favorite: undefined,
     id: createSavedRecipeId(new Date(clonedAt)),
     isStarter: undefined,
+    // A copy starts its own cooking history and rating.
+    libraryExtras: copyableLibraryExtras(sourceRecord.libraryExtras),
     notes: sourceRecord.notes,
     recipe: {
       ...recipe,
