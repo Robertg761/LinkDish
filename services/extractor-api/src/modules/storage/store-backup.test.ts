@@ -44,7 +44,9 @@ const createFakeRedis = (nowMs: () => number) => {
       case "ZRANGE":
         return [...(zsets.get(key) ?? new Map<string, number>())]
           .sort((left, right) => left[1] - right[1])
-          .flatMap(([member, score]) => [member, String(score)]);
+          .flatMap(([member, score]) =>
+            args.includes("WITHSCORES") ? [member, String(score)] : [member]
+          );
       case "PTTL": {
         if (!has(key)) return -2;
         const expiresAt = expiries.get(key);
@@ -300,6 +302,40 @@ describe("restoreStoreSnapshot", () => {
     await expect(restoreStoreSnapshot(run, snapshot, options)).resolves.toMatchObject({
       written: 3
     });
+  });
+
+  it("drops items the current feed names that the snapshot lacks, with overwrite", async () => {
+    const source = createFakeRedis(() => 0);
+    seed(source, 0);
+    const snapshot = await createStoreSnapshot(source.run, { now: () => new Date(0) });
+    const target = createFakeRedis(() => 0);
+    target.strings.set("linkdish:library:v1:item:u1:recipe:new", JSON.stringify({ rev: 2 }));
+    target.zsets.set("linkdish:library:v1:changes:u1", new Map([["recipe:new", 2]]));
+
+    await restoreStoreSnapshot(target.run, snapshot, { apply: true, overwrite: true });
+
+    expect(target.strings.has("linkdish:library:v1:item:u1:recipe:new")).toBe(false);
+    expect([...(target.zsets.get("linkdish:library:v1:changes:u1")?.keys() ?? [])]).toEqual([
+      "recipe:a"
+    ]);
+  });
+
+  it("takes a whole library when a prefix selects part of it", async () => {
+    const source = createFakeRedis(() => 0);
+    seed(source, 0);
+    const snapshot = await createStoreSnapshot(source.run, { now: () => new Date(0) });
+    const target = createFakeRedis(() => 0);
+
+    const result = await restoreStoreSnapshot(target.run, snapshot, {
+      apply: true,
+      keyPrefixes: ["linkdish:library:v1:item:u1:recipe:a"],
+      overwrite: true
+    });
+
+    expect(result.written).toBe(3);
+    expect(target.strings.get("linkdish:library:v1:rev:u1")).toBe("1");
+    expect(target.zsets.get("linkdish:library:v1:changes:u1")?.get("recipe:a")).toBe(1);
+    expect(target.strings.has("linkdish:user:v1:u1")).toBe(false);
   });
 
   it("clears live sets the snapshot has no members for, with overwrite", async () => {

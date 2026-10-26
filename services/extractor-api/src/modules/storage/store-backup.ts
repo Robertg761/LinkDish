@@ -375,7 +375,7 @@ export interface RestoreStoreSnapshotOptions {
   /* Without it nothing is written: the result says what would be. */
   apply?: boolean;
   batchSize?: number;
-  /* Only keys starting with one of these prefixes. */
+  /* Only keys starting with one of these prefixes; a synced library is taken whole if any of it is. */
   keyPrefixes?: string[];
   /* Tries at a synced library's lock while the API holds it. */
   lockAttempts?: number;
@@ -515,6 +515,17 @@ const restoreLibrary = async (
       const ordered = [...entries].sort((left, right) => rank(left) - rank(right));
 
       if (options.overwrite) {
+        // The items the current feed names go too: one the snapshot lacks would otherwise stay
+        // behind with no feed entry, and a later push of it would be taken as unchanged.
+        const [current] = await run([["ZRANGE", coreKeys[1] as string, "0", "-1"]]);
+        const currentItemKeys = (Array.isArray(current) ? current : []).map(
+          (member) => `${prefix}:item:${userId}:${String(member)}`
+        );
+
+        for (const batch of chunk(currentItemKeys, 500)) {
+          await run([["DEL", ...batch]]);
+        }
+
         await run([["DEL", ...coreKeys]]);
       }
 
@@ -554,8 +565,24 @@ export const restoreStoreSnapshot = async (
   };
   const candidates: Array<{ entry: StoreSnapshotEntry; pttlMs: number | null }> = [];
 
+  const libraryIdOf = (key: string): string | null => {
+    const match = libraryKeyPattern.exec(key);
+    return match ? `${match[1]}:${match[2]}` : null;
+  };
+  const matchesPrefix = (key: string): boolean =>
+    keyPrefixes.length === 0 || keyPrefixes.some((prefix) => key.startsWith(prefix));
+  // Restoring part of a library would pair it with the rest from another moment.
+  const selectedLibraries = new Set(
+    snapshot.entries.flatMap((entry) => {
+      const id = libraryIdOf(entry.key);
+      return id && matchesPrefix(entry.key) ? [id] : [];
+    })
+  );
+
   for (const entry of snapshot.entries) {
-    if (keyPrefixes.length > 0 && !keyPrefixes.some((prefix) => entry.key.startsWith(prefix))) {
+    const libraryId = libraryIdOf(entry.key);
+
+    if (libraryId ? !selectedLibraries.has(libraryId) : !matchesPrefix(entry.key)) {
       continue;
     }
 
