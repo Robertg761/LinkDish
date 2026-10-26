@@ -33,6 +33,12 @@
           <string>com.linkdish.app</string>
         </array>
       </dict>
+      <dict>
+        <key>CFBundleURLSchemes</key>
+        <array>
+          <string>com.googleusercontent.apps.657605042373-fmju96338ddhndib9pch6opk2no9cjj2</string>
+        </array>
+      </dict>
     </array>
     <key>CFBundleVersion</key>
     <string>29</string>
@@ -63,6 +69,8 @@
     <array>
       <string>$(PRODUCT_BUNDLE_IDENTIFIER).expo.index_route</string>
     </array>
+    <key>RCTNewArchEnabled</key>
+    <true/>
     <key>UILaunchStoryboardName</key>
     <string>SplashScreen</string>
     <key>UIRequiredDeviceCapabilities</key>
