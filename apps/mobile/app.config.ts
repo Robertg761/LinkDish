@@ -5,6 +5,7 @@ import {
   withAndroidManifest,
   withAppBuildGradle,
   withDangerousMod,
+  withGradleProperties,
   type ConfigPlugin
 } from "expo/config-plugins";
 
@@ -114,6 +115,23 @@ const withAndroidUnrestrictedOrientation: ConfigPlugin = (config) =>
         }
       }
     }
+
+    return modConfig;
+  });
+
+/**
+ * AsyncStorage's SQLite database on Android is capped at 6 MB by default, shared by every key
+ * (the cookbook, shopping list, sync state). Raised so large cookbooks keep saving.
+ */
+const ASYNC_STORAGE_DB_SIZE_MB = "64";
+
+const withAndroidAsyncStorageSize: ConfigPlugin = (config) =>
+  withGradleProperties(config, (modConfig) => {
+    const key = "AsyncStorage_db_size_in_MB";
+    modConfig.modResults = [
+      ...modConfig.modResults.filter((entry) => entry.type !== "property" || entry.key !== key),
+      { type: "property", key, value: ASYNC_STORAGE_DB_SIZE_MB }
+    ];
 
     return modConfig;
   });
@@ -237,6 +255,6 @@ const config: ExpoConfig = {
   }
 };
 
-export default withAndroidUnrestrictedOrientation(
-  withAndroidDialogTheme(withAndroidDebugIdentity(config))
+export default withAndroidAsyncStorageSize(
+  withAndroidUnrestrictedOrientation(withAndroidDialogTheme(withAndroidDebugIdentity(config)))
 );

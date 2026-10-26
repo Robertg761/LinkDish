@@ -41,11 +41,83 @@ const apiMocks = vi.hoisted(() => ({
   updateSharedRecipe: vi.fn()
 }));
 
-const asyncStorageMocks = vi.hoisted(() => ({
-  getItem: vi.fn(),
-  removeItem: vi.fn(),
-  setItem: vi.fn()
-}));
+/** AsyncStorage as an in-memory store, with every method a mock that tests can override. */
+const asyncStorageMocks = vi.hoisted(() => {
+  const data = new Map<string, string>();
+  /** The cookbook as stored after each cookbook write (a JSON list), oldest first. */
+  const cookbookWrites: string[] = [];
+
+  const storedCookbook = (): string | null => {
+    const index = data.get("linkdish.cookbook.v2.index");
+
+    if (index == null) {
+      return null;
+    }
+
+    const { ids } = JSON.parse(index) as { ids: string[] };
+    return `[${ids.flatMap((id) => data.get(`linkdish.cookbook.v2.recipe:${id}`) ?? []).join(",")}]`;
+  };
+
+  const multiSet = (pairs: ReadonlyArray<readonly [string, string]>): Promise<void> => {
+    for (const [key, value] of pairs) {
+      data.set(key, value);
+    }
+
+    if (pairs.some(([key]) => key.startsWith("linkdish.cookbook.v2."))) {
+      cookbookWrites.push(storedCookbook() ?? "[]");
+    }
+
+    return Promise.resolve();
+  };
+
+  const defaults = {
+    getAllKeys: () => Promise.resolve([...data.keys()]),
+    getItem: (key: string) => Promise.resolve(data.get(key) ?? null),
+    multiGet: (keys: readonly string[]) =>
+      Promise.resolve(keys.map((key) => [key, data.get(key) ?? null] as const)),
+    multiRemove: (keys: readonly string[]) => {
+      keys.forEach((key) => data.delete(key));
+      return Promise.resolve();
+    },
+    multiSet,
+    removeItem: (key: string) => {
+      data.delete(key);
+      return Promise.resolve();
+    },
+    setItem: (key: string, value: string) => {
+      data.set(key, value);
+      return Promise.resolve();
+    }
+  };
+
+  const mocks = {
+    getAllKeys: vi.fn(defaults.getAllKeys),
+    getItem: vi.fn(defaults.getItem),
+    multiGet: vi.fn(defaults.multiGet),
+    multiRemove: vi.fn(defaults.multiRemove),
+    multiSet: vi.fn(defaults.multiSet),
+    removeItem: vi.fn(defaults.removeItem),
+    setItem: vi.fn(defaults.setItem)
+  };
+
+  return {
+    ...mocks,
+    /** What the default multiSet does, for a test's own implementation to end with. */
+    applyMultiSet: multiSet,
+    cookbookWrites,
+    data,
+    /** Back to an empty store with the default behavior. */
+    reset: () => {
+      data.clear();
+      cookbookWrites.splice(0);
+
+      for (const [name, mock] of Object.entries(mocks)) {
+        mock.mockReset();
+        mock.mockImplementation(defaults[name as keyof typeof defaults] as never);
+      }
+    }
+  };
+});
 
 const analyticsMocks = vi.hoisted(() => ({
   trackMobileEvent: vi.fn()
@@ -286,10 +358,7 @@ const Probe = () => {
   return null;
 };
 
-const cookbookWritesOf = () =>
-  asyncStorageMocks.setItem.mock.calls
-    .filter(([key]) => key === "linkdish.savedRecipes")
-    .map(([, value]) => String(value));
+const cookbookWritesOf = () => [...asyncStorageMocks.cookbookWrites];
 
 const settlePersistence = async () => {
   await act(async () => {
@@ -325,10 +394,22 @@ const renderProvider = async () => {
   return renderer;
 };
 
+/** Stores `records` as the cookbook is stored now: one value per recipe plus an index. */
 const storeSavedRecipes = (records: ReturnType<typeof buildSavedRecipes>) => {
-  asyncStorageMocks.getItem.mockImplementation((key: string) =>
-    Promise.resolve(key === "linkdish.savedRecipes" ? JSON.stringify(records) : null)
+  asyncStorageMocks.data.set(
+    "linkdish.cookbook.v2.index",
+    JSON.stringify({ ids: records.map((record) => record.id), legacyMigrated: true, version: 2 })
   );
+
+  for (const record of records) {
+    asyncStorageMocks.data.set(`linkdish.cookbook.v2.recipe:${record.id}`, JSON.stringify(record));
+  }
+};
+
+/** Stores the cookbook as builds before per-recipe storage did: one value, `blob`. */
+const storeLegacyCookbook = (blob: string) => {
+  asyncStorageMocks.data.set("linkdish.savedRecipes", blob);
+  asyncStorageMocks.data.set("linkdish.starterRecipesSeeded.v1", "true");
 };
 
 afterEach(() => {
@@ -357,12 +438,7 @@ beforeEach(() => {
     mock.mockReset();
   }
 
-  asyncStorageMocks.getItem.mockReset();
-  asyncStorageMocks.removeItem.mockReset();
-  asyncStorageMocks.setItem.mockReset();
-  asyncStorageMocks.getItem.mockResolvedValue(null);
-  asyncStorageMocks.removeItem.mockResolvedValue(undefined);
-  asyncStorageMocks.setItem.mockResolvedValue(undefined);
+  asyncStorageMocks.reset();
   analyticsMocks.trackMobileEvent.mockReset();
   fileSystemMocks.writes.splice(0);
 
@@ -620,12 +696,10 @@ describe("SavedRecipesProvider household save entitlement", () => {
     /** The cookbook write waits until `finish`, as a slow AsyncStorage write would. */
     const holdNextCookbookWrite = () => {
       let finish: () => void = () => undefined;
-      asyncStorageMocks.setItem.mockImplementationOnce((key: string) =>
-        key === "linkdish.savedRecipes"
-          ? new Promise<void>((resolve) => {
-              finish = resolve;
-            })
-          : Promise.resolve()
+      asyncStorageMocks.multiSet.mockImplementationOnce((pairs) =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }).then(() => asyncStorageMocks.applyMultiSet(pairs))
       );
       return () => finish();
     };
@@ -689,12 +763,10 @@ describe("SavedRecipesProvider household save entitlement", () => {
     /** The cookbook write waits until `finish`, as a slow AsyncStorage write would. */
     const holdCookbookWrite = () => {
       let finish: () => void = () => undefined;
-      asyncStorageMocks.setItem.mockImplementation((key: string) =>
-        key === "linkdish.savedRecipes"
-          ? new Promise<void>((resolve) => {
-              finish = resolve;
-            })
-          : Promise.resolve()
+      asyncStorageMocks.multiSet.mockImplementation((pairs) =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }).then(() => asyncStorageMocks.applyMultiSet(pairs))
       );
       return () => finish();
     };
@@ -1135,11 +1207,7 @@ describe("SavedRecipesProvider household save entitlement", () => {
       sourceImages: [{ mimeType: "image/jpeg" as const, uri: `data:image/jpeg;base64,${bytes}` }]
     });
     const failCookbookWrites = () =>
-      asyncStorageMocks.setItem.mockImplementation((key: string) =>
-        key === "linkdish.savedRecipes"
-          ? Promise.reject(new Error("Row too big to fit into CursorWindow"))
-          : Promise.resolve(undefined)
-      );
+      asyncStorageMocks.multiSet.mockRejectedValue(new Error("database or disk is full"));
     const save = async (bytes: string) => {
       let result: Awaited<ReturnType<NonNullable<typeof latestSavedRecipes>["saveRecipe"]>>;
       await act(async () => {
@@ -1178,7 +1246,7 @@ describe("SavedRecipesProvider household save entitlement", () => {
       expect(latestSavedRecipes?.savedRecipes[0]?.sourceImages?.[0]?.uri).toBe(firstScan);
 
       // Saving it again works: the new scans replace the old, which are then let go.
-      asyncStorageMocks.setItem.mockResolvedValue(undefined);
+      asyncStorageMocks.multiSet.mockImplementation(asyncStorageMocks.applyMultiSet);
       expect(await save("THIRD")).toMatchObject({ saved: true });
       const thirdScan = latestSavedRecipes?.savedRecipes[0]?.sourceImages?.[0]?.uri;
       expect(thirdScan).not.toBe(firstScan);
@@ -1207,34 +1275,24 @@ describe("SavedRecipesProvider household save entitlement", () => {
     const savedImage = latestSavedRecipes?.savedRecipes[0]?.sourceImages?.[0];
     expect(savedImage?.uri.startsWith("file:///documents/")).toBe(true);
 
-    const cookbookWrites = asyncStorageMocks.setItem.mock.calls.filter(
-      ([key]) => key === "linkdish.savedRecipes"
-    );
+    const cookbookWrites = cookbookWritesOf();
     expect(cookbookWrites.length).toBeGreaterThan(0);
 
-    for (const [, value] of cookbookWrites) {
-      expect(String(value)).not.toContain("SCANBYTES");
-      expect(String(value)).not.toContain("base64");
+    for (const value of cookbookWrites) {
+      expect(value).not.toContain("SCANBYTES");
+      expect(value).not.toContain("base64");
     }
   });
 
   it("migrates legacy base64 scan photos onto the filesystem when loading", async () => {
     const storedRecipe = buildSavedRecipes(1)[0]!;
-    asyncStorageMocks.getItem.mockImplementation((key: string) =>
-      Promise.resolve(
-        key === "linkdish.savedRecipes"
-          ? JSON.stringify([
-              {
-                ...storedRecipe,
-                sourceImages: [
-                  { dataUrl: "data:image/png;base64,LEGACYBYTES", mimeType: "image/png" }
-                ]
-              }
-            ])
-          : key === "linkdish.starterRecipesSeeded.v1"
-            ? "true"
-            : null
-      )
+    storeLegacyCookbook(
+      JSON.stringify([
+        {
+          ...storedRecipe,
+          sourceImages: [{ dataUrl: "data:image/png;base64,LEGACYBYTES", mimeType: "image/png" }]
+        }
+      ])
     );
 
     await renderProvider();
@@ -1246,25 +1304,22 @@ describe("SavedRecipesProvider household save entitlement", () => {
       true
     );
 
-    const cookbookWrites = asyncStorageMocks.setItem.mock.calls.filter(
-      ([key]) => key === "linkdish.savedRecipes"
-    );
+    const cookbookWrites = cookbookWritesOf();
     expect(cookbookWrites.length).toBeGreaterThan(0);
 
-    for (const [, value] of cookbookWrites) {
-      expect(String(value)).not.toContain("LEGACYBYTES");
+    for (const value of cookbookWrites) {
+      expect(value).not.toContain("LEGACYBYTES");
     }
+    expect(cookbookWrites.at(-1)).toContain(
+      latestSavedRecipes!.savedRecipes[0]!.sourceImages![0]!.uri
+    );
   });
 
   it("reports a failure instead of pretending a recipe was saved", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
     await renderProvider();
 
-    asyncStorageMocks.setItem.mockImplementation((key: string) =>
-      key === "linkdish.savedRecipes"
-        ? Promise.reject(new Error("Row too big to fit into CursorWindow"))
-        : Promise.resolve(undefined)
-    );
+    asyncStorageMocks.multiSet.mockRejectedValue(new Error("database or disk is full"));
 
     let result: Awaited<ReturnType<NonNullable<typeof latestSavedRecipes>["saveRecipe"]>>;
 
@@ -1285,36 +1340,84 @@ describe("SavedRecipesProvider household save entitlement", () => {
   it("does not overwrite a corrupt cookbook blob with an empty cookbook", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const corruptBlob = '[{"savedAt":"2026-04-19T12:00:00.000Z","recipe":{"title":"Soup"';
-    asyncStorageMocks.getItem.mockImplementation((key: string) =>
-      Promise.resolve(
-        key === "linkdish.savedRecipes"
-          ? corruptBlob
-          : key === "linkdish.starterRecipesSeeded.v1"
-            ? "true"
-            : null
-      )
-    );
+    storeLegacyCookbook(corruptBlob);
 
     await renderProvider();
+    await settlePersistence();
 
     expect(latestSavedRecipes?.hasLoadedSavedRecipes).toBe(true);
     expect(latestSavedRecipes?.savedRecipes).toHaveLength(0);
-    expect(
-      asyncStorageMocks.setItem.mock.calls.some(([key]) => key === "linkdish.savedRecipes")
-    ).toBe(false);
-    expect(asyncStorageMocks.setItem).toHaveBeenCalledWith(
-      "linkdish.savedRecipes.corrupt.v1",
-      corruptBlob
-    );
+    expect(cookbookWritesOf()).toHaveLength(0);
+    expect(asyncStorageMocks.data.get("linkdish.savedRecipes")).toBe(corruptBlob);
+    expect(asyncStorageMocks.data.get("linkdish.savedRecipes.corrupt.v1")).toBe(corruptBlob);
 
     await act(async () => {
       await latestSavedRecipes!.saveRecipe(buildSuccessState(44));
       await flushAsyncWork();
     });
 
-    expect(
-      asyncStorageMocks.setItem.mock.calls.some(([key]) => key === "linkdish.savedRecipes")
-    ).toBe(true);
+    // A real cookbook replaces it; the backup stays.
+    expect(cookbookWritesOf()).toHaveLength(1);
+    expect(asyncStorageMocks.data.has("linkdish.savedRecipes")).toBe(false);
+    expect(asyncStorageMocks.data.get("linkdish.savedRecipes.corrupt.v1")).toBe(corruptBlob);
+  });
+
+  it("moves a cookbook stored as one value into per-recipe storage", async () => {
+    const stored = buildSavedRecipes(3);
+    storeLegacyCookbook(JSON.stringify(stored));
+
+    await renderProvider();
+    await settlePersistence();
+
+    expect(latestSavedRecipes?.savedRecipes.map((recipe) => recipe.id)).toEqual(
+      stored.map((recipe) => recipe.id)
+    );
+    expect(asyncStorageMocks.data.has("linkdish.savedRecipes")).toBe(false);
+    expect(JSON.parse(asyncStorageMocks.data.get("linkdish.cookbook.v2.index")!)).toMatchObject({
+      ids: stored.map((recipe) => recipe.id),
+      legacyMigrated: true
+    });
+    // Moved once; loading it needed no other write.
+    expect(cookbookWritesOf()).toHaveLength(1);
+
+    // A cook rewrites that one recipe, not the cookbook.
+    asyncStorageMocks.multiSet.mockClear();
+    await act(async () => {
+      latestSavedRecipes!.incrementRecipeTimesCooked(stored[1]!.id);
+      await flushAsyncWork();
+    });
+    await settlePersistence();
+
+    expect(asyncStorageMocks.multiSet).toHaveBeenCalledTimes(1);
+    expect(asyncStorageMocks.multiSet.mock.calls[0]![0].map(([key]) => key)).toEqual([
+      `linkdish.cookbook.v2.recipe:${stored[1]!.id}`
+    ]);
+  });
+
+  it("keeps showing the cookbook when the old value can't be read, and leaves it stored", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    storeLegacyCookbook(JSON.stringify(buildSavedRecipes(2)));
+    asyncStorageMocks.getItem.mockImplementation((key: string) =>
+      key === "linkdish.savedRecipes"
+        ? Promise.reject(new Error("Row too big to fit into CursorWindow"))
+        : Promise.resolve(asyncStorageMocks.data.get(key) ?? null)
+    );
+
+    await renderProvider();
+    await settlePersistence();
+
+    expect(latestSavedRecipes?.hasLoadedSavedRecipes).toBe(true);
+    expect(latestSavedRecipes?.savedRecipes).toHaveLength(0);
+    expect(cookbookWritesOf()).toHaveLength(0);
+
+    await act(async () => {
+      await latestSavedRecipes!.saveRecipe(buildSuccessState(45));
+      await flushAsyncWork();
+    });
+
+    // New saves are stored apart from it, and it stays for a later launch to read.
+    expect(cookbookWritesOf()).toHaveLength(1);
+    expect(asyncStorageMocks.data.has("linkdish.savedRecipes")).toBe(true);
   });
 
   it("returns a typed reason when the free save limit is reached", async () => {
