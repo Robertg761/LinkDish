@@ -4,6 +4,7 @@ import { createExtractionResultCache } from "../cache/extraction-cache.js";
 import { ExtractionCancelledError } from "../deadline.js";
 import { createGeminiVideoRecipeReader } from "../extractors/video/gemini-video-recipe-reader.js";
 import { BrowserFetchError, HtmlFetchError } from "../fetchers/errors.js";
+import { isInstagramUrl } from "../source-detection/detect-source-from-url.js";
 import { getDomainAdapter } from "../source-detection/domain-adapters.js";
 import { parseYouTubeVideoId } from "../source-detection/parse-youtube-video-id.js";
 import { validatePublicSourceUrl } from "../source-url-safety.js";
@@ -14,6 +15,7 @@ import {
 
 import type * as BrowserEscalation from "./browser-escalation.js";
 import type * as HtmlFetcher from "../fetchers/fetch-html-document.js";
+import type * as InstagramFetcher from "../fetchers/fetch-instagram-document.js";
 import type * as TikTokFetcher from "../fetchers/fetch-tiktok-document.js";
 import type * as TikTokVideoFetcher from "../fetchers/fetch-tiktok-video.js";
 import type * as YouTubeFetcher from "../fetchers/fetch-youtube-document.js";
@@ -40,6 +42,7 @@ let browserEscalationModule: Promise<typeof BrowserEscalation> | null = null;
 let youTubeFetcherModule: Promise<typeof YouTubeFetcher> | null = null;
 let tikTokFetcherModule: Promise<typeof TikTokFetcher> | null = null;
 let tikTokVideoFetcherModule: Promise<typeof TikTokVideoFetcher> | null = null;
+let instagramFetcherModule: Promise<typeof InstagramFetcher> | null = null;
 
 const loadHtmlFetcher = () => {
   htmlFetcherModule ??= import("../fetchers/fetch-html-document.js");
@@ -54,6 +57,11 @@ const loadBrowserEscalation = () => {
 const loadTikTokFetcher = () => {
   tikTokFetcherModule ??= import("../fetchers/fetch-tiktok-document.js");
   return tikTokFetcherModule;
+};
+
+const loadInstagramFetcher = () => {
+  instagramFetcherModule ??= import("../fetchers/fetch-instagram-document.js");
+  return instagramFetcherModule;
 };
 
 const loadTikTokVideoFetcher = () => {
@@ -222,6 +230,16 @@ export const createDefaultExtractorRuntime = (): ExtractorRuntime => {
     },
     fetchSocialDocument: async (url: string, options?: SourceFetchOptions) => {
       const deadline = options?.deadline;
+
+      /* Instagram's caption is only on its embed page once a browser has loaded it. */
+      if (isInstagramUrl(url)) {
+        const { fetchInstagramDocument } = await loadInstagramFetcher();
+
+        return fetchInstagramDocument(url, (embedUrl) =>
+          fetchWithBrowser(embedUrl, options, undefined)
+        );
+      }
+
       const { fetchTikTokDocument } = await loadTikTokFetcher();
 
       return fetchTikTokDocument(url, fetchImplementation, {

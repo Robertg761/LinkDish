@@ -14,19 +14,54 @@ import type { DetectionResult } from "../types.js";
  * Instagram are "social", other video hosts "video". The adapterKey tells the
  * orchestrator which platform path to take.
  */
-const socialHosts = ["instagram.com", "facebook.com", "fb.watch"];
+const socialHosts = ["instagram.com", "instagr.am", "facebook.com", "fb.watch"];
 const videoHosts = ["vimeo.com", "dailymotion.com", "twitch.tv"];
 const matchesHostname = (hostname: string, expected: string): boolean =>
   hostname === expected || hostname.endsWith(`.${expected}`);
 
 export const TIKTOK_ADAPTER_KEY = "tiktok";
 export const PINTEREST_ADAPTER_KEY = "pinterest";
+export const INSTAGRAM_ADAPTER_KEY = "instagram";
 
 export const isTikTokUrl = (url: string): boolean => {
   try {
     return matchesHostname(new URL(url).hostname.toLowerCase(), "tiktok.com");
   } catch {
     return false;
+  }
+};
+
+const isInstagramHostname = (hostname: string): boolean =>
+  matchesHostname(hostname, "instagram.com") || matchesHostname(hostname, "instagr.am");
+
+export const isInstagramUrl = (url: string): boolean => {
+  try {
+    return isInstagramHostname(new URL(url).hostname.toLowerCase());
+  } catch {
+    return false;
+  }
+};
+
+/*
+ * A single Instagram post, reel or IGTV video: /p/<code>, /reel/<code>, /reels/<code>, /tv/<code>,
+ * also under a profile (/cook/p/<code>) as the share sheet sometimes writes them. Profiles,
+ * stories and everything else are not posts.
+ */
+export const parseInstagramPost = (url: string): { shortcode: string; isVideo: boolean } | null => {
+  try {
+    const parsedUrl = new URL(url);
+
+    if (!isInstagramHostname(parsedUrl.hostname.toLowerCase())) {
+      return null;
+    }
+
+    const match = parsedUrl.pathname.match(
+      /^\/(?:[\w.]+\/)?(p|reels?|tv)\/([A-Za-z0-9_-]{5,64})\/?$/u
+    );
+
+    return match?.[1] && match[2] ? { shortcode: match[2], isVideo: match[1] !== "p" } : null;
+  } catch {
+    return null;
   }
 };
 
@@ -95,6 +130,15 @@ export const detectHostedMediaSourceType = (url: string): DetectionResult | null
       confidence: "high",
       reasons: ["Matched TikTok; the caption is read through TikTok's public oEmbed endpoint."],
       adapterKey: TIKTOK_ADAPTER_KEY
+    };
+  }
+
+  if (parseInstagramPost(url)) {
+    return {
+      sourceType: "social",
+      confidence: "high",
+      reasons: ["Matched an Instagram post; the caption is read from its public embed page."],
+      adapterKey: INSTAGRAM_ADAPTER_KEY
     };
   }
 

@@ -38,8 +38,27 @@ describe("detectSourceType", () => {
   });
 
   it("marks unsupported social URLs as social", () => {
-    expect(detectSourceType("https://www.instagram.com/reel/abc123").sourceType).toBe("social");
-    expect(detectSourceType("https://www.instagram.com/reel/abc123").adapterKey).toBeNull();
+    expect(detectSourceType("https://www.facebook.com/reel/123456").sourceType).toBe("social");
+    expect(detectSourceType("https://www.facebook.com/reel/123456").adapterKey).toBeNull();
+    expect(detectSourceType("https://www.instagram.com/cookcreator/").sourceType).toBe("social");
+    expect(detectSourceType("https://www.instagram.com/cookcreator/").adapterKey).toBeNull();
+    expect(detectSourceType("https://www.instagram.com/stories/cook/123/").adapterKey).toBeNull();
+  });
+
+  it("gives Instagram posts, reels and IGTV videos their own adapter key", () => {
+    for (const url of [
+      "https://www.instagram.com/p/DAbc123xyz/",
+      "https://www.instagram.com/reel/DAbc123xyz/?igsh=abc",
+      "https://instagram.com/reels/DAbc123xyz",
+      "https://www.instagram.com/tv/DAbc123xyz/",
+      "https://www.instagram.com/cookcreator/p/DAbc123xyz/",
+      "https://instagr.am/p/DAbc123xyz/"
+    ]) {
+      expect(detectSourceType(url)).toMatchObject({
+        sourceType: "social",
+        adapterKey: "instagram"
+      });
+    }
   });
 
   it("maps TikTok onto the existing social type with its own adapter key", () => {

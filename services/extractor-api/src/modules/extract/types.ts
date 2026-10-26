@@ -52,18 +52,23 @@ export interface YouTubeSourceDocument {
 }
 
 /**
- * Recipe text that did not come from a fetched page: a TikTok caption read through oEmbed, or
- * text the user pasted. It is read by the rule-based text parser (extractors/text).
+ * Recipe text that did not come from a fetched page: a TikTok caption read through oEmbed, an
+ * Instagram caption read from the post's embed page, or text the user pasted. It is read by the rule-based text parser (extractors/text).
  */
 export interface TextSourceDocument {
   kind: "text";
   /** The recipe's source URL (the video's canonical URL, or the pasted text's source/synthetic URL). */
   url: string;
-  origin: "paste" | "tiktok";
+  origin: "paste" | "tiktok" | "instagram";
   text: string;
   title: string | null;
   authorName: string | null;
   thumbnailUrl: string | null;
+  /**
+   * For an Instagram post, whether it is a video (a reel). A photo post has no video to hold the
+   * method, so an ingredients-only caption is no recipe. TikToks are always videos.
+   */
+  isVideo?: boolean | undefined;
   /** For a TikTok, what the caption fetch learned about the video, for the video reader. */
   tiktokVideo?: TikTokVideoLocator | undefined;
 }
@@ -202,8 +207,8 @@ export interface ExtractorRuntime {
     options?: SourceFetchOptions
   ): Promise<YouTubeSourceDocument>;
   /**
-   * Reads a social post's caption (TikTok oEmbed today). Runtimes without it treat those
-   * links as unsupported.
+   * Reads a social post's caption (TikTok through oEmbed, Instagram from its rendered embed
+   * page). Runtimes without it treat those links as unsupported.
    */
   fetchSocialDocument?: (url: string, options?: SourceFetchOptions) => Promise<TextSourceDocument>;
   /** Downloads a TikTok post's video for the video recipe reader. */
