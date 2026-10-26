@@ -1,3 +1,5 @@
+import { randomBytes } from "node:crypto";
+
 import {
   type BackedUpKeyFamily,
   type BackupValueType,
@@ -375,6 +377,9 @@ export interface RestoreStoreSnapshotOptions {
   batchSize?: number;
   /* Only keys starting with one of these prefixes. */
   keyPrefixes?: string[];
+  /* Tries at a synced library's lock while the API holds it. */
+  lockAttempts?: number;
+  lockRetryDelayMs?: number;
   now?: () => Date;
   /* Replace keys that exist. Without it, existing keys are left as they are. */
   overwrite?: boolean;
@@ -434,6 +439,98 @@ const buildWriteCommands = (
   ];
 };
 
+/* The library service's own lock release: deletes the lock only while it still holds our token. */
+const releaseLockScript =
+  "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end";
+const libraryRestoreLockMs = 120_000;
+
+/*
+ * Restores one synced library whole, under the library service's own lock so no push or account
+ * deletion runs in between. Without overwrite a library that has any of its counter, feed or
+ * live sets is left as it is; with it, those four keys are cleared first (a live set the
+ * snapshot has no members for included). Items go first and the feed last, so a pull during the
+ * restore never sees feed entries without their items.
+ */
+const restoreLibrary = async (
+  run: StorePipeline,
+  version: string,
+  userId: string,
+  entries: StoreSnapshotEntry[],
+  options: {
+    apply: boolean;
+    batchSize: number;
+    lockAttempts: number;
+    lockRetryDelayMs: number;
+    overwrite: boolean;
+  }
+): Promise<{ kept: number; replaced: number; written: number }> => {
+  const prefix = `linkdish:library:${version}`;
+  const lockKey = `${prefix}:lock:${userId}`;
+  const coreKeys = [
+    `${prefix}:rev:${userId}`,
+    `${prefix}:changes:${userId}`,
+    `${prefix}:live:${userId}:recipe`,
+    `${prefix}:live:${userId}:collection`
+  ];
+  const token = randomBytes(16).toString("base64url");
+  let locked = false;
+
+  if (options.apply) {
+    for (let attempt = 1; attempt <= options.lockAttempts && !locked; attempt += 1) {
+      const [acquired] = await run([
+        ["SET", lockKey, token, "NX", "PX", String(libraryRestoreLockMs)]
+      ]);
+      locked = acquired === "OK";
+
+      if (!locked && attempt < options.lockAttempts) {
+        await new Promise((resolve) => setTimeout(resolve, options.lockRetryDelayMs));
+      }
+    }
+
+    if (!locked) {
+      throw new Error(`The library of user ${userId} stayed locked; try the restore again.`);
+    }
+  }
+
+  try {
+    const coreExists = await run(coreKeys.map((key) => ["EXISTS", key]));
+    const libraryPresent = coreExists.some((exists) => Number(exists) > 0);
+
+    if (libraryPresent && !options.overwrite) {
+      return { kept: entries.length, replaced: 0, written: 0 };
+    }
+
+    const exists = await run(entries.map((entry) => ["EXISTS", entry.key]));
+    const replaced = exists.filter((value) => Number(value) > 0).length;
+
+    if (options.apply) {
+      const rank = (entry: StoreSnapshotEntry): number =>
+        entry.key.includes(":item:")
+          ? 0
+          : entry.key.includes(":live:")
+            ? 1
+            : entry.key.includes(":rev:")
+              ? 2
+              : 3;
+      const ordered = [...entries].sort((left, right) => rank(left) - rank(right));
+
+      if (options.overwrite) {
+        await run([["DEL", ...coreKeys]]);
+      }
+
+      for (const batch of chunk(ordered, options.batchSize)) {
+        await run(batch.flatMap((entry) => buildWriteCommands(entry, null, true)));
+      }
+    }
+
+    return { kept: 0, replaced, written: entries.length - replaced };
+  } finally {
+    if (locked) {
+      await run([["EVAL", releaseLockScript, "1", lockKey, token]]);
+    }
+  }
+};
+
 export const restoreStoreSnapshot = async (
   run: StorePipeline,
   snapshot: StoreSnapshot,
@@ -441,6 +538,8 @@ export const restoreStoreSnapshot = async (
     apply = false,
     batchSize = 100,
     keyPrefixes = [],
+    lockAttempts = 20,
+    lockRetryDelayMs = 500,
     now = () => new Date(),
     overwrite = false
   }: RestoreStoreSnapshotOptions = {}
@@ -475,54 +574,58 @@ export const restoreStoreSnapshot = async (
     candidates.push({ entry, pttlMs: remainingMs });
   }
 
-  const present = new Set<string>();
+  const libraries = new Map<string, StoreSnapshotEntry[]>();
+  const others: typeof candidates = [];
 
-  for (const batch of chunk(candidates, batchSize)) {
-    const exists = await run(batch.map(({ entry }) => ["EXISTS", entry.key]));
-    batch.forEach(({ entry }, index) => {
-      if (Number(exists[index]) > 0) {
-        present.add(entry.key);
-      }
-    });
+  for (const candidate of candidates) {
+    const match = libraryKeyPattern.exec(candidate.entry.key);
+
+    if (match) {
+      const id = `${match[1]}:${match[2]}`;
+      libraries.set(id, [...(libraries.get(id) ?? []), candidate.entry]);
+    } else {
+      others.push(candidate);
+    }
   }
 
-  // A synced library is restored whole or not at all, so it never mixes keys from two moments
-  // (see readLibrary): without overwrite, one live key keeps the whole library as it is.
-  const libraryOf = (key: string): string | null => {
-    const match = libraryKeyPattern.exec(key);
-    return match ? `${match[1]}:${match[2]}` : null;
-  };
-  const presentLibraries = new Set(
-    [...present].flatMap((key) => {
-      const library = libraryOf(key);
-      return library ? [library] : [];
-    })
-  );
-
-  for (const batch of chunk(candidates, batchSize)) {
+  for (const batch of chunk(others, batchSize)) {
+    const exists = await run(batch.map(({ entry }) => ["EXISTS", entry.key]));
     const writes: string[][] = [];
 
-    for (const { entry, pttlMs } of batch) {
-      const isPresent = present.has(entry.key);
-      const library = libraryOf(entry.key);
+    batch.forEach(({ entry, pttlMs }, index) => {
+      const present = Number(exists[index]) > 0;
 
-      if (!overwrite && (isPresent || (library != null && presentLibraries.has(library)))) {
+      if (present && !overwrite) {
         result.kept += 1;
-        continue;
+        return;
       }
 
-      if (isPresent) {
+      if (present) {
         result.replaced += 1;
       } else {
         result.written += 1;
       }
 
       writes.push(...buildWriteCommands(entry, pttlMs, overwrite));
-    }
+    });
 
     if (apply && writes.length > 0) {
       await run(writes);
     }
+  }
+
+  for (const [id, entries] of [...libraries].sort(([left], [right]) => (left < right ? -1 : 1))) {
+    const [version = "", userId = ""] = id.split(":");
+    const counts = await restoreLibrary(run, version, userId, entries, {
+      apply,
+      batchSize,
+      lockAttempts,
+      lockRetryDelayMs,
+      overwrite
+    });
+    result.kept += counts.kept;
+    result.replaced += counts.replaced;
+    result.written += counts.written;
   }
 
   return result;

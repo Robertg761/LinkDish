@@ -61,8 +61,15 @@ const createFakeRedis = (nowMs: () => number) => {
         return "OK";
       }
       case "DEL":
-        del(key);
+        [key, ...args].forEach(del);
         return 1;
+      case "EVAL": {
+        // Only the library lock release: delete KEYS[1] while it holds ARGV[1].
+        const [, lockKey = "", token] = args;
+        if (strings.get(lockKey) !== token) return 0;
+        del(lockKey);
+        return 1;
+      }
       case "SADD": {
         const set = sets.get(key) ?? new Set<string>();
         args.forEach((member) => set.add(member));
@@ -222,21 +229,95 @@ describe("createStoreSnapshot", () => {
 
 describe("restoreStoreSnapshot", () => {
   it("keeps sorted-set scores the live API wrote after the existence check", async () => {
+    const index = "linkdish:ios-waitlist:v1:emails";
     const source = createFakeRedis(() => 0);
-    seed(source, 0);
+    source.zsets.set(index, new Map([["hash", 1]]));
     const snapshot = await createStoreSnapshot(source.run, { now: () => new Date(0) });
     const target = createFakeRedis(() => 0);
     const run: StorePipeline = (commands) => {
       if (commands[0]?.[0] !== "EXISTS") {
-        // A sync lands between EXISTS and the restore's writes.
-        target.zsets.set("linkdish:library:v1:changes:u1", new Map([["recipe:a", 9]]));
+        // A sign-up lands between EXISTS and the restore's writes.
+        target.zsets.set(index, new Map([["hash", 9]]));
       }
       return target.run(commands);
     };
 
     await restoreStoreSnapshot(run, snapshot, { apply: true, now: () => new Date(0) });
 
-    expect(target.zsets.get("linkdish:library:v1:changes:u1")?.get("recipe:a")).toBe(9);
+    expect(target.zsets.get(index)?.get("hash")).toBe(9);
+  });
+
+  it("restores a library under its lock, items before the feed", async () => {
+    const source = createFakeRedis(() => 0);
+    seed(source, 0);
+    const snapshot = await createStoreSnapshot(source.run, { now: () => new Date(0) });
+    const target = createFakeRedis(() => 0);
+    const lockKey = "linkdish:library:v1:lock:u1";
+    const writes: Array<{ key: string; locked: boolean }> = [];
+    const run: StorePipeline = (commands) => {
+      for (const [name, key = ""] of commands) {
+        if (
+          ["SET", "SADD", "ZADD"].includes(name ?? "") &&
+          key.includes(":library:") &&
+          key !== lockKey
+        ) {
+          writes.push({ key, locked: target.strings.has(lockKey) });
+        }
+      }
+      return target.run(commands);
+    };
+
+    await restoreStoreSnapshot(run, snapshot, { apply: true, now: () => new Date(0) });
+
+    expect(writes.map(({ key }) => key)).toEqual([
+      "linkdish:library:v1:item:u1:recipe:a",
+      "linkdish:library:v1:rev:u1",
+      "linkdish:library:v1:changes:u1"
+    ]);
+    expect(writes.every(({ locked }) => locked)).toBe(true);
+    expect(target.strings.has(lockKey)).toBe(false);
+  });
+
+  it("waits for the API's library lock, and gives up if it stays held", async () => {
+    const source = createFakeRedis(() => 0);
+    seed(source, 0);
+    const snapshot = await createStoreSnapshot(source.run, { now: () => new Date(0) });
+    const target = createFakeRedis(() => 0);
+    const lockKey = "linkdish:library:v1:lock:u1";
+    target.strings.set(lockKey, "push");
+    let tries = 0;
+    const run: StorePipeline = (commands) => {
+      if (commands[0]?.[0] === "SET" && commands[0][1] === lockKey && (tries += 1) === 3) {
+        target.strings.delete(lockKey);
+      }
+      return target.run(commands);
+    };
+    const options = { apply: true, keyPrefixes: ["linkdish:library:"], lockRetryDelayMs: 0 };
+
+    await expect(
+      restoreStoreSnapshot(run, snapshot, { ...options, lockAttempts: 2 })
+    ).rejects.toThrow(/locked/u);
+    await expect(restoreStoreSnapshot(run, snapshot, options)).resolves.toMatchObject({
+      written: 3
+    });
+  });
+
+  it("clears live sets the snapshot has no members for, with overwrite", async () => {
+    const source = createFakeRedis(() => 0);
+    seed(source, 0);
+    const snapshot = await createStoreSnapshot(source.run, { now: () => new Date(0) });
+    const target = createFakeRedis(() => 0);
+    target.sets.set("linkdish:library:v1:live:u1:collection", new Set(["c9"]));
+    target.strings.set("linkdish:library:v1:rev:u1", "40");
+
+    await restoreStoreSnapshot(target.run, snapshot, {
+      apply: true,
+      keyPrefixes: ["linkdish:library:"],
+      overwrite: true
+    });
+
+    expect(target.sets.has("linkdish:library:v1:live:u1:collection")).toBe(false);
+    expect(target.strings.get("linkdish:library:v1:rev:u1")).toBe("1");
   });
 
   it("does nothing without apply, then fills in only missing keys", async () => {
