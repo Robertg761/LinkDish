@@ -11,6 +11,7 @@ import {
 } from "./librarySync";
 import { incrementSavedRecipeTimesCooked } from "./store";
 
+import type { MobileCollection } from "./collections";
 import type { MobileLibraryCookbook } from "./librarySync";
 import type { SavedRecipeRecord } from "./store";
 import type { ExtractorApiClient } from "@linkdish/api-client";
@@ -96,13 +97,21 @@ const createCloud = () => {
   };
 };
 
-const createCookbook = (initial: SavedRecipeRecord[]) => {
+const createCookbook = (
+  initial: SavedRecipeRecord[],
+  initialCollections: MobileCollection[] = []
+) => {
   let records = initial;
+  let collections = initialCollections;
   const persisted: SavedRecipeRecord[][] = [];
   const cookbook: MobileLibraryCookbook = {
+    commitCollections: (update) => {
+      collections = update(collections);
+    },
     commitRecords: (update) => {
       records = update(records);
     },
+    getCollections: () => collections,
     getRecords: () => records,
     persist: (removed) => {
       persisted.push([...removed]);
@@ -117,8 +126,20 @@ const createCookbook = (initial: SavedRecipeRecord[]) => {
     persisted,
     set: (next: SavedRecipeRecord[]) => {
       records = next;
+    },
+    setCollections: (next: MobileCollection[]) => {
+      collections = next;
     }
   };
+};
+
+const weeknights: MobileCollection = {
+  createdAt: "2026-10-01T12:00:00.000Z",
+  emoji: "🍝",
+  id: "c-here",
+  name: "Weeknights",
+  sortOrder: 0,
+  updatedAt: "2026-10-01T12:00:00.000Z"
 };
 
 beforeEach(() => {
@@ -300,11 +321,15 @@ describe("mobile cookbook sync", () => {
       })
     ).resolves.toEqual({ status: "other_account" });
     expect(cloud.client.pullLibraryChanges).not.toHaveBeenCalled();
-    await expect(countMobileChangesNotSynced(local.cookbook.getRecords())).resolves.toBe(1);
+    await expect(
+      countMobileChangesNotSynced(local.cookbook.getRecords(), local.cookbook.getCollections())
+    ).resolves.toBe(1);
 
+    local.setCollections([weeknights]);
     await replaceMobileLibrary("u2", local.cookbook);
 
     expect(local.ids()).toEqual(["starter-1"]);
+    expect(local.cookbook.getCollections()).toEqual([]);
     expect(await readMobileLibrarySyncState()).toMatchObject({ account: "u2", cursor: "0" });
   });
 
@@ -324,5 +349,95 @@ describe("mobile cookbook sync", () => {
     await unlinkMobileLibrary("u1");
     expect(storage.has(LIBRARY_SYNC_STORAGE_KEY)).toBe(false);
     expect(local.ids()).toEqual(["saved-1"]);
+  });
+
+  it("syncs collections both ways and tombstones one deleted here", async () => {
+    const cloud = createCloud();
+    cloud.store({
+      collection: { createdAt: "2026-10-02T12:00:00.000Z", name: "Baking", sortOrder: 1 },
+      id: "c-web",
+      kind: "collection",
+      updatedAt: "2026-10-26T10:00:00.000Z"
+    });
+    const local = createCookbook(
+      [record("saved-1", { libraryExtras: { collectionIds: ["c-here"], tags: ["Quick"] } })],
+      [weeknights]
+    );
+    const sync = () =>
+      syncMobileLibrary({
+        account: "u1",
+        client: cloud.client,
+        cookbook: local.cookbook,
+        isCurrent: () => true
+      });
+
+    await sync();
+
+    expect(local.cookbook.getCollections()).toEqual(
+      expect.arrayContaining([
+        weeknights,
+        {
+          createdAt: "2026-10-02T12:00:00.000Z",
+          id: "c-web",
+          name: "Baking",
+          sortOrder: 1,
+          updatedAt: "2026-10-26T10:00:00.000Z"
+        }
+      ])
+    );
+    expect(cloud.get("collection:c-here")?.collection).toEqual({
+      createdAt: "2026-10-01T12:00:00.000Z",
+      emoji: "🍝",
+      name: "Weeknights",
+      sortOrder: 0
+    });
+    expect(cloud.get("recipe:saved-1")?.recipe).toMatchObject({
+      collectionIds: ["c-here"],
+      tags: ["Quick"]
+    });
+
+    local.setCollections(local.cookbook.getCollections().filter((entry) => entry.id !== "c-web"));
+    await sync();
+
+    expect(cloud.get("collection:c-web")).toMatchObject({ deleted: true });
+  });
+
+  it("moves collections an older build kept in the sync state into the cookbook", async () => {
+    const cloud = createCloud();
+    storage.set(
+      LIBRARY_SYNC_STORAGE_KEY,
+      JSON.stringify({
+        account: "u1",
+        bases: {},
+        collections: {
+          c1: {
+            payload: { createdAt: "2026-10-01T12:00:00.000Z", name: "Soups", sortOrder: 0 },
+            updatedAt: "2026-10-20T12:00:00.000Z"
+          }
+        },
+        cursor: "0",
+        linkedAt: "2026-10-20T12:00:00.000Z"
+      })
+    );
+    const local = createCookbook([]);
+
+    await syncMobileLibrary({
+      account: "u1",
+      client: cloud.client,
+      cookbook: local.cookbook,
+      isCurrent: () => true
+    });
+
+    expect(local.cookbook.getCollections()).toEqual([
+      {
+        createdAt: "2026-10-01T12:00:00.000Z",
+        id: "c1",
+        name: "Soups",
+        sortOrder: 0,
+        updatedAt: "2026-10-20T12:00:00.000Z"
+      }
+    ]);
+    expect(await readMobileLibrarySyncState()).not.toHaveProperty("collections");
+    expect(cloud.get("collection:c1")?.collection).toMatchObject({ name: "Soups" });
   });
 });

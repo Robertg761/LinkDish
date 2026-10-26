@@ -32,6 +32,7 @@ import { trackMobileEvent } from "../src/analytics/client";
 import { AppDialog } from "../src/components/AppDialog";
 import { useAccount } from "../src/features/account/AccountContext";
 import { useOptionalUpgradeMoment } from "../src/features/billing/UpgradeMomentContext";
+import { RecipeOrganizeSection } from "../src/features/collections/RecipeOrganizeSection";
 import { requestRecipeBookBounce } from "../src/features/navigation/recipeBookBounceEvents";
 import { requestRecipeUrlReset } from "../src/features/recipe-intake/intakeResetEvents";
 import {
@@ -1017,6 +1018,10 @@ export default function RecipeScreen() {
                       </View>
                     ) : null}
                   </View>
+
+                  {currentSavedRecipe && !isSharedRecipeRoute ? (
+                    <RecipeOrganizeSection record={currentSavedRecipe} />
+                  ) : null}
 
                   {saveLimitMessage || (!isCurrentRecipeSaved && !currentSaveGate.allowed) ? (
                     <AppText muted style={styles.saveMessage}>

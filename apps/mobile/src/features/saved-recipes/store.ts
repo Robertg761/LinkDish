@@ -659,10 +659,14 @@ const textListOf = <T>(value: unknown, read: (entry: T) => unknown): string[] =>
  * Searchable fields for any record carrying a recipe (saved or shared). Stored cookbooks were
  * written by many app versions, so every field is read defensively.
  */
-export const recipeRecordSearchFields = (record: {
-  notes?: string | null | undefined;
-  recipe: SavedRecipeRecord["recipe"];
-}): RecipeSearchFields => {
+export const recipeRecordSearchFields = (
+  record: {
+    libraryExtras?: SavedRecipeLibraryExtras | undefined;
+    notes?: string | null | undefined;
+    recipe: SavedRecipeRecord["recipe"];
+  },
+  collectionNames?: ReadonlyMap<string, string>
+): RecipeSearchFields => {
   const recipe = record.recipe as Partial<SavedRecipeRecord["recipe"]> | undefined;
 
   return recipeSearchFields(
@@ -681,7 +685,14 @@ export const recipeRecordSearchFields = (record: {
       ),
       title: typeof recipe?.title === "string" ? recipe.title : ""
     },
-    { notes: typeof record.notes === "string" ? record.notes : null }
+    {
+      notes: typeof record.notes === "string" ? record.notes : null,
+      // Collection names count as tags, so "weeknight" finds the Weeknight collection too.
+      tags: [
+        ...textListOf<string>(record.libraryExtras?.tags, (tag) => tag),
+        ...textListOf<string>(record.libraryExtras?.collectionIds, (id) => collectionNames?.get(id))
+      ]
+    }
   );
 };
 
@@ -690,14 +701,17 @@ export const recipeRecordSearchFields = (record: {
  * memoizes it on `savedRecipes`) and query it on every keystroke.
  */
 export const buildSavedRecipeSearchIndex = (
-  savedRecipes: readonly SavedRecipeRecord[]
+  savedRecipes: readonly SavedRecipeRecord[],
+  collectionNames?: ReadonlyMap<string, string>
 ): RecipeSearchIndex<SavedRecipeRecord> =>
-  createRecipeSearchIndex(savedRecipes, recipeRecordSearchFields);
+  createRecipeSearchIndex(savedRecipes, (record) =>
+    recipeRecordSearchFields(record, collectionNames)
+  );
 
 export const buildSharedRecipeSearchIndex = (
   sharedRecipes: readonly SharedRecipe[]
 ): RecipeSearchIndex<SharedRecipe> =>
-  createRecipeSearchIndex(sharedRecipes, recipeRecordSearchFields);
+  createRecipeSearchIndex(sharedRecipes, (record) => recipeRecordSearchFields(record));
 
 /** Ranked matches; every query word must match (title > tags > ingredients > source/notes > steps). */
 export const searchSavedRecipeRecords = (
