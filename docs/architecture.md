@@ -260,7 +260,7 @@ each app:
   only while the item still is what it was merged with; an item that keeps changing meanwhile
   keeps the pulled change as `pending` for the next run and sends nothing over it. A change the API
   turns away is held (not sent again) until the item changes. `packages/api-client/src/
-  library-sync.ts` validates each change before sending, so one bad item never fails a batch.
+library-sync.ts` validates each change before sending, so one bad item never fails a batch.
 - A device's cookbook is linked to one account: the first to sign in on it (merging the two). It
   keeps the cookbook when that account signs out. Another account that signs in doesn't sync it;
   it can replace it with its own cookbook. Deleting the account unlinks the device; its recipes
@@ -351,6 +351,38 @@ Performance pieces in `services/extractor-api/src/modules/extract`:
 - `AUTH_MODE` controls rollout behavior: `legacy_email_code`, `clerk_beta`, or `clerk_primary`.
 - `GET /auth/config` lets mobile discover whether Clerk sign-in and email-code fallback should be visible without requiring a signed-in session.
 - Google sign-in is supported through Clerk. Apple sign-in is intentionally hidden until an Apple Developer account and production Apple credentials exist.
+
+### Admin dashboard
+
+`/admin` (rewritten to `api/admin` on Vercel, `registerAdminDashboardRoutes` on Fastify) is
+protected by named tokens rather than a Clerk session. Both adapters go through
+`authorizeAdminAccess` in `modules/admin/admin-access.ts`:
+
+- **Named tokens.** `ADMIN_DASHBOARD_TOKENS` holds one `name:token` pair per person,
+  comma separated (lowercase names; tokens from `openssl rand -hex 32`). The browser
+  prompt takes the name as the username and the token as the password; scripts send
+  `Authorization: Bearer <token>` or `x-admin-dashboard-token`. Revoking one person means
+  deleting their pair. The older shared `ADMIN_DASHBOARD_TOKEN` still works as the user
+  `admin`, and the dashboard's Notes ask for it to be replaced. Malformed, duplicate or
+  shared entries are skipped and reported in Notes instead of failing API startup. With no
+  tokens, Fastify admits loopback callers only and Vercel refuses with 403.
+- **Lockout.** Each presented-but-wrong token increments a per-network counter in Upstash
+  (`linkdish:admin:auth-failures:v1:<hashed IP>`). After `ADMIN_AUTH_FAILURE_LIMIT_MAX`
+  (10) failures within `ADMIN_AUTH_FAILURE_LIMIT_WINDOW_MS` (15 minutes) that network gets
+  429 even with a valid token until the window ends. A request with no credential (the
+  browser's first hit before its prompt) is not counted. The limiter fails open if
+  Upstash is unreachable, so an outage does not lock the owner out; the token check
+  still runs.
+- **Cross-site writes.** Browsers replay cached Basic credentials, so POST/PUT/DELETE are
+  refused when `Sec-Fetch-Site` is anything but `same-origin`/`none`, and POST/PUT must
+  send `application/json` (which forces a CORS preflight the admin routes never answer).
+- **Audit log.** Failed sign-ins, lockouts, account lookups, plan grants (including dry
+  runs) and model changes/resets are appended to the `linkdish:admin:audit:v1` sorted set
+  with the admin's name, IP, outcome and details (never the presented token), trimmed to
+  `ADMIN_AUDIT_RETENTION_DAYS` (180) and 2,000 entries, and mirrored to the function log
+  as `[admin-audit]` lines. The dashboard shows the newest 50 under Admin Activity. Plan
+  grants also keep their own `linkdish:admin:billing-grant:*` record, now with
+  `grantedBy: admin-api:<name>`.
 
 ## Extraction Fallback Contract
 

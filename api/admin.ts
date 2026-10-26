@@ -1,14 +1,20 @@
 import { z } from "zod";
 
-import { extractorApiEnv } from "../services/extractor-api/src/config/env.js";
 import {
-  hasValidAdminToken,
-  withAdminSecurityHeaders
-} from "../services/extractor-api/src/modules/admin/admin-auth.js";
+  authorizeAdminAccess,
+  isAdminAuthConfigured,
+  type AdminRequestContext
+} from "../services/extractor-api/src/modules/admin/admin-access.js";
+import {
+  grantAdminBillingPlan,
+  lookupAdminUserAccount,
+  resetAdminModelSettings,
+  updateAdminModelSettings
+} from "../services/extractor-api/src/modules/admin/admin-actions.js";
+import { withAdminSecurityHeaders } from "../services/extractor-api/src/modules/admin/admin-auth.js";
 import {
   AdminBillingGrantError,
-  adminBillingGrantRequestSchema,
-  grantBillingPlanByEmail
+  adminBillingGrantRequestSchema
 } from "../services/extractor-api/src/modules/admin/billing-grants.js";
 import { adminDashboardHtml } from "../services/extractor-api/src/modules/admin/dashboard-assets.js";
 import { getAdminDashboardSnapshot } from "../services/extractor-api/src/modules/admin/dashboard-snapshot.js";
@@ -25,6 +31,8 @@ import {
 } from "../services/extractor-api/src/modules/admin/user-accounts.js";
 import { getSharedExtractorRuntime } from "../services/extractor-api/src/modules/extract/services/runtime.js";
 
+import { getVercelRequestIdentity } from "./_lib/vercel-request-identity.js";
+
 export const config = {
   maxDuration: 60
 };
@@ -39,48 +47,33 @@ const modelUpdateSchema = z.object({
     .transform((value) => (value === "" ? undefined : value))
 });
 
-const authorizeAdminRequest = (request: Request): Response | null => {
-  if (!extractorApiEnv.ADMIN_DASHBOARD_ENABLED) {
-    return Response.json(
-      {
-        message: "Admin dashboard is disabled."
-      },
-      {
-        status: 404
-      }
-    );
-  }
-
-  if (!extractorApiEnv.ADMIN_DASHBOARD_TOKEN) {
-    return Response.json(
-      {
-        message: "Admin dashboard requires ADMIN_DASHBOARD_TOKEN on Vercel."
-      },
-      {
-        status: 403
-      }
-    );
-  }
-
-  if (!hasValidAdminToken(request.headers, extractorApiEnv.ADMIN_DASHBOARD_TOKEN)) {
-    return Response.json(
-      {
-        message: "Admin dashboard access denied."
-      },
-      {
-        headers: {
-          "www-authenticate": 'Basic realm="LinkDish Admin", charset="UTF-8"'
-        },
-        status: 401
-      }
-    );
-  }
-
-  return null;
-};
-
 const getAdminPath = (url: URL): string =>
   (url.searchParams.get("path") ?? "").replace(/^\/+|\/+$/gu, "");
+
+const authorizeAdminRequest = async (request: Request): Promise<AdminRequestContext | Response> => {
+  const url = new URL(request.url);
+  const access = await authorizeAdminAccess({
+    adapter: "vercel",
+    headers: request.headers,
+    ip: getVercelRequestIdentity(request).remoteAddress ?? "unknown",
+    method: request.method,
+    path: `/admin/${getAdminPath(url)}`.replace(/\/$/u, "")
+  });
+
+  if (!access.ok) {
+    return Response.json(
+      {
+        message: access.message
+      },
+      {
+        headers: access.headers,
+        status: access.status
+      }
+    );
+  }
+
+  return { actor: access.actor, ip: access.ip };
+};
 
 const jsonError = (message: string, status: number, detail?: string): Response =>
   Response.json(
@@ -95,10 +88,10 @@ const jsonError = (message: string, status: number, detail?: string): Response =
 
 const handleGet = async (request: Request): Promise<Response> => {
   const url = new URL(request.url);
-  const authFailure = authorizeAdminRequest(request);
+  const admin = await authorizeAdminRequest(request);
 
-  if (authFailure) {
-    return authFailure;
+  if (admin instanceof Response) {
+    return admin;
   }
 
   const path = getAdminPath(url);
@@ -138,7 +131,7 @@ const handleGet = async (request: Request): Promise<Response> => {
     }
 
     try {
-      return Response.json(await getAdminUserAccountDetails(parsedQuery.data));
+      return Response.json(await lookupAdminUserAccount(admin, parsedQuery.data));
     } catch (error) {
       if (error instanceof AdminUserAccountError) {
         return jsonError(error.message, error.statusCode);
@@ -157,18 +150,18 @@ export async function GET(request: Request) {
 
 const handlePost = async (request: Request): Promise<Response> => {
   const url = new URL(request.url);
-  const authFailure = authorizeAdminRequest(request);
+  const admin = await authorizeAdminRequest(request);
 
-  if (authFailure) {
-    return authFailure;
+  if (admin instanceof Response) {
+    return admin;
   }
 
   if (getAdminPath(url) !== "api/billing/grants") {
     return jsonError("Admin dashboard route not found.", 404);
   }
 
-  if (!extractorApiEnv.ADMIN_DASHBOARD_TOKEN) {
-    return jsonError("Billing grants require ADMIN_DASHBOARD_TOKEN.", 403);
+  if (!isAdminAuthConfigured()) {
+    return jsonError("Billing grants require ADMIN_DASHBOARD_TOKENS.", 403);
   }
 
   const parsedBody = adminBillingGrantRequestSchema.safeParse(await request.json());
@@ -186,9 +179,7 @@ const handlePost = async (request: Request): Promise<Response> => {
   }
 
   try {
-    const grant = await grantBillingPlanByEmail(parsedBody.data, {
-      grantedBy: "admin-api"
-    });
+    const grant = await grantAdminBillingPlan(admin, parsedBody.data);
 
     return Response.json({
       ...grant,
@@ -219,10 +210,10 @@ export async function POST(request: Request) {
 
 const handlePut = async (request: Request): Promise<Response> => {
   const url = new URL(request.url);
-  const authFailure = authorizeAdminRequest(request);
+  const admin = await authorizeAdminRequest(request);
 
-  if (authFailure) {
-    return authFailure;
+  if (admin instanceof Response) {
+    return admin;
   }
 
   if (getAdminPath(url) !== "api/llm") {
@@ -250,7 +241,7 @@ const handlePut = async (request: Request): Promise<Response> => {
   }
 
   try {
-    const llm = await runtime.fallbackExtractor.updateSettings(parsedBody.data);
+    const llm = await updateAdminModelSettings(admin, runtime.fallbackExtractor, parsedBody.data);
 
     return Response.json({
       llm,
@@ -275,10 +266,10 @@ export async function PUT(request: Request) {
 
 const handleDelete = async (request: Request): Promise<Response> => {
   const url = new URL(request.url);
-  const authFailure = authorizeAdminRequest(request);
+  const admin = await authorizeAdminRequest(request);
 
-  if (authFailure) {
-    return authFailure;
+  if (admin instanceof Response) {
+    return admin;
   }
 
   if (getAdminPath(url) !== "api/llm") {
@@ -292,7 +283,7 @@ const handleDelete = async (request: Request): Promise<Response> => {
   }
 
   try {
-    const llm = await runtime.fallbackExtractor.resetSettingsToEnv();
+    const llm = await resetAdminModelSettings(admin, runtime.fallbackExtractor);
 
     return Response.json({
       llm,

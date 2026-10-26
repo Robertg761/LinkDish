@@ -189,6 +189,10 @@ const parsedExtractorApiEnv = readEnv(
       .default("true")
       .transform((value) => value === true || value === "true"),
     ADMIN_DASHBOARD_TOKEN: trimmedOptionalString(),
+    ADMIN_DASHBOARD_TOKENS: trimmedOptionalString(),
+    ADMIN_AUTH_FAILURE_LIMIT_MAX: z.coerce.number().int().positive().default(10),
+    ADMIN_AUTH_FAILURE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(900_000),
+    ADMIN_AUDIT_RETENTION_DAYS: z.coerce.number().int().positive().default(180),
     ANALYTICS_ENABLED: z
       .union([trimmedBooleanString, z.boolean()])
       .default("false")

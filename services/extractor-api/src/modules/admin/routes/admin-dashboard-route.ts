@@ -1,12 +1,18 @@
 import { z } from "zod";
 
-import { extractorApiEnv } from "../../../config/env.js";
-import { adminSecurityHeaders, hasValidAdminToken } from "../admin-auth.js";
 import {
-  AdminBillingGrantError,
-  adminBillingGrantRequestSchema,
-  grantBillingPlanByEmail
-} from "../billing-grants.js";
+  authorizeAdminAccess,
+  isAdminAuthConfigured,
+  type AdminRequestContext
+} from "../admin-access.js";
+import {
+  grantAdminBillingPlan,
+  lookupAdminUserAccount,
+  resetAdminModelSettings,
+  updateAdminModelSettings
+} from "../admin-actions.js";
+import { adminSecurityHeaders } from "../admin-auth.js";
+import { AdminBillingGrantError, adminBillingGrantRequestSchema } from "../billing-grants.js";
 import { adminDashboardHtml } from "../dashboard-assets.js";
 import { getAdminDashboardSnapshot } from "../dashboard-snapshot.js";
 import { parseAdminEnvironmentName } from "../environment-profiles.js";
@@ -34,24 +40,16 @@ const modelUpdateSchema = z.object({
 const isLoopbackRequest = (request: FastifyRequest): boolean =>
   ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(request.ip);
 
-export const getAdminDashboardAuthMode = (): string => {
-  if (extractorApiEnv.ADMIN_DASHBOARD_TOKEN) {
-    return "ADMIN_DASHBOARD_TOKEN";
+const adminRequestContexts = new WeakMap<FastifyRequest, AdminRequestContext>();
+
+const getAdminContext = (request: FastifyRequest): AdminRequestContext => {
+  const context = adminRequestContexts.get(request);
+
+  if (!context) {
+    throw new Error("Admin route ran without an authorized admin context.");
   }
 
-  return "Localhost only until ADMIN_DASHBOARD_TOKEN is set";
-};
-
-export const authorizeAdminRequest = (request: FastifyRequest): boolean => {
-  if (!extractorApiEnv.ADMIN_DASHBOARD_ENABLED) {
-    return false;
-  }
-
-  if (!extractorApiEnv.ADMIN_DASHBOARD_TOKEN) {
-    return isLoopbackRequest(request);
-  }
-
-  return hasValidAdminToken(request.headers, extractorApiEnv.ADMIN_DASHBOARD_TOKEN);
+  return context;
 };
 
 export const registerAdminDashboardRoutes = (app: FastifyInstance, runtime: ExtractorRuntime) => {
@@ -62,17 +60,23 @@ export const registerAdminDashboardRoutes = (app: FastifyInstance, runtime: Extr
 
     reply.headers(adminSecurityHeaders);
 
-    if (!authorizeAdminRequest(request)) {
-      if (extractorApiEnv.ADMIN_DASHBOARD_ENABLED) {
-        reply.header("www-authenticate", 'Basic realm="LinkDish Admin", charset="UTF-8"');
-      }
+    const access = await authorizeAdminAccess({
+      adapter: "fastify",
+      headers: request.headers,
+      ip: request.ip,
+      isLoopback: isLoopbackRequest(request),
+      method: request.method,
+      path: request.url.split("?")[0] ?? request.url
+    });
 
-      return reply.status(extractorApiEnv.ADMIN_DASHBOARD_ENABLED ? 401 : 404).send({
-        message: extractorApiEnv.ADMIN_DASHBOARD_ENABLED
-          ? "Admin dashboard access denied."
-          : "Admin dashboard is disabled."
+    if (!access.ok) {
+      reply.headers(access.headers);
+      return reply.status(access.status).send({
+        message: access.message
       });
     }
+
+    adminRequestContexts.set(request, { actor: access.actor, ip: access.ip });
   });
 
   app.get("/admin", async (_request, reply) =>
@@ -99,7 +103,7 @@ export const registerAdminDashboardRoutes = (app: FastifyInstance, runtime: Extr
     }
 
     try {
-      return await getAdminUserAccountDetails(parsedQuery.data);
+      return await lookupAdminUserAccount(getAdminContext(request), parsedQuery.data);
     } catch (error) {
       if (error instanceof AdminUserAccountError) {
         return reply.status(error.statusCode).send({
@@ -128,7 +132,11 @@ export const registerAdminDashboardRoutes = (app: FastifyInstance, runtime: Extr
     }
 
     try {
-      const llm = await runtime.fallbackExtractor.updateSettings(parsedBody.data);
+      const llm = await updateAdminModelSettings(
+        getAdminContext(request),
+        runtime.fallbackExtractor,
+        parsedBody.data
+      );
 
       return {
         llm,
@@ -153,7 +161,7 @@ export const registerAdminDashboardRoutes = (app: FastifyInstance, runtime: Extr
     }
   });
 
-  app.delete("/admin/api/llm", async (_request, reply) => {
+  app.delete("/admin/api/llm", async (request, reply) => {
     if (!isManagedFallbackExtractor(runtime.fallbackExtractor)) {
       return reply.status(409).send({
         message: "This runtime does not support admin model changes."
@@ -161,7 +169,10 @@ export const registerAdminDashboardRoutes = (app: FastifyInstance, runtime: Extr
     }
 
     try {
-      const llm = await runtime.fallbackExtractor.resetSettingsToEnv();
+      const llm = await resetAdminModelSettings(
+        getAdminContext(request),
+        runtime.fallbackExtractor
+      );
 
       return {
         llm,
@@ -180,9 +191,9 @@ export const registerAdminDashboardRoutes = (app: FastifyInstance, runtime: Extr
   });
 
   app.post("/admin/api/billing/grants", async (request, reply) => {
-    if (!extractorApiEnv.ADMIN_DASHBOARD_TOKEN) {
+    if (!isAdminAuthConfigured()) {
       return reply.status(403).send({
-        message: "Billing grants require ADMIN_DASHBOARD_TOKEN."
+        message: "Billing grants require ADMIN_DASHBOARD_TOKENS."
       });
     }
 
@@ -196,9 +207,7 @@ export const registerAdminDashboardRoutes = (app: FastifyInstance, runtime: Extr
     }
 
     try {
-      const grant = await grantBillingPlanByEmail(parsedBody.data, {
-        grantedBy: "admin-api"
-      });
+      const grant = await grantAdminBillingPlan(getAdminContext(request), parsedBody.data);
 
       return {
         ...grant,
