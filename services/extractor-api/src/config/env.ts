@@ -202,6 +202,7 @@ const parsedExtractorApiEnv = readEnv(
       .transform((value) => value === true || value === "true"),
     ANALYTICS_RETENTION_DAYS: z.coerce.number().int().positive().default(180),
     ANALYTICS_ROLLUP_RETENTION_DAYS: z.coerce.number().int().positive().default(1095),
+    CRON_SECRET: trimmedOptionalString(),
     GOOGLE_PLAY_PACKAGE_NAME: trimmedString().default("com.linkdish.app"),
     VERCEL_API_TOKEN: trimmedOptionalString(),
     VERCEL_PROJECT_ID: trimmedOptionalString(),

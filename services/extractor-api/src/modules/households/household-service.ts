@@ -26,6 +26,7 @@ import {
   shoppingItemSchema
 } from "../../../../../packages/recipe-domain/src/index.js";
 import { extractorApiEnv } from "../../config/env.js";
+import { deleteAnalyticsForAccount } from "../analytics/analytics-store.js";
 import {
   createSessionForUser,
   getUserByEmail,
@@ -1279,6 +1280,10 @@ export const deleteAccountAndHouseholdAccess = async (
         400
       );
     }
+
+    // First, so an analytics database failure stops the deletion before anything else is gone
+    // and the person can retry; the delete is idempotent.
+    await deleteAnalyticsForAccount(user.id);
 
     const householdId = await getHouseholdIdForUser(user.id);
     const household = householdId ? await getHouseholdById(householdId) : null;
