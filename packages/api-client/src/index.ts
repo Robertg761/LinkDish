@@ -23,6 +23,9 @@ import {
   householdShoppingListResponseSchema,
   householdSummarySchema,
   logoutResponseSchema,
+  pullLibraryChangesResponseSchema,
+  pushLibraryChangesRequestSchema,
+  pushLibraryChangesResponseSchema,
   removeHouseholdMemberRequestSchema,
   requestLoginCodeRequestSchema,
   requestLoginCodeResponseSchema,
@@ -62,6 +65,9 @@ import {
   type HouseholdShoppingListResponse,
   type HouseholdSummary,
   type LogoutResponse,
+  type PullLibraryChangesResponse,
+  type PushLibraryChangesRequest,
+  type PushLibraryChangesResponse,
   type RemoveHouseholdMemberRequest,
   type RequestLoginCodeRequest,
   type RequestLoginCodeResponse,
@@ -212,6 +218,19 @@ export interface ExtractorApiClient {
   getShoppingList(options?: RequestOptionsArgument): Promise<HouseholdShoppingListResponse>;
   leaveHousehold(options?: RequestOptionsArgument): Promise<HouseholdMutationResponse>;
   logout(options?: RequestOptionsArgument): Promise<LogoutResponse>;
+  /**
+   * The signed-in account's library changes after `since` (a cursor from an earlier pull; "0"
+   * for everything), one page at a time: pull again with the returned cursor while `hasMore`.
+   */
+  pullLibraryChanges(
+    since: string,
+    options?: RequestOptionsArgument
+  ): Promise<PullLibraryChangesResponse>;
+  /** Sends up to 25 changed library items; newer copies the API already holds come back. */
+  pushLibraryChanges(
+    input: PushLibraryChangesRequest,
+    options?: RequestOptionsArgument
+  ): Promise<PushLibraryChangesResponse>;
   removeHouseholdMember(
     input: RemoveHouseholdMemberRequest,
     options?: RequestOptionsArgument
@@ -670,6 +689,20 @@ export const createExtractorApiClient = (
       return requestJson("/auth/logout", {
         method: "POST",
         responseSchema: logoutResponseSchema,
+        signal: callOptions?.signal
+      });
+    },
+    async pullLibraryChanges(since, callOptions) {
+      return requestJson(`/library/changes?since=${encodeURIComponent(since)}`, {
+        responseSchema: pullLibraryChangesResponseSchema,
+        signal: callOptions?.signal
+      });
+    },
+    async pushLibraryChanges(input, callOptions) {
+      return requestJson("/library/changes", {
+        body: validateInput(pushLibraryChangesRequestSchema, input),
+        method: "POST",
+        responseSchema: pushLibraryChangesResponseSchema,
         signal: callOptions?.signal
       });
     },

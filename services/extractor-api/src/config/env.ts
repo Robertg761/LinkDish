@@ -158,6 +158,10 @@ const parsedExtractorApiEnv = readEnv(
       .union([trimmedBooleanString, z.boolean()])
       .default("false")
       .transform((value) => value === true || value === "true"),
+    LIBRARY_SYNC_ENABLED: z
+      .union([trimmedBooleanString, z.boolean()])
+      .default("false")
+      .transform((value) => value === true || value === "true"),
     AUTH_SECRET: trimmedOptionalString(),
     AUTH_CODE_TTL_SECONDS: z.coerce.number().int().positive().default(600),
     AUTH_LOGIN_CODE_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(5),

@@ -41,6 +41,7 @@ import {
   hasActiveRevenueCatFamilyEntitlement,
   verifyActiveRevenueCatFamilyEntitlement
 } from "../billing/revenuecat-entitlements.js";
+import { deleteLibraryForUser } from "../library/library-service.js";
 import {
   addStoreSetMembers,
   deleteStoreKeys,
@@ -1288,6 +1289,7 @@ export const deleteAccountAndHouseholdAccess = async (
       await leaveHousehold(user);
     }
 
+    await deleteLibraryForUser(user.id);
     await markUserDeleted(user.id);
     await tombstoneExternalIdentitiesForUser(user.id);
   });

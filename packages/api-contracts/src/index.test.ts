@@ -10,8 +10,13 @@ import {
   extractRecipeRequestSchema,
   extractRecipeResponseSchema,
   extractRecipeSuccessSchema,
+  libraryChangeSchema,
   MAX_HOUSEHOLD_SHOPPING_ITEMS,
+  MAX_LIBRARY_CHANGE_PAYLOAD_CHARS,
   MAX_SHARED_RECIPE_PAYLOAD_CHARS,
+  pullLibraryChangesQuerySchema,
+  pullLibraryChangesResponseSchema,
+  pushLibraryChangesRequestSchema,
   sharedRecipeListResponseSchema,
   updateAccountProfileRequestSchema,
   updateSharedRecipeRequestSchema,
@@ -434,5 +439,128 @@ describe("household shopping contracts", () => {
     });
 
     expect(parsed.success).toBe(false);
+  });
+});
+
+describe("library sync contracts", () => {
+  const libraryRecipe = {
+    createdAt: "2026-10-01T12:00:00.000Z",
+    fetchMode: "http",
+    provenance: ["visible-text"],
+    recipe: {
+      title: "Soup",
+      sourceUrl: "https://example.com/soup",
+      sourceType: "article",
+      ingredients: [{ text: "1 onion" }],
+      steps: [{ index: 1, text: "Cook." }],
+      servings: "4 servings",
+      prepTimeMinutes: 10,
+      cookTimeMinutes: 20,
+      nutrition: null,
+      confidence: {
+        score: 0.81,
+        summary: "Confident extraction.",
+        missingFields: [],
+        notes: [],
+        fieldProvenance: {
+          title: "visible-text",
+          ingredients: "visible-text",
+          steps: "visible-text",
+          servings: "visible-text",
+          prepTimeMinutes: "visible-text",
+          cookTimeMinutes: "visible-text",
+          nutrition: null
+        }
+      }
+    },
+    strategy: "article-pattern",
+    warnings: []
+  };
+
+  it("accepts recipes with their personal metadata, collections and tombstones", () => {
+    const parsed = pushLibraryChangesRequestSchema.parse({
+      changes: [
+        {
+          id: "recipe_1",
+          kind: "recipe",
+          recipe: {
+            ...libraryRecipe,
+            collectionIds: ["collection_1"],
+            cookLog: [{ cookedAt: "2026-10-20T18:00:00.000Z", note: "Doubled the garlic." }],
+            favorite: true,
+            lastCookedAt: "2026-10-20T18:00:00.000Z",
+            preferredServings: 6,
+            rating: 5,
+            tags: ["Weeknight"],
+            timesCooked: 1
+          },
+          updatedAt: "2026-10-26T10:00:00.000Z"
+        },
+        {
+          collection: { createdAt: "2026-10-01T12:00:00.000Z", name: "Soups", sortOrder: 1 },
+          id: "collection_1",
+          kind: "collection",
+          updatedAt: "2026-10-26T10:00:00.000Z"
+        },
+        { deleted: true, id: "recipe_2", kind: "recipe", updatedAt: "2026-10-26T10:00:00.000Z" }
+      ]
+    });
+
+    expect(parsed.changes).toHaveLength(3);
+  });
+
+  it("rejects a change whose payload doesn't match its kind", () => {
+    expect(
+      libraryChangeSchema.safeParse({
+        collection: { createdAt: "2026-10-01T12:00:00.000Z", name: "Soups", sortOrder: 1 },
+        id: "recipe_1",
+        kind: "recipe",
+        updatedAt: "2026-10-26T10:00:00.000Z"
+      }).success
+    ).toBe(false);
+    expect(
+      libraryChangeSchema.safeParse({
+        deleted: true,
+        id: "recipe_1",
+        kind: "recipe",
+        recipe: libraryRecipe,
+        updatedAt: "2026-10-26T10:00:00.000Z"
+      }).success
+    ).toBe(false);
+  });
+
+  it("rejects oversized recipes and out-of-range metadata", () => {
+    const change = (recipe: Record<string, unknown>) => ({
+      id: "recipe_1",
+      kind: "recipe",
+      recipe: { ...libraryRecipe, ...recipe },
+      updatedAt: "2026-10-26T10:00:00.000Z"
+    });
+
+    expect(libraryChangeSchema.safeParse(change({ rating: 6 })).success).toBe(false);
+    expect(libraryChangeSchema.safeParse(change({ tags: [""] })).success).toBe(false);
+    expect(
+      libraryChangeSchema.safeParse(
+        change({ notes: "x".repeat(20_000), warnings: ["y".repeat(400)] })
+      ).success
+    ).toBe(true);
+    expect(
+      libraryChangeSchema.safeParse(
+        change({
+          recipe: {
+            ...libraryRecipe.recipe,
+            steps: [{ index: 1, text: "z".repeat(MAX_LIBRARY_CHANGE_PAYLOAD_CHARS) }]
+          }
+        })
+      ).success
+    ).toBe(false);
+  });
+
+  it("defaults the pull cursor to the start and rejects anything but digits", () => {
+    expect(pullLibraryChangesQuerySchema.parse({})).toEqual({ since: "0" });
+    expect(pullLibraryChangesQuerySchema.safeParse({ since: "-1" }).success).toBe(false);
+    expect(
+      pullLibraryChangesResponseSchema.parse({ changes: [], cursor: "12", hasMore: false })
+    ).toEqual({ changes: [], cursor: "12", hasMore: false });
   });
 });

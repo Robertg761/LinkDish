@@ -135,6 +135,8 @@ const API_METHODS = [
   "getWebBillingAvailability",
   "leaveHousehold",
   "logout",
+  "pullLibraryChanges",
+  "pushLibraryChanges",
   "removeHouseholdMember",
   "requestLoginCode",
   "sendAnalyticsEvents",

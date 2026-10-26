@@ -214,6 +214,32 @@ parses `extractRecipeAnyRequestSchema`.
   unknown names; the current one drops only those events, but they are still lost until
   the API knows them.
 
+### Personal library sync
+
+A signed-in account's own cookbook (recipes with their notes, favorites, tags, collection
+membership, rating, cook log and preferred servings, plus collections) is kept in the account so it
+follows the account between devices. Household recipes and the household shopping list keep their
+own routes. Scan photos, starter recipes, the meal plan and cook-mode sessions are not part of it.
+
+- `GET /library/changes?since=<cursor>` returns the account's items written after the cursor
+  ("0" for everything), oldest first, at most 100 items or about 2 MB per page, with the next
+  `cursor` and `hasMore`. A cursor past anything the account has written (a lost or reset store)
+  answers from the start with `reset: true`, so the device sends everything it holds again.
+- `POST /library/changes` takes 1 to 25 changes. Each is a recipe, a collection or a tombstone
+  (`deleted: true`, no payload) with the `updatedAt` of the device that changed it. A change is
+  stored when it is at least as new as the stored copy; otherwise the stored copy comes back in
+  `newer` for the device to apply. Invalid changes and new items past the limits (5,000 recipes,
+  200 collections; 120,000 characters per item) are `rejected` one by one and the rest are stored.
+- Storage (`modules/library/library-service.ts`) is Upstash, per LinkDish user id:
+  `linkdish:library:v1:item:<user>:<kind>:<id>` holds the newest copy and the revision it was
+  written at, the `changes` sorted set scores each item by that revision (the feed a pull reads),
+  a `rev` counter hands out revisions, and `live` sets count live items against the limits. Writes
+  for one account run under a 30 s lock, so revisions commit in order and a pull never skips one.
+  Tombstones are kept so devices that were offline for months still learn about deletions.
+- `LIBRARY_SYNC_ENABLED` (off by default) switches the routes on; off, they answer 404 and clients
+  keep working locally. In production the routes refuse to run without Upstash (503) rather than
+  keep cookbooks in process memory. Deleting the account deletes every library key.
+
 ### `/extract` request path and performance
 
 `api/extract.ts` and the Fastify route share `services/extract-request-pipeline.ts`:
