@@ -19,7 +19,7 @@ on:
 
 concurrency:
   group: deploy-api-production
-  # Queue instead of cancelling: a cancelled run can stop between the deploy and its canary.
+  # Queue instead of cancelling: a cancelled run can stop between the promotion and its final check.
   cancel-in-progress: false
 
 permissions:
@@ -60,14 +60,59 @@ jobs:
       - name: Build Vercel output
         run: vercel build --prod --token="${{ secrets.VERCEL_TOKEN }}"
 
-      - name: Deploy API to production
-        run: vercel deploy --prebuilt --prod --token="${{ secrets.VERCEL_TOKEN }}"
+      # The new version is built with production settings but api.linkdish.ca keeps serving the
+      # current one until the checks below pass against the deployment's own URL.
+      - name: Stage API deployment without production domains
+        id: stage
+        run: |
+          deployment_url="$(vercel deploy --prebuilt --prod --skip-domain --token="${{ secrets.VERCEL_TOKEN }}")"
+          # The canary sends LINKDISH_CANARY_AUTH_TOKEN to this URL, so only accept a Vercel deployment host.
+          if [[ ! "$deployment_url" =~ ^https://[a-z0-9-]+\.vercel\.app$ ]]; then
+            echo "Unexpected deployment URL from vercel deploy: ${deployment_url}" >&2
+            exit 1
+          fi
+          echo "url=${deployment_url}" >> "$GITHUB_OUTPUT"
+          echo "Staged API deployment: ${deployment_url}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify staged API
+        env:
+          LINKDISH_PRODUCTION_API_BASE_URL: ${{ steps.stage.outputs.url }}
+        run: pnpm release:api:production
+
+      - name: Run canary against staged API
+        env:
+          LINKDISH_CANARY_BASE_URL: ${{ steps.stage.outputs.url }}
+          LINKDISH_CANARY_AUTH_TOKEN: ${{ secrets.LINKDISH_CANARY_AUTH_TOKEN }}
+        run: pnpm canary:live
+
+      - name: Upload canary artifacts
+        if: always() && steps.stage.outputs.url != ''
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: deploy-canary-results
+          path: services/extractor-api/.artifacts/live-canary/*.json
+          retention-days: 7
+
+      - name: Promote API to production
+        id: promote
+        env:
+          STAGED_URL: ${{ steps.stage.outputs.url }}
+        run: vercel promote "$STAGED_URL" --yes --token="${{ secrets.VERCEL_TOKEN }}"
 
       - name: Verify production API
         run: pnpm release:api:production
 
-      - name: Run production canary
+      - name: Explain blocked promotion
+        if: failure() && steps.stage.outputs.url != '' && steps.promote.outcome != 'success'
         env:
-          LINKDISH_CANARY_BASE_URL: https://api.linkdish.ca
-          LINKDISH_CANARY_AUTH_TOKEN: ${{ secrets.LINKDISH_CANARY_AUTH_TOKEN }}
-        run: pnpm canary:live
+          STAGED_URL: ${{ steps.stage.outputs.url }}
+        run: |
+          {
+            echo "### API not promoted"
+            echo
+            echo "api.linkdish.ca still serves the previous deployment. ${STAGED_URL} failed its checks."
+            echo "If the failure is a third-party recipe site rather than this change, promote it by hand:"
+            echo
+            echo "    vercel promote ${STAGED_URL}"
+          } >> "$GITHUB_STEP_SUMMARY"

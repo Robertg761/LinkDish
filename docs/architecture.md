@@ -394,3 +394,10 @@ If production `/extract` skips the browser fetch, it is a deployment regression 
   and the site check. The web bundle budget (`pnpm --filter @linkdish/web size`) needs a
   build first, so it is not part of `validate`.
 - The live canary manifest is intentionally separate from PR-blocking CI so real-world regressions can be measured without making the pipeline flaky.
+- API deploys (`deploy-api.yml`) are gated on it instead: the workflow deploys with
+  `--prod --skip-domain`, runs the health check and the live canary against that deployment's
+  own `*.vercel.app` URL, and only then runs `vercel promote`. A failing check leaves
+  api.linkdish.ca on the previous deployment, and the run summary names the staged URL so it can
+  be promoted by hand when the failure is a third-party site rather than the change. This relies
+  on the API project having no Vercel Deployment Protection; turning it on would need a bypass
+  header in both check scripts.
