@@ -1,0 +1,297 @@
+import { describe, expect, it } from "vitest";
+
+import { decryptBackup, encryptBackup, generateBackupKeyPair } from "./backup-crypto.js";
+import {
+  createStoreSnapshot,
+  createUpstashPipeline,
+  parseStoreSnapshot,
+  restoreStoreSnapshot,
+  type StorePipeline
+} from "./store-backup.js";
+
+/* Just enough Redis for the backup: strings, sets, sorted sets and TTLs, in one process. */
+const createFakeRedis = (nowMs: () => number) => {
+  const strings = new Map<string, string>();
+  const sets = new Map<string, Set<string>>();
+  const zsets = new Map<string, Map<string, number>>();
+  const expiries = new Map<string, number>();
+  const has = (key: string) => strings.has(key) || sets.has(key) || zsets.has(key);
+  const del = (key: string) => {
+    strings.delete(key);
+    sets.delete(key);
+    zsets.delete(key);
+    expiries.delete(key);
+  };
+  const commands: string[][] = [];
+
+  const runOne = (command: string[]): unknown => {
+    const [name, key = "", ...args] = command;
+    commands.push(command);
+
+    switch (name) {
+      case "SCAN": {
+        // Two pages, to exercise the cursor.
+        const all = [...new Set([...strings.keys(), ...sets.keys(), ...zsets.keys()])].sort();
+        const half = Math.ceil(all.length / 2);
+        return key === "0" ? ["7", all.slice(0, half)] : ["0", all.slice(half)];
+      }
+      case "MGET":
+        return [key, ...args].map((name) => strings.get(name) ?? null);
+      case "SMEMBERS":
+        return [...(sets.get(key) ?? [])];
+      case "ZRANGE":
+        return [...(zsets.get(key) ?? new Map<string, number>())]
+          .sort((left, right) => left[1] - right[1])
+          .flatMap(([member, score]) => [member, String(score)]);
+      case "PTTL": {
+        if (!has(key)) return -2;
+        const expiresAt = expiries.get(key);
+        return expiresAt == null ? -1 : expiresAt - nowMs();
+      }
+      case "EXISTS":
+        return has(key) ? 1 : 0;
+      case "SET": {
+        if (args.includes("NX") && has(key)) return null;
+        del(key);
+        strings.set(key, args[0] ?? "");
+        const px = args.indexOf("PX");
+        if (px >= 0) expiries.set(key, nowMs() + Number(args[px + 1]));
+        return "OK";
+      }
+      case "DEL":
+        del(key);
+        return 1;
+      case "SADD": {
+        const set = sets.get(key) ?? new Set<string>();
+        args.forEach((member) => set.add(member));
+        sets.set(key, set);
+        return args.length;
+      }
+      case "ZADD": {
+        const zset = zsets.get(key) ?? new Map<string, number>();
+        for (let index = 0; index < args.length; index += 2) {
+          zset.set(args[index + 1] ?? "", Number(args[index]));
+        }
+        zsets.set(key, zset);
+        return args.length / 2;
+      }
+      case "PEXPIRE":
+        expiries.set(key, nowMs() + Number(args[0]));
+        return 1;
+      default:
+        throw new Error(`Fake Redis does not know ${name}`);
+    }
+  };
+
+  const run: StorePipeline = (batch) => Promise.resolve(batch.map(runOne));
+
+  return { commands, expiries, run, sets, strings, zsets };
+};
+
+const seed = (redis: ReturnType<typeof createFakeRedis>, nowMs: number) => {
+  redis.strings.set("linkdish:user:v1:u1", JSON.stringify({ id: "u1" }));
+  redis.strings.set("linkdish:user-by-email:v1:hash", "u1");
+  redis.strings.set("linkdish:session:v1:token", JSON.stringify({ userId: "u1" }));
+  redis.expiries.set("linkdish:session:v1:token", nowMs + 60_000);
+  redis.sets.set("linkdish:user-sessions:v1:u1", new Set(["token"]));
+  redis.strings.set("linkdish:household:v1:h1", JSON.stringify({ id: "h1" }));
+  redis.sets.set("linkdish:household-recipes:v1:h1", new Set(["r2", "r1"]));
+  redis.strings.set("linkdish:library:v1:item:u1:recipe:a", "{}");
+  redis.zsets.set("linkdish:library:v1:changes:u1", new Map([["recipe:a", 1]]));
+  redis.strings.set("linkdish:library:v1:rev:u1", "1");
+  redis.strings.set("linkdish:quota:v2:lifetime:import:u1", "3");
+  // Disposable
+  redis.strings.set("linkdish:library:v1:lock:u1", "x");
+  redis.strings.set("linkdish:extract-cache:v9:abc", "{}");
+  redis.zsets.set("linkdish:quota:v2:lifetime:import:u1:pending", new Map([["t", 1]]));
+  redis.strings.set("linkdish:quota:v2:2026-10:import:u1", "1");
+  // Nobody classified this one
+  redis.strings.set("linkdish:mystery:v1:thing", "?");
+};
+
+describe("createStoreSnapshot", () => {
+  it("copies account data, leaves out disposable keys, and keeps TTLs", async () => {
+    const nowMs = Date.parse("2026-10-26T00:00:00.000Z");
+    const redis = createFakeRedis(() => nowMs);
+    seed(redis, nowMs);
+
+    const snapshot = await createStoreSnapshot(redis.run, {
+      batchSize: 4,
+      now: () => new Date(nowMs)
+    });
+
+    expect(snapshot.entries.map((entry) => entry.key)).toEqual([
+      "linkdish:household-recipes:v1:h1",
+      "linkdish:household:v1:h1",
+      "linkdish:library:v1:changes:u1",
+      "linkdish:library:v1:item:u1:recipe:a",
+      "linkdish:library:v1:rev:u1",
+      "linkdish:quota:v2:lifetime:import:u1",
+      "linkdish:session:v1:token",
+      "linkdish:user-by-email:v1:hash",
+      "linkdish:user-sessions:v1:u1",
+      "linkdish:user:v1:u1"
+    ]);
+    expect(
+      snapshot.entries.find((entry) => entry.key.includes("household-recipes"))?.value
+    ).toEqual(["r1", "r2"]);
+    expect(snapshot.entries.find((entry) => entry.key.includes("changes"))?.value).toEqual([
+      ["recipe:a", 1]
+    ]);
+    expect(snapshot.entries.find((entry) => entry.key.includes("session:"))?.pttlMs).toBe(60_000);
+    expect(snapshot.entries.find((entry) => entry.key.includes(":user:"))?.pttlMs).toBeUndefined();
+    expect(snapshot.families.user).toBe(1);
+    expect(snapshot.families["identity"]).toBe(0);
+    expect(snapshot.skipped).toEqual({ "extract-cache": 1, library: 1, quota: 2 });
+    expect(snapshot.unclassified).toEqual({ mystery: 1 });
+    // Strings in one MGET per batch, never one GET per key.
+    expect(redis.commands.some(([name]) => name === "GET")).toBe(false);
+  });
+
+  it("leaves out keys deleted between the scan and the read", async () => {
+    const redis = createFakeRedis(() => 0);
+    redis.strings.set("linkdish:user:v1:u1", "{}");
+    const run: StorePipeline = async (commands) => {
+      if (commands[0]?.[0] === "MGET") {
+        redis.strings.delete("linkdish:user:v1:u1");
+      }
+      return redis.run(commands);
+    };
+
+    const snapshot = await createStoreSnapshot(run);
+
+    expect(snapshot.entries).toEqual([]);
+  });
+});
+
+describe("restoreStoreSnapshot", () => {
+  it("does nothing without apply, then fills in only missing keys", async () => {
+    const takenMs = Date.parse("2026-10-26T00:00:00.000Z");
+    const source = createFakeRedis(() => takenMs);
+    seed(source, takenMs);
+    const snapshot = parseStoreSnapshot(
+      JSON.stringify(await createStoreSnapshot(source.run, { now: () => new Date(takenMs) }))
+    );
+
+    const restoredMs = takenMs + 20_000;
+    const target = createFakeRedis(() => restoredMs);
+    target.strings.set("linkdish:user:v1:u1", "newer");
+    target.sets.set("linkdish:household-recipes:v1:h1", new Set(["r3"]));
+
+    const dryRun = await restoreStoreSnapshot(target.run, snapshot, {
+      now: () => new Date(restoredMs)
+    });
+    expect(dryRun).toEqual({ applied: false, expired: 0, kept: 2, replaced: 0, written: 8 });
+    expect(target.strings.has("linkdish:household:v1:h1")).toBe(false);
+
+    const applied = await restoreStoreSnapshot(target.run, snapshot, {
+      apply: true,
+      now: () => new Date(restoredMs)
+    });
+    expect(applied.written).toBe(8);
+    expect(target.strings.get("linkdish:user:v1:u1")).toBe("newer");
+    expect([...(target.sets.get("linkdish:household-recipes:v1:h1") ?? [])]).toEqual(["r3"]);
+    expect(target.strings.get("linkdish:household:v1:h1")).toBe(JSON.stringify({ id: "h1" }));
+    expect(target.zsets.get("linkdish:library:v1:changes:u1")?.get("recipe:a")).toBe(1);
+    // The session keeps what was left of its TTL.
+    expect(target.expiries.get("linkdish:session:v1:token")).toBe(restoredMs + 40_000);
+  });
+
+  it("replaces existing keys with overwrite, limited to a prefix", async () => {
+    const source = createFakeRedis(() => 0);
+    seed(source, 0);
+    const snapshot = await createStoreSnapshot(source.run, { now: () => new Date(0) });
+    const target = createFakeRedis(() => 0);
+    target.strings.set("linkdish:user:v1:u1", "newer");
+    target.sets.set("linkdish:household-recipes:v1:h1", new Set(["r3"]));
+
+    const result = await restoreStoreSnapshot(target.run, snapshot, {
+      apply: true,
+      keyPrefixes: ["linkdish:household"],
+      now: () => new Date(0),
+      overwrite: true
+    });
+
+    expect(result).toEqual({ applied: true, expired: 0, kept: 0, replaced: 1, written: 1 });
+    expect([...(target.sets.get("linkdish:household-recipes:v1:h1") ?? [])].sort()).toEqual([
+      "r1",
+      "r2"
+    ]);
+    expect(target.strings.get("linkdish:user:v1:u1")).toBe("newer");
+  });
+
+  it("skips sessions whose TTL ran out since the snapshot", async () => {
+    const source = createFakeRedis(() => 0);
+    seed(source, 0);
+    const snapshot = await createStoreSnapshot(source.run, { now: () => new Date(0) });
+    const target = createFakeRedis(() => 120_000);
+
+    const result = await restoreStoreSnapshot(target.run, snapshot, {
+      apply: true,
+      now: () => new Date(120_000)
+    });
+
+    expect(result.expired).toBe(1);
+    expect(target.strings.has("linkdish:session:v1:token")).toBe(false);
+  });
+});
+
+describe("parseStoreSnapshot", () => {
+  it("rejects other JSON", () => {
+    expect(() => parseStoreSnapshot(JSON.stringify({ entries: [] }))).toThrow(/snapshot/u);
+  });
+});
+
+describe("createUpstashPipeline", () => {
+  it("posts to /pipeline and returns the results", async () => {
+    const calls: Array<{ body: unknown; url: string }> = [];
+    const fetchImpl = ((url: string, init: RequestInit) => {
+      calls.push({ body: JSON.parse(init.body as string), url });
+      return Promise.resolve(new Response(JSON.stringify([{ result: "OK" }, { result: 1 }])));
+    }) as unknown as typeof fetch;
+
+    const run = createUpstashPipeline("https://example.upstash.io/", "token", fetchImpl);
+
+    await expect(
+      run([
+        ["SET", "a", "b"],
+        ["EXISTS", "a"]
+      ])
+    ).resolves.toEqual(["OK", 1]);
+    expect(calls).toEqual([
+      {
+        body: [
+          ["SET", "a", "b"],
+          ["EXISTS", "a"]
+        ],
+        url: "https://example.upstash.io/pipeline"
+      }
+    ]);
+  });
+
+  it("throws when any command failed", async () => {
+    const fetchImpl = (() =>
+      Promise.resolve(
+        new Response(JSON.stringify([{ result: "OK" }, { error: "WRONGTYPE" }]))
+      )) as unknown as typeof fetch;
+
+    await expect(
+      createUpstashPipeline("https://x", "t", fetchImpl)([["GET", "a"]])
+    ).rejects.toThrow(/WRONGTYPE/u);
+  });
+});
+
+describe("backup encryption", () => {
+  it("round-trips with the private key and its passphrase, and fails without it", () => {
+    const { privateKeyPem, publicKeyPem } = generateBackupKeyPair("correct horse");
+    const envelope = encryptBackup('{"hello":"world"}', publicKeyPem);
+
+    expect(envelope).not.toContain("hello");
+    expect(decryptBackup(envelope, privateKeyPem, "correct horse")).toBe('{"hello":"world"}');
+    expect(() => decryptBackup(envelope, privateKeyPem, "wrong")).toThrow();
+
+    const tampered = JSON.parse(envelope) as { ciphertext: string };
+    tampered.ciphertext = Buffer.from("not the data").toString("base64");
+    expect(() => decryptBackup(JSON.stringify(tampered), privateKeyPem, "correct horse")).toThrow();
+  });
+});

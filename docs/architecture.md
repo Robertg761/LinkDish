@@ -98,6 +98,14 @@ size` checks the budgets after a build (entry ≤ 115 KB gzip, landing JS ≤
   behind a provider interface that is optional at runtime. The backend controls whether
   Gemini, OpenAI, or no provider is active.
 - The root `api/extract.ts` Vercel handler is an adapter into the full extractor runtime. Production routing lives in the root `vercel.json`.
+- Accounts, sessions, sign-in identities, Family households and synced libraries live only in
+  Upstash. The **Account Data Backup** workflow copies them every night into an encrypted
+  GitHub Actions artifact kept 90 days; caches, locks, rate limits and one-time codes are left
+  out. Which keys count as account data is listed in
+  `modules/storage/store-key-families.ts`, and a test fails on any `linkdish:` key segment that
+  is not listed there. `pnpm --filter @linkdish/extractor-api backup:store` makes the key pair,
+  inspects a backup and restores it (a dry run unless `--confirm`; only missing keys unless
+  `--overwrite`).
 
 ### Sources
 
@@ -260,7 +268,7 @@ each app:
   only while the item still is what it was merged with; an item that keeps changing meanwhile
   keeps the pulled change as `pending` for the next run and sends nothing over it. A change the API
   turns away is held (not sent again) until the item changes. `packages/api-client/src/
-  library-sync.ts` validates each change before sending, so one bad item never fails a batch.
+library-sync.ts` validates each change before sending, so one bad item never fails a batch.
 - A device's cookbook is linked to one account: the first to sign in on it (merging the two). It
   keeps the cookbook when that account signs out. Another account that signs in doesn't sync it;
   it can replace it with its own cookbook. Deleting the account unlinks the device; its recipes
