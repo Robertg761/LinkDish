@@ -1,6 +1,7 @@
 import type { ExtractionResultCache } from "./cache/extraction-cache.js";
 import type { RequestDeadline } from "./deadline.js";
 import type { VideoRecipeReader } from "./extractors/video/gemini-video-recipe-reader.js";
+import type { VideoReadAllowance } from "./extractors/video/video-read-allowance.js";
 import type { TikTokVideoFile } from "./fetchers/fetch-tiktok-video.js";
 import type { ValidateSourceUrl } from "./source-url-safety.js";
 import type {
@@ -216,6 +217,8 @@ export interface ExtractorRuntime {
    * written recipe. Absent, or unavailable, while VIDEO_RECIPE_READER_ENABLED is off.
    */
   videoRecipeReader?: VideoRecipeReader;
+  /** The daily cap on video reads. Runtimes without it do not cap them. */
+  videoReadAllowance?: VideoReadAllowance;
   fallbackExtractor: FallbackRecipeExtractor;
   recipeTextCleaner?: RecipeTextCleaner;
   /** URL-keyed store of validated success responses. Test runtimes omit it unless they opt in. */
@@ -225,7 +228,13 @@ export interface ExtractorRuntime {
 }
 
 export type VideoReadOutcome =
-  "read" | "no_recipe" | "failed" | "download_failed" | "too_long" | "skipped_budget";
+  | "read"
+  | "no_recipe"
+  | "failed"
+  | "download_failed"
+  | "too_long"
+  | "skipped_budget"
+  | "skipped_daily_limit";
 
 export type ExtractionFailureReason = ExtractRecipeFailure["reason"];
 

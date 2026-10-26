@@ -126,6 +126,16 @@ describe("isAmountSupported", () => {
     expect(isAmountSupported("1 cup", "add a splash of milk and 2 cups of flour")).toBe(false);
     expect(isAmountSupported("1 cup", "half a cup of butter")).toBe(false);
   });
+
+  it("holds an amount spelled with an article to its unit and number", () => {
+    expect(isAmountSupported("a tablespoon", "a tablespoon of honey")).toBe(true);
+    expect(isAmountSupported("a heaping cup", "a heaping cup of flour")).toBe(true);
+    expect(isAmountSupported("a pinch", "pinch of salt")).toBe(true);
+    expect(isAmountSupported("a tablespoon", "a teaspoon of salt")).toBe(false);
+    expect(isAmountSupported("a cup", "half a cup of butter")).toBe(false);
+    expect(isAmountSupported("a cup", "2 cups of flour")).toBe(false);
+    expect(isAmountSupported("a splash", "a pinch of salt")).toBe(false);
+  });
 });
 
 describe("isItemNamedIn", () => {

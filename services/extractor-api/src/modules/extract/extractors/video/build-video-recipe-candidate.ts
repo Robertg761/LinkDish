@@ -93,7 +93,18 @@ const unitFamilyOf = new Map(
 );
 
 /* Words in an amount that say nothing about which ingredient or how much. */
-const amountFillerWords = new Set(["of", "or", "to", "the", "and", "about", "around", "roughly"]);
+const amountFillerWords = new Set([
+  "a",
+  "an",
+  "of",
+  "or",
+  "to",
+  "the",
+  "and",
+  "about",
+  "around",
+  "roughly"
+]);
 
 const nameStopWords = new Set([
   "and",
@@ -370,19 +381,32 @@ const sameNumber = (left: number, right: number): boolean => Math.abs(left - rig
  * lets "an egg" in the quote state 1.
  */
 export const isAmountSupported = (amount: string, quote: string, item = ""): boolean => {
-  /* "a pinch" is checked by its words; "a cup" in the quote still states 1 cup. */
+  /* "a pinch" and "a cup" have no number of their own; "a cup" in the quote still states 1 cup. */
   const amountQuantities = readQuantities(amount, null).map(({ quantity }) => quantity);
+  const quoteUnits = new Set(wordsOf(quote).map((word) => unitFamilyOf.get(word)));
+  const amountUnits = wordsOf(amount)
+    .map((word) => unitFamilyOf.get(word))
+    .filter((unit) => unit !== undefined);
 
   if (amountQuantities.length > 0) {
     const stated = readStatedNumbers(quote, item);
-    const quoteUnits = new Set(wordsOf(quote).map((word) => unitFamilyOf.get(word)));
-    const amountUnits = wordsOf(amount)
-      .map((word) => unitFamilyOf.get(word))
-      .filter((unit) => unit !== undefined);
 
     return (
       amountQuantities.every((value) => stated.some((number) => sameNumber(number, value))) &&
       amountUnits.every((unit) => quoteUnits.has(unit))
+    );
+  }
+
+  /*
+   * "a tablespoon", "a pinch": one of the unit. The quote must say that unit, and must not state
+   * it as another amount, so "a teaspoon of salt" and "half a cup" do not support them.
+   */
+  if (amountUnits.length > 0) {
+    const stated = readStatedNumbers(quote, item);
+
+    return (
+      amountUnits.every((unit) => quoteUnits.has(unit)) &&
+      (stated.length === 0 || stated.some((number) => sameNumber(number, 1)))
     );
   }
 

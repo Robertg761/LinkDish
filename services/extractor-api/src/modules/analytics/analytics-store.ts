@@ -486,7 +486,8 @@ export const writeExtractionAnalyticsEvent = async (
         meteringMode: event.meteringMode,
         missingFieldCount: extraction?.missingFieldCount ?? 0,
         ...(extraction?.cacheStatus ? { cacheStatus: extraction.cacheStatus } : {}),
-        ...(extraction?.textCleanup ? { textCleanup: extraction.textCleanup } : {})
+        ...(extraction?.textCleanup ? { textCleanup: extraction.textCleanup } : {}),
+        ...(extraction?.videoRead ? { videoRead: extraction.videoRead } : {})
       })
     ]
   );

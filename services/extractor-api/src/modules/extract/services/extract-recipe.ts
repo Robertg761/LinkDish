@@ -961,6 +961,25 @@ const readRecipeFromVideo = async (request: VideoReadRequest): Promise<VideoRead
     );
   };
 
+  /* The day's reads are capped; when the count can't be checked, the read is not risked. */
+  if (runtime.videoReadAllowance) {
+    let allowed: boolean;
+
+    try {
+      allowed = await runtime.videoReadAllowance.reserve();
+    } catch (error) {
+      logVideoRead("skipped_daily_limit", {
+        message: `could not check the daily limit: ${error instanceof Error ? error.message : "unknown"}`
+      });
+      return { outcome: "skipped_daily_limit", response: null };
+    }
+
+    if (!allowed) {
+      logVideoRead("skipped_daily_limit");
+      return { outcome: "skipped_daily_limit", response: null };
+    }
+  }
+
   let source: VideoRecipeSource;
 
   if (request.platform === "youtube") {

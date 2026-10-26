@@ -101,6 +101,8 @@ const parsedExtractorApiEnv = readEnv(
     /* Longer videos are not sent: they cost more and cannot be read inside the request deadline. */
     VIDEO_RECIPE_MAX_SECONDS: z.coerce.number().int().positive().default(240),
     VIDEO_RECIPE_TIMEOUT_MS: z.coerce.number().int().positive().default(40_000),
+    /* Video reads started per UTC day, across all instances; 0 stops them. Bounds Gemini spend. */
+    VIDEO_RECIPE_DAILY_READ_LIMIT: z.coerce.number().int().nonnegative().default(300),
     LLM_FALLBACK_DAILY_BUDGET_USD: z.coerce.number().nonnegative().default(0),
     BILLING_ENFORCEMENT_ENABLED: z
       .union([trimmedBooleanString, z.boolean()])
