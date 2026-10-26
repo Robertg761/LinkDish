@@ -119,6 +119,26 @@ const runMemoryCommand = (command: string[]): UpstashResponse => {
 
       return { result: count };
     }
+    case "INCRBY": {
+      if (!key) {
+        return { error: "INCRBY requires a key." };
+      }
+
+      const increment = Number(args[0]);
+
+      if (!Number.isInteger(increment)) {
+        return { error: "INCRBY requires an integer increment." };
+      }
+
+      const existingEntry = memoryValues.get(key);
+      const count = parseNumeric(existingEntry?.value) + increment;
+      memoryValues.set(key, {
+        expiresAtMs: existingEntry?.expiresAtMs ?? null,
+        value: String(count)
+      });
+
+      return { result: count };
+    }
     case "SET": {
       if (!key) {
         return { error: "SET requires a key." };
@@ -230,6 +250,8 @@ const runMemoryCommand = (command: string[]): UpstashResponse => {
     }
     case "SMEMBERS":
       return { result: key ? [...(memorySets.get(key) ?? [])] : [] };
+    case "SCARD":
+      return { result: key ? (memorySets.get(key)?.size ?? 0) : 0 };
     case "ZADD": {
       if (!key) {
         return { error: "ZADD requires a key." };
@@ -269,6 +291,42 @@ const runMemoryCommand = (command: string[]): UpstashResponse => {
       }
 
       return { result: removed };
+    }
+    case "ZRANGEBYSCORE": {
+      const sortedSet = key ? memorySortedSets.get(key) : null;
+      const parseBound = (bound: string | undefined): { exclusive: boolean; value: number } => {
+        const exclusive = bound?.startsWith("(") ?? false;
+        const raw = exclusive ? (bound ?? "").slice(1) : (bound ?? "");
+        const value =
+          raw === "+inf" ? Infinity : raw === "-inf" ? -Infinity : Number(raw === "" ? NaN : raw);
+        return { exclusive, value };
+      };
+      const min = parseBound(args[0]);
+      const max = parseBound(args[1]);
+      const options = args.slice(2).map((entry) => entry.toUpperCase());
+      const withScores = options.includes("WITHSCORES");
+      const limitIndex = options.indexOf("LIMIT");
+      const offset = limitIndex >= 0 ? Number(args[2 + limitIndex + 1]) : 0;
+      const count = limitIndex >= 0 ? Number(args[2 + limitIndex + 2]) : -1;
+
+      if (!sortedSet || Number.isNaN(min.value) || Number.isNaN(max.value)) {
+        return { result: [] };
+      }
+
+      const selected = [...sortedSet.entries()]
+        .filter(
+          ([, score]) =>
+            (min.exclusive ? score > min.value : score >= min.value) &&
+            (max.exclusive ? score < max.value : score <= max.value)
+        )
+        .sort((left, right) => left[1] - right[1] || left[0].localeCompare(right[0]))
+        .slice(offset, count < 0 ? undefined : offset + count);
+
+      return {
+        result: withScores
+          ? selected.flatMap(([member, score]) => [member, String(score)])
+          : selected.map(([member]) => member)
+      };
     }
     case "ZCARD":
       return { result: key ? (memorySortedSets.get(key)?.size ?? 0) : 0 };

@@ -920,6 +920,7 @@ export async function duplicateSavedRecipe(
       const now = new Date().toISOString();
       const duplicate: WebSavedRecipe = {
         ...copyable,
+        clonedFromId: existing.id,
         id: crypto.randomUUID(),
         recipe: {
           ...existing.recipe,
@@ -1025,7 +1026,7 @@ export async function saveSharedRecipeCopy(
 
 /**
  * The household payload for a saved recipe. Only domain fields travel: personal metadata
- * (favorites, tags, collections, ratings, cook log, …) and source images stay on this device.
+ * (favorites, tags, collections, ratings, cook log, …) and source images stay out of it.
  */
 export const buildHouseholdRecipePayload = (recipe: WebSavedRecipe) => ({
   fetchMode: recipe.extraction.fetchMode,
@@ -1328,7 +1329,7 @@ export async function updateSavedRecipeSync(
 }
 
 /* ------------------------------------------------------------------------------------------------
- * Personal metadata (local-only; never changes updatedAt or the sync state)
+ * Personal metadata (never changes updatedAt or the household sync state)
  * ---------------------------------------------------------------------------------------------- */
 
 /** Trims, collapses whitespace, drops empties and case-insensitive duplicates, caps count/length. */

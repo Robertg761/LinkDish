@@ -23,6 +23,7 @@ import { mobileEnv } from "../../src/config/env";
 import { useAccount } from "../../src/features/account/AccountContext";
 import { useClerkSession } from "../../src/features/account/ClerkSessionContext";
 import { useBilling } from "../../src/features/billing/BillingContext";
+import { CookbookSyncCard } from "../../src/features/saved-recipes/CookbookSyncCard";
 import { useSavedRecipes } from "../../src/features/saved-recipes/SavedRecipesContext";
 import { pressedOpacity } from "../../src/theme/interactions";
 import { appColors, appSpacing } from "../../src/theme/tokens";
@@ -787,6 +788,8 @@ export default function AccountScreen() {
               </View>
             </AppSurface>
 
+            <CookbookSyncCard />
+
             <AppSurface style={[styles.card, styles.settingsCard]}>
               <View style={[styles.actions, styles.accountActions]}>
                 <View style={styles.accountPrimaryActions}>
@@ -834,9 +837,9 @@ export default function AccountScreen() {
                 Delete Account
               </AppText>
               <AppText muted style={styles.centeredText}>
-                Deleting your account removes server-side account, household, and shared Family
-                recipe records that belong to the account. Recipes saved on this device stay on this
-                device.
+                Deleting your account removes server-side account, synced cookbook, household, and
+                shared Family recipe records that belong to the account. Recipes saved on this
+                device stay on this device.
               </AppText>
               <TextInput
                 autoCapitalize="none"

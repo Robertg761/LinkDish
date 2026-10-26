@@ -7,6 +7,7 @@ import {
   countStoreKeys,
   deleteStoreKeys,
   getStoreString,
+  runStoreTransaction,
   setStoreString,
   setStoreStringUnlessBlocked
 } from "./upstash-store.js";
@@ -34,6 +35,34 @@ describe("countStoreKeys", () => {
 
     expect(await countStoreKeys("linkdish-test:dotXkey:*")).toBe(0);
     expect(await countStoreKeys("linkdish-test:dot.key:*")).toBe(1);
+  });
+});
+
+describe("memory store commands used by library sync", () => {
+  it("increments by a step, counts set members and reads a sorted set by score", async () => {
+    const results = await runStoreTransaction([
+      ["INCRBY", "linkdish-test:rev:v1:a", "3"],
+      ["INCRBY", "linkdish-test:rev:v1:a", "2"],
+      ["SADD", "linkdish-test:live:v1:a", "x", "y"],
+      ["SCARD", "linkdish-test:live:v1:a"],
+      ["SCARD", "linkdish-test:live:v1:missing"],
+      ["ZADD", "linkdish-test:feed:v1:a", "1", "one", "2", "two", "3", "three", "4", "four"],
+      ["ZRANGEBYSCORE", "linkdish-test:feed:v1:a", "(1", "+inf", "WITHSCORES", "LIMIT", "0", "2"],
+      ["ZRANGEBYSCORE", "linkdish-test:feed:v1:a", "3", "4"],
+      ["ZRANGEBYSCORE", "linkdish-test:feed:v1:missing", "(0", "+inf"]
+    ]);
+
+    expect(results.map((result) => result.result)).toEqual([
+      3,
+      5,
+      2,
+      2,
+      0,
+      4,
+      ["two", "2", "three", "3"],
+      ["three", "four"],
+      []
+    ]);
   });
 });
 

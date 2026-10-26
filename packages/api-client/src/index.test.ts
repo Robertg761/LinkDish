@@ -290,3 +290,55 @@ describe("header merging", () => {
     expect(headers["x-linkdish-platform"]).toBe("android_app");
   });
 });
+
+describe("library sync", () => {
+  it("pulls changes from a cursor and pushes a validated batch", async () => {
+    const fetchMock = vi
+      .fn<FetchSignature>()
+      .mockResolvedValueOnce(jsonResponse({ changes: [], cursor: "7", hasMore: false }))
+      .mockResolvedValueOnce(jsonResponse({ accepted: [], newer: [], rejected: [] }));
+    const client = createExtractorApiClient({
+      baseUrl: "https://api.example.com",
+      fetchImplementation: fetchMock
+    });
+
+    await expect(client.pullLibraryChanges("5")).resolves.toEqual({
+      changes: [],
+      cursor: "7",
+      hasMore: false
+    });
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("https://api.example.com/library/changes?since=5");
+    expect(fetchMock.mock.calls[0]?.[1]?.method).toBe("GET");
+
+    const tombstone = {
+      deleted: true as const,
+      id: "recipe_1",
+      kind: "recipe" as const,
+      updatedAt: "2026-10-26T10:00:00.000Z"
+    };
+
+    await expect(client.pushLibraryChanges({ changes: [tombstone] })).resolves.toEqual({
+      accepted: [],
+      newer: [],
+      rejected: []
+    });
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("https://api.example.com/library/changes");
+    expect(fetchMock.mock.calls[1]?.[1]?.method).toBe("POST");
+    expect(JSON.parse(fetchMock.mock.calls[1]?.[1]?.body as string)).toEqual({
+      changes: [tombstone]
+    });
+  });
+
+  it("sends nothing for an invalid push batch", async () => {
+    const fetchMock = createFetchMock(() => jsonResponse({}));
+    const client = createExtractorApiClient({
+      baseUrl: "https://api.example.com",
+      fetchImplementation: fetchMock
+    });
+
+    await expect(client.pushLibraryChanges({ changes: [] })).rejects.toMatchObject({
+      kind: "validation"
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});

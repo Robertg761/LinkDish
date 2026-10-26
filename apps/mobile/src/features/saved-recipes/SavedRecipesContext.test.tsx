@@ -268,6 +268,8 @@ const createMockClient = (): ExtractorApiClient => ({
   getWebBillingAvailability: vi.fn(),
   leaveHousehold: vi.fn(),
   logout: vi.fn(),
+  pullLibraryChanges: vi.fn(),
+  pushLibraryChanges: vi.fn(),
   removeHouseholdMember: vi.fn(),
   requestLoginCode: vi.fn(),
   sendAnalyticsEvents: vi.fn(),

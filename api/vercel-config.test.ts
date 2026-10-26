@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
@@ -230,5 +230,28 @@ describe("vercel.json app hosts", () => {
     expect(webCsp).toBeDefined();
     expect(cspOf(appHostRule)).toBe(webCsp);
     expect(cspOf(appHostRule)).toContain("'sha256-Gx75g3P/94t2dubzu/zEVZUhlNzdIAiLifLVj8l4WJA='");
+  });
+});
+
+describe("vercel.json API functions", () => {
+  const apiConfig = JSON.parse(
+    readFileSync(new URL("../vercel.json", import.meta.url), "utf8")
+  ) as VercelConfig;
+  const functions = readdirSync(new URL(".", import.meta.url)).filter(
+    (name) => name.endsWith(".ts") && !name.endsWith(".test.ts")
+  );
+
+  it("stays within the Hobby plan's 12 functions per deployment", () => {
+    expect(functions.length).toBeLessThanOrEqual(12);
+  });
+
+  it("only rewrites to functions that exist", () => {
+    for (const rule of apiConfig.rewrites ?? []) {
+      const target = /^\/api\/([^/?]+)/u.exec(rule.destination)?.[1];
+
+      if (target) {
+        expect(functions).toContain(`${target}.ts`);
+      }
+    }
   });
 });

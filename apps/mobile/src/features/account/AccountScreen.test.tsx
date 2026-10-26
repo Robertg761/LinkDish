@@ -205,6 +205,10 @@ vi.mock("../saved-recipes/SavedRecipesContext", () => ({
   useSavedRecipes: () => savedRecipesMocks
 }));
 
+vi.mock("../saved-recipes/CookbookSyncCard", () => ({
+  CookbookSyncCard: () => null
+}));
+
 vi.mock("../../theme/tokens", () => ({
   appColors: canonicalAppColors,
   appSpacing: {

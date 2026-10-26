@@ -214,6 +214,71 @@ parses `extractRecipeAnyRequestSchema`.
   unknown names; the current one drops only those events, but they are still lost until
   the API knows them.
 
+### Personal library sync
+
+A signed-in account's own cookbook (recipes with their notes, favorites, tags, collection
+membership, rating, cook log and preferred servings, plus collections) is kept in the account so it
+follows the account between devices. Household recipes and the household shopping list keep their
+own routes. Scan photos, starter recipes, the meal plan and cook-mode sessions are not part of it.
+
+- `GET /library/changes?since=<cursor>` returns the account's items written after the cursor
+  ("0" for everything), oldest first, at most 100 items or about 2 MB per page, with the next
+  `cursor` and `hasMore`. A cursor past anything the account has written (a lost or reset store)
+  answers from the start with `reset: true`, so the device sends everything it holds again.
+- `POST /library/changes` takes 1 to 25 changes. Each is a recipe, a collection or a tombstone
+  (`deleted: true`, no payload) with the `updatedAt` of the device that changed it, and
+  `baseUpdatedAt`: the cloud copy the device merged it with (null for an item it never saw). A
+  change is stored when it is at least as new as the stored copy and was merged with that copy;
+  otherwise the stored copy comes back in `newer` for the device to merge, so a device never
+  overwrites a change it hasn't seen (two devices syncing at once, or clocks that disagree). Invalid changes and new items past the limits (5,000 recipes,
+  200 collections; 120,000 characters per item) are `rejected` one by one and the rest are stored.
+- Storage (`modules/library/library-service.ts`) is Upstash, per LinkDish user id:
+  `linkdish:library:v1:item:<user>:<kind>:<id>` holds the newest copy and the revision it was
+  written at, the `changes` sorted set scores each item by that revision (the feed a pull reads),
+  a `rev` counter hands out revisions, and `live` sets count live items against the limits. Writes
+  for one account run under a 30 s lock, so revisions commit in order and a pull never skips one.
+  Tombstones are kept so devices that were offline for months still learn about deletions.
+- `LIBRARY_SYNC_ENABLED` (off by default) switches the routes on; off, they answer 404 and clients
+  keep working locally. In production the routes refuse to run without Upstash (503) rather than
+  keep cookbooks in process memory. Deleting the account deletes every library key.
+- On Vercel the routes are served by the `api/household` function (`/library/*` rewrites to
+  `api/household?path=library/...`, see `api/_lib/library-routes.ts`): the Hobby plan allows 12
+  functions per deployment, and `api/vercel-config.test.ts` keeps the count within it.
+
+On a device, sync is one shared engine (`packages/recipe-domain/src/library-sync.ts`) driven by
+each app:
+
+- A device remembers, per item, a fingerprint of the copy the cloud last had (its "base"). An item
+  whose local fingerprint differs from its base changed on the device; a pulled copy that differs
+  changed elsewhere. Fields are fingerprinted in groups (content, notes, favorite, tags,
+  collections, rating, cooking, servings, ...), so edits to different groups on two devices both
+  survive; when both changed one group the device merging keeps its own, except tags, collection
+  membership and the cook log, which combine. Apps keep their own write paths: nothing records
+  changes as they happen, a run compares.
+- A run pulls and merges every page, then pushes what still differs from its base (deletions as
+  tombstones), stamping uploads later than the cloud copy they replace. A merged write is applied
+  only while the item still is what it was merged with; an item that keeps changing meanwhile
+  keeps the pulled change as `pending` for the next run and sends nothing over it. A change the API
+  turns away is held (not sent again) until the item changes. `packages/api-client/src/
+  library-sync.ts` validates each change before sending, so one bad item never fails a batch.
+- A device's cookbook is linked to one account: the first to sign in on it (merging the two). It
+  keeps the cookbook when that account signs out. Another account that signs in doesn't sync it;
+  it can replace it with its own cookbook. Deleting the account unlinks the device; its recipes
+  stay. Starter recipes, scans and when a recipe was last opened stay on the device.
+- Web (`apps/web/src/features/cloud-sync`): the link and bases live in the `librarySync` store
+  (IndexedDB v5), so they change with the recipes they describe; runs are serialized across tabs
+  with Web Locks and start after local changes (4 s), on focus, on coming online, every 5 minutes,
+  and on sign-in. The module loads after the first screen settles, and only once someone signs in.
+  The Account page shows its state, and the switch for another account's cookbook.
+- Android (`apps/mobile/src/features/saved-recipes/librarySync.ts`, `CookbookSyncContext.tsx`):
+  the link, bases and the account's collections (which the app doesn't show yet) live under
+  `linkdish.librarySync.v1` in AsyncStorage; synced fields the app doesn't show (tags, collection
+  membership, rating, cook log, preferred servings) ride along on each record as `libraryExtras`.
+  Merged changes are written to the stored cookbook before the bases that describe them. Runs
+  start after changes (4 s), when the app comes to the foreground, every 5 minutes while open, and
+  on sign-in; never while the stored cookbook couldn't be read. The Household screen shows its
+  state and the switch.
+
 ### `/extract` request path and performance
 
 `api/extract.ts` and the Fastify route share `services/extract-request-pipeline.ts`:

@@ -626,6 +626,167 @@ export const deleteShoppingItemsResponseSchema = z.object({
     .default([])
 });
 
+/*
+ * Personal library sync: a signed-in account's own cookbook (recipes with their personal metadata,
+ * and collections), kept in the account and exchanged as changes. Each recipe or collection is one
+ * item; the copy with the newest `updatedAt` wins, and a deletion travels as a tombstone.
+ */
+export const MAX_LIBRARY_RECIPES = 5_000;
+export const MAX_LIBRARY_COLLECTIONS = 200;
+export const MAX_LIBRARY_PUSH_CHANGES = 25;
+export const MAX_LIBRARY_PULL_CHANGES = 100;
+export const MAX_LIBRARY_CHANGE_PAYLOAD_CHARS = MAX_SHARED_RECIPE_PAYLOAD_CHARS;
+export const MAX_LIBRARY_RECIPE_TAGS = 20;
+export const MAX_LIBRARY_RECIPE_TAG_LENGTH = 32;
+export const MAX_LIBRARY_COOK_LOG_ENTRIES = 100;
+export const MAX_LIBRARY_COOK_LOG_NOTE_LENGTH = 1_000;
+/* As long as a LinkDish backup allows, so no restored recipe is too long to sync. */
+export const MAX_LIBRARY_NOTES_LENGTH = 20_000;
+export const MAX_LIBRARY_COLLECTION_NAME_LENGTH = 60;
+export const MAX_LIBRARY_COLLECTION_DESCRIPTION_LENGTH = 280;
+export const MAX_LIBRARY_COLLECTION_EMOJI_LENGTH = 16;
+
+const libraryItemIdSchema = z.string().trim().min(1).max(MAX_SHARED_RECIPE_SOURCE_ID_LENGTH);
+
+export const libraryItemKindSchema = z.enum(["recipe", "collection"]);
+
+export const libraryCookLogEntrySchema = z.object({
+  cookedAt: z.string().datetime(),
+  note: z.string().max(MAX_LIBRARY_COOK_LOG_NOTE_LENGTH).optional()
+});
+
+export const libraryRecipeSchema = z.object({
+  recipe: recipeSchema,
+  notes: z.string().max(MAX_LIBRARY_NOTES_LENGTH).optional(),
+  fetchMode: fetchModeSchema,
+  provenance: z.array(extractionProvenanceSchema),
+  strategy: extractionStrategySchema,
+  warnings: sharedRecipeWarningsSchema,
+  /** When the recipe was first saved. */
+  createdAt: z.string().datetime(),
+  /** The recipe this one was duplicated from, when it is a copy. */
+  clonedFromId: libraryItemIdSchema.optional(),
+  favorite: z.boolean().optional(),
+  tags: z
+    .array(z.string().trim().min(1).max(MAX_LIBRARY_RECIPE_TAG_LENGTH))
+    .max(MAX_LIBRARY_RECIPE_TAGS)
+    .optional(),
+  collectionIds: z.array(libraryItemIdSchema).max(MAX_LIBRARY_COLLECTIONS).optional(),
+  rating: z.number().int().min(1).max(5).optional(),
+  cookLog: z.array(libraryCookLogEntrySchema).max(MAX_LIBRARY_COOK_LOG_ENTRIES).optional(),
+  timesCooked: z.number().int().nonnegative().optional(),
+  lastCookedAt: z.string().datetime().optional(),
+  preferredServings: z.number().positive().max(10_000).optional()
+});
+
+export const libraryCollectionSchema = z.object({
+  name: z.string().trim().min(1).max(MAX_LIBRARY_COLLECTION_NAME_LENGTH),
+  emoji: z.string().max(MAX_LIBRARY_COLLECTION_EMOJI_LENGTH).optional(),
+  description: z.string().max(MAX_LIBRARY_COLLECTION_DESCRIPTION_LENGTH).optional(),
+  sortOrder: z.number().finite(),
+  createdAt: z.string().datetime()
+});
+
+/**
+ * One item as it changed: a live recipe or collection (with its payload), or a tombstone
+ * (`deleted: true`, no payload). `updatedAt` is when the item last changed on the device that
+ * changed it; the newest copy wins.
+ */
+export const libraryChangeSchema = z
+  .object({
+    kind: libraryItemKindSchema,
+    id: libraryItemIdSchema,
+    updatedAt: z.string().datetime(),
+    /**
+     * Pushes only: the `updatedAt` of the cloud copy the device merged this change with (null for
+     * an item it has never seen in the cloud). When the stored copy is another, a device wrote in
+     * between, and the stored copy comes back in `newer` to merge instead of being overwritten.
+     */
+    baseUpdatedAt: z.string().datetime().nullable().optional(),
+    deleted: z.literal(true).optional(),
+    recipe: libraryRecipeSchema.optional(),
+    collection: libraryCollectionSchema.optional()
+  })
+  .superRefine((change, context) => {
+    const hasRecipe = change.recipe !== undefined;
+    const hasCollection = change.collection !== undefined;
+    const valid = change.deleted
+      ? !hasRecipe && !hasCollection
+      : change.kind === "recipe"
+        ? hasRecipe && !hasCollection
+        : hasCollection && !hasRecipe;
+
+    if (!valid) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: change.deleted
+          ? "A deleted library item carries no payload."
+          : `A ${change.kind} change carries its ${change.kind} and nothing else.`
+      });
+    }
+
+    if (JSON.stringify(change).length > MAX_LIBRARY_CHANGE_PAYLOAD_CHARS) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Library item payload is too large."
+      });
+    }
+  });
+
+/** An opaque position in an account's change feed; "0" is the start. */
+export const libraryCursorSchema = z.string().regex(/^\d{1,15}$/u);
+
+export const pullLibraryChangesQuerySchema = z.object({
+  since: libraryCursorSchema.default("0")
+});
+
+export const pullLibraryChangesResponseSchema = z.object({
+  changes: z.array(libraryChangeSchema).max(MAX_LIBRARY_PULL_CHANGES),
+  /** Pass back as `since` for the next page (or the next sync). */
+  cursor: libraryCursorSchema,
+  hasMore: z.boolean(),
+  /**
+   * The cursor sent was past anything stored for the account (its stored library was lost or
+   * reset): this page starts again from the beginning, and the device should send everything it
+   * holds for the account again.
+   */
+  reset: z.boolean().optional()
+});
+
+export const pushLibraryChangesRequestSchema = z.object({
+  changes: z.array(libraryChangeSchema).min(1).max(MAX_LIBRARY_PUSH_CHANGES)
+});
+
+/* What the API parses before taking each change on its own (see `rejected` below). */
+export const pushLibraryChangesEnvelopeSchema = z.object({
+  changes: z.array(z.unknown()).min(1).max(MAX_LIBRARY_PUSH_CHANGES)
+});
+
+const libraryItemRefSchema = z.object({
+  kind: libraryItemKindSchema,
+  id: libraryItemIdSchema
+});
+
+export const pushLibraryChangesResponseSchema = z.object({
+  /** Stored as sent. */
+  accepted: z.array(libraryItemRefSchema),
+  /** Lost to a copy at least as new already stored; that copy is here to apply instead. */
+  newer: z.array(libraryChangeSchema),
+  /**
+   * Turned away on their own (invalid, too large, or over a library limit). The rest of the batch
+   * is still stored. `index` is the change's position in the request.
+   */
+  rejected: z.array(
+    z.object({
+      index: z.number().int().nonnegative(),
+      kind: libraryItemKindSchema.optional(),
+      id: z.string().optional(),
+      reason: z.enum(["invalid", "limit_reached"]),
+      message: z.string()
+    })
+  )
+});
+
 export const analyticsPlatformSchema = z.enum([
   "marketing_site",
   "web_app",
@@ -896,6 +1057,14 @@ export type UpsertShoppingItemsResponse = z.infer<typeof upsertShoppingItemsResp
 export type DeleteShoppingItemInput = z.infer<typeof deleteShoppingItemInputSchema>;
 export type DeleteShoppingItemsRequest = z.infer<typeof deleteShoppingItemsRequestSchema>;
 export type DeleteShoppingItemsResponse = z.infer<typeof deleteShoppingItemsResponseSchema>;
+export type LibraryItemKind = z.infer<typeof libraryItemKindSchema>;
+export type LibraryCookLogEntry = z.infer<typeof libraryCookLogEntrySchema>;
+export type LibraryRecipe = z.infer<typeof libraryRecipeSchema>;
+export type LibraryCollection = z.infer<typeof libraryCollectionSchema>;
+export type LibraryChange = z.infer<typeof libraryChangeSchema>;
+export type PullLibraryChangesResponse = z.infer<typeof pullLibraryChangesResponseSchema>;
+export type PushLibraryChangesRequest = z.infer<typeof pushLibraryChangesRequestSchema>;
+export type PushLibraryChangesResponse = z.infer<typeof pushLibraryChangesResponseSchema>;
 export type AnalyticsPlatform = z.infer<typeof analyticsPlatformSchema>;
 export type AnalyticsEventName = z.infer<typeof analyticsEventNameSchema>;
 export type AnalyticsEventProperties = z.infer<typeof analyticsEventPropertiesSchema>;
