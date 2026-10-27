@@ -370,6 +370,29 @@ describe("cookbook storage", () => {
       expect(data.get(LEGACY_COOKBOOK_CORRUPT_BACKUP_STORAGE_KEY)).toBe("[{broken");
     });
 
+    it("keeps sync off while a kept old value turns out not to be understood, then backs it up", async () => {
+      vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      const data = new Map([[LEGACY_COOKBOOK_STORAGE_KEY, "[{broken"]]);
+      const first = relaunch(data);
+      first.storage.getItem.mockRejectedValueOnce(
+        new Error("Row too big to fit into CursorWindow")
+      );
+      await first.cookbook.read();
+      await first.cookbook.write([buildRecord(1)]);
+
+      // Readable now, but not understood: its recipes are missing here, so the read is incomplete.
+      const second = relaunch(data);
+      const read = await second.cookbook.read();
+      expect(read).toMatchObject({ incomplete: true, status: "ok" });
+      expect(ids(read.records)).toEqual(["saved-1"]);
+      expect(data.get(LEGACY_COOKBOOK_CORRUPT_BACKUP_STORAGE_KEY)).toBe("[{broken");
+
+      // Backed up, so the next write lets it go, and later launches are complete.
+      await second.cookbook.write(read.records);
+      expect(data.has(LEGACY_COOKBOOK_STORAGE_KEY)).toBe(false);
+      expect((await relaunch(data).cookbook.read()).incomplete).toBeUndefined();
+    });
+
     it("never deletes one it couldn't read, and adds its recipes once it can", async () => {
       vi.spyOn(console, "warn").mockImplementation(() => undefined);
       const stored = [buildRecord(1), buildRecord(2)];

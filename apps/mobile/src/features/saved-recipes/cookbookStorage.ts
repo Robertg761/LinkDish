@@ -252,6 +252,19 @@ export const createCookbookStorage = (
     return records;
   };
 
+  /** Copies an old value that can't be understood aside for recovery; true once it's copied. */
+  const backUpUnreadableLegacy = async (value: string | null): Promise<boolean> => {
+    try {
+      if ((await storage.getItem(LEGACY_COOKBOOK_CORRUPT_BACKUP_STORAGE_KEY)) !== value) {
+        await storage.setItem(LEGACY_COOKBOOK_CORRUPT_BACKUP_STORAGE_KEY, value ?? "");
+      }
+      return true;
+    } catch (error) {
+      console.warn("Failed to back up the unreadable saved recipes.", error);
+      return false;
+    }
+  };
+
   /** Moves the old one-value cookbook into per-recipe storage. */
   const migrateLegacy = async (
     records: SavedRecipeRecord[],
@@ -313,14 +326,8 @@ export const createCookbookStorage = (
 
       if (legacy.status === "corrupt") {
         console.warn("Saved recipes could not be read. Keeping the stored copy for recovery.");
-
-        try {
-          await storage.setItem(LEGACY_COOKBOOK_CORRUPT_BACKUP_STORAGE_KEY, legacyValue ?? "");
-          // Backed up: the first cookbook written replaces it, as it always has.
-          legacyNeedsRemoval = true;
-        } catch (error) {
-          console.warn("Failed to back up the unreadable saved recipes.", error);
-        }
+        // Backed up: the first cookbook written replaces it, as it always has.
+        legacyNeedsRemoval = await backUpUnreadableLegacy(legacyValue);
 
         mode = "v2";
         return { records: [], status: "corrupt" };
@@ -378,9 +385,19 @@ export const createCookbookStorage = (
         ));
       } else {
         try {
-          const legacy = readSavedRecipeRecords(await storage.getItem(LEGACY_COOKBOOK_STORAGE_KEY));
+          const legacyValue = await storage.getItem(LEGACY_COOKBOOK_STORAGE_KEY);
+          const legacy = readSavedRecipeRecords(legacyValue);
 
-          if (legacy.status !== "corrupt") {
+          if (legacy.status === "corrupt") {
+            // Readable now but not understood: its recipes are missing here, so sync stays off
+            // this launch (it would take them for deletions). Once it's backed up, the next write
+            // deletes it, as a first launch does.
+            console.warn(
+              "The old saved recipes could not be understood. Keeping a copy for recovery."
+            );
+            incomplete = true;
+            legacyNeedsRemoval = await backUpUnreadableLegacy(legacyValue);
+          } else {
             // It couldn't be read when this cookbook was started: its recipes join it now, and
             // the next write stores them and deletes it.
             // One already here by id is kept as it is here. Ids are made unique before the
