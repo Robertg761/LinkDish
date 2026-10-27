@@ -1,4 +1,5 @@
-import type { ExtractRecipeRequest, ExtractRecipeResponse } from "@linkdish/api-contracts";
+import type { MobileExtractionRequest } from "../services/extraction-request";
+import type { ExtractRecipeResponse } from "@linkdish/api-contracts";
 
 const buildSuccessResponse = (
   url: string,
@@ -87,8 +88,12 @@ const isVideoUrl = (value: string): boolean => {
 };
 
 export const buildMockExtractionResponse = (
-  request: ExtractRecipeRequest
+  request: MobileExtractionRequest
 ): ExtractRecipeResponse => {
+  if ("text" in request) {
+    return buildSuccessResponse(request.sourceUrl ?? request.routeUrl, "llm-fallback");
+  }
+
   if ("images" in request) {
     return buildSuccessResponse(request.sourceUrl, "llm-fallback", "image");
   }

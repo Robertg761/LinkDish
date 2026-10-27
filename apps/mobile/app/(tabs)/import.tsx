@@ -18,9 +18,11 @@ import {
 
 import { useAccount } from "../../src/features/account/AccountContext";
 import { useBilling } from "../../src/features/billing/BillingContext";
+import { PasteTextSheet } from "../../src/features/recipe-intake/components/PasteTextSheet";
 import { UrlForm } from "../../src/features/recipe-intake/components/UrlForm";
 import { subscribeToRecipeUrlReset } from "../../src/features/recipe-intake/intakeResetEvents";
 import { createPendingImageImport } from "../../src/features/recipe-intake/pendingImageImports";
+import { createPendingTextImport } from "../../src/features/recipe-intake/textImport";
 import { pressedOpacity } from "../../src/theme/interactions";
 import { appColors, appSpacing } from "../../src/theme/tokens";
 
@@ -45,6 +47,7 @@ export default function HomeScreen() {
   const [urlResetSignal, setUrlResetSignal] = useState(0);
   const [isScanSheetVisible, setIsScanSheetVisible] = useState(false);
   const [isScanSheetRendered, setIsScanSheetRendered] = useState(false);
+  const [isPasteTextSheetVisible, setIsPasteTextSheetVisible] = useState(false);
   const sheetProgress = React.useRef(new Animated.Value(0)).current;
   const heroEntranceValues = React.useRef(
     HERO_ENTRANCE_DELAYS_MS.map(() => new Animated.Value(0))
@@ -104,6 +107,28 @@ export default function HomeScreen() {
       pathname: "/recipe",
       params: {
         url
+      }
+    });
+  };
+
+  const openPasteTextSheet = () => {
+    if (!useServerBillingGate && !importGate.allowed) {
+      router.push("/upgrade");
+      return;
+    }
+
+    setIsPasteTextSheetVisible(true);
+  };
+
+  const handleImportText = (text: string) => {
+    setIsPasteTextSheetVisible(false);
+    const pendingImport = createPendingTextImport(text);
+
+    router.push({
+      pathname: "/recipe",
+      params: {
+        textImportId: pendingImport.id,
+        url: pendingImport.sourceUrl
       }
     });
   };
@@ -298,6 +323,16 @@ export default function HomeScreen() {
               resetSignal={urlResetSignal}
               onCameraPress={handleCameraPress}
             />
+            <Pressable
+              accessibilityHint="Opens a box to paste a recipe from a caption, a note or an email"
+              accessibilityRole="button"
+              onPress={openPasteTextSheet}
+              style={({ pressed }) => [styles.pasteTextButton, pressed && styles.sheetRowPressed]}
+              testID="paste-text-button"
+            >
+              <MaterialCommunityIcons color={appColors.accent} name="text-box-outline" size={20} />
+              <AppText style={styles.pasteTextLabel}>Paste recipe text instead</AppText>
+            </Pressable>
           </Animated.View>
 
           {imageScanError || (!useServerBillingGate && !importGate.allowed) ? (
@@ -316,6 +351,15 @@ export default function HomeScreen() {
           void startImageImport(option);
         }}
         progress={sheetProgress}
+      />
+      <PasteTextSheet
+        onClose={() => setIsPasteTextSheetVisible(false)}
+        onImportLink={(url) => {
+          setIsPasteTextSheetVisible(false);
+          handleSubmit(url);
+        }}
+        onImportText={handleImportText}
+        visible={isPasteTextSheetVisible}
       />
     </View>
   );
@@ -485,6 +529,21 @@ const styles = StyleSheet.create({
   },
   keyboardAvoiding: {
     flex: 1
+  },
+  pasteTextButton: {
+    alignItems: "center",
+    alignSelf: "center",
+    borderRadius: 12,
+    flexDirection: "row",
+    gap: appSpacing.sm,
+    marginTop: appSpacing.md,
+    minHeight: 44,
+    paddingHorizontal: appSpacing.lg
+  },
+  pasteTextLabel: {
+    color: appColors.accent,
+    fontSize: 15,
+    fontWeight: "700"
   },
   screen: {
     backgroundColor: appColors.background,

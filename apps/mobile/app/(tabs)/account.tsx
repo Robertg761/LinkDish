@@ -22,6 +22,7 @@ import { AppDialog } from "../../src/components/AppDialog";
 import { mobileEnv } from "../../src/config/env";
 import { useAccount } from "../../src/features/account/AccountContext";
 import { useClerkSession } from "../../src/features/account/ClerkSessionContext";
+import { BackupCard } from "../../src/features/backup/BackupCard";
 import { useBilling } from "../../src/features/billing/BillingContext";
 import { CookbookSyncCard } from "../../src/features/saved-recipes/CookbookSyncCard";
 import { useSavedRecipes } from "../../src/features/saved-recipes/SavedRecipesContext";
@@ -790,6 +791,8 @@ export default function AccountScreen() {
 
             <CookbookSyncCard />
 
+            <BackupCard />
+
             <AppSurface style={[styles.card, styles.settingsCard]}>
               <View style={[styles.actions, styles.accountActions]}>
                 <View style={styles.accountPrimaryActions}>
@@ -958,6 +961,8 @@ export default function AccountScreen() {
                 />
               </AppSurface>
             ) : null}
+
+            <BackupCard />
           </>
         )}
       </ScrollView>

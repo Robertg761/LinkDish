@@ -157,6 +157,20 @@ vi.mock("./components/UrlForm", () => ({
   }
 }));
 
+const pasteTextSheetState = vi.hoisted(() => ({
+  props: null as {
+    onImportText: (text: string) => void;
+    visible: boolean;
+  } | null
+}));
+
+vi.mock("./components/PasteTextSheet", () => ({
+  PasteTextSheet: (props: { onImportText: (text: string) => void; visible: boolean }) => {
+    pasteTextSheetState.props = props;
+    return null;
+  }
+}));
+
 vi.mock("./intakeResetEvents", () => ({
   subscribeToRecipeUrlReset: vi.fn(() => () => undefined)
 }));
@@ -414,5 +428,61 @@ describe("HomeScreen import gate", () => {
     expect(JSON.stringify(renderer!.toJSON())).toContain(
       "That image was too large or could not be read. Try a clearer photo."
     );
+  });
+
+  it("opens the paste-text sheet and imports pasted text on the recipe screen", async () => {
+    accountState.isSignedIn = true;
+    let renderer: ReturnType<typeof create>;
+
+    await act(async () => {
+      renderer = create(<HomeScreen />);
+      await flushAsyncWork();
+    });
+
+    expect(pasteTextSheetState.props?.visible).toBe(false);
+
+    await act(async () => {
+      (
+        renderer!.root.findByProps({ testID: "paste-text-button" }).props as { onPress: () => void }
+      ).onPress();
+      await flushAsyncWork();
+    });
+
+    expect(pasteTextSheetState.props?.visible).toBe(true);
+
+    await act(async () => {
+      pasteTextSheetState.props?.onImportText("Pancakes: 2 eggs, 1 cup flour, fry them.");
+      await flushAsyncWork();
+    });
+
+    expect(routerMocks.push).toHaveBeenCalledWith({
+      pathname: "/recipe",
+      params: {
+        textImportId: expect.stringMatching(/^text-/u) as unknown,
+        url: expect.stringMatching(
+          /^https:\/\/linkdish\.app\/text-imports\/android-text-/u
+        ) as unknown
+      }
+    });
+    expect(pasteTextSheetState.props?.visible).toBe(false);
+  });
+
+  it("sends free users who are out of imports to the plans before they paste", async () => {
+    let renderer: ReturnType<typeof create>;
+
+    await act(async () => {
+      renderer = create(<HomeScreen />);
+      await flushAsyncWork();
+    });
+
+    await act(async () => {
+      (
+        renderer!.root.findByProps({ testID: "paste-text-button" }).props as { onPress: () => void }
+      ).onPress();
+      await flushAsyncWork();
+    });
+
+    expect(routerMocks.push).toHaveBeenCalledWith("/upgrade");
+    expect(pasteTextSheetState.props?.visible).toBe(false);
   });
 });
