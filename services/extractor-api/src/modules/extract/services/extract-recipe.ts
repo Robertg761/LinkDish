@@ -35,6 +35,8 @@ import { normalizeExtractionCandidate } from "../normalizers/index.js";
 import {
   detectHostedMediaSourceType,
   detectSourceTypeFromUrl,
+  INSTAGRAM_ADAPTER_KEY,
+  isInstagramUrl,
   isPinterestPinUrl,
   TIKTOK_ADAPTER_KEY
 } from "../source-detection/detect-source-from-url.js";
@@ -130,8 +132,9 @@ const logTaskFailure = (event: string) => (error: unknown) => {
 };
 
 const unsupportedSourceMessages = {
-  social:
-    "Instagram and Facebook links are not supported yet. Paste a written recipe page instead.",
+  social: "Facebook links are not supported yet. Paste a written recipe page instead.",
+  instagram:
+    "That Instagram link isn't a post. Share a single post or reel, or paste the recipe instead.",
   video: "That video site is not supported yet. Paste a written recipe page instead.",
   unknown: "That source is not supported yet."
 } as const;
@@ -144,14 +147,20 @@ const textCleanupReserveMs = 1_000;
 /* Social, video and unknown sources are never cached (they skip the lookup). */
 const isUnsupportedInitialSource = (
   sourceType: DetectionResult["sourceType"]
-): sourceType is keyof typeof unsupportedSourceMessages =>
+): sourceType is "social" | "video" | "unknown" =>
   sourceType === "social" || sourceType === "video" || sourceType === "unknown";
 
-/* TikTok is the one social platform with a supported path: its caption, via oEmbed. */
+/*
+ * TikTok and Instagram posts have a supported path: the caption, read through TikTok's oEmbed or
+ * Instagram's rendered embed page.
+ */
 const isSupportedSocialSource = (detection: DetectionResult, runtime: ExtractorRuntime) =>
   detection.sourceType === "social" &&
-  detection.adapterKey === TIKTOK_ADAPTER_KEY &&
+  (detection.adapterKey === TIKTOK_ADAPTER_KEY || detection.adapterKey === INSTAGRAM_ADAPTER_KEY) &&
   typeof runtime.fetchSocialDocument === "function";
+
+const socialPlatformName = (detection: DetectionResult): "Instagram" | "TikTok" =>
+  detection.adapterKey === INSTAGRAM_ADAPTER_KEY ? "Instagram" : "TikTok";
 
 const createExtractionContext = (
   runtime: ExtractorRuntime,
@@ -284,8 +293,11 @@ const getDocumentLogFields = (sourceDocument: SourceDocument, fetchMode: FetchMo
 
 const mapFetchErrorToResponse = (
   error: unknown,
-  sourceType: DetectionResult["sourceType"]
+  sourceType: DetectionResult["sourceType"],
+  socialPlatform: ReturnType<typeof socialPlatformName> = "TikTok"
 ): ExtractRecipeResponse => {
+  const socialPost = socialPlatform === "Instagram" ? "post" : "video";
+
   if (
     error instanceof BrowserFetchError ||
     error instanceof HtmlFetchError ||
@@ -313,7 +325,7 @@ const mapFetchErrorToResponse = (
           sourceType === "youtube"
             ? "That YouTube source blocked extraction right now."
             : sourceType === "social"
-              ? "TikTok did not let LinkDish read that video right now."
+              ? `${socialPlatform} did not let LinkDish read that ${socialPost} right now.`
               : "That site blocked recipe extraction right now.",
         recovery: {
           retryable: false,
@@ -355,7 +367,7 @@ const mapFetchErrorToResponse = (
         reason: "parse_failed",
         userMessage:
           sourceType === "social"
-            ? "That video is private, removed or not available to read."
+            ? `That ${socialPost} is private, removed or not available to read.`
             : "That page no longer exists or has moved.",
         recovery: {
           retryable: false,
@@ -1084,7 +1096,7 @@ const loadTextRecipeExtractor = async () => {
 };
 
 /*
- * Text that did not come from a fetched page: a TikTok caption or pasted text. The recipe is
+ * Text that did not come from a fetched page: a TikTok or Instagram caption, or pasted text. The recipe is
  * read from the text's own headings or layout (see parse-recipe-text.ts); text without a clear
  * ingredient list fails with a message that says what to add.
  */
@@ -1102,13 +1114,15 @@ const runTextExtraction = async ({
   attempt: "primary" | "fallback";
 }): Promise<ExtractionResult> => {
   const { runtime } = context;
+  /* Instagram captions come from a browser render; TikTok's oEmbed and pasted text do not. */
+  const fetchMode: FetchMode = document.origin === "instagram" ? "browser" : "http";
   const logBase = {
     hostname,
     detection,
     attempt,
-    fetchMode: "http" as const,
+    fetchMode,
     fallbackProvider: runtime.fallbackExtractor.providerName,
-    browserAttempted: false
+    browserAttempted: fetchMode === "browser"
   };
 
   await ensureAuthorized(context);
@@ -1122,7 +1136,7 @@ const runTextExtraction = async ({
         },
         detection.sourceType,
         document.url,
-        "http"
+        fetchMode
       )
     : null;
 
@@ -1171,13 +1185,14 @@ const runTextExtraction = async ({
   }
 
   if (!normalized) {
-    const isCaption = document.origin === "tiktok";
     const response = noRecipeInTextResponse(
-      isCaption
+      document.origin === "tiktok"
         ? "That video's caption doesn't include a written recipe. Try the recipe's website instead."
-        : looksLikeRecipeText(document.text)
-          ? 'LinkDish couldn\'t tell the ingredients from the steps. Put the ingredients under an "Ingredients" heading and the steps under a "Method" heading, then try again.'
-          : "That text doesn't look like a recipe yet. Include the ingredients and the steps."
+        : document.origin === "instagram"
+          ? "That post's caption doesn't include a written recipe. Try the recipe's website instead."
+          : looksLikeRecipeText(document.text)
+            ? 'LinkDish couldn\'t tell the ingredients from the steps. Put the ingredients under an "Ingredients" heading and the steps under a "Method" heading, then try again.'
+            : "That text doesn't look like a recipe yet. Include the ingredients and the steps."
     );
 
     return {
@@ -1209,7 +1224,10 @@ const runTextExtraction = async ({
   };
 };
 
-/* TikTok: the caption is read through oEmbed and parsed like pasted text. */
+/*
+ * TikTok and Instagram: the caption (through TikTok's oEmbed, or Instagram's embed page rendered
+ * in the browser) is parsed like pasted text.
+ */
 const extractFromSocialCaption = async (
   request: ExtractRecipeUrlRequest,
   context: ExtractionContext,
@@ -1232,9 +1250,21 @@ const extractFromSocialCaption = async (
       throw new SocialFetchError("Social captions are not available.", "unreachable");
     }
 
-    document = await fetchSocialDocument(request.url, { deadline: context.deadline });
+    document = await fetchSocialDocument(request.url, {
+      deadline: context.deadline,
+      awaitAuthorized: () => ensureAuthorized(context)
+    });
   } catch (error) {
-    const response = mapFetchErrorToResponse(error, detection.sourceType);
+    /* Billing denied the request while a browser render waited for it: that is no fetch error. */
+    if (error instanceof ExtractionCancelledError) {
+      throw error;
+    }
+
+    const response = mapFetchErrorToResponse(
+      error,
+      detection.sourceType,
+      socialPlatformName(detection)
+    );
     const metadata = getFetchErrorMetadata(error);
 
     return {
@@ -1274,7 +1304,10 @@ const rejectUnsupportedSource = (
   const response = extractRecipeResponseSchema.parse({
     status: "failure",
     reason: "unsupported_source",
-    userMessage: unsupportedSourceMessages[sourceType],
+    userMessage:
+      sourceType === "social" && isInstagramUrl(request.url)
+        ? unsupportedSourceMessages.instagram
+        : unsupportedSourceMessages[sourceType],
     recovery: {
       retryable: false,
       allowFallback: false,
