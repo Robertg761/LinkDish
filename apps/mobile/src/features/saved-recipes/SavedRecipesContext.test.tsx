@@ -519,6 +519,40 @@ describe("SavedRecipesProvider household save entitlement", () => {
     expect(collectionWrites[0]).toEqual(["linkdish.collections.corrupt.v1", '[{"id":"collection-']);
   });
 
+  it("makes sync pull damaged collections back instead of deleting them in the cloud", async () => {
+    asyncStorageMocks.getItem.mockImplementation((key: string) =>
+      Promise.resolve(
+        key === "linkdish.collections.v1"
+          ? '[{"id":"collection-'
+          : key === "linkdish.librarySync.v1"
+            ? JSON.stringify({
+                account: "u1",
+                bases: {
+                  "collection:collection-soups": { updatedAt: "2026-10-20T12:00:00.000Z" },
+                  "recipe:recipe-1": { updatedAt: "2026-10-20T12:00:00.000Z" }
+                },
+                cursor: "42",
+                linkedAt: "2026-10-20T12:00:00.000Z"
+              })
+            : null
+      )
+    );
+
+    await renderProvider();
+    await settlePersistence();
+
+    const syncStateWrites = asyncStorageMocks.setItem.mock.calls.filter(
+      ([key]) => key === "linkdish.librarySync.v1"
+    );
+    const state = JSON.parse(String(syncStateWrites.at(-1)?.[1])) as {
+      bases: Record<string, unknown>;
+      cursor: string;
+    };
+    expect(Object.keys(state.bases)).toEqual(["recipe:recipe-1"]);
+    expect(state.cursor).toBe("0");
+    expect(latestSavedRecipes?.isCookbookReadable).toBe(true);
+  });
+
   it("coalesces rapid small edits into one cookbook write", async () => {
     const storedRecipe = buildSavedRecipes(1)[0]!;
     storeSavedRecipes([storedRecipe]);

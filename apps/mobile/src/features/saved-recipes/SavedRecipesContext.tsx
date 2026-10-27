@@ -40,7 +40,11 @@ import {
   type MobileCollection
 } from "./collections";
 import { CookbookSyncProvider } from "./CookbookSyncContext";
-import { clearStateCollections, readStateCollections } from "./librarySync";
+import {
+  clearStateCollections,
+  forgetSyncedCollections,
+  readStateCollections
+} from "./librarySync";
 import {
   createScanVersion,
   deleteRecipeSourceImageFiles,
@@ -629,6 +633,8 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
         // Collections that can't be read are copied aside first; if that fails, nothing is written.
         if (isUnreadableStoredList(stored)) {
           await AsyncStorage.setItem(COLLECTIONS_CORRUPT_BACKUP_STORAGE_KEY, stored!);
+          // Sync forgets them too, so it brings the cloud's back rather than deleting them there.
+          await forgetSyncedCollections();
         }
 
         if (isMounted) {

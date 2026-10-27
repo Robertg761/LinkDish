@@ -96,6 +96,30 @@ export const readStateCollections = async (): Promise<MobileCollection[]> => {
 const writeState = (state: MobileLibrarySyncState): Promise<void> =>
   AsyncStorage.setItem(LIBRARY_SYNC_STORAGE_KEY, JSON.stringify(state));
 
+/**
+ * After the cookbook's stored collections were found damaged (and copied aside), sync forgets what
+ * it knew of them and pulls everything afresh: the cloud's collections come back here instead of
+ * their absence going out as deletions.
+ */
+export const forgetSyncedCollections = async (): Promise<void> => {
+  const state = await readMobileLibrarySyncState();
+
+  if (!state) {
+    return;
+  }
+
+  const prefix = librarySyncKey("collection", "");
+
+  for (const key of Object.keys(state.bases)) {
+    if (key.startsWith(prefix)) {
+      delete state.bases[key];
+    }
+  }
+
+  state.cursor = "0";
+  await writeState(state);
+};
+
 /** Takes the collections an older build kept out of the sync state, once the cookbook saved them. */
 export const clearStateCollections = async (): Promise<void> => {
   const state = await readMobileLibrarySyncState();
