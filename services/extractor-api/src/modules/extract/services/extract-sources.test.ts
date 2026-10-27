@@ -1126,6 +1126,70 @@ describe("the video recipe reader", () => {
     expect(response).toMatchObject({ status: "success", recipe: { title: "Easy chili" } });
   });
 
+  it("skips the read once the day's reads are used up", async () => {
+    const videoRecipeReader = reader();
+    const runtime = createRuntime({
+      fetchSocialDocument: () => Promise.resolve(tiktokDocument("so good 😍 #foodtok")),
+      fetchSocialVideo,
+      videoRecipeReader,
+      videoReadAllowance: { reserve: () => Promise.resolve(false) }
+    });
+
+    const { response, logContext } = await extractRecipe(
+      { url: tiktokUrl, attempt: "primary" },
+      runtime
+    );
+
+    expect(videoRecipeReader.read).not.toHaveBeenCalled();
+    expect(logContext.videoRead).toBe("skipped_daily_limit");
+    expect(response).toMatchObject({ status: "failure", reason: "parse_failed" });
+  });
+
+  it("skips the read when the daily limit can't be checked", async () => {
+    const videoRecipeReader = reader();
+    const runtime = createRuntime({
+      fetchSocialDocument: () => Promise.resolve(tiktokDocument("so good 😍 #foodtok")),
+      fetchSocialVideo,
+      videoRecipeReader,
+      videoReadAllowance: { reserve: () => Promise.reject(new Error("Upstash timed out")) }
+    });
+
+    const { logContext } = await extractRecipe({ url: tiktokUrl, attempt: "primary" }, runtime);
+
+    expect(videoRecipeReader.read).not.toHaveBeenCalled();
+    expect(logContext.videoRead).toBe("limit_unavailable");
+  });
+
+  it("does not use up a daily read on a failed download", async () => {
+    const reserve = vi.fn(() => Promise.resolve(true));
+    const runtime = createRuntime({
+      fetchSocialDocument: () => Promise.resolve(tiktokDocument("so good 😍 #foodtok")),
+      fetchSocialVideo: () => Promise.reject(new SocialFetchError("403", "blocked", 403)),
+      videoRecipeReader: reader(),
+      videoReadAllowance: { reserve }
+    });
+
+    const { logContext } = await extractRecipe({ url: tiktokUrl, attempt: "primary" }, runtime);
+
+    expect(reserve).not.toHaveBeenCalled();
+    expect(logContext.videoRead).toBe("download_failed");
+  });
+
+  it("reads the video while the day's reads last", async () => {
+    const reserve = vi.fn(() => Promise.resolve(true));
+    const runtime = createRuntime({
+      fetchSocialDocument: () => Promise.resolve(tiktokDocument("so good 😍 #foodtok")),
+      fetchSocialVideo,
+      videoRecipeReader: reader(),
+      videoReadAllowance: { reserve }
+    });
+
+    const { logContext } = await extractRecipe({ url: tiktokUrl, attempt: "primary" }, runtime);
+
+    expect(reserve).toHaveBeenCalledTimes(1);
+    expect(logContext.videoRead).toBe("read");
+  });
+
   it("reports a failed download as the caption's failure", async () => {
     const runtime = createRuntime({
       fetchSocialDocument: () => Promise.resolve(tiktokDocument("so good 😍 #foodtok")),
