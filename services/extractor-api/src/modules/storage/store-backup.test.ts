@@ -708,6 +708,43 @@ describe("restoreStoreSnapshot", () => {
     expect(target.strings.has("linkdish:household:v1:h1")).toBe(false);
   });
 
+  it("treats an account the snapshot already marks deleted as deleted", async () => {
+    const source = createFakeRedis(() => 0);
+    source.strings.set(
+      "linkdish:user:v1:u1",
+      JSON.stringify({ deletedAt: "2026-10-02T00:00:00.000Z", id: "u1" })
+    );
+    source.strings.set("linkdish:user:v1:u2", JSON.stringify({ id: "u2" }));
+    // Read before the deletion reached them.
+    source.strings.set("linkdish:session:v1:token", JSON.stringify({ userId: "u1" }));
+    source.strings.set("linkdish:identity:v1:clerk:sub", "u1");
+    source.strings.set("linkdish:identity-deleted:v1:clerk:sub", "u1");
+    source.strings.set(
+      "linkdish:household:v1:h1",
+      JSON.stringify({ id: "h1", memberUserIds: ["u2", "u1"], ownerUserId: "u2" })
+    );
+    source.strings.set(
+      "linkdish:household-recipe:v1:s1",
+      JSON.stringify({ householdId: "h1", id: "s1", ownerUserId: "u1" })
+    );
+    source.sets.set("linkdish:household-recipes:v1:h1", new Set(["s1"]));
+    const snapshot = await createStoreSnapshot(source.run, { now: () => new Date(0) });
+    const target = createFakeRedis(() => 0);
+
+    await restoreStoreSnapshot(target.run, snapshot, { apply: true });
+
+    expect(JSON.parse(target.strings.get("linkdish:user:v1:u1") ?? "{}")).toHaveProperty(
+      "deletedAt"
+    );
+    expect(target.strings.has("linkdish:session:v1:token")).toBe(false);
+    expect(target.strings.has("linkdish:identity:v1:clerk:sub")).toBe(false);
+    expect(target.strings.has("linkdish:household-recipe:v1:s1")).toBe(false);
+    expect(target.sets.has("linkdish:household-recipes:v1:h1")).toBe(false);
+    expect(JSON.parse(target.strings.get("linkdish:household:v1:h1") ?? "{}")).toMatchObject({
+      memberUserIds: ["u2"]
+    });
+  });
+
   it("judges keys picked by --only against the whole snapshot", async () => {
     const source = createFakeRedis(() => 0);
     source.strings.set("linkdish:user:v1:u1", JSON.stringify({ id: "u1" }));

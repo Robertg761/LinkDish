@@ -919,6 +919,8 @@ const identityTombstoneKey = (key: string): string =>
 const findRevokedIdentities = async (
   run: StorePipeline,
   candidates: Array<{ entry: StoreSnapshotEntry }>,
+  /* Tombstones in the snapshot itself: a deletion that landed while the backup was read. */
+  snapshotKeys: Set<string>,
   batchSize: number
 ): Promise<Set<string>> => {
   const identityKeys = new Set<string>();
@@ -941,7 +943,9 @@ const findRevokedIdentities = async (
   for (const batch of chunk([...identityKeys], batchSize)) {
     const exists = await run(batch.map((key) => ["EXISTS", identityTombstoneKey(key)]));
     batch.forEach((key, index) => {
-      if (Number(exists[index]) > 0) revoked.add(key);
+      if (Number(exists[index]) > 0 || snapshotKeys.has(identityTombstoneKey(key))) {
+        revoked.add(key);
+      }
     });
   }
 
@@ -1215,15 +1219,18 @@ export const restoreStoreSnapshot = async (
    * restored under the lock account deletion takes, and only if the account is not deleted.
    */
   const userKeys = new Map<string, string>();
+  // An account deleted while the backup was read: its record is marked, other keys may not be.
+  const deletedInSnapshot = new Set<string>();
 
-  for (const { key } of snapshot.entries) {
+  for (const { key, value } of snapshot.entries) {
     if (findBackedUpKeyFamily(key)?.name === "user") {
       userKeys.set(lastSegment(key), key);
+      if (isDeletedUserRecord(value)) deletedInSnapshot.add(lastSegment(key));
     }
   }
 
   const userIds = new Set(userKeys.keys());
-  const deletedUserIds = new Set<string>();
+  const deletedUserIds = new Set(deletedInSnapshot);
 
   for (const batch of chunk([...userKeys], batchSize)) {
     const [values] = await run([["MGET", ...batch.map(([, key]) => key)]]);
@@ -1236,7 +1243,12 @@ export const restoreStoreSnapshot = async (
 
   const shared = withoutRevokedIdentities(
     withoutDeletedMembers(candidates, snapshot.entries, deletedUserIds),
-    await findRevokedIdentities(run, candidates, batchSize)
+    await findRevokedIdentities(
+      run,
+      candidates,
+      new Set(snapshot.entries.map(({ key }) => key)),
+      batchSize
+    )
   );
   result.ofDeletedAccounts += candidates.length - shared.length;
 
@@ -1326,6 +1338,18 @@ export const restoreStoreSnapshot = async (
 
       if (isDeletedUserRecord(user)) {
         result.ofDeletedAccounts += group.length;
+        continue;
+      }
+
+      if (deletedInSnapshot.has(userId)) {
+        // Only its record, marked deleted, comes back.
+        const marker = group.filter(
+          ({ entry }) => findBackedUpKeyFamily(entry.key)?.name === "user"
+        );
+        result.ofDeletedAccounts += group.length - marker.length;
+        await restoreEntries(marker, async () => {
+          await lock?.renew();
+        });
         continue;
       }
 
