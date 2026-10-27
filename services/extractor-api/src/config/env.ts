@@ -105,6 +105,11 @@ const parsedExtractorApiEnv = readEnv(
     /* Longer videos are not sent: they cost more and cannot be read inside the request deadline. */
     VIDEO_RECIPE_MAX_SECONDS: z.coerce.number().int().positive().default(240),
     VIDEO_RECIPE_TIMEOUT_MS: z.coerce.number().int().positive().default(40_000),
+    /*
+     * Gemini video reads per UTC day, across instances with Upstash (per instance without); 0
+     * stops them. Bounds the reader's spend.
+     */
+    VIDEO_RECIPE_DAILY_READ_LIMIT: z.coerce.number().int().nonnegative().default(300),
     LLM_FALLBACK_DAILY_BUDGET_USD: z.coerce.number().nonnegative().default(0),
     BILLING_ENFORCEMENT_ENABLED: z
       .union([trimmedBooleanString, z.boolean()])

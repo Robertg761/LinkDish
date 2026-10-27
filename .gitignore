@@ -21,6 +21,9 @@ apps/mobile/.expo
 .artifacts
 .vercel
 .env*.local
+apps/web/dist-e2e
+apps/web/test-results
+apps/web/playwright-report
 
 # Private and generated working material
 .tmp_*

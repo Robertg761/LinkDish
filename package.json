@@ -12,6 +12,7 @@
     "build:web": "pnpm --filter @linkdish/web build",
     "preview:web": "pnpm --filter @linkdish/web preview",
     "test:web": "pnpm --filter @linkdish/web test",
+    "test:e2e:web": "pnpm --filter @linkdish/web test:e2e",
     "typecheck:web": "pnpm --filter @linkdish/web typecheck",
     "dev:mobile": "pnpm --filter @linkdish/mobile dev",
     "dev:api": "pnpm --filter @linkdish/extractor-api dev",
