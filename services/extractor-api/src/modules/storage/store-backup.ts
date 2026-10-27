@@ -476,7 +476,58 @@ const buildWriteCommands = (
 /* Extends the lock while it still holds our token; 0 once another holder has it. */
 const renewLockScript =
   "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('pexpire', KEYS[1], ARGV[2]) else return 0 end";
-const libraryRestoreLockMs = 120_000;
+const restoreLockMs = 120_000;
+
+interface HeldLock {
+  release: () => Promise<void>;
+  /* Before every write: a long restore can outlast one lease, and a write after the lock has
+   * passed to someone else would mix the two. Throws once it has. */
+  renew: () => Promise<void>;
+}
+
+/* The same lock the API takes (SET NX with a token), tried a few times while the API holds it. */
+const takeLock = async (
+  run: StorePipeline,
+  key: string,
+  what: string,
+  attempts: number,
+  retryDelayMs: number
+): Promise<HeldLock> => {
+  const token = randomBytes(16).toString("base64url");
+
+  for (let attempt = 1; ; attempt += 1) {
+    const [acquired] = await run([["SET", key, token, "NX", "PX", String(restoreLockMs)]]);
+
+    if (acquired === "OK") {
+      break;
+    }
+
+    if (attempt >= attempts) {
+      throw new Error(
+        `${what[0]?.toUpperCase() ?? ""}${what.slice(1)} stayed locked; try the restore again.`
+      );
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+  }
+
+  return {
+    release: async () => {
+      await run([["EVAL", releaseLibraryLockScript, "1", key, token]]);
+    },
+    renew: async () => {
+      const [renewed] = await run([
+        ["EVAL", renewLockScript, "1", key, token, String(restoreLockMs)]
+      ]);
+
+      if (Number(renewed) !== 1) {
+        throw new Error(
+          `Lost the lock on ${what} part-way through; run the restore again with --overwrite.`
+        );
+      }
+    }
+  };
+};
 
 /* The snapshot's feed members that it also holds the item of, oldest first. */
 const restorableMembers = (
@@ -600,45 +651,26 @@ const restoreLibrary = async (
     lockAttempts: number;
     lockRetryDelayMs: number;
     overwrite: boolean;
+    /* Renews the lock on the library's account, if the caller holds one. */
+    holdAccount: () => Promise<void>;
   }
 ): Promise<{ kept: number; replaced: number; written: number }> => {
   const keys = libraryKeysFor(version);
-  const lockKey = keys.lock(userId);
   const liveKeys = libraryItemKinds.map((kind) => keys.live(userId, kind));
   const coreKeys = [keys.rev(userId), keys.changes(userId), ...liveKeys];
-  const token = randomBytes(16).toString("base64url");
-  let locked = false;
-  // Before every write: a large library on a slow link can outlast one lease, and a write after
-  // the lock has passed to a push would mix the two.
+  const lock = options.apply
+    ? await takeLock(
+        run,
+        keys.lock(userId),
+        `the library of user ${userId}`,
+        options.lockAttempts,
+        options.lockRetryDelayMs
+      )
+    : null;
   const holdLock = async (): Promise<void> => {
-    const [renewed] = await run([
-      ["EVAL", renewLockScript, "1", lockKey, token, String(libraryRestoreLockMs)]
-    ]);
-
-    if (Number(renewed) !== 1) {
-      locked = false;
-      throw new Error(
-        `Lost the library lock of user ${userId} part-way through; run the restore again with --overwrite.`
-      );
-    }
+    await options.holdAccount();
+    await lock?.renew();
   };
-
-  if (options.apply) {
-    for (let attempt = 1; attempt <= options.lockAttempts && !locked; attempt += 1) {
-      const [acquired] = await run([
-        ["SET", lockKey, token, "NX", "PX", String(libraryRestoreLockMs)]
-      ]);
-      locked = acquired === "OK";
-
-      if (!locked && attempt < options.lockAttempts) {
-        await new Promise((resolve) => setTimeout(resolve, options.lockRetryDelayMs));
-      }
-    }
-
-    if (!locked) {
-      throw new Error(`The library of user ${userId} stayed locked; try the restore again.`);
-    }
-  }
 
   try {
     const coreExists = await run(coreKeys.map((key) => ["EXISTS", key]));
@@ -747,71 +779,47 @@ const restoreLibrary = async (
 
     return { kept: 0, replaced, written: entries.length - replaced };
   } finally {
-    if (locked) {
-      await run([["EVAL", releaseLibraryLockScript, "1", lockKey, token]]);
-    }
+    await lock?.release();
   }
 };
 
 /*
- * Deleting an account keeps its user record (marked deletedAt) but removes its email lookup,
- * sessions, sign-in identities and library. Those are missing, not lost, so a restore leaves
- * them out rather than bring the account back.
+ * Held by deleteAccountAndHouseholdAccess (households/household-service.ts) while it deletes an
+ * account, so a restore of that account's keys runs before the deletion or not at all.
  */
-const findDeletedUsers = async (
-  run: StorePipeline,
-  snapshot: StoreSnapshot,
-  batchSize: number
-): Promise<Set<string>> => {
-  const userKeys = snapshot.entries
-    .filter((entry) => findBackedUpKeyFamily(entry.key)?.name === "user")
-    .map((entry) => entry.key);
-  const deleted = new Set<string>();
+const accountLockKey = (userId: string): string => `linkdish:household-lock:v1:user:${userId}`;
 
-  for (const batch of chunk(userKeys, batchSize)) {
-    const [values] = await run([["MGET", ...batch]]);
-
-    batch.forEach((key, index) => {
-      const value: unknown = Array.isArray(values) ? values[index] : null;
-
-      try {
-        const user =
-          typeof value === "string"
-            ? (JSON.parse(value) as { deletedAt?: unknown; id?: unknown })
-            : null;
-        if (user?.deletedAt && typeof user.id === "string") deleted.add(user.id);
-      } catch {
-        // Not a user record this tool can read; restore it as usual.
-      }
-    });
-  }
-
-  return deleted;
-};
-
-/* The deleted account an entry belongs to, by a key segment or what a lookup points at. */
-const ownerOf = (entry: StoreSnapshotEntry, deletedUserIds: Set<string>): string | null => {
-  if (deletedUserIds.size === 0) return null;
-
-  const fromKey = entry.key.split(":").find((segment) => deletedUserIds.has(segment));
+/* The account an entry belongs to: by a key segment, or what a lookup or session points at. */
+const ownerOf = (entry: StoreSnapshotEntry, userIds: Set<string>): string | null => {
+  const fromKey = entry.key.split(":").find((segment) => userIds.has(segment));
   if (fromKey) return fromKey;
 
   const family = findBackedUpKeyFamily(entry.key)?.name;
   if (typeof entry.value !== "string") return null;
-  if ((family === "user-by-email" || family === "identity") && deletedUserIds.has(entry.value)) {
+  if ((family === "user-by-email" || family === "identity") && userIds.has(entry.value)) {
     return entry.value;
   }
 
   if (family === "session") {
     try {
       const { userId } = JSON.parse(entry.value) as { userId?: unknown };
-      return typeof userId === "string" && deletedUserIds.has(userId) ? userId : null;
+      return typeof userId === "string" && userIds.has(userId) ? userId : null;
     } catch {
       return null;
     }
   }
 
   return null;
+};
+
+const isDeletedUserRecord = (value: unknown): boolean => {
+  try {
+    return (
+      typeof value === "string" && Boolean((JSON.parse(value) as { deletedAt?: unknown }).deletedAt)
+    );
+  } catch {
+    return false;
+  }
 };
 
 export const restoreStoreSnapshot = async (
@@ -836,7 +844,8 @@ export const restoreStoreSnapshot = async (
     replaced: 0,
     written: 0
   };
-  const candidates: Array<{ entry: StoreSnapshotEntry; pttlMs: number | null }> = [];
+  type Candidate = { entry: StoreSnapshotEntry; pttlMs: number | null };
+  const candidates: Candidate[] = [];
 
   const libraryIdOf = (key: string): string | null => {
     const match = libraryKeyPattern.exec(key);
@@ -874,65 +883,119 @@ export const restoreStoreSnapshot = async (
     candidates.push({ entry, pttlMs: remainingMs });
   }
 
-  const deletedUserIds = await findDeletedUsers(run, snapshot, batchSize);
-  const libraries = new Map<string, StoreSnapshotEntry[]>();
-  const others: typeof candidates = [];
+  const restoreEntries = async (
+    group: Candidate[],
+    holdAccount: () => Promise<void>
+  ): Promise<void> => {
+    const libraries = new Map<string, StoreSnapshotEntry[]>();
+    const others: Candidate[] = [];
+
+    for (const candidate of group) {
+      const libraryId = libraryIdOf(candidate.entry.key);
+
+      if (libraryId) {
+        const library = libraries.get(libraryId);
+        if (library) library.push(candidate.entry);
+        else libraries.set(libraryId, [candidate.entry]);
+      } else {
+        others.push(candidate);
+      }
+    }
+
+    for (const batch of chunk(others, batchSize)) {
+      const exists = await run(batch.map(({ entry }) => ["EXISTS", entry.key]));
+      const writes: string[][] = [];
+
+      batch.forEach(({ entry, pttlMs }, index) => {
+        const present = Number(exists[index]) > 0;
+
+        if (present && !overwrite) {
+          result.kept += 1;
+          return;
+        }
+
+        if (present) {
+          result.replaced += 1;
+        } else {
+          result.written += 1;
+        }
+
+        writes.push(...buildWriteCommands(entry, pttlMs, overwrite));
+      });
+
+      if (apply && writes.length > 0) {
+        await holdAccount();
+        await run(writes);
+      }
+    }
+
+    for (const [id, entries] of [...libraries].sort(([left], [right]) => (left < right ? -1 : 1))) {
+      const [version = "", userId = ""] = id.split(":");
+      const counts = await restoreLibrary(run, version, userId, entries, {
+        apply,
+        batchSize,
+        holdAccount,
+        lockAttempts,
+        lockRetryDelayMs,
+        overwrite
+      });
+      result.kept += counts.kept;
+      result.replaced += counts.replaced;
+      result.written += counts.written;
+    }
+  };
+
+  /*
+   * Deleting an account keeps its user record (marked deletedAt) but removes its email lookup,
+   * sessions, sign-in identities and library: missing, not lost. So each account's keys are
+   * restored under the lock account deletion takes, and only if the account is not deleted.
+   */
+  const userKeys = new Map<string, string>();
+
+  for (const { key } of snapshot.entries) {
+    if (findBackedUpKeyFamily(key)?.name === "user") {
+      userKeys.set(key.slice(key.lastIndexOf(":") + 1), key);
+    }
+  }
+
+  const userIds = new Set(userKeys.keys());
+  const byAccount = new Map<string, Candidate[]>();
+  const unowned: Candidate[] = [];
 
   for (const candidate of candidates) {
-    if (ownerOf(candidate.entry, deletedUserIds)) {
-      result.ofDeletedAccounts += 1;
-      continue;
-    }
-
-    const libraryId = libraryIdOf(candidate.entry.key);
-
-    if (libraryId) {
-      const library = libraries.get(libraryId);
-      if (library) library.push(candidate.entry);
-      else libraries.set(libraryId, [candidate.entry]);
-    } else {
-      others.push(candidate);
-    }
+    const owner = ownerOf(candidate.entry, userIds);
+    const group = owner ? byAccount.get(owner) : unowned;
+    if (group) group.push(candidate);
+    else if (owner) byAccount.set(owner, [candidate]);
   }
 
-  for (const batch of chunk(others, batchSize)) {
-    const exists = await run(batch.map(({ entry }) => ["EXISTS", entry.key]));
-    const writes: string[][] = [];
+  await restoreEntries(unowned, () => Promise.resolve());
 
-    batch.forEach(({ entry, pttlMs }, index) => {
-      const present = Number(exists[index]) > 0;
+  for (const [userId, group] of [...byAccount].sort(([left], [right]) => (left < right ? -1 : 1))) {
+    const lock = apply
+      ? await takeLock(
+          run,
+          accountLockKey(userId),
+          `the account of user ${userId}`,
+          lockAttempts,
+          lockRetryDelayMs
+        )
+      : null;
 
-      if (present && !overwrite) {
-        result.kept += 1;
-        return;
+    try {
+      const [user] = await run([["GET", userKeys.get(userId) as string]]);
+
+      if (isDeletedUserRecord(user)) {
+        result.ofDeletedAccounts += group.length;
+        continue;
       }
 
-      if (present) {
-        result.replaced += 1;
-      } else {
-        result.written += 1;
-      }
-
-      writes.push(...buildWriteCommands(entry, pttlMs, overwrite));
-    });
-
-    if (apply && writes.length > 0) {
-      await run(writes);
+      await restoreEntries(group, async () => {
+        await lock?.renew();
+      });
+    } finally {
+      await lock?.release();
     }
-  }
-
-  for (const [id, entries] of [...libraries].sort(([left], [right]) => (left < right ? -1 : 1))) {
-    const [version = "", userId = ""] = id.split(":");
-    const counts = await restoreLibrary(run, version, userId, entries, {
-      apply,
-      batchSize,
-      lockAttempts,
-      lockRetryDelayMs,
-      overwrite
-    });
-    result.kept += counts.kept;
-    result.replaced += counts.replaced;
-    result.written += counts.written;
   }
 
   return result;

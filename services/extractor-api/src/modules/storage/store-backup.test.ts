@@ -502,6 +502,41 @@ describe("restoreStoreSnapshot", () => {
     }
   });
 
+  it("checks for a deleted account under the lock account deletion holds", async () => {
+    const source = createFakeRedis(() => 0);
+    seed(source, 0);
+    const snapshot = await createStoreSnapshot(source.run, { now: () => new Date(0) });
+    const target = createFakeRedis(() => 0);
+    const accountLock = "linkdish:household-lock:v1:user:u1";
+    const run: StorePipeline = (commands) => {
+      if (commands[0]?.[0] === "SET" && commands[0][1] === accountLock) {
+        // The deletion finishes just before the restore gets the lock.
+        target.strings.set(
+          "linkdish:user:v1:u1",
+          JSON.stringify({ deletedAt: "2026-10-02T00:00:00.000Z", id: "u1" })
+        );
+      }
+      return target.run(commands);
+    };
+
+    const result = await restoreStoreSnapshot(run, snapshot, { apply: true, overwrite: true });
+
+    expect(result.ofDeletedAccounts).toBeGreaterThan(0);
+    expect(target.strings.has("linkdish:session:v1:token")).toBe(false);
+    expect(target.zsets.has("linkdish:library:v1:changes:u1")).toBe(false);
+    expect(target.strings.has(accountLock)).toBe(false);
+
+    // While a deletion holds the lock, the restore waits and then gives up.
+    target.strings.set(accountLock, "deleting");
+    await expect(
+      restoreStoreSnapshot(target.run, snapshot, {
+        apply: true,
+        lockAttempts: 2,
+        lockRetryDelayMs: 0
+      })
+    ).rejects.toThrow(/The account of user u1 stayed locked/u);
+  });
+
   it("takes a whole library when a prefix selects part of it", async () => {
     const source = createFakeRedis(() => 0);
     seed(source, 0);
@@ -528,7 +563,12 @@ describe("restoreStoreSnapshot", () => {
     const lockKey = "linkdish:library:v1:lock:u1";
     let renewals = 0;
     const run: StorePipeline = (commands) => {
-      if (commands[0]?.[0] === "EVAL" && commands[0][1]?.includes("pexpire") && ++renewals === 2) {
+      if (
+        commands[0]?.[0] === "EVAL" &&
+        commands[0][1]?.includes("pexpire") &&
+        commands[0][3] === lockKey &&
+        ++renewals === 2
+      ) {
         // The lease ran out and a push took the lock.
         target.strings.set(lockKey, "push");
       }
@@ -541,7 +581,7 @@ describe("restoreStoreSnapshot", () => {
         batchSize: 1,
         keyPrefixes: ["linkdish:library:"]
       })
-    ).rejects.toThrow(/Lost the library lock/u);
+    ).rejects.toThrow(/Lost the lock on the library of user u1/u);
     expect(target.strings.has("linkdish:library:v1:item:u1:recipe:a")).toBe(true);
     expect(target.zsets.has("linkdish:library:v1:changes:u1")).toBe(false);
     expect(target.strings.get(lockKey)).toBe("push");
