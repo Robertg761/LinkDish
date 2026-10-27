@@ -3,6 +3,8 @@ import React from "react";
 import { act, create, type ReactTestInstance } from "react-test-renderer";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const appStateListeners = vi.hoisted(() => new Set<(state: string) => void>());
+
 const asyncStorageMocks = vi.hoisted(() => ({
   getItem: vi.fn(),
   setItem: vi.fn()
@@ -69,7 +71,10 @@ vi.mock("react-native-safe-area-context", () => ({
 
 vi.mock("react-native", () => ({
   AppState: {
-    addEventListener: () => ({ remove: () => undefined })
+    addEventListener: (_event: string, listener: (state: string) => void) => {
+      appStateListeners.add(listener);
+      return { remove: () => appStateListeners.delete(listener) };
+    }
   },
   Pressable: ({ children, ...props }: { children?: React.ReactNode }) =>
     React.createElement("pressable", props, children),
@@ -229,6 +234,22 @@ describe("PlanScreen", () => {
     });
     expect(textOf(renderer)).toContain("This week");
     expect(textOf(renderer)).toContain("Oct 25 – Oct 31");
+  });
+
+  it("moves on to the new day and week when the app comes back after midnight", async () => {
+    vi.setSystemTime(new Date(2026, 9, 31, 23));
+    const renderer = await render();
+
+    expect(textOf(renderer)).toContain("Today · Oct 31");
+
+    vi.setSystemTime(new Date(2026, 10, 1, 8));
+    act(() => {
+      appStateListeners.forEach((listener) => listener("active"));
+    });
+
+    expect(textOf(renderer)).toContain("This week");
+    expect(textOf(renderer)).toContain("Nov 1 – Nov 7");
+    expect(textOf(renderer)).toContain("Today · Nov 1");
   });
 
   it("pauses planning when the stored plan couldn't be read", async () => {

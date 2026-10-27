@@ -9,7 +9,7 @@ import {
 import { AppButton, AppSurface, AppText } from "@linkdish/ui";
 import { useFocusEffect, useLocalSearchParams } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { AppState, Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { selectionTick } from "../../lib/haptics";
@@ -53,12 +53,36 @@ export const PlanScreen = () => {
   const todayRef = useRef(today);
   todayRef.current = today;
 
-  // The day can turn over while the app sits in the background.
-  useFocusEffect(
-    useCallback(() => {
-      setToday(toIsoDate(new Date()));
-    }, [])
-  );
+  // The day can turn over while the app sits in the background (on this tab or another): the
+  // week with today in it moves on with it.
+  const refreshToday = useCallback(() => {
+    const previous = todayRef.current;
+    const next = toIsoDate(new Date());
+
+    if (next === previous) {
+      return;
+    }
+
+    todayRef.current = next;
+    setToday(next);
+    setWeekStart((current) =>
+      previous >= current && previous <= addDaysToIsoDate(current, 6)
+        ? startOfWeek(next, weekStartsOn)
+        : current
+    );
+  }, [weekStartsOn]);
+
+  useFocusEffect(refreshToday);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") {
+        refreshToday();
+      }
+    });
+
+    return () => subscription.remove();
+  }, [refreshToday]);
 
   // "View plan" after planning a recipe opens the week it went on.
   const requestedDate = typeof params.date === "string" ? params.date : undefined;
