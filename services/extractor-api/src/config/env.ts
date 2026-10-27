@@ -25,6 +25,10 @@ const trimmedOptionalString = () =>
     .trim()
     .optional()
     .transform((value) => (value === "" ? undefined : value));
+const optionalPositiveIntegerString = () =>
+  trimmedOptionalString()
+    .transform((value) => (value === undefined ? undefined : Number(value)))
+    .pipe(z.number().int().positive().optional());
 const trimmedBooleanString = z
   .string()
   .trim()
@@ -202,12 +206,8 @@ const parsedExtractorApiEnv = readEnv(
       .transform((value) => value === true || value === "true"),
     // Unset means analytics are kept indefinitely; the daily purge only runs for a table group
     // whose retention is set.
-    ANALYTICS_RETENTION_DAYS: trimmedOptionalString().pipe(
-      z.coerce.number().int().positive().optional()
-    ),
-    ANALYTICS_ROLLUP_RETENTION_DAYS: trimmedOptionalString().pipe(
-      z.coerce.number().int().positive().optional()
-    ),
+    ANALYTICS_RETENTION_DAYS: optionalPositiveIntegerString(),
+    ANALYTICS_ROLLUP_RETENTION_DAYS: optionalPositiveIntegerString(),
     CRON_SECRET: trimmedOptionalString(),
     GOOGLE_PLAY_PACKAGE_NAME: trimmedString().default("com.linkdish.app"),
     VERCEL_API_TOKEN: trimmedOptionalString(),
