@@ -292,6 +292,29 @@ const runMemoryCommand = (command: string[]): UpstashResponse => {
 
       return { result: removed };
     }
+    case "ZREMRANGEBYRANK": {
+      const sortedSet = key ? memorySortedSets.get(key) : null;
+      const start = Number(args[0]);
+      const stop = Number(args[1]);
+
+      if (!sortedSet || !Number.isInteger(start) || !Number.isInteger(stop)) {
+        return { result: 0 };
+      }
+
+      const ascending = [...sortedSet.entries()].sort(
+        (left, right) => left[1] - right[1] || left[0].localeCompare(right[0])
+      );
+      const toIndex = (rank: number) => (rank < 0 ? ascending.length + rank : rank);
+      const from = Math.max(0, toIndex(start));
+      const to = Math.min(ascending.length - 1, toIndex(stop));
+      const selected = to < from ? [] : ascending.slice(from, to + 1);
+
+      for (const [member] of selected) {
+        sortedSet.delete(member);
+      }
+
+      return { result: selected.length };
+    }
     case "ZRANGEBYSCORE": {
       const sortedSet = key ? memorySortedSets.get(key) : null;
       const parseBound = (bound: string | undefined): { exclusive: boolean; value: number } => {

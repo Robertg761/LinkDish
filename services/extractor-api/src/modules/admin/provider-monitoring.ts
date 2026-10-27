@@ -4,12 +4,7 @@ import { resolve } from "node:path";
 import { extractorApiEnv } from "../../config/env.js";
 
 export type AdminProviderConnectionStatus =
-  | "ok"
-  | "watch"
-  | "upgrade"
-  | "missing"
-  | "error"
-  | "unknown";
+  "ok" | "watch" | "upgrade" | "missing" | "error" | "unknown";
 
 export interface AdminProviderMetric {
   label: string;
