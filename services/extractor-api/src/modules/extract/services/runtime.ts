@@ -3,6 +3,7 @@ import { getSharedManagedFallbackExtractor } from "../../admin/model-control.js"
 import { createExtractionResultCache } from "../cache/extraction-cache.js";
 import { ExtractionCancelledError } from "../deadline.js";
 import { createGeminiVideoRecipeReader } from "../extractors/video/gemini-video-recipe-reader.js";
+import { createDailyVideoReadAllowance } from "../extractors/video/video-read-allowance.js";
 import { BrowserFetchError, HtmlFetchError } from "../fetchers/errors.js";
 import { getDomainAdapter } from "../source-detection/domain-adapters.js";
 import { parseYouTubeVideoId } from "../source-detection/parse-youtube-video-id.js";
@@ -256,6 +257,9 @@ export const createDefaultExtractorRuntime = (): ExtractorRuntime => {
       model: extractorApiEnv.VIDEO_RECIPE_MODEL,
       fetchImplementation,
       timeoutMs: extractorApiEnv.VIDEO_RECIPE_TIMEOUT_MS
+    }),
+    videoReadAllowance: createDailyVideoReadAllowance({
+      dailyLimit: extractorApiEnv.VIDEO_RECIPE_DAILY_READ_LIMIT
     }),
     fallbackExtractor: getSharedManagedFallbackExtractor(fetchImplementation),
     recipeTextCleaner: createRecipeTextCleaner(),
