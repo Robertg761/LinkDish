@@ -1,5 +1,7 @@
 import { test as base, expect } from "@playwright/test";
 
+import { ONBOARDING_STORAGE_KEY } from "../src/features/onboarding/onboarding-routes";
+
 import { E2E_API_ORIGIN } from "./api-origin";
 
 import type { AuthConfigResponse } from "@linkdish/api-contracts";
@@ -29,15 +31,21 @@ const SIGNED_OUT_AUTH_CONFIG: AuthConfigResponse = {
 
 /**
  * Stands in for the LinkDish API. Every request to the E2E API origin is recorded and answered
- * by the handler registered for its method and path, or with a 404 (the app treats those as a
- * server without the feature, as it would for a signed-out visitor).
+ * by the handler registered for its method and path. A request without one gets a 404 and fails
+ * the test, so a flow that starts depending on a new endpoint has to say how it answers.
  */
 export class ApiMock {
   readonly calls: ApiCall[] = [];
+  /** Handlers that threw; the test fails on them (the request gets a 500 instead of hanging). */
+  readonly handlerErrors: string[] = [];
+  /** Requests no handler answered; the test fails on them. */
+  readonly unmocked: string[] = [];
   private readonly handlers = new Map<string, ApiHandler>();
 
   constructor() {
     this.on("GET", "/auth/config", () => ({ json: SIGNED_OUT_AUTH_CONFIG }));
+    // Recipe photos come through the API's image proxy; without one the app shows its placeholder.
+    this.on("GET", "/image", () => ({ status: 404, json: { error: "not_found" } }));
     this.on("POST", "/analytics/events", (call) => ({
       json: { accepted: (call.body as { events?: unknown[] } | null)?.events?.length ?? 0 }
     }));
@@ -62,7 +70,18 @@ export class ApiMock {
     this.calls.push(call);
 
     const handler = this.handlers.get(`${call.method} ${call.path}`);
-    const response = handler ? handler(call) : { status: 404, json: { error: "not_found" } };
+    let response: MockResponse = { status: 404, json: { error: "not_found" } };
+
+    if (!handler) {
+      this.unmocked.push(`${call.method} ${call.path}`);
+    } else {
+      try {
+        response = handler(call);
+      } catch (error) {
+        this.handlerErrors.push(`${call.method} ${call.path}: ${String(error)}`);
+        response = { status: 500, json: { error: "mock_handler_failed" } };
+      }
+    }
 
     await route.fulfill({
       status: response.status ?? 200,
@@ -115,15 +134,18 @@ export const test = base.extend<Fixtures>({
       });
 
       await use(api);
+
+      expect(api.handlerErrors, "API mock handlers that threw").toEqual([]);
+      expect(api.unmocked, "API requests without a mock (add one with api.on)").toEqual([]);
     },
     { auto: true }
   ],
 
   page: async ({ page, onboardingSeen }, use) => {
     if (onboardingSeen) {
-      await page.addInitScript(() => {
-        window.localStorage.setItem("linkdish:web:first-run-onboarding-seen:v1", "true");
-      });
+      await page.addInitScript((key) => {
+        window.localStorage.setItem(key, "true");
+      }, ONBOARDING_STORAGE_KEY);
     }
 
     const uncaught: string[] = [];

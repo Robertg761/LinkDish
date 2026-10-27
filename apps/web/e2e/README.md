@@ -25,10 +25,13 @@ report and traces when a test fails.
   on port 4183, so it tests what ships. Locally an already running server on that port is
   reused; stop it after changing app code.
 - The build points the API at `https://api.e2e.invalid`. `fixtures.ts` answers those requests
-  (`api.on("POST", "/extract", ...)`), records them in `api.calls`, and returns 404 for anything
-  a test didn't mock. Requests to any other origin are aborted, so nothing reaches production.
+  (`api.on("POST", "/extract", ...)`) and records them in `api.calls`. A request nothing mocks
+  fails the test, as does a mock handler that throws. Requests to any other origin are aborted,
+  so nothing reaches production.
 - Each test gets a fresh browser context: an empty cookbook (the starter recipes), no
   account (Clerk is off) and the first-run sheet already dismissed (`test.use({ onboardingSeen:
 false })` shows it).
 - A test fails if the page throws an uncaught error.
+- The config is `e2e/playwright.config.ts`, outside the app's tsconfig, so the production build
+  never type-checks test tooling.
 - Files are `*.e2e.ts`, not `*.test.ts`, so Vitest leaves them alone.

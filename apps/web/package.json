@@ -10,7 +10,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p scripts/tsconfig.json && tsc -p e2e/tsconfig.json",
     "size": "node scripts/bundle-size.ts",
     "test": "vitest run",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test -c e2e/playwright.config.ts"
   },
   "dependencies": {
     "@clerk/clerk-react": "5.61.8",

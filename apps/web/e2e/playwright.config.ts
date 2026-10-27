@@ -1,6 +1,6 @@
 import { defineConfig, devices } from "@playwright/test";
 
-import { E2E_API_ORIGIN } from "./e2e/api-origin";
+import { E2E_API_ORIGIN } from "./api-origin";
 
 const isCI = Boolean(process.env.CI);
 /** Not Vite's preview default (4173), so a preview pointed at the real API is never reused. */
@@ -9,16 +9,20 @@ const baseURL = `http://localhost:${PORT}`;
 
 /**
  * End-to-end tests run the production build (vite build + vite preview) in Chromium, with every
- * API call answered by the mock in e2e/fixtures.ts. See e2e/README.md.
+ * API call answered by the mock in fixtures.ts. See README.md. It lives in e2e/ (paths below are
+ * relative to it) so the app's own tsconfig, which the production build type-checks, leaves it out.
  */
 export default defineConfig({
-  testDir: "./e2e",
+  testDir: ".",
+  outputDir: "../test-results",
   // Not *.test.ts / *.spec.ts: those belong to Vitest, which would try to run these.
   testMatch: "**/*.e2e.ts",
   fullyParallel: true,
   forbidOnly: isCI,
   retries: isCI ? 1 : 0,
-  reporter: isCI ? [["github"], ["html", { open: "never" }]] : [["list"]],
+  reporter: isCI
+    ? [["github"], ["html", { open: "never", outputFolder: "../playwright-report" }]]
+    : [["list"]],
   use: {
     baseURL,
     locale: "en-US",
@@ -34,6 +38,7 @@ export default defineConfig({
   ],
   webServer: {
     command: `pnpm exec vite build --outDir dist-e2e --logLevel error && pnpm exec vite preview --outDir dist-e2e --port ${PORT} --strictPort`,
+    cwd: "..",
     url: baseURL,
     // Set here so a local .env can't point the build at the real API, Clerk or RevenueCat.
     env: {

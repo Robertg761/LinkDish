@@ -1,3 +1,5 @@
+import { ONBOARDING_STORAGE_KEY } from "../src/features/onboarding/onboarding-routes";
+
 import { expect, test, toasts } from "./fixtures";
 
 test.describe("first visit", () => {
@@ -12,6 +14,11 @@ test.describe("first visit", () => {
     ).toBeVisible();
     await welcome.getByRole("button", { name: "Skip" }).click();
     await expect(welcome).toBeHidden();
+    // What keeps it away next time (the sheet itself only appears after a short delay, so a
+    // reload alone can't prove it stays gone).
+    expect(
+      await page.evaluate((key) => window.localStorage.getItem(key), ONBOARDING_STORAGE_KEY)
+    ).toBe("true");
 
     const main = page.getByRole("main");
     await expect(main.getByText("3 starter recipes")).toBeVisible();

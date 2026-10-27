@@ -30,7 +30,7 @@ test("imports a recipe from a link and keeps it in the cookbook", async ({ page,
 test("offers pasted text when a site blocks the link", async ({ page, api }) => {
   const soup = { ...weeknightRice, title: "Pantry Lentil Soup" };
   api.on("POST", "/extract", ({ body }) =>
-    (body as { url?: string }).url
+    (body as { url?: string } | null)?.url
       ? { json: extractFailure("source_blocked") }
       : { json: extractSuccess(soup) }
   );

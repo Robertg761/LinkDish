@@ -3,6 +3,8 @@ import { expect, test, toasts } from "./fixtures";
 const RECIPE = "Ginger-Sesame Chicken Rice Skillet";
 
 test.beforeEach(async ({ page }) => {
+  // Midday, so "today" in the plan sheet and on the plan page can't straddle midnight.
+  await page.clock.setFixedTime(new Date("2026-10-14T12:00:00Z"));
   await page.goto("/");
   await page
     .getByRole("main")
