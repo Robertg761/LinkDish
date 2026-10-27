@@ -939,6 +939,35 @@ describe("household-service", () => {
     await expect(auth.getUserByEmail("standalone@example.com")).resolves.toBeNull();
   });
 
+  it("deletes the account's analytics with the account", async () => {
+    stubRevenueCatFamily(() => true);
+    const { auth, households } = await importHouseholdModules({ ANALYTICS_ENABLED: "true" });
+    const analytics = await import("../analytics/analytics-store.js");
+    const { hashAnalyticsUserId } = await import("../analytics/analytics-privacy.js");
+    const user = await createUser(auth, "counted@example.com");
+
+    await analytics.writeAnalyticsEvents([
+      {
+        accountUserHash: hashAnalyticsUserId(user.id),
+        eventName: "web_app_loaded",
+        platform: "web_app",
+        properties: {}
+      },
+      {
+        accountUserHash: hashAnalyticsUserId("someone-else"),
+        eventName: "web_app_loaded",
+        platform: "web_app",
+        properties: {}
+      }
+    ]);
+
+    await households.deleteAccountAndHouseholdAccess(user, user.email);
+
+    await expect(analytics.getAnalyticsDashboardSummary()).resolves.toMatchObject({
+      totals: { events: 1 }
+    });
+  });
+
   it("deletes the account's cloud cookbook with the account", async () => {
     stubRevenueCatFamily(() => true);
     const { auth, households } = await importHouseholdModules({ LIBRARY_SYNC_ENABLED: "true" });

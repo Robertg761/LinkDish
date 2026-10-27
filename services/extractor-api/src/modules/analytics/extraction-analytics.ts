@@ -1,4 +1,4 @@
-import { getAuthenticatedUser } from "../auth/auth-service.js";
+import { getAuthenticatedUser, getUserById } from "../auth/auth-service.js";
 import { getHeader, isLiveCanaryRequest } from "../request-identity.js";
 
 import { hashAnalyticsUserId } from "./analytics-privacy.js";
@@ -36,10 +36,19 @@ export const recordDurableExtractionAnalyticsEvent = async (
    * instead of authenticating the request a second time (1-4 store reads and
    * possibly a Clerk verification).
    */
-  const accountUserId =
+  const authenticatedUserId =
     event.billing.accountUserId ??
     (await getAuthenticatedUser(headers).catch(() => null))?.user.id ??
     null;
+  /*
+   * An extraction can outlast its account: deleting the account while an import is running
+   * would otherwise write an account-linked row after the deletion swept them. getUserById
+   * returns null for a deleted account, so the event is recorded without the account hash.
+   */
+  const accountUserId =
+    authenticatedUserId && (await getUserById(authenticatedUserId).catch(() => null))
+      ? authenticatedUserId
+      : null;
 
   const anonymousId = getHeader(headers, "x-linkdish-client-id") ?? undefined;
   const sessionId = getHeader(headers, "x-linkdish-session-id") ?? undefined;
