@@ -23,6 +23,17 @@ export const INSTAGRAM_ORIGIN = "https://www.instagram.com";
 
 const maxCaptionChars = 5_000;
 
+/*
+ * Instagram drops empty lines from captions, so creators end lines with an invisible separator
+ * (U+2063) to keep them. Without it those lines are empty again, and the text parser sees the
+ * gap between the ingredients and the method.
+ */
+const cleanCaption = (caption: string): string =>
+  caption
+    .replace(/[\u2063\u200b\u2060\ufeff]/gu, "")
+    .replace(/[^\S\n]+$/gmu, "")
+    .trim();
+
 /** Renders a page with the browser fetcher (the runtime supplies it with the request's budget). */
 export type RenderInstagramPage = (url: string) => Promise<FetchResult>;
 
@@ -232,8 +243,9 @@ const readPostFromRenderedText = (document: HtmlSourceDocument): InstagramEmbedP
   return null;
 };
 
+/* The embed page of a removed, private or mistyped post says so instead of showing one. */
 const removedPostPattern =
-  /(?:Sorry, this page isn't available|This (?:post|content|reel) (?:is|isn't) (?:no longer )?available|Post isn't available)/iu;
+  /(?:may be broken, or the post may have been removed|Sorry, this page isn't available|This (?:post|content|reel) (?:is|isn't) (?:no longer )?available|Post isn't available)/iu;
 
 /** The post a rendered embed page shows, or null when it shows no post. */
 export const readInstagramEmbedPost = (
@@ -292,7 +304,7 @@ export const fetchInstagramDocument = async (
     kind: "text",
     url: toInstagramPostUrl(post.shortcode, isVideo),
     origin: "instagram",
-    text: embedPost.caption.slice(0, maxCaptionChars),
+    text: cleanCaption(embedPost.caption).slice(0, maxCaptionChars),
     title: null,
     authorName: embedPost.authorName,
     thumbnailUrl: embedPost.thumbnailUrl,

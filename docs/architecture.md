@@ -172,7 +172,8 @@ platforms map onto them and are told apart internally by the detection `adapterK
   render, and its budget comes from the request deadline). The caption, author, cover image
   and whether it is a video are read from the post's record in the page state
   (`contextJSON` or a bare `edge_media_to_caption`), then the classic `.Caption` markup, then
-  the rendered text between the like count and the comments link. The caption goes through
+  the rendered text between the like count and the comments link. The invisible separators
+  (U+2063) creators put on lines to keep blank lines are dropped, and the caption goes through
   the same text parser as TikTok. A reel's ingredients-only caption keeps the video step; a
   photo post's does not, and reels never go to the video reader. A login redirect or a page
   with no post fails as `source_blocked`, a removed or private post as `parse_failed`.

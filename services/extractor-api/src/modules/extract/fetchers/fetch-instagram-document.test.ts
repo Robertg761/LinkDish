@@ -109,6 +109,32 @@ describe("fetchInstagramDocument", () => {
     });
   });
 
+  it("drops the invisible separators creators use to keep empty lines", async () => {
+    const separated =
+      "Lemon pasta ☀️\u2063\n\u2063\n2 tbsp butter\u2063 \n1 cup cream\u2063\n\u2063\nMelt the butter.";
+    const html = page(
+      "",
+      `<script>(${JSON.stringify({
+        contextJSON: JSON.stringify({
+          gql_data: {
+            shortcode_media: {
+              shortcode,
+              owner: { username: "cookcreator" },
+              edge_media_to_caption: { edges: [{ node: { text: separated } }] }
+            }
+          }
+        })
+      })})</script>`
+    );
+
+    const document = await fetchInstagramDocument(
+      `https://www.instagram.com/reel/${shortcode}/`,
+      () => Promise.resolve(rendered(html))
+    );
+
+    expect(document.text).toBe("Lemon pasta ☀️\n\n2 tbsp butter\n1 cup cream\n\nMelt the butter.");
+  });
+
   it("reads a caption edge that sits directly in a script", async () => {
     const html = page(
       "",
@@ -184,7 +210,13 @@ describe("fetchInstagramDocument", () => {
       Promise.resolve(rendered(page("Log in"), "https://www.instagram.com/accounts/login/?next=x"))
     );
     const removed = fetchInstagramDocument(`https://www.instagram.com/p/${shortcode}/`, () =>
-      Promise.resolve(rendered(page("<h2>Sorry, this page isn't available.</h2>")))
+      Promise.resolve(
+        rendered(
+          page(
+            "<div>The link to this photo or video may be broken, or the post may have been removed.</div>"
+          )
+        )
+      )
     );
     const shell = fetchInstagramDocument(`https://www.instagram.com/p/${shortcode}/`, () =>
       Promise.resolve(rendered(page("<div>Instagram</div>")))
