@@ -308,3 +308,65 @@ describe("Vercel admin dashboard adapter", () => {
     expect(persistedSettings.size).toBe(0);
   });
 });
+
+describe("analytics retention cron", () => {
+  const importWithEnv = async (env: Record<string, string>) => {
+    vi.resetModules();
+
+    for (const [key, value] of Object.entries(env)) {
+      vi.stubEnv(key, value);
+    }
+
+    return import("./admin.js");
+  };
+
+  const cronRequest = (secret?: string) =>
+    request("/api/admin?path=cron/analytics-retention", {
+      headers: secret ? { authorization: `Bearer ${secret}` } : {}
+    });
+
+  it("is unavailable until CRON_SECRET is set", async () => {
+    const api = await importWithEnv({ CRON_SECRET: "" });
+
+    expect((await api.GET(cronRequest("anything"))).status).toBe(503);
+  });
+
+  it("rejects a missing or wrong secret, including the admin dashboard token", async () => {
+    const api = await importWithEnv({ CRON_SECRET: "test_cron_secret" });
+
+    expect((await api.GET(cronRequest())).status).toBe(401);
+    expect((await api.GET(cronRequest("wrong_secret"))).status).toBe(401);
+    expect((await api.GET(cronRequest("test_admin_token"))).status).toBe(401);
+  });
+
+  it("runs the purge with the cron secret, even with the dashboard disabled", async () => {
+    const api = await importWithEnv({
+      ADMIN_DASHBOARD_ENABLED: "false",
+      ANALYTICS_DATABASE_URL: "",
+      CRON_SECRET: "test_cron_secret"
+    });
+
+    const response = await api.GET(cronRequest("test_cron_secret"));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    await expect(response.json()).resolves.toMatchObject({
+      complete: true,
+      configured: false
+    });
+  });
+
+  it("does not open the dashboard to the cron secret", async () => {
+    const api = await importWithEnv({ CRON_SECRET: "test_cron_secret" });
+
+    expect(
+      (
+        await api.GET(
+          request("/api/admin?path=api/dashboard", {
+            headers: { authorization: "Bearer test_cron_secret" }
+          })
+        )
+      ).status
+    ).toBe(401);
+  });
+});
