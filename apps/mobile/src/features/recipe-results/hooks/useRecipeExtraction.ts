@@ -2,6 +2,7 @@ import { ExtractorApiError } from "@linkdish/api-client";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { createMobileAnalyticsId, trackMobileEvent } from "../../../analytics/client";
+import { isTextExtractionRequest } from "../../../services/extraction-request";
 import { extractRecipe } from "../../../services/extractor-api";
 import { useAccount } from "../../account/AccountContext";
 import { useBilling } from "../../billing/BillingContext";
@@ -11,8 +12,8 @@ import { INVALID_RECIPE_URL_MESSAGE, isAllowedRecipeUrl } from "../../recipe-int
 import { restoreSavedRecipeState, type SavedRecipeRecord } from "../../saved-recipes/store";
 import { getDraftRecipeExtraction, saveDraftRecipeExtraction } from "../draftStore";
 
+import type { MobileExtractionRequest } from "../../../services/extraction-request";
 import type { ExtractionUiState, RecipeSourceImage, SuccessfulExtractionState } from "../types";
-import type { ExtractRecipeRequest } from "@linkdish/api-contracts";
 
 interface UseRecipeExtractionResult {
   state: ExtractionUiState;
@@ -20,7 +21,7 @@ interface UseRecipeExtractionResult {
   retryWithFallback: () => Promise<void>;
 }
 
-type RecipeExtractionSource = ExtractRecipeRequest | string | undefined;
+type RecipeExtractionSource = MobileExtractionRequest | string | undefined;
 type RecipeExtractionEntrySource = "in_app" | "share_sheet";
 type InFlightExtraction = {
   key: string;
@@ -39,18 +40,26 @@ interface UseRecipeExtractionOptions {
   routeOrScreen?: string;
 }
 
-const getExtractionRequest = (source: RecipeExtractionSource): ExtractRecipeRequest | undefined =>
+const getExtractionRequest = (
+  source: RecipeExtractionSource
+): MobileExtractionRequest | undefined =>
   typeof source === "string" ? { url: source, attempt: "primary" } : source;
 
-const getRequestSourceUrl = (request: ExtractRecipeRequest | undefined): string | undefined => {
+const getRequestSourceUrl = (request: MobileExtractionRequest | undefined): string | undefined => {
   if (!request) {
     return undefined;
   }
 
-  return "images" in request ? request.sourceUrl : request.url;
+  return isTextExtractionRequest(request)
+    ? request.routeUrl
+    : "images" in request
+      ? request.sourceUrl
+      : request.url;
 };
 
-const getInitialAttempt = (request: ExtractRecipeRequest | undefined): "primary" | "fallback" => {
+const getInitialAttempt = (
+  request: MobileExtractionRequest | undefined
+): "primary" | "fallback" => {
   if (!request) {
     return "primary";
   }
@@ -59,16 +68,18 @@ const getInitialAttempt = (request: ExtractRecipeRequest | undefined): "primary"
 };
 
 const buildRequestForAttempt = (
-  request: ExtractRecipeRequest,
+  request: MobileExtractionRequest,
   attempt: "primary" | "fallback",
   correlationId?: string
-): ExtractRecipeRequest =>
+): MobileExtractionRequest =>
   "images" in request
     ? { ...request, attempt: "fallback", ...(correlationId ? { correlationId } : {}) }
     : { ...request, attempt, ...(correlationId ? { correlationId } : {}) };
 
 /** The scans an image import sent, as in-memory `data:` images the screen can show and save. */
-const getRequestSourceImages = (request: ExtractRecipeRequest): RecipeSourceImage[] | undefined =>
+const getRequestSourceImages = (
+  request: MobileExtractionRequest
+): RecipeSourceImage[] | undefined =>
   "images" in request
     ? request.images.map((image) => ({ mimeType: image.mimeType, uri: image.dataUrl }))
     : undefined;
@@ -78,16 +89,18 @@ const getSavedRecipeRestoreKey = (savedRecipe: SavedRecipeRecord): string =>
     ":"
   );
 
-const getExtractionRequestKey = (request: ExtractRecipeRequest): string =>
-  "images" in request
-    ? [
-        "images",
-        request.sourceUrl,
-        request.attempt,
-        request.images.length,
-        request.images.map((image) => `${image.mimeType}:${image.dataUrl.length}`).join(",")
-      ].join(":")
-    : ["url", request.url, request.attempt].join(":");
+const getExtractionRequestKey = (request: MobileExtractionRequest): string =>
+  isTextExtractionRequest(request)
+    ? ["text", request.routeUrl, request.attempt, request.text.length].join(":")
+    : "images" in request
+      ? [
+          "images",
+          request.sourceUrl,
+          request.attempt,
+          request.images.length,
+          request.images.map((image) => `${image.mimeType}:${image.dataUrl.length}`).join(",")
+        ].join(":")
+      : ["url", request.url, request.attempt].join(":");
 
 const getTransportFailureMessage = (error: unknown) => {
   const fallbackMessage =
@@ -122,23 +135,31 @@ const getSourceHost = (sourceUrl: string): string | undefined => {
 };
 
 const getImportEventProperties = (
-  request: ExtractRecipeRequest,
+  request: MobileExtractionRequest,
   requestSourceUrl: string,
   importSource: RecipeExtractionEntrySource
 ) => {
-  const sourceHost = "images" in request ? undefined : getSourceHost(requestSourceUrl);
+  const sourceHost =
+    "images" in request || isTextExtractionRequest(request)
+      ? undefined
+      : getSourceHost(requestSourceUrl);
 
   return {
     attempt: request.attempt,
     source: importSource,
-    source_type:
-      "images" in request ? "image" : importSource === "share_sheet" ? "share_target" : "url",
+    source_type: isTextExtractionRequest(request)
+      ? "text"
+      : "images" in request
+        ? "image"
+        : importSource === "share_sheet"
+          ? "share_target"
+          : "url",
     ...(sourceHost ? { source_host: sourceHost } : {})
   };
 };
 
 const trackImportStarted = (
-  request: ExtractRecipeRequest,
+  request: MobileExtractionRequest,
   requestSourceUrl: string,
   importSource: RecipeExtractionEntrySource,
   routeOrScreen: string,
@@ -217,7 +238,7 @@ export const useRecipeExtraction = (
   const trackAbandonedImport = (
     lifecycle: ImportLifecycle | null,
     reason: string,
-    request?: ExtractRecipeRequest
+    request?: MobileExtractionRequest
   ) => {
     if (!lifecycle?.started || lifecycle.terminal || !request || !requestSourceUrl) {
       return;

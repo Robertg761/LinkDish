@@ -16,14 +16,36 @@ import { AppState } from "react-native";
 import { trackMobileEvent } from "../../analytics/client";
 import { mobileEnv } from "../../config/env";
 import { createDebouncedWriter } from "../../lib/debouncedWriter";
+import { isUnreadableStoredList } from "../../lib/storedList";
 import { isAccountChangedError } from "../account/account-changed-error";
 import { useAccount } from "../account/AccountContext";
 import { useBilling } from "../billing/BillingContext";
 import { billingPlans } from "../billing/plans";
 import { canSaveAnotherRecipe } from "../billing/store";
 
+import {
+  COLLECTIONS_CORRUPT_BACKUP_STORAGE_KEY,
+  COLLECTIONS_STORAGE_KEY,
+  CollectionValidationError,
+  createCollectionRecord,
+  getRecipeCollectionIds,
+  parseCollections,
+  removeCollectionFromRecords,
+  setSavedRecipeCollectionIds,
+  setSavedRecipeTags,
+  sortCollections,
+  updateCollectionRecord,
+  type CollectionInput,
+  type CollectionPatch,
+  type MobileCollection
+} from "./collections";
 import { createCookbookStorage } from "./cookbookStorage";
 import { CookbookSyncProvider } from "./CookbookSyncContext";
+import {
+  clearStateCollections,
+  forgetSyncedCollections,
+  readStateCollections
+} from "./librarySync";
 import {
   createScanVersion,
   deleteRecipeSourceImageFiles,
@@ -56,18 +78,26 @@ import {
   type SavedRecipeUpdate
 } from "./store";
 
+import type { RestorePlan } from "../backup/backup";
 import type { BillingTier } from "../billing/plans";
 import type { SuccessfulExtractionState } from "../recipe-results/types";
 import type { HouseholdDetails, SharedRecipe } from "@linkdish/api-contracts";
 
 export interface SavedRecipesState {
   canUseSharedRecipeBook: boolean;
+  /** The cookbook's collections, in their display order. */
+  collections: MobileCollection[];
   getSaveLimitStatus: (options?: { isExistingRecord?: boolean }) => SaveLimitStatus;
   getSavedRecipeById: (id: string) => SavedRecipeRecord | undefined;
   getSavedRecipeBySourceUrl: (sourceUrl: string) => SavedRecipeRecord | undefined;
   getSharedRecipeById: (id: string) => SharedRecipe | undefined;
   hasLoadedSavedRecipes: boolean;
   hasLoadedSharedRecipes: boolean;
+  /**
+   * Everything stored for the cookbook (recipes and collections) has loaded and could be read,
+   * so what shows is the whole cookbook: a backup made now is complete, and a restore is allowed.
+   */
+  isCookbookReadable: boolean;
   savedRecipes: SavedRecipeRecord[];
   sharedRecipeError: string | null;
   sharedRecipes: SharedRecipe[];
@@ -77,10 +107,26 @@ export interface SavedRecipesState {
 export interface SavedRecipesActions {
   cloneRecipe: (id: string) => SaveRecipeResult & { recipeId?: string };
   cloneSharedRecipe: (id: string) => SaveRecipeResult & { recipeId?: string };
+  /**
+   * Adds a collection at the end. Throws CollectionValidationError for a bad name, or when the
+   * stored collections couldn't be read.
+   */
+  createCollection: (input: CollectionInput) => MobileCollection;
+  /** Deletes a collection and takes every recipe out of it (the recipes stay). */
+  deleteCollection: (id: string) => void;
   deleteSharedRecipe: (id: string) => Promise<SaveRecipeResult>;
   incrementRecipeTimesCooked: (id: string) => boolean;
   refreshSharedRecipes: () => Promise<void>;
   removeRecipe: (id: string) => void;
+  /**
+   * Adds what `plan` decides a backup brings (see planBackupRestore), planned against the
+   * cookbook as it is now, and saves the cookbook at once. A planned record whose id is already
+   * here replaces that record. Returns the plan it applied, or null (changing nothing) when the
+   * stored cookbook isn't readable (see isCookbookReadable).
+   */
+  restoreBackup: (
+    plan: (cookbook: BackupRestoreCookbook) => RestorePlan
+  ) => Promise<RestorePlan | null>;
   saveRecipe: (
     state: SuccessfulExtractionState
   ) => Promise<SaveRecipeResult & { recipeId?: string }>;
@@ -90,12 +136,25 @@ export interface SavedRecipesActions {
   ) => Promise<SaveRecipeResult & { recipeId?: string; sharedRecipeId?: string }>;
   /** Hearts or un-hearts a personal recipe. Returns false when the recipe is gone. */
   setRecipeFavorite: (id: string, favorite: boolean) => boolean;
+  /** The collections a personal recipe is in. Returns false when the recipe is gone. */
+  setRecipeCollections: (id: string, collectionIds: readonly string[]) => boolean;
+  /** A personal recipe's tags (cleaned up and deduplicated). Returns false when it is gone. */
+  setRecipeTags: (id: string, tags: readonly string[]) => boolean;
   setShareMode: (mode: RecipeBookShareMode) => Promise<void>;
   shareAllPersonalRecipes: () => Promise<SaveRecipeResult>;
   shareRecipe: (id: string) => Promise<SaveRecipeResult & { sharedRecipeId?: string }>;
   unshareRecipe: (id: string) => Promise<SaveRecipeResult>;
+  /** Renames a collection or changes its emoji, description or place. Throws on a bad name. */
+  updateCollection: (id: string, patch: CollectionPatch) => void;
   updateRecipe: (id: string, update: SavedRecipeUpdate) => boolean;
   updateSharedRecipe: (id: string, update: SavedRecipeUpdate) => Promise<boolean>;
+}
+
+export interface BackupRestoreCookbook {
+  collections: MobileCollection[];
+  /** Personal recipes that still fit (Infinity when there is no limit). */
+  freeSlots: number;
+  records: SavedRecipeRecord[];
 }
 
 export type SavedRecipesContextValue = SavedRecipesState & SavedRecipesActions;
@@ -248,6 +307,13 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
   const hasLoadedSharedRecipes = familyStateIsCurrent && hasLoadedSharedRecipesState;
   const [hasLoadedShareMode, setHasLoadedShareMode] = useState(false);
   const savedRecipesRef = useRef<SavedRecipeRecord[]>([]);
+  const [collections, setCollections] = useState<MobileCollection[]>([]);
+  const [hasLoadedCollections, setHasLoadedCollections] = useState(false);
+  /** The collections couldn't be read: none are written (or synced) over the stored copy. */
+  const [collectionsReadFailed, setCollectionsReadFailed] = useState(false);
+  const collectionsReadFailedRef = useRef(collectionsReadFailed);
+  collectionsReadFailedRef.current = collectionsReadFailed;
+  const collectionsRef = useRef<MobileCollection[]>([]);
   /** Bumped by every Family refresh, so only the newest one lands. */
   const sharedRefreshRef = useRef(0);
   const cookbookStorage = useMemo(
@@ -321,6 +387,31 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
     []
   );
 
+  /** Every collections change goes through here; the ref is always the latest list. */
+  const commitCollections = useCallback(
+    (update: (current: MobileCollection[]) => MobileCollection[]) => {
+      const next = update(collectionsRef.current);
+
+      if (next !== collectionsRef.current) {
+        collectionsRef.current = sortCollections(next);
+        setCollections(collectionsRef.current);
+      }
+    },
+    []
+  );
+
+  const collectionsWriter = useMemo(
+    () =>
+      createDebouncedWriter<MobileCollection[]>(
+        (value) => AsyncStorage.setItem(COLLECTIONS_STORAGE_KEY, JSON.stringify(value)),
+        SAVED_RECIPES_PERSIST_DEBOUNCE_MS,
+        (error) => {
+          console.warn("Failed to persist collections.", error);
+        }
+      ),
+    []
+  );
+
   const writer = useMemo(
     () =>
       createDebouncedWriter<SavedRecipeRecord[]>(
@@ -337,12 +428,17 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
   /** The cookbook as cloud sync reads and changes it (see CookbookSyncProvider). */
   const syncedCookbook = useMemo(
     () => ({
+      commitCollections,
       commitRecords: commitSavedRecipes,
+      getCollections: () => collectionsRef.current,
       getRecords: () => savedRecipesRef.current,
       persist: async (removed: readonly SavedRecipeRecord[]) => {
         // Stored before the sync records that the cloud's copy is in the cookbook, so a crash
         // can't leave it believing that of a cookbook that was never written.
-        await writer.writeNow(savedRecipesRef.current);
+        await Promise.all([
+          writer.writeNow(savedRecipesRef.current),
+          collectionsWriter.writeNow(collectionsRef.current)
+        ]);
         const orphanedScanUris = getOrphanedSourceImageUris(savedRecipesRef.current, [...removed]);
 
         if (orphanedScanUris.length > 0) {
@@ -350,7 +446,7 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
         }
       }
     }),
-    [commitSavedRecipes, writer]
+    [collectionsWriter, commitCollections, commitSavedRecipes, writer]
   );
   const createSyncClient = useCallback(
     (account: string) =>
@@ -503,6 +599,74 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
   useEffect(() => {
     let isMounted = true;
 
+    Promise.all([
+      AsyncStorage.getItem(COLLECTIONS_STORAGE_KEY),
+      readStateCollections().catch((error: unknown) => {
+        console.warn("Failed to read collections left in the sync state.", error);
+        return [];
+      })
+    ])
+      .then(async ([stored, fromSyncState]) => {
+        // Collections that can't be read are copied aside first; if that fails, nothing is written.
+        if (isUnreadableStoredList(stored)) {
+          await AsyncStorage.setItem(COLLECTIONS_CORRUPT_BACKUP_STORAGE_KEY, stored!);
+          // Sync forgets them too, so it brings the cloud's back rather than deleting them there.
+          await forgetSyncedCollections();
+        }
+
+        if (isMounted) {
+          // Anything a sync or the cook changed before this read landed is kept.
+          commitCollections((current) => {
+            const known = new Set(current.map((collection) => collection.id));
+            const loaded = [...parseCollections(stored ?? null), ...fromSyncState].filter(
+              (collection) => {
+                const isNew = !known.has(collection.id);
+                known.add(collection.id);
+                return isNew;
+              }
+            );
+            return [...current, ...loaded];
+          });
+
+          // They live in the cookbook now: once saved here, they leave the sync state, so one
+          // deleted later can't come back from there.
+          if (fromSyncState.length > 0) {
+            try {
+              await collectionsWriter.writeNow(collectionsRef.current);
+              await clearStateCollections();
+            } catch (error) {
+              console.warn("Failed to move collections out of the sync state.", error);
+            }
+          }
+        }
+      })
+      .catch((error: unknown) => {
+        console.warn("Failed to load collections.", error);
+
+        if (isMounted) {
+          setCollectionsReadFailed(true);
+        }
+      })
+      .finally(() => {
+        if (isMounted) {
+          setHasLoadedCollections(true);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [collectionsWriter, commitCollections]);
+
+  useEffect(() => {
+    if (hasLoadedCollections && !collectionsReadFailed) {
+      collectionsWriter.schedule(collections);
+    }
+  }, [collections, collectionsReadFailed, collectionsWriter, hasLoadedCollections]);
+
+  useEffect(() => {
+    let isMounted = true;
+
     const hydrateShareMode = async () => {
       if (!shareModeStorageKey) {
         setShareModeState("none");
@@ -571,14 +735,18 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
         void writer.flush().catch((error: unknown) => {
           console.warn("Failed to persist saved recipes.", error);
         });
+        void collectionsWriter.flush().catch((error: unknown) => {
+          console.warn("Failed to persist collections.", error);
+        });
       }
     });
 
     return () => {
       subscription.remove();
       void writer.flush().catch(() => undefined);
+      void collectionsWriter.flush().catch(() => undefined);
     };
-  }, [writer]);
+  }, [collectionsWriter, writer]);
 
   useEffect(() => {
     if (!shareModeStorageKey || !hasLoadedShareMode) {
@@ -1096,6 +1264,149 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
     [commitSavedRecipes]
   );
 
+  const setRecipeTags = useCallback(
+    (id: string, tags: readonly string[]): boolean => {
+      if (!getSavedRecipeRecordById(savedRecipesRef.current, id)) {
+        return false;
+      }
+
+      commitSavedRecipes((current) => setSavedRecipeTags(current, id, tags));
+      return true;
+    },
+    [commitSavedRecipes]
+  );
+
+  const setRecipeCollections = useCallback(
+    (id: string, collectionIds: readonly string[]): boolean => {
+      if (!getSavedRecipeRecordById(savedRecipesRef.current, id)) {
+        return false;
+      }
+
+      commitSavedRecipes((current) => setSavedRecipeCollectionIds(current, id, collectionIds));
+      return true;
+    },
+    [commitSavedRecipes]
+  );
+
+  const createCollection = useCallback(
+    (input: CollectionInput): MobileCollection => {
+      // Collections that couldn't be read aren't saved to, so a new one would vanish on restart.
+      if (collectionsReadFailedRef.current) {
+        throw new CollectionValidationError(
+          "Your collections couldn't be loaded on this phone. Close and reopen LinkDish to try again."
+        );
+      }
+
+      const created = createCollectionRecord(collectionsRef.current, input);
+      commitCollections((current) => [...current, created]);
+      trackMobileEvent({
+        eventName: "collection_created",
+        routeOrScreen: "cookbook",
+        properties: {
+          collection_count: collectionsRef.current.length,
+          has_emoji: Boolean(created.emoji)
+        }
+      });
+      return created;
+    },
+    [commitCollections]
+  );
+
+  const updateCollection = useCallback(
+    (id: string, patch: CollectionPatch) => {
+      const existing = collectionsRef.current.find((collection) => collection.id === id);
+
+      if (!existing) {
+        return;
+      }
+
+      const updated = updateCollectionRecord(existing, patch);
+      commitCollections((current) =>
+        current.map((collection) => (collection.id === id ? updated : collection))
+      );
+    },
+    [commitCollections]
+  );
+
+  const deleteCollection = useCallback(
+    (id: string) => {
+      commitSavedRecipes((current) => removeCollectionFromRecords(current, id));
+      commitCollections((current) => current.filter((collection) => collection.id !== id));
+    },
+    [commitCollections, commitSavedRecipes]
+  );
+
+  const isCookbookReadable =
+    hasLoadedSavedRecipes &&
+    hasLoadedCollections &&
+    !hasUnreadableStoredRecipes &&
+    !cookbookReadFailed &&
+    !collectionsReadFailed;
+  const isCookbookReadableRef = useRef(isCookbookReadable);
+  isCookbookReadableRef.current = isCookbookReadable;
+
+  const restoreBackup = useCallback(
+    async (plan: (cookbook: BackupRestoreCookbook) => RestorePlan): Promise<RestorePlan | null> => {
+      // Restoring into a cookbook that isn't all here would save the restored copy over the one
+      // that couldn't be read.
+      if (!isCookbookReadableRef.current) {
+        return null;
+      }
+
+      const { canUseSharedRecipeBook: unlimited, tier } = latestRef.current;
+      const limit = billingPlans[tier].limits.savedRecipes;
+      const applied = plan({
+        collections: collectionsRef.current,
+        freeSlots:
+          unlimited || limit == null
+            ? Number.POSITIVE_INFINITY
+            : Math.max(0, limit - getQuotaSavedRecipeCount(savedRecipesRef.current)),
+        records: savedRecipesRef.current
+      });
+
+      if (applied.collections.length > 0) {
+        commitCollections((current) => {
+          const known = new Set(current.map((collection) => collection.id));
+          return [...current, ...applied.collections.filter((entry) => !known.has(entry.id))];
+        });
+      }
+
+      if (applied.records.length > 0 || applied.membershipAdditions.length > 0) {
+        commitSavedRecipes((current) => {
+          // A record with an id already here replaces it (a starter nobody touched; see
+          // planBackupRestore); the rest are new.
+          const byId = new Map(applied.records.map((record) => [record.id, record]));
+          const known = new Set(current.map((record) => record.id));
+          let next = [
+            ...applied.records.filter((record) => !known.has(record.id)),
+            ...current.map((record) => byId.get(record.id) ?? record)
+          ];
+
+          for (const { collectionIds, recipeId } of applied.membershipAdditions) {
+            const record = getSavedRecipeRecordById(next, recipeId);
+
+            if (record) {
+              next = setSavedRecipeCollectionIds(next, recipeId, [
+                ...getRecipeCollectionIds(record),
+                ...collectionIds
+              ]);
+            }
+          }
+
+          return next;
+        });
+      }
+
+      await Promise.all([
+        writer.writeNow(savedRecipesRef.current),
+        collectionsWriter.writeNow(collectionsRef.current)
+      ]);
+
+      return applied;
+    },
+    [collectionsWriter, commitCollections, commitSavedRecipes, writer]
+  );
+
   const setRecipeFavorite = useCallback(
     (id: string, favorite: boolean): boolean => {
       if (!getSavedRecipeRecordById(savedRecipesRef.current, id)) {
@@ -1476,12 +1787,14 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
   const state = useMemo<SavedRecipesState>(
     () => ({
       canUseSharedRecipeBook,
+      collections,
       getSaveLimitStatus,
       getSavedRecipeById,
       getSavedRecipeBySourceUrl,
       getSharedRecipeById,
       hasLoadedSavedRecipes,
       hasLoadedSharedRecipes,
+      isCookbookReadable,
       savedRecipes: visibleSavedRecipes,
       sharedRecipeError,
       sharedRecipes,
@@ -1489,12 +1802,14 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
     }),
     [
       canUseSharedRecipeBook,
+      collections,
       getSaveLimitStatus,
       getSavedRecipeById,
       getSavedRecipeBySourceUrl,
       getSharedRecipeById,
       hasLoadedSavedRecipes,
       hasLoadedSharedRecipes,
+      isCookbookReadable,
       sharedRecipeError,
       sharedRecipes,
       shareMode,
@@ -1506,34 +1821,46 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
     () => ({
       cloneRecipe,
       cloneSharedRecipe,
+      createCollection,
+      deleteCollection,
       deleteSharedRecipe,
       incrementRecipeTimesCooked,
       refreshSharedRecipes,
       removeRecipe,
+      restoreBackup,
       saveRecipe,
       saveRecipeToTargets,
+      setRecipeCollections,
       setRecipeFavorite,
+      setRecipeTags,
       setShareMode,
       shareAllPersonalRecipes,
       shareRecipe,
       unshareRecipe,
+      updateCollection,
       updateRecipe,
       updateSharedRecipe
     }),
     [
       cloneRecipe,
       cloneSharedRecipe,
+      createCollection,
+      deleteCollection,
       deleteSharedRecipe,
       incrementRecipeTimesCooked,
       refreshSharedRecipes,
       removeRecipe,
+      restoreBackup,
       saveRecipe,
       saveRecipeToTargets,
+      setRecipeCollections,
       setRecipeFavorite,
+      setRecipeTags,
       setShareMode,
       shareAllPersonalRecipes,
       shareRecipe,
       unshareRecipe,
+      updateCollection,
       updateRecipe,
       updateSharedRecipe
     ]
@@ -1544,9 +1871,10 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
       <SavedRecipesStateContext.Provider value={state}>
         <CookbookSyncProvider
           account={familyAccount}
+          collections={collections}
           cookbook={syncedCookbook}
           createClient={createSyncClient}
-          hasLoaded={hasLoadedSavedRecipes && !hasUnreadableStoredRecipes && !cookbookReadFailed}
+          hasLoaded={isCookbookReadable}
           savedRecipes={savedRecipes}
         >
           {children}

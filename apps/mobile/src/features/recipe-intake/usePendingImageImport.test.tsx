@@ -3,7 +3,12 @@ import { act, create } from "react-test-renderer";
 import { describe, expect, it } from "vitest";
 
 import { createPendingImageImport, getPendingImageImport } from "./pendingImageImports";
-import { usePendingImageImport, type PendingImageImportState } from "./usePendingImageImport";
+import { createPendingTextImport, getPendingTextImport } from "./textImport";
+import {
+  usePendingImageImport,
+  usePendingTextImport,
+  type PendingImageImportState
+} from "./usePendingImageImport";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -70,5 +75,40 @@ describe("usePendingImageImport", () => {
 
     expect(renders.at(-1)?.pendingImport?.id).toBe(second.id);
     expect(renders.at(-1)?.status).toBe("ready");
+  });
+});
+
+describe("usePendingTextImport", () => {
+  it("has the pasted text on the first render and then releases it from memory", () => {
+    const textRenders: Array<ReturnType<typeof usePendingTextImport>> = [];
+    const TextProbe = ({ id }: { id: string | undefined }) => {
+      textRenders.push(usePendingTextImport(id));
+      return null;
+    };
+    const pending = createPendingTextImport("Pancakes: 2 eggs, 1 cup flour, fry them.");
+
+    act(() => {
+      create(<TextProbe id={pending.id} />);
+    });
+
+    expect(textRenders[0]).toMatchObject({ status: "ready" });
+    expect(textRenders.at(-1)?.pendingImport?.text).toBe(
+      "Pancakes: 2 eggs, 1 cup flour, fry them."
+    );
+    expect(getPendingTextImport(pending.id)).toBeUndefined();
+  });
+
+  it("reports a text import lost to a restart as missing", () => {
+    const textRenders: Array<ReturnType<typeof usePendingTextImport>> = [];
+    const TextProbe = ({ id }: { id: string | undefined }) => {
+      textRenders.push(usePendingTextImport(id));
+      return null;
+    };
+
+    act(() => {
+      create(<TextProbe id="text-restored-after-process-death" />);
+    });
+
+    expect(textRenders.every((state) => state.status === "missing")).toBe(true);
   });
 });

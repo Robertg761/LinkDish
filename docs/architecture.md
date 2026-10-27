@@ -96,6 +96,25 @@ size` checks the budgets after a build (entry ≤ 115 KB gzip, landing JS ≤
   `android/gradle.properties` and by `app.config.ts` on prebuild).
 - Search, shopping aggregation (aisle grouping, clean fractions), US/metric conversion and
   servings/time formatting come from `@linkdish/recipe-domain`, the same code the web uses.
+- Tabs: Cookbook, Add, Plan, Shopping and Household. The Add tab imports a link, photos or
+  pasted text; text (or shared text with no link) is held in memory under a route key
+  (`https://linkdish.app/text-imports/android-<id>`, never sent) while `/recipe` extracts it
+  with `extractRecipeFromText`.
+- Collections and tags work as on the web. Collections are stored under
+  `linkdish.collections.v1`; a recipe's tags and collection ids ride on the record as
+  `libraryExtras` and sync with the cookbook. The Cookbook filters by favorites, collection and
+  tag, and search matches tags and collection names.
+- The meal planner (`src/features/meal-plan`) keeps the plan on the device under
+  `linkdish.mealPlan.v1`, as the web keeps it local: a week view, meals from the cookbook or
+  notes, and "Shop for the week", which scales each planned recipe to its servings and merges the
+  lines with `mergeShoppingInputs`. Recipe pages have an "Add to meal plan" row.
+- Backups (`src/features/backup`, on the Household screen) write and read the shared
+  LinkDish backup format, including the web app's `linkdishWeb` extras (collection emoji and
+  order, extraction details, meal-plan timestamps), so a backup moves between Android and the
+  web either way. The file is saved through the share sheet and picked with expo-file-system's
+  picker. Restoring only adds, with the web's rules: existing recipes (same id, or same link and
+  title) are kept but join the backup's collections, new ones respect the free limit, starters
+  come back outside it, and the cookbook is written at once.
 
 ## Backend
 
@@ -113,6 +132,21 @@ size` checks the budgets after a build (entry ≤ 115 KB gzip, landing JS ≤
   active. The one other LLM call is the video reader (below), the last resort for a TikTok
   or YouTube link with no written recipe.
 - The root `api/extract.ts` Vercel handler is an adapter into the full extractor runtime. Production routing lives in the root `vercel.json`.
+- Accounts, sessions, sign-in identities, Family households and synced libraries live only in
+  Upstash. The **Account Data Backup** workflow copies them every night into an encrypted
+  GitHub Actions artifact kept 90 days; caches, locks, rate limits and one-time codes are left
+  out. Which keys count as account data is listed in
+  `modules/storage/store-key-families.ts`, and a test fails on any `linkdish:` key segment that
+  is not listed there. `pnpm --filter @linkdish/extractor-api backup:store` makes the key pair,
+  inspects a backup and restores it (a dry run unless `--confirm`; only missing keys unless
+  `--overwrite`). A synced library is read as one unit (feed, items, live sets and revision
+  counter from the same moment) and restored whole under the library service's own lock, so a
+  restore never leaves pulls resetting or skipping changes. With `--overwrite` the backup's items
+  replace the live ones, items added since the backup are kept, and the merged library is
+  renumbered above both the live and the backed-up counter, so every device pulls it again as new
+  changes. Accounts deleted since the backup (or while it was read) stay deleted: a restore leaves
+  out their keys and what they shared with a household, checking under the lock account deletion
+  takes. An email lookup comes back only while its account still has that address.
 
 ### Sources
 
@@ -387,9 +421,10 @@ library-sync.ts` validates each change before sending, so one bad item never fai
   and on sign-in. The module loads after the first screen settles, and only once someone signs in.
   The Account page shows its state, and the switch for another account's cookbook.
 - Android (`apps/mobile/src/features/saved-recipes/librarySync.ts`, `CookbookSyncContext.tsx`):
-  the link, bases and the account's collections (which the app doesn't show yet) live under
-  `linkdish.librarySync.v1` in AsyncStorage; synced fields the app doesn't show (tags, collection
-  membership, rating, cook log, preferred servings) ride along on each record as `libraryExtras`.
+  the link and bases live under `linkdish.librarySync.v1` in AsyncStorage and collections under
+  `linkdish.collections.v1` (collections an older build kept in the sync state move there on the
+  next run); tags, collection membership, rating, cook log and preferred servings ride along on
+  each record as `libraryExtras`.
   Merged changes are written to the stored cookbook before the bases that describe them. Runs
   start after changes (4 s), when the app comes to the foreground, every 5 minutes while open, and
   on sign-in; never while the stored cookbook couldn't be read. The Household screen shows its

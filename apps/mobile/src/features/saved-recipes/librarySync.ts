@@ -6,9 +6,11 @@
  * - The cookbook on a device is linked to one account: the first to sign in on it (the two
  *   cookbooks are merged). Signing out keeps it; another account that signs in never syncs it,
  *   and can replace it with its own (see {@link replaceMobileLibrary}).
- * - Fields this app doesn't show yet (tags, collections, ratings, the cook log, preferred
- *   servings) are kept on the record as `libraryExtras`, and collections in the sync state, so
- *   they sync through untouched instead of being deleted.
+ * - Tags and collection membership live on the record as `libraryExtras`, with the fields this
+ *   app doesn't show yet (ratings, the cook log, preferred servings), so those sync through
+ *   untouched instead of being deleted. Collections are the cookbook's own list (see
+ *   ./collections); builds before collections came to Android kept them in the sync state, and
+ *   the first sync moves them over.
  */
 import { createLibrarySyncTransport } from "@linkdish/api-client/src/library-sync";
 import {
@@ -20,6 +22,8 @@ import {
   stableStringify
 } from "@linkdish/recipe-domain/src/library-sync";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+
+import { fromLibraryCollection, toLibraryCollection, type MobileCollection } from "./collections";
 
 import type { SavedRecipeLibraryExtras, SavedRecipeRecord } from "./store";
 import type { ExtractorApiClient } from "@linkdish/api-client";
@@ -48,7 +52,11 @@ export interface MobileLibrarySyncState {
   cursor: string;
   linkedAt: string;
   bases: Record<string, LibrarySyncBase>;
-  collections: Record<string, StoredCollection>;
+  /**
+   * Collections as builds before collections came to Android kept them. The first sync moves them
+   * into the cookbook's list and leaves this out.
+   */
+  collections?: Record<string, StoredCollection> | undefined;
 }
 
 const isState = (value: unknown): value is MobileLibrarySyncState =>
@@ -56,8 +64,7 @@ const isState = (value: unknown): value is MobileLibrarySyncState =>
   value !== null &&
   typeof (value as { account?: unknown }).account === "string" &&
   typeof (value as { cursor?: unknown }).cursor === "string" &&
-  typeof (value as { bases?: unknown }).bases === "object" &&
-  typeof (value as { collections?: unknown }).collections === "object";
+  typeof (value as { bases?: unknown }).bases === "object";
 
 export const readMobileLibrarySyncState = async (): Promise<MobileLibrarySyncState | null> => {
   const stored = await AsyncStorage.getItem(LIBRARY_SYNC_STORAGE_KEY);
@@ -74,13 +81,58 @@ export const readMobileLibrarySyncState = async (): Promise<MobileLibrarySyncSta
   }
 };
 
+/**
+ * Collections an older build kept in the sync state that a sync hasn't moved into the cookbook
+ * yet (see moveStateCollections). The cookbook loads them too, so they're there signed out.
+ */
+export const readStateCollections = async (): Promise<MobileCollection[]> => {
+  const state = await readMobileLibrarySyncState();
+
+  return Object.entries(state?.collections ?? {}).map(([id, stored]) =>
+    fromLibraryCollection(id, stored.payload, stored.updatedAt)
+  );
+};
+
 const writeState = (state: MobileLibrarySyncState): Promise<void> =>
   AsyncStorage.setItem(LIBRARY_SYNC_STORAGE_KEY, JSON.stringify(state));
+
+/**
+ * After the cookbook's stored collections were found damaged (and copied aside), sync forgets what
+ * it knew of them and pulls everything afresh: the cloud's collections come back here instead of
+ * their absence going out as deletions.
+ */
+export const forgetSyncedCollections = async (): Promise<void> => {
+  const state = await readMobileLibrarySyncState();
+
+  if (!state) {
+    return;
+  }
+
+  const prefix = librarySyncKey("collection", "");
+
+  for (const key of Object.keys(state.bases)) {
+    if (key.startsWith(prefix)) {
+      delete state.bases[key];
+    }
+  }
+
+  state.cursor = "0";
+  await writeState(state);
+};
+
+/** Takes the collections an older build kept out of the sync state, once the cookbook saved them. */
+export const clearStateCollections = async (): Promise<void> => {
+  const state = await readMobileLibrarySyncState();
+
+  if (state?.collections) {
+    delete state.collections;
+    await writeState(state);
+  }
+};
 
 const newState = (account: string): MobileLibrarySyncState => ({
   account,
   bases: {},
-  collections: {},
   cursor: "0",
   linkedAt: new Date().toISOString()
 });
@@ -196,7 +248,7 @@ const fingerprintKeyOf = (kind: LibraryItemKind, payload: LibrarySyncPayload): s
 
 const readLocalItems = (
   records: readonly SavedRecipeRecord[],
-  collections: Record<string, StoredCollection>
+  collections: readonly MobileCollection[]
 ) => {
   const items = new Map<
     string,
@@ -209,12 +261,14 @@ const readLocalItems = (
     }
   }
 
-  for (const [id, collection] of Object.entries(collections)) {
-    items.set(librarySyncKey("collection", id), {
-      id,
-      kind: "collection",
-      payload: collection.payload
-    });
+  for (const collection of collections) {
+    if (collection.id.length <= MAX_ITEM_ID_LENGTH) {
+      items.set(librarySyncKey("collection", collection.id), {
+        id: collection.id,
+        kind: "collection",
+        payload: toLibraryCollection(collection)
+      });
+    }
   }
 
   return items;
@@ -229,9 +283,12 @@ export interface MobileLibraryCookbook {
   getRecords(): SavedRecipeRecord[];
   /** Changes the cookbook (synchronously, like every other cookbook change). */
   commitRecords(update: (records: SavedRecipeRecord[]) => SavedRecipeRecord[]): void;
+  getCollections(): MobileCollection[];
+  /** Changes the cookbook's collections (synchronously). */
+  commitCollections(update: (collections: MobileCollection[]) => MobileCollection[]): void;
   /**
-   * Stores the cookbook now (before the sync records that the cloud's copy is in it), and lets go
-   * of scans only `removed` used.
+   * Stores the cookbook and its collections now (before the sync records that the cloud's copy
+   * is in them), and lets go of scans only `removed` used.
    */
   persist(removed: readonly SavedRecipeRecord[]): Promise<void>;
 }
@@ -307,29 +364,74 @@ const applyRecipeWrites = (
   return removed;
 };
 
+const collectionKeyOf = (collection: MobileCollection): string =>
+  fingerprintKeyOf("collection", toLibraryCollection(collection));
+
 const applyCollectionWrites = (
-  state: MobileLibrarySyncState,
+  cookbook: MobileLibraryCookbook,
   writes: readonly LibraryLocalWrite[],
   written: Set<string>
 ) => {
-  for (const write of writes) {
-    const stored = state.collections[write.id];
-    const storedKey = stored ? fingerprintKeyOf("collection", stored.payload) : null;
+  if (writes.length === 0) {
+    return;
+  }
 
-    if (storedKey !== write.expectedKey) {
-      continue;
+  cookbook.commitCollections((collections) => {
+    const byId = new Map(collections.map((collection) => [collection.id, collection]));
+
+    for (const write of writes) {
+      const stored = byId.get(write.id);
+
+      if ((stored ? collectionKeyOf(stored) : null) !== write.expectedKey) {
+        continue;
+      }
+
+      if (write.payload) {
+        byId.set(
+          write.id,
+          fromLibraryCollection(
+            write.id,
+            write.payload as unknown as LibraryCollection,
+            write.updatedAt
+          )
+        );
+      } else {
+        byId.delete(write.id);
+      }
+
+      written.add(librarySyncKey("collection", write.id));
     }
 
-    if (write.payload) {
-      state.collections[write.id] = {
-        payload: write.payload as unknown as LibraryCollection,
-        updatedAt: write.updatedAt
-      };
-    } else {
-      delete state.collections[write.id];
-    }
+    return [...byId.values()];
+  });
+};
 
-    written.add(librarySyncKey("collection", write.id));
+/**
+ * Moves collections kept in the sync state by builds before collections came to Android into the
+ * cookbook's list (one already there stays as it is), then drops them from the state.
+ */
+const moveStateCollections = async (
+  state: MobileLibrarySyncState,
+  cookbook: MobileLibraryCookbook
+): Promise<void> => {
+  const legacy = Object.entries(state.collections ?? {});
+
+  if (legacy.length > 0) {
+    cookbook.commitCollections((collections) => {
+      const known = new Set(collections.map((collection) => collection.id));
+      return [
+        ...collections,
+        ...legacy
+          .filter(([id]) => !known.has(id))
+          .map(([id, stored]) => fromLibraryCollection(id, stored.payload, stored.updatedAt))
+      ];
+    });
+    await cookbook.persist([]);
+  }
+
+  if (state.collections) {
+    delete state.collections;
+    await writeState(state);
   }
 };
 
@@ -352,6 +454,7 @@ export const syncMobileLibrary = async ({
   }
 
   const linked = state;
+  await moveStateCollections(linked, cookbook);
   const adapter: LibrarySyncAdapter = {
     ...createLibrarySyncTransport(client),
     applyLocal: async (writes) => {
@@ -362,19 +465,20 @@ export const syncMobileLibrary = async ({
         written
       );
       applyCollectionWrites(
-        linked,
+        cookbook,
         writes.filter((write) => write.kind === "collection"),
         written
       );
 
-      if ([...written].some((key) => key.startsWith("recipe:"))) {
+      if (written.size > 0) {
         await cookbook.persist(removed);
       }
 
       return written;
     },
     isCurrent,
-    readLocal: () => Promise.resolve(readLocalItems(cookbook.getRecords(), linked.collections)),
+    readLocal: () =>
+      Promise.resolve(readLocalItems(cookbook.getRecords(), cookbook.getCollections())),
     readState: () =>
       Promise.resolve({ bases: new Map(Object.entries(linked.bases)), cursor: linked.cursor }),
     saveState: async (cursor, bases) => {
@@ -390,7 +494,6 @@ export const syncMobileLibrary = async ({
         }
       }
 
-      // Collections changed by applyLocal are stored with the bases that describe them.
       await writeState(linked);
     }
   };
@@ -405,7 +508,8 @@ export const syncMobileLibrary = async ({
 
 /** Changes made here that the account the cookbook is linked to doesn't have yet. */
 export const countMobileChangesNotSynced = async (
-  records: readonly SavedRecipeRecord[]
+  records: readonly SavedRecipeRecord[],
+  collections: readonly MobileCollection[]
 ): Promise<number> => {
   const state = await readMobileLibrarySyncState();
 
@@ -413,7 +517,15 @@ export const countMobileChangesNotSynced = async (
     return 0;
   }
 
-  const local = readLocalItems(records, state.collections);
+  // Collections still in the sync state count until the next sync moves them, and only where
+  // the cookbook has none with that id (as moveStateCollections does).
+  const known = new Set(collections.map((collection) => collection.id));
+  const local = readLocalItems(records, [
+    ...collections,
+    ...Object.entries(state.collections ?? {})
+      .filter(([id]) => !known.has(id))
+      .map(([id, stored]) => fromLibraryCollection(id, stored.payload, stored.updatedAt))
+  ]);
   let count = 0;
 
   for (const [key, item] of local) {
@@ -438,8 +550,8 @@ export const countMobileChangesNotSynced = async (
 
 /**
  * Replaces this device's cookbook (linked to another account) with `account`'s: every recipe but
- * the starters goes, and the cookbook is linked to `account`, so its next sync brings that
- * account's cookbook in.
+ * the starters goes, with every collection, and the cookbook is linked to `account`, so its next
+ * sync brings that account's cookbook in.
  */
 export const replaceMobileLibrary = async (
   account: string,
@@ -451,6 +563,7 @@ export const replaceMobileLibrary = async (
     removed = records.filter(isSyncedRecord);
     return records.filter((record) => !isSyncedRecord(record));
   });
+  cookbook.commitCollections(() => []);
   await cookbook.persist(removed);
   await writeState(newState(account));
 };

@@ -1,4 +1,5 @@
 import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { recipeSourceLabel } from "@linkdish/recipe-domain";
 import { AppButton, AppSurface, AppText } from "@linkdish/ui";
 import { Stack, router, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
@@ -31,9 +32,13 @@ import { trackMobileEvent } from "../src/analytics/client";
 import { AppDialog } from "../src/components/AppDialog";
 import { useAccount } from "../src/features/account/AccountContext";
 import { useOptionalUpgradeMoment } from "../src/features/billing/UpgradeMomentContext";
+import { RecipeOrganizeSection } from "../src/features/collections/RecipeOrganizeSection";
 import { requestRecipeBookBounce } from "../src/features/navigation/recipeBookBounceEvents";
 import { requestRecipeUrlReset } from "../src/features/recipe-intake/intakeResetEvents";
-import { usePendingImageImport } from "../src/features/recipe-intake/usePendingImageImport";
+import {
+  usePendingImageImport,
+  usePendingTextImport
+} from "../src/features/recipe-intake/usePendingImageImport";
 import { RecipeFavoriteButton } from "../src/features/recipe-results/components/RecipeFavoriteButton";
 import {
   RecipeResultCard,
@@ -138,23 +143,16 @@ const getSourceLabel = (sourceUrl: string | undefined) => {
     return "No source provided";
   }
 
-  if (sourceUrl.includes("linkdish.app/image-imports/")) {
-    return "Scanned image";
-  }
-
-  try {
-    return new URL(sourceUrl).hostname.replace(/^www\./u, "");
-  } catch {
-    return sourceUrl;
-  }
+  return recipeSourceLabel(sourceUrl);
 };
 
 export default function RecipeScreen() {
-  const { edit, imageImportId, savedId, sharedId, url } = useLocalSearchParams<{
+  const { edit, imageImportId, savedId, sharedId, textImportId, url } = useLocalSearchParams<{
     edit?: string;
     imageImportId?: string;
     savedId?: string;
     sharedId?: string;
+    textImportId?: string;
     url?: string;
   }>();
   const { user } = useAccount();
@@ -223,6 +221,8 @@ export default function RecipeScreen() {
   );
   const { pendingImport: pendingImageImport, status: imageImportStatus } =
     usePendingImageImport(imageImportId);
+  const { pendingImport: pendingTextImport, status: textImportStatus } =
+    usePendingTextImport(textImportId);
 
   const extractionSource = useMemo(() => {
     if (savedId || sharedId) {
@@ -241,8 +241,21 @@ export default function RecipeScreen() {
       };
     }
 
+    if (textImportId) {
+      if (!pendingTextImport) {
+        return undefined;
+      }
+
+      return {
+        attempt: "primary" as const,
+        routeUrl: pendingTextImport.sourceUrl,
+        sourceUrl: pendingTextImport.captionSourceUrl,
+        text: pendingTextImport.text
+      };
+    }
+
     return url;
-  }, [imageImportId, pendingImageImport, savedId, sharedId, url]);
+  }, [imageImportId, pendingImageImport, pendingTextImport, savedId, sharedId, textImportId, url]);
   const extraction = useRecipeExtraction(
     extractionSource,
     routeSharedRecipeRecord ?? routeSavedRecipe
@@ -795,7 +808,10 @@ export default function RecipeScreen() {
           />
         ) : null}
 
-        {extraction.state.state === "empty" && !isSharedRecipeRequest && !imageImportId ? (
+        {extraction.state.state === "empty" &&
+        !isSharedRecipeRequest &&
+        !imageImportId &&
+        !textImportId ? (
           <StatusCard
             body="Head back and paste a recipe source to keep going."
             primaryAction={{
@@ -814,6 +830,17 @@ export default function RecipeScreen() {
               onPress: () => router.replace("/import")
             }}
             title="Your scan needs another look"
+          />
+        ) : null}
+
+        {extraction.state.state === "empty" && textImportStatus === "missing" ? (
+          <StatusCard
+            body="LinkDish closed before it could read the text you pasted. Paste it again to pick up where you left off."
+            primaryAction={{
+              label: "Paste again",
+              onPress: () => router.replace("/import")
+            }}
+            title="Your recipe text needs another look"
           />
         ) : null}
 
@@ -991,6 +1018,10 @@ export default function RecipeScreen() {
                       </View>
                     ) : null}
                   </View>
+
+                  {currentSavedRecipe && !isSharedRecipeRoute ? (
+                    <RecipeOrganizeSection record={currentSavedRecipe} />
+                  ) : null}
 
                   {saveLimitMessage || (!isCurrentRecipeSaved && !currentSaveGate.allowed) ? (
                     <AppText muted style={styles.saveMessage}>

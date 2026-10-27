@@ -4,7 +4,11 @@ import { getMobileAnalyticsHeaders, trackMobileEvent } from "../analytics/client
 import { mobileEnv } from "../config/env";
 import { buildMockExtractionResponse } from "../mocks/extraction";
 
-import type { ExtractRecipeRequest, ExtractRecipeResponse } from "@linkdish/api-contracts";
+import { isTextExtractionRequest, type MobileExtractionRequest } from "./extraction-request";
+
+import type { ExtractRecipeResponse } from "@linkdish/api-contracts";
+
+export type { MobileExtractionRequest, TextExtractionRequest } from "./extraction-request";
 
 const apiClient = createExtractorApiClient({
   baseUrl: mobileEnv.apiBaseUrl,
@@ -65,15 +69,15 @@ export function extractRecipe(
   options?: ExtractRecipeOptions
 ): Promise<ExtractRecipeResponse>;
 export function extractRecipe(
-  request: ExtractRecipeRequest,
+  request: MobileExtractionRequest,
   options?: ExtractRecipeOptions
 ): Promise<ExtractRecipeResponse>;
 export async function extractRecipe(
-  requestOrUrl: ExtractRecipeRequest | string,
+  requestOrUrl: MobileExtractionRequest | string,
   attemptOrOptions: "primary" | "fallback" | ExtractRecipeOptions = "primary",
   maybeOptions?: ExtractRecipeOptions
 ): Promise<ExtractRecipeResponse> {
-  const request =
+  const request: MobileExtractionRequest =
     typeof requestOrUrl === "string"
       ? { url: requestOrUrl, attempt: attemptOrOptions as "primary" | "fallback" }
       : requestOrUrl;
@@ -110,12 +114,24 @@ export async function extractRecipe(
     routeOrScreen: "recipe",
     properties: {
       attempt: request.attempt,
-      input_mode: "images" in request ? "image" : "url",
-      source_type: "images" in request ? "image" : "unknown"
+      input_mode: isTextExtractionRequest(request) ? "text" : "images" in request ? "image" : "url",
+      source_type: isTextExtractionRequest(request)
+        ? "text"
+        : "images" in request
+          ? "image"
+          : "unknown"
     }
   });
 
-  const operation = () => client.extractRecipe(request);
+  const operation = () =>
+    isTextExtractionRequest(request)
+      ? client.extractRecipeFromText({
+          attempt: request.attempt,
+          text: request.text,
+          ...(request.correlationId ? { correlationId: request.correlationId } : {}),
+          ...(request.sourceUrl ? { sourceUrl: request.sourceUrl } : {})
+        })
+      : client.extractRecipe(request);
   const response = await runExtractorRequestWithRetry(operation);
 
   if (shouldRetryRetryableExtractionFailure(response)) {

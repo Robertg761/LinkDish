@@ -60,7 +60,7 @@ import { createSavedRecipeRecord, type SavedRecipeRecord } from "../../saved-rec
 
 import { shouldShowLastFreeImportPrompt, useRecipeExtraction } from "./useRecipeExtraction";
 
-import type { ExtractRecipeRequest } from "@linkdish/api-contracts";
+import type { MobileExtractionRequest as ExtractRecipeRequest } from "../../../services/extraction-request";
 
 const mockedExtractRecipe = vi.mocked(extractRecipe);
 const mockedAsyncStorage = vi.mocked(AsyncStorage);
@@ -535,6 +535,78 @@ describe("useRecipeExtraction", () => {
     expect(mockedExtractRecipe).toHaveBeenCalledWith(
       expect.objectContaining(request),
       expect.any(Object)
+    );
+  });
+
+  it("imports pasted text as a plain import keyed by its route", async () => {
+    mockedExtractRecipe.mockResolvedValueOnce({
+      status: "success",
+      recipe: {
+        title: "Pancakes",
+        sourceUrl: "https://linkdish.app/text-imports/0123456789abcdef0123456789abcdef",
+        sourceType: "unknown",
+        ingredients: [{ text: "2 eggs" }],
+        steps: [{ index: 1, text: "Fry." }],
+        servings: null,
+        prepTimeMinutes: null,
+        cookTimeMinutes: null,
+        nutrition: null,
+        confidence: {
+          score: 0.7,
+          summary: "Read from pasted text.",
+          missingFields: [],
+          notes: [],
+          fieldProvenance: {
+            title: "visible-text",
+            ingredients: "visible-text",
+            steps: "visible-text",
+            servings: null,
+            prepTimeMinutes: null,
+            cookTimeMinutes: null,
+            nutrition: null
+          }
+        }
+      },
+      extraction: {
+        sourceType: "unknown",
+        strategy: "llm-fallback",
+        confidenceScore: 0.7,
+        missingFields: [],
+        warnings: [],
+        fetchMode: "http",
+        provenance: ["visible-text"]
+      }
+    });
+
+    const request: ExtractRecipeRequest = {
+      attempt: "primary",
+      routeUrl: "https://linkdish.app/text-imports/android-text-1",
+      text: "Pancakes: 2 eggs, 1 cup flour, fry them."
+    };
+    let renderer: ReturnType<typeof create>;
+
+    await act(() => {
+      renderer = create(<HookRequestProbe request={request} />);
+      return Promise.resolve();
+    });
+
+    await act(async () => {
+      await flushAsyncWork();
+    });
+
+    const output = renderer!.root.findByType(Text).props.children as string;
+    expect(output).toContain('"state":"success"');
+    expect(output).toContain("Pancakes");
+    expect(mockedExtractRecipe).toHaveBeenCalledTimes(1);
+    expect(mockedExtractRecipe).toHaveBeenCalledWith(
+      expect.objectContaining({ ...request, attempt: "primary" }),
+      expect.any(Object)
+    );
+    expect(trackMobileEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventName: "import_started",
+        properties: expect.objectContaining({ source_type: "text" }) as unknown
+      })
     );
   });
 
