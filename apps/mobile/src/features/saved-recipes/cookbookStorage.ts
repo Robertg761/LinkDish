@@ -37,6 +37,9 @@ export const COOKBOOK_RECIPE_STORAGE_KEY_PREFIX = "linkdish.cookbook.v2.recipe:"
 export const cookbookRecipeStorageKey = (id: string): string =>
   `${COOKBOOK_RECIPE_STORAGE_KEY_PREFIX}${id}`;
 
+const recipeIdOfStorageKey = (key: string): string =>
+  key.slice(COOKBOOK_RECIPE_STORAGE_KEY_PREFIX.length);
+
 /** What is stored under {@link COOKBOOK_INDEX_STORAGE_KEY}. */
 export interface CookbookIndex {
   /** The cookbook's recipes, in order. */
@@ -51,7 +54,7 @@ export interface CookbookIndex {
 
 export type CookbookKeyValueStorage = Pick<
   typeof AsyncStorage,
-  "getAllKeys" | "getItem" | "multiGet" | "multiRemove" | "multiSet" | "removeItem" | "setItem"
+  "getAllKeys" | "getItem" | "multiGet" | "multiRemove" | "multiSet" | "setItem"
 >;
 
 export interface CookbookReadResult {
@@ -212,16 +215,28 @@ export const createCookbookStorage = (
       return [];
     }
 
-    const entries = await storage.multiGet(ids.map(cookbookRecipeStorageKey));
+    const keys = ids.map(cookbookRecipeStorageKey);
+    /** Each recipe's stored value; `undefined` when storage couldn't read it. */
+    let values: Array<string | null | undefined>;
+
+    try {
+      values = (await storage.multiGet(keys)).map(([, value]) => value);
+    } catch (error) {
+      // One value storage can't read (too large, or a damaged row) fails the whole batch: read
+      // them one at a time, so only that one is left out.
+      console.warn("Saved recipes could not be read together. Reading them one at a time.", error);
+      values = await Promise.all(keys.map((key) => storage.getItem(key).catch(() => undefined)));
+    }
+
     const records: SavedRecipeRecord[] = [];
 
-    entries.forEach(([, value], position) => {
+    values.forEach((value, position) => {
       const id = ids[position]!;
-      const record = parseStoredRecipe(value);
+      const record = value === undefined ? null : parseStoredRecipe(value);
 
       if (!record) {
         // Missing values are gone already; unreadable ones stay stored for recovery.
-        if (value != null) {
+        if (value !== null) {
           console.warn("A saved recipe could not be read. Keeping the stored copy for recovery.");
           unreadableIds.add(id);
         }
@@ -347,7 +362,7 @@ export const createCookbookStorage = (
       // The index is missing or unreadable: every stored recipe is in, newest saved first, and
       // the next write stores a new index.
       console.warn("The saved recipes index could not be read. Rebuilding it.");
-      const ids = recipeKeys.map((key) => key.slice(COOKBOOK_RECIPE_STORAGE_KEY_PREFIX.length));
+      const ids = recipeKeys.map(recipeIdOfStorageKey);
       records = (await readRecipes(ids)).sort(newestSavedFirst);
       legacyMigrated = false;
     }
@@ -368,12 +383,14 @@ export const createCookbookStorage = (
           if (legacy.status !== "corrupt") {
             // It couldn't be read when this cookbook was started: its recipes join it now, and
             // the next write stores them and deletes it.
-            // One already here by id is kept as it is here.
+            // One already here by id is kept as it is here. Ids are made unique before the
+            // recipes are prepared, so two that shared one never write scans to the same files.
             const present = new Set(records.map((record) => record.id));
-            records = withUniqueIds([
+            const added = withUniqueIds([
               ...records,
-              ...prepareLegacyRecords(legacy.records.filter((record) => !present.has(record.id)))
-            ]);
+              ...legacy.records.filter((record) => !present.has(record.id))
+            ]).slice(records.length);
+            records = [...records, ...prepareLegacyRecords(added)];
             legacyMigrated = true;
             legacyNeedsRemoval = true;
           }
@@ -450,7 +467,7 @@ export const createCookbookStorage = (
 
       for (const [key, value] of changes) {
         if (key !== COOKBOOK_INDEX_STORAGE_KEY) {
-          storedValues.set(key.slice(COOKBOOK_RECIPE_STORAGE_KEY_PREFIX.length), value);
+          storedValues.set(recipeIdOfStorageKey(key), value);
         }
       }
 

@@ -227,6 +227,31 @@ describe("cookbook storage", () => {
     expect(indexOf(data)?.ids).toEqual(["saved-1", "saved-3", "saved-2"]);
   });
 
+  it("reads recipes one at a time when one of them can't be read with the rest", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { data } = relaunch(new Map());
+    const first = relaunch(data);
+    await first.cookbook.read();
+    await first.cookbook.write([buildRecord(1), buildRecord(2), buildRecord(3)]);
+
+    const next = relaunch(data);
+    next.storage.multiGet.mockRejectedValue(new Error("Row too big to fit into CursorWindow"));
+    next.storage.getItem.mockImplementation((key: string) =>
+      key === cookbookRecipeStorageKey("saved-2")
+        ? Promise.reject(new Error("Row too big to fit into CursorWindow"))
+        : Promise.resolve(data.get(key) ?? null)
+    );
+    const { incomplete, records } = await next.cookbook.read();
+
+    expect(ids(records)).toEqual(["saved-1", "saved-3"]);
+    expect(incomplete).toBe(true);
+
+    // Saves still land, and the one it couldn't read stays stored and listed.
+    await next.cookbook.write([...records, buildRecord(4)]);
+    expect(data.has(cookbookRecipeStorageKey("saved-2"))).toBe(true);
+    expect(indexOf(data)?.ids).toEqual(["saved-1", "saved-3", "saved-4", "saved-2"]);
+  });
+
   it("rebuilds an unreadable index from the stored recipes, newest saved first", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const { data } = relaunch(new Map());
@@ -392,11 +417,38 @@ describe("cookbook storage", () => {
       });
     });
 
+    it("gives old recipes that shared an id their own ids before preparing them on a merge", async () => {
+      vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      const original = buildRecord(1);
+      const twin = { ...buildRecord(2), id: original.id };
+      const data = new Map([[LEGACY_COOKBOOK_STORAGE_KEY, JSON.stringify([original, twin])]]);
+      const first = relaunch(data);
+      first.storage.getItem.mockRejectedValueOnce(
+        new Error("Row too big to fit into CursorWindow")
+      );
+      await first.cookbook.read();
+      await first.cookbook.write([buildRecord(3)]);
+
+      const prepared: string[][] = [];
+      const cookbook = createCookbookStorage(createFakeStorage(data).storage, {
+        prepareLegacyRecords: (records) => {
+          prepared.push(ids(records));
+          return records;
+        }
+      });
+      const { records } = await cookbook.read();
+
+      expect(records).toHaveLength(3);
+      expect(prepared).toHaveLength(1);
+      expect(prepared[0]).toHaveLength(2);
+      expect(new Set(prepared[0]).size).toBe(2);
+      expect(prepared[0]![0]).toBe(original.id);
+    });
+
     it("deletes an old value left behind by an earlier move", async () => {
       const stored = [buildRecord(1)];
       const { data } = relaunch(new Map([[LEGACY_COOKBOOK_STORAGE_KEY, JSON.stringify(stored)]]));
       const first = relaunch(data);
-      first.storage.removeItem.mockRejectedValue(new Error("busy"));
       first.storage.multiRemove.mockRejectedValue(new Error("busy"));
       vi.spyOn(console, "warn").mockImplementation(() => undefined);
       await first.cookbook.read();

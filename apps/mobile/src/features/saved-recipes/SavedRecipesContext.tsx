@@ -458,14 +458,13 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
           setCookbookReadFailed(true);
         }
 
-        // A scan migration or seeding is stored by the write that follows the load, which skips
-        // recipes that are stored as they are.
-        const migratedRecipes = migrateLegacySourceImages(loadedRecipes);
+        // Inlined scans were moved to files by the storage read (prepareLegacyRecords). Seeding is
+        // stored by the write that follows the load, which skips recipes stored as they are.
         const shouldSeedStarterRecipes =
-          status !== "corrupt" && migratedRecipes.length === 0 && storedSeeded !== "true";
+          status !== "corrupt" && loadedRecipes.length === 0 && storedSeeded !== "true";
         const hydratedRecipes = shouldSeedStarterRecipes
           ? createStarterRecipeSeedRecords().map(starterRecipeSeedRecordToSavedRecipeRecord)
-          : migratedRecipes;
+          : loadedRecipes;
 
         if (status !== "corrupt" && storedSeeded !== "true") {
           await AsyncStorage.setItem(STARTER_RECIPES_SEEDED_STORAGE_KEY, "true");
