@@ -173,12 +173,14 @@ platforms map onto them and are told apart internally by the detection `adapterK
   by URL, only for Shorts and videos of known length up to `VIDEO_RECIPE_MAX_SECONDS`.
   Every ingredient comes back with its evidence (words heard, text shown, a caption line),
   and `build-video-recipe-candidate.ts` drops an ingredient its quote doesn't name and an
-  amount its quote doesn't state ("a tablespoon" needs a tablespoon, not "a teaspoon" or
-  "half a"); the gaps become a warning. Results use the `llm-fallback` strategy and `llm`
+  amount its quote doesn't state ("a tablespoon" needs one tablespoon, not "a teaspoon",
+  "half a tablespoon" or "a few tablespoons"); the gaps become a warning. Results use the `llm-fallback` strategy and `llm`
   provenance, are metered as plain imports and are never cached. Reads need 15 s of
   request time left (10 s after a TikTok download) and are capped at
-  `VIDEO_RECIPE_DAILY_READ_LIMIT` started per UTC day across instances (an Upstash
-  counter; a read is skipped when the counter can't be checked). Each read logs a
+  `VIDEO_RECIPE_DAILY_READ_LIMIT` Gemini calls per UTC day, counted just before each call
+  (one Upstash counter across instances, per instance without Upstash). Past the cap the
+  outcome is `skipped_daily_limit`; when the counter can't be checked the read is skipped
+  as `limit_unavailable`. Each read logs a
   `video_recipe_read` line, and the outcome is stored as `videoRead` in the extraction
   analytics `properties`.
 

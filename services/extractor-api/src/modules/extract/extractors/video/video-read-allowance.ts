@@ -3,9 +3,9 @@ import { runStoreTransaction } from "../../../storage/upstash-store.js";
 /*
  * Every video read is a paid Gemini call, and links are metered as plain imports and TikTok
  * results are never cached, so nothing else bounds what the reader can spend. This caps the
- * reads started per UTC day across all instances (one Upstash counter; in memory per instance
- * without Upstash). A read is counted when it starts, before the download, so failed reads count
- * too and the cap is never exceeded.
+ * Gemini calls per UTC day: across all instances with Upstash (one counter), per instance
+ * without it. A call is counted before it is made, so the cap is never exceeded; calls that fail
+ * still count.
  */
 
 export interface VideoReadAllowance {

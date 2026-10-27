@@ -137,6 +137,16 @@ describe("isAmountSupported", () => {
     expect(isAmountSupported("a cup", "one cup of rice")).toBe(true);
     expect(isAmountSupported("a cup", "2 heaping cups of flour")).toBe(false);
     expect(isAmountSupported("a cup", "one and a half cups of milk")).toBe(false);
+    expect(isAmountSupported("a cup", "a cup and a half of flour")).toBe(false);
+    expect(isAmountSupported("a tablespoon", "a tablespoon and a half of honey")).toBe(false);
+    expect(isAmountSupported("a cup", "a few cups of flour")).toBe(false);
+    expect(isAmountSupported("a cup", "several cups of stock")).toBe(false);
+    expect(isAmountSupported("a cup", "2 big heaping cups of flour")).toBe(false);
+    expect(isAmountSupported("a can", "you can add beans")).toBe(false);
+    expect(isAmountSupported("a slice", "slice the onion thin")).toBe(false);
+    expect(isAmountSupported("a can", "a can of chickpeas")).toBe(true);
+    expect(isAmountSupported("a cup and a half", "half a cup of milk")).toBe(false);
+    expect(isAmountSupported("a cup and a half", "a cup and a half of milk")).toBe(true);
     expect(isAmountSupported("a tablespoon", "a teaspoon of salt")).toBe(false);
     expect(isAmountSupported("a cup", "half a cup of butter")).toBe(false);
     expect(isAmountSupported("a cup", "2 cups of flour")).toBe(false);

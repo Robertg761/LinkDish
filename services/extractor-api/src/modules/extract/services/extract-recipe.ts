@@ -961,25 +961,6 @@ const readRecipeFromVideo = async (request: VideoReadRequest): Promise<VideoRead
     );
   };
 
-  /* The day's reads are capped; when the count can't be checked, the read is not risked. */
-  if (runtime.videoReadAllowance) {
-    let allowed: boolean;
-
-    try {
-      allowed = await runtime.videoReadAllowance.reserve();
-    } catch (error) {
-      logVideoRead("skipped_daily_limit", {
-        message: `could not check the daily limit: ${error instanceof Error ? error.message : "unknown"}`
-      });
-      return { outcome: "skipped_daily_limit", response: null };
-    }
-
-    if (!allowed) {
-      logVideoRead("skipped_daily_limit");
-      return { outcome: "skipped_daily_limit", response: null };
-    }
-  }
-
   let source: VideoRecipeSource;
 
   if (request.platform === "youtube") {
@@ -1012,6 +993,28 @@ const readRecipeFromVideo = async (request: VideoReadRequest): Promise<VideoRead
     if (deadline.remainingMs() < minimumGeminiReadBudgetMs) {
       logVideoRead("skipped_budget", { message: "too little time left after the download" });
       return { outcome: "skipped_budget", response: null };
+    }
+  }
+
+  /*
+   * The day's Gemini calls are capped, and counted here so a failed download never uses one up.
+   * When the count can't be checked, the read is not risked.
+   */
+  if (runtime.videoReadAllowance) {
+    let allowed: boolean;
+
+    try {
+      allowed = await runtime.videoReadAllowance.reserve();
+    } catch (error) {
+      logVideoRead("limit_unavailable", {
+        message: error instanceof Error ? error.message : "unknown"
+      });
+      return { outcome: "limit_unavailable", response: null };
+    }
+
+    if (!allowed) {
+      logVideoRead("skipped_daily_limit");
+      return { outcome: "skipped_daily_limit", response: null };
     }
   }
 

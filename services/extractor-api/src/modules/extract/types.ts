@@ -234,7 +234,8 @@ export type VideoReadOutcome =
   | "download_failed"
   | "too_long"
   | "skipped_budget"
-  | "skipped_daily_limit";
+  | "skipped_daily_limit"
+  | "limit_unavailable";
 
 export type ExtractionFailureReason = ExtractRecipeFailure["reason"];
 

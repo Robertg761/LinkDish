@@ -58,6 +58,10 @@ const fractionWords: Record<string, number> = {
 const articles = new Set(["a", "an"]);
 /* "a heaping cup", "a large egg": one of these may sit between an article and what it counts. */
 const sizeWords = new Set([
+  "tiny",
+  "packed",
+  "rounded",
+  "scant",
   "heaping",
   "heaped",
   "level",
@@ -91,6 +95,30 @@ const unitFamilies: string[][] = [
 const unitFamilyOf = new Map(
   unitFamilies.flatMap((family, index) => family.map((spelling) => [spelling, index] as const))
 );
+/* "cups" with no number before it ("a few cups") is not one cup. */
+const pluralUnitSpellings = new Set([
+  "cups",
+  "tablespoons",
+  "tbsps",
+  "teaspoons",
+  "tsps",
+  "ounces",
+  "pounds",
+  "lbs",
+  "grams",
+  "kilograms",
+  "kilos",
+  "milliliters",
+  "millilitres",
+  "liters",
+  "litres",
+  "cloves",
+  "cans",
+  "tins",
+  "sticks",
+  "pinches",
+  "slices"
+]);
 
 /* Words in an amount that say nothing about which ingredient or how much. */
 const amountFillerWords = new Set([
@@ -321,11 +349,18 @@ const readNumbers = (tokens: string[], articleCounts: Set<string> | null): State
  * The amounts a text states. "Three quarters" is one amount, the product, and a mixed number
  * ("1 1/2", "one and a half", "a cup and a half") is one, the sum of its parts.
  */
-const readQuantities = (
-  value: string,
+interface StatedQuantity {
+  quantity: number;
+  parts: number[];
+  /** The tokens it spans: "a cup and a half" spans the unit too. */
+  start: number;
+  end: number;
+}
+
+const readQuantitySpans = (
+  tokens: string[],
   articleCounts: Set<string> | null
-): { quantity: number; parts: number[] }[] => {
-  const tokens = tokensOf(value);
+): StatedQuantity[] => {
   const terms: StatedNumber[] = [];
 
   for (const number of readNumbers(tokens, articleCounts)) {
@@ -345,7 +380,7 @@ const readQuantities = (
     }
   }
 
-  const quantities: { quantity: number; parts: number[]; end: number }[] = [];
+  const quantities: StatedQuantity[] = [];
 
   for (const term of terms) {
     const last = quantities.at(-1);
@@ -361,12 +396,26 @@ const readQuantities = (
       last.quantity += term.value;
       last.end = term.end;
     } else {
-      quantities.push({ quantity: term.value, parts: [term.value], end: term.end });
+      quantities.push({
+        quantity: term.value,
+        parts: [term.value],
+        start: term.start,
+        end: term.end
+      });
     }
   }
 
-  return quantities.map(({ quantity, parts }) => ({ quantity, parts }));
+  return quantities;
 };
+
+const readQuantities = (
+  value: string,
+  articleCounts: Set<string> | null
+): { quantity: number; parts: number[] }[] =>
+  readQuantitySpans(tokensOf(value), articleCounts).map(({ quantity, parts }) => ({
+    quantity,
+    parts
+  }));
 
 /** Every number a text states, mixed numbers both whole and as their parts. */
 export const readStatedNumbers = (value: string, item = ""): number[] =>
@@ -378,20 +427,36 @@ const sameNumber = (left: number, right: number): boolean => Math.abs(left - rig
 
 /*
  * Does the quote say one of this unit: "a pinch", "one cup" or a bare "pinch of salt", and not
- * "2 cups", "a teaspoon" or "half a cup". Only a number just before the unit counts ("2 heaping
- * cups"), so "a tiny pinch of salt, then cook for 2 minutes" still says one pinch.
+ * "2 cups", "half a cup", "a cup and a half", "a few cups" or "a teaspoon". The count is the
+ * amount just before the unit, past size words ("2 big heaping cups"), or one that runs across
+ * it, so "a tiny pinch of salt, then cook for 2 minutes" still says one pinch. With no count, only
+ * a singular unit followed by "of" says one, so "you can add" is not a can.
  */
 const statesOneOf = (unit: number, quote: string): boolean => {
   const tokens = tokensOf(quote);
-  const numbers = readNumbers(tokens, new Set());
+  const quantities = readQuantitySpans(tokens, new Set());
 
   return tokens.some((token, index) => {
     if (unitFamilyOf.get(token) !== unit) {
       return false;
     }
 
-    const before = numbers.filter(({ end }) => end === index || end === index - 1).at(-1);
-    return !before || sameNumber(before.value, 1);
+    let countEnd = index;
+
+    while (
+      countEnd > 0 &&
+      (sizeWords.has(tokens[countEnd - 1] ?? "") || articles.has(tokens[countEnd - 1] ?? ""))
+    ) {
+      countEnd -= 1;
+    }
+
+    const count = quantities.filter(({ start, end }) => start < index && end >= countEnd).at(-1);
+
+    if (count) {
+      return sameNumber(count.quantity, 1);
+    }
+
+    return !pluralUnitSpellings.has(token) && tokens[index + 1] === "of";
   });
 };
 
@@ -401,7 +466,11 @@ const statesOneOf = (unit: number, quote: string): boolean => {
  */
 export const isAmountSupported = (amount: string, quote: string, item = ""): boolean => {
   /* "a pinch" and "a cup" have no number of their own; "a cup" in the quote still states 1 cup. */
-  const amountQuantities = readQuantities(amount, null).map(({ quantity }) => quantity);
+  /* With a number of its own, "a cup and a half" is 1.5: the article before a unit counts. */
+  const amountQuantities =
+    readQuantities(amount, null).length > 0
+      ? readQuantities(amount, new Set()).map(({ quantity }) => quantity)
+      : [];
   const quoteUnits = new Set(wordsOf(quote).map((word) => unitFamilyOf.get(word)));
   const amountUnits = wordsOf(amount)
     .map((word) => unitFamilyOf.get(word))
