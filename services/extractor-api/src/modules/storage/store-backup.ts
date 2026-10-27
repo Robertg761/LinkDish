@@ -423,7 +423,7 @@ export interface RestoreStoreSnapshotResult {
   expired: number;
   /* Existing keys left alone, with the rest of a library that is partly there (no overwrite). */
   kept: number;
-  /* Keys of accounts deleted since the snapshot, left out so they stay deleted. */
+  /* Keys of accounts or sign-ins deleted since the snapshot, left out so they stay deleted. */
   ofDeletedAccounts: number;
   /* Existing keys replaced (overwrite). */
   replaced: number;
@@ -828,6 +828,8 @@ const parseRecord = (entry: StoreSnapshotEntry): Record<string, unknown> | null 
  */
 const withoutDeletedMembers = <Candidate extends { entry: StoreSnapshotEntry }>(
   candidates: Candidate[],
+  /* The whole snapshot, so a key picked by --only is judged by records it did not pick. */
+  allEntries: StoreSnapshotEntry[],
   deletedUserIds: Set<string>
 ): Candidate[] => {
   if (deletedUserIds.size === 0) return candidates;
@@ -837,7 +839,7 @@ const withoutDeletedMembers = <Candidate extends { entry: StoreSnapshotEntry }>(
   const recipes = new Set<string>();
   const shoppingItems = new Set<string>();
 
-  for (const { entry } of candidates) {
+  for (const entry of allEntries) {
     const record = parseRecord(entry);
     const name = family(entry);
     // Shopping items record who added them; households and shared recipes, who owns them.
@@ -892,6 +894,72 @@ const withoutDeletedMembers = <Candidate extends { entry: StoreSnapshotEntry }>(
         ...(record.memberJoinedAt ? { memberJoinedAt } : {})
       });
       return [{ ...candidate, entry: { ...entry, value } }];
+    }
+
+    return [candidate];
+  });
+};
+
+/* `linkdish:identity:v1:google:sub` -> `linkdish:identity-deleted:v1:google:sub`. */
+const identityTombstoneKey = (key: string): string =>
+  key.replace(/^linkdish:identity:/u, "linkdish:identity-deleted:");
+
+/*
+ * Sign-ins tombstoned since the snapshot (account deletion, or the provider deleting the user),
+ * as `<provider>:<subject>` per version. Their mapping and membership stay removed.
+ */
+const findRevokedIdentities = async (
+  run: StorePipeline,
+  candidates: Array<{ entry: StoreSnapshotEntry }>,
+  batchSize: number
+): Promise<Set<string>> => {
+  const identityKeys = new Set<string>();
+
+  for (const { entry } of candidates) {
+    const name = findBackedUpKeyFamily(entry.key)?.name;
+
+    if (name === "identity") {
+      identityKeys.add(entry.key);
+    } else if (name === "user-identities" && Array.isArray(entry.value)) {
+      const version = entry.key.split(":")[2] ?? "";
+      for (const member of entry.value as string[]) {
+        identityKeys.add(`linkdish:identity:${version}:${member}`);
+      }
+    }
+  }
+
+  const revoked = new Set<string>();
+
+  for (const batch of chunk([...identityKeys], batchSize)) {
+    const exists = await run(batch.map((key) => ["EXISTS", identityTombstoneKey(key)]));
+    batch.forEach((key, index) => {
+      if (Number(exists[index]) > 0) revoked.add(key);
+    });
+  }
+
+  return revoked;
+};
+
+const withoutRevokedIdentities = <Candidate extends { entry: StoreSnapshotEntry }>(
+  candidates: Candidate[],
+  revokedIdentityKeys: Set<string>
+): Candidate[] => {
+  if (revokedIdentityKeys.size === 0) return candidates;
+
+  return candidates.flatMap((candidate) => {
+    const { entry } = candidate;
+    const name = findBackedUpKeyFamily(entry.key)?.name;
+
+    if (name === "identity") {
+      return revokedIdentityKeys.has(entry.key) ? [] : [candidate];
+    }
+
+    if (name === "user-identities" && Array.isArray(entry.value)) {
+      const version = entry.key.split(":")[2] ?? "";
+      const members = (entry.value as string[]).filter(
+        (member) => !revokedIdentityKeys.has(`linkdish:identity:${version}:${member}`)
+      );
+      return members.length > 0 ? [{ ...candidate, entry: { ...entry, value: members } }] : [];
     }
 
     return [candidate];
@@ -1056,7 +1124,10 @@ export const restoreStoreSnapshot = async (
     });
   }
 
-  const shared = withoutDeletedMembers(candidates, deletedUserIds);
+  const shared = withoutRevokedIdentities(
+    withoutDeletedMembers(candidates, snapshot.entries, deletedUserIds),
+    await findRevokedIdentities(run, candidates, batchSize)
+  );
   result.ofDeletedAccounts += candidates.length - shared.length;
   const byAccount = new Map<string, Candidate[]>();
   const unowned: Candidate[] = [];

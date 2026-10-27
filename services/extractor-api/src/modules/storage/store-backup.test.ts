@@ -563,6 +563,51 @@ describe("restoreStoreSnapshot", () => {
     expect([...(target.sets.get("linkdish:household-shopping-items:v1:h1") ?? [])]).toEqual(["i2"]);
   });
 
+  it("leaves sign-ins tombstoned since the snapshot unmapped", async () => {
+    const source = createFakeRedis(() => 0);
+    seed(source, 0);
+    source.strings.set("linkdish:identity:v1:clerk:gone", "u1");
+    source.strings.set("linkdish:identity:v1:google:kept", "u1");
+    source.sets.set("linkdish:user-identities:v1:u1", new Set(["clerk:gone", "google:kept"]));
+    const snapshot = await createStoreSnapshot(source.run, { now: () => new Date(0) });
+    const target = createFakeRedis(() => 0);
+    // The provider deleted the user; the LinkDish account itself was not deleted.
+    target.strings.set("linkdish:identity-deleted:v1:clerk:gone", "u1");
+
+    await restoreStoreSnapshot(target.run, snapshot, { apply: true });
+
+    expect(target.strings.has("linkdish:identity:v1:clerk:gone")).toBe(false);
+    expect(target.strings.get("linkdish:identity:v1:google:kept")).toBe("u1");
+    expect([...(target.sets.get("linkdish:user-identities:v1:u1") ?? [])]).toEqual(["google:kept"]);
+  });
+
+  it("judges keys picked by --only against the whole snapshot", async () => {
+    const source = createFakeRedis(() => 0);
+    source.strings.set("linkdish:user:v1:u1", JSON.stringify({ id: "u1" }));
+    source.strings.set("linkdish:user:v1:u2", JSON.stringify({ id: "u2" }));
+    source.strings.set(
+      "linkdish:household:v1:h1",
+      JSON.stringify({ id: "h1", memberUserIds: ["u1", "u2"], ownerUserId: "u1" })
+    );
+    source.strings.set("linkdish:household-by-user:v1:u2", "h1");
+    const snapshot = await createStoreSnapshot(source.run, { now: () => new Date(0) });
+    const target = createFakeRedis(() => 0);
+    target.strings.set(
+      "linkdish:user:v1:u1",
+      JSON.stringify({ deletedAt: "2026-10-02T00:00:00.000Z", id: "u1" })
+    );
+    // u2 has joined another household since h1 was dissolved.
+    target.strings.set("linkdish:household-by-user:v1:u2", "h2");
+
+    await restoreStoreSnapshot(target.run, snapshot, {
+      apply: true,
+      keyPrefixes: ["linkdish:household-by-user:"],
+      overwrite: true
+    });
+
+    expect(target.strings.get("linkdish:household-by-user:v1:u2")).toBe("h2");
+  });
+
   it("checks for a deleted account under the lock account deletion holds", async () => {
     const source = createFakeRedis(() => 0);
     seed(source, 0);
