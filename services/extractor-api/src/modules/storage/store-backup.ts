@@ -823,8 +823,8 @@ const parseRecord = (entry: StoreSnapshotEntry): Record<string, unknown> | null 
 
 /*
  * What a deleted account shared with a Family household goes when it is deleted: a household it
- * owned is dissolved (with its recipes, list, invites), and a recipe it shared is removed, as is
- * its membership. A restore leaves all of that out rather than show it to the others again.
+ * owned is dissolved (with its recipes, list, invites), and the recipes it shared and shopping
+ * items it added are removed, as is its membership. A restore leaves all of that out rather than show it to the others again.
  */
 const withoutDeletedMembers = <Candidate extends { entry: StoreSnapshotEntry }>(
   candidates: Candidate[],
@@ -835,15 +835,19 @@ const withoutDeletedMembers = <Candidate extends { entry: StoreSnapshotEntry }>(
   const family = (entry: StoreSnapshotEntry) => findBackedUpKeyFamily(entry.key)?.name;
   const households = new Set<string>();
   const recipes = new Set<string>();
+  const shoppingItems = new Set<string>();
 
   for (const { entry } of candidates) {
     const record = parseRecord(entry);
-    const owner = record?.ownerUserId;
+    const name = family(entry);
+    // Shopping items record who added them; households and shared recipes, who owns them.
+    const owner = name === "household-shopping-item" ? record?.addedBy : record?.ownerUserId;
     if (typeof owner !== "string" || !deletedUserIds.has(owner) || typeof record?.id !== "string") {
       continue;
     }
-    if (family(entry) === "household") households.add(record.id);
-    if (family(entry) === "household-recipe") recipes.add(record.id);
+    if (name === "household") households.add(record.id);
+    if (name === "household-recipe") recipes.add(record.id);
+    if (name === "household-shopping-item") shoppingItems.add(record.id);
   }
 
   return candidates.flatMap((candidate) => {
@@ -855,6 +859,9 @@ const withoutDeletedMembers = <Candidate extends { entry: StoreSnapshotEntry }>(
       entry.key.split(":").some((segment) => households.has(segment)) ||
       (typeof record?.householdId === "string" && households.has(record.householdId)) ||
       (name === "household-recipe" && typeof record?.id === "string" && recipes.has(record.id)) ||
+      (name === "household-shopping-item" &&
+        typeof record?.id === "string" &&
+        shoppingItems.has(record.id)) ||
       (name === "household-by-user" &&
         typeof entry.value === "string" &&
         households.has(entry.value)) ||
@@ -865,8 +872,9 @@ const withoutDeletedMembers = <Candidate extends { entry: StoreSnapshotEntry }>(
       return [];
     }
 
-    if (name === "household-recipes") {
-      const members = (entry.value as string[]).filter((member) => !recipes.has(member));
+    if (name === "household-recipes" || name === "household-shopping-items") {
+      const removed = name === "household-recipes" ? recipes : shoppingItems;
+      const members = (entry.value as string[]).filter((member) => !removed.has(member));
       return members.length > 0 ? [{ ...candidate, entry: { ...entry, value: members } }] : [];
     }
 

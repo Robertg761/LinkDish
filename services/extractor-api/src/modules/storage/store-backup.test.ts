@@ -526,6 +526,15 @@ describe("restoreStoreSnapshot", () => {
     source.strings.set("linkdish:household-recipe-by-source:v1:h1:u1:saved", "s1");
     source.sets.set("linkdish:household-recipes:v1:h1", new Set(["s1", "s2"]));
     source.strings.set(
+      "linkdish:household-shopping-item:v1:i1",
+      JSON.stringify({ addedBy: "u1", householdId: "h1", id: "i1" })
+    );
+    source.strings.set(
+      "linkdish:household-shopping-item:v1:i2",
+      JSON.stringify({ addedBy: "u2", householdId: "h1", id: "i2" })
+    );
+    source.sets.set("linkdish:household-shopping-items:v1:h1", new Set(["i1", "i2"]));
+    source.strings.set(
       "linkdish:household:v1:h9",
       JSON.stringify({ id: "h9", memberUserIds: ["u1"], ownerUserId: "u1" })
     );
@@ -549,6 +558,9 @@ describe("restoreStoreSnapshot", () => {
       memberUserIds: ["u2"]
     });
     expect(target.strings.has("linkdish:household-recipe:v1:s2")).toBe(true);
+    expect(target.strings.has("linkdish:household-shopping-item:v1:i1")).toBe(false);
+    expect(target.strings.has("linkdish:household-shopping-item:v1:i2")).toBe(true);
+    expect([...(target.sets.get("linkdish:household-shopping-items:v1:h1") ?? [])]).toEqual(["i2"]);
   });
 
   it("checks for a deleted account under the lock account deletion holds", async () => {
