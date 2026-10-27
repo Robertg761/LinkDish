@@ -1,3 +1,5 @@
+import { fileURLToPath } from "node:url";
+
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
 import { defineConfig } from "vitest/config";
@@ -170,54 +172,38 @@ const DOMAIN_FORMAT_PATTERN =
  * the import queue count; see platform/boot-settle.ts) is not in `app-core`: the Cookbook's
  * first download carries only what its first paint needs.
  */
-const createChunkGroups = (bootModules: readonly string[]): Rolldown.CodeSplittingGroup[] => {
-  /**
-   * Whether `id` is in the static import graph of a root, found by walking up its static
-   * importers (Rolldown's chunking context can't list every module, so the graph can't be walked
-   * down from the roots). Both answers are remembered: a module under a root puts everything it
-   * imports under it too, and a module that isn't needn't be walked again.
-   */
-  const createStaticGraphCheck = (isRoot: (info: Rolldown.ModuleInfo) => boolean) => {
-    const known = new Map<string, boolean>();
+const createChunkGroups = (landingModuleId: string): Rolldown.CodeSplittingGroup[] => {
+  // The landing page's static import graph, walked once per chunking pass (a watch rebuild gets a
+  // new context, so an import that changed since the last build is seen).
+  const landingGraphs = new WeakMap<ChunkingContext, Set<string>>();
+  const landingGraphFor = (context: ChunkingContext): Set<string> => {
+    let graph = landingGraphs.get(context);
 
-    return (id: string, context: ChunkingContext): boolean => {
+    if (!graph) {
       const visited = new Set<string>();
-      const pending = [id];
-
-      while (pending.length > 0) {
-        const current = pending.pop()!;
-
-        if (visited.has(current) || known.get(current) === false) {
-          continue;
+      const visit = (id: string) => {
+        if (visited.has(id)) {
+          return;
         }
 
-        const info = context.getModuleInfo(current);
+        visited.add(id);
+        context.getModuleInfo(id)?.importedIds.forEach(visit);
+      };
 
-        if (known.get(current) || (info && isRoot(info))) {
-          known.set(id, true);
-          return true;
-        }
+      visit(landingModuleId);
+      graph = visited;
+      landingGraphs.set(context, graph);
+    }
 
-        visited.add(current);
-        pending.push(...(info?.importers ?? []));
-      }
-
-      visited.forEach((visitedId) => known.set(visitedId, false));
-      return false;
-    };
+    return graph;
   };
-
-  const inEntryGraph = createStaticGraphCheck((info) => info.isEntry);
-  const inLandingGraph = createStaticGraphCheck((info) =>
-    bootModules.some((bootModule) => info.id.replaceAll("\\", "/").endsWith(bootModule))
-  );
 
   const sharedChunkFor = (id: string, context: ChunkingContext): string | undefined => {
     const path = id.replaceAll("\\", "/");
     const info = context.getModuleInfo(id);
 
-    // Entry code stays in the entry; modules only ever imported lazily keep their own chunks.
-    if (!info || inEntryGraph(id, context) || info.importers.length === 0) {
+    // Modules only ever imported lazily keep their own chunks.
+    if (!info || info.importers.length === 0) {
       return undefined;
     }
 
@@ -228,7 +214,7 @@ const createChunkGroups = (bootModules: readonly string[]): Rolldown.CodeSplitti
     }
 
     if (APP_SHARED_PATTERN.test(path)) {
-      return inLandingGraph(id, context) ? "app-core" : "app-shared";
+      return landingGraphFor(context).has(id) ? "app-core" : "app-shared";
     }
 
     if (DOMAIN_CORE_PATTERN.test(path)) {
@@ -239,20 +225,18 @@ const createChunkGroups = (bootModules: readonly string[]): Rolldown.CodeSplitti
   };
 
   return [
-    // Claimed first and named explicitly: a group pulls its modules' dependencies into its chunk
-    // unless another group already holds them, which would otherwise drag shell code (React, the
-    // router) into `app-core` and make every route download it.
-    {
-      debugName: "entry",
-      name: (id, context) => (inEntryGraph(id, context) ? "index" : null),
-      priority: 1
-    },
+    // Listed first, so it claims the entry's static graph before the shared groups: a group pulls
+    // its modules' dependencies into its chunk unless another group already holds them, which
+    // would otherwise drag shell code (React, the router) into `app-core` and make every route
+    // download it.
+    { name: "index", tags: ["$initial"] },
     { debugName: "shared", name: (id, context) => sharedChunkFor(id, context) ?? null }
   ];
 };
 
 /** The page most visits start on; see preloadLandingRoute and app/routes.ts. */
 const LANDING_ROUTE_MODULE = "/src/features/library/LibraryPage.tsx";
+const LANDING_ROUTE_ID = fileURLToPath(new URL(`.${LANDING_ROUTE_MODULE}`, import.meta.url));
 
 export default defineConfig({
   test: {
@@ -264,7 +248,7 @@ export default defineConfig({
     rolldownOptions: {
       output: {
         codeSplitting: {
-          groups: createChunkGroups([LANDING_ROUTE_MODULE])
+          groups: createChunkGroups(LANDING_ROUTE_ID)
         }
       }
     }
