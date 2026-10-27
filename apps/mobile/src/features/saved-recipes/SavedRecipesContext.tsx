@@ -39,6 +39,7 @@ import {
   type MobileCollection
 } from "./collections";
 import { CookbookSyncProvider } from "./CookbookSyncContext";
+import { readStateCollections } from "./librarySync";
 import {
   createScanVersion,
   deleteRecipeSourceImageFiles,
@@ -611,8 +612,14 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
   useEffect(() => {
     let isMounted = true;
 
-    AsyncStorage.getItem(COLLECTIONS_STORAGE_KEY)
-      .then(async (stored) => {
+    Promise.all([
+      AsyncStorage.getItem(COLLECTIONS_STORAGE_KEY),
+      readStateCollections().catch((error: unknown) => {
+        console.warn("Failed to read collections left in the sync state.", error);
+        return [];
+      })
+    ])
+      .then(async ([stored, fromSyncState]) => {
         // Collections that can't be read are copied aside first; if that fails, nothing is written.
         if (isUnreadableStoredList(stored)) {
           await AsyncStorage.setItem(COLLECTIONS_CORRUPT_BACKUP_STORAGE_KEY, stored!);
@@ -622,10 +629,14 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
           // Anything a sync or the cook changed before this read landed is kept.
           commitCollections((current) => {
             const known = new Set(current.map((collection) => collection.id));
-            return [
-              ...current,
-              ...parseCollections(stored ?? null).filter((collection) => !known.has(collection.id))
-            ];
+            const loaded = [...parseCollections(stored ?? null), ...fromSyncState].filter(
+              (collection) => {
+                const isNew = !known.has(collection.id);
+                known.add(collection.id);
+                return isNew;
+              }
+            );
+            return [...current, ...loaded];
           });
         }
       })

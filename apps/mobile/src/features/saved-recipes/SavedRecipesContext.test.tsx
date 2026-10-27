@@ -452,6 +452,38 @@ describe("SavedRecipesProvider household save entitlement", () => {
     ).toBe(true);
   });
 
+  it("loads collections an older build left in the sync state, signed out too", async () => {
+    asyncStorageMocks.getItem.mockImplementation((key: string) =>
+      Promise.resolve(
+        key === "linkdish.librarySync.v1"
+          ? JSON.stringify({
+              account: "u1",
+              bases: {},
+              collections: {
+                "collection-soups": {
+                  payload: { createdAt: "2026-10-01T12:00:00.000Z", name: "Soups", sortOrder: 0 },
+                  updatedAt: "2026-10-20T12:00:00.000Z"
+                }
+              },
+              cursor: "0",
+              linkedAt: "2026-10-20T12:00:00.000Z"
+            })
+          : null
+      )
+    );
+
+    await renderProvider();
+    await settlePersistence();
+
+    expect(latestSavedRecipes?.collections.map((collection) => collection.name)).toEqual(["Soups"]);
+    expect(latestSavedRecipes?.isCookbookReadable).toBe(true);
+    expect(
+      asyncStorageMocks.setItem.mock.calls.some(
+        ([key, value]) => key === "linkdish.collections.v1" && String(value).includes("Soups")
+      )
+    ).toBe(true);
+  });
+
   it("copies damaged collections aside before writing over them", async () => {
     asyncStorageMocks.getItem.mockImplementation((key: string) =>
       Promise.resolve(key === "linkdish.collections.v1" ? '[{"id":"collection-' : null)

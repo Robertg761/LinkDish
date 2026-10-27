@@ -81,6 +81,18 @@ export const readMobileLibrarySyncState = async (): Promise<MobileLibrarySyncSta
   }
 };
 
+/**
+ * Collections an older build kept in the sync state that a sync hasn't moved into the cookbook
+ * yet (see moveStateCollections). The cookbook loads them too, so they're there signed out.
+ */
+export const readStateCollections = async (): Promise<MobileCollection[]> => {
+  const state = await readMobileLibrarySyncState();
+
+  return Object.entries(state?.collections ?? {}).map(([id, stored]) =>
+    fromLibraryCollection(id, stored.payload, stored.updatedAt)
+  );
+};
+
 const writeState = (state: MobileLibrarySyncState): Promise<void> =>
   AsyncStorage.setItem(LIBRARY_SYNC_STORAGE_KEY, JSON.stringify(state));
 
