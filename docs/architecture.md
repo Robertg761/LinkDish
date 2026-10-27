@@ -228,6 +228,32 @@ parses `extractRecipeAnyRequestSchema`.
   counted; the rest are written. The response is `{ accepted, dropped }` (`dropped` is an
   optional, additive field). Only a malformed envelope is a 400.
 - Postgres stores `event_name` as free text, so new names need no migration.
+
+### Analytics storage
+
+- The Postgres schema is versioned in
+  `services/extractor-api/src/modules/analytics/analytics-migrations.ts`, tracked in
+  `analytics_schema_migrations`. The API applies pending migrations on first use in each process
+  (one transaction under an advisory lock, so concurrent cold starts apply each once); when the
+  database is current that is a version read and no DDL. `pnpm --filter @linkdish/extractor-api
+  analytics:migrate` applies them by hand. Never edit a shipped migration; add the next one.
+  Migration 1 is the schema the API used to create on every cold start, still guarded by
+  `if not exists`, so databases created that way adopt it.
+- **Retention is off by default: analytics are kept indefinitely.** Vercel Cron calls
+  `GET /admin/cron/analytics-retention` daily (root `vercel.json` `crons`; it is folded into
+  `api/admin.ts` for the 12-function limit). It authenticates with `CRON_SECRET` only, not the
+  dashboard token, and returns 503 until that is set. It deletes nothing unless a retention is
+  set: with `ANALYTICS_RETENTION_DAYS`, raw rows (`analytics_events`, `extraction_analytics`,
+  `error_analytics`) older than that are deleted in batches by `received_at`, because
+  `occurred_at` is client-supplied; with `ANALYTICS_ROLLUP_RETENTION_DAYS`, rollups and store
+  metrics older than that go. A run stops after about 40 seconds and the next one carries on.
+  Setting either one is a permanent deletion of older rows, and the privacy pages should then
+  state the period.
+- **Account deletion** deletes every raw analytics row carrying the account's hashed id before
+  anything else is removed, so an analytics database failure fails the deletion while it can
+  still be retried. Rows recorded before sign-in carry only an anonymous id and expire with
+  retention. Purge and account deletion run whenever `ANALYTICS_DATABASE_URL` is set, even with
+  `ANALYTICS_ENABLED` off.
 - **Deploy order**: event names are a closed enum in `packages/api-contracts`. Deploy the
   API before shipping clients that send new names. Older APIs rejected whole batches with
   unknown names; the current one drops only those events, but they are still lost until
@@ -413,3 +439,13 @@ If production `/extract` skips the browser fetch, it is a deployment regression 
   and the site check. The web bundle budget (`pnpm --filter @linkdish/web size`) needs a
   build first, so it is not part of `validate`.
 - The live canary manifest is intentionally separate from PR-blocking CI so real-world regressions can be measured without making the pipeline flaky.
+- API deploys (`deploy-api.yml`) are gated on it instead: the workflow deploys with
+  `--prod --skip-domain`, runs the health check and the live canary against that deployment's
+  own `*.vercel.app` URL, and only then runs `vercel promote`. After promoting it confirms through
+  the Vercel API that api.linkdish.ca points at the new deployment before the final health check.
+  A failing check leaves api.linkdish.ca on the previous deployment, and the run summary names the
+  staged URL so it can be promoted by hand when the failure is a third-party site rather than the
+  change (only if no later run has promoted a newer one). A failure after promotion gets a
+  `vercel rollback` hint instead. The workflow only runs from `main`. This relies
+  on the API project having no Vercel Deployment Protection; turning it on would need a bypass
+  header in both check scripts.
