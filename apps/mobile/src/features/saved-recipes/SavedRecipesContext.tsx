@@ -26,6 +26,7 @@ import { canSaveAnotherRecipe } from "../billing/store";
 import {
   COLLECTIONS_CORRUPT_BACKUP_STORAGE_KEY,
   COLLECTIONS_STORAGE_KEY,
+  CollectionValidationError,
   createCollectionRecord,
   getRecipeCollectionIds,
   parseCollections,
@@ -103,7 +104,10 @@ export interface SavedRecipesState {
 export interface SavedRecipesActions {
   cloneRecipe: (id: string) => SaveRecipeResult & { recipeId?: string };
   cloneSharedRecipe: (id: string) => SaveRecipeResult & { recipeId?: string };
-  /** Adds a collection at the end. Throws CollectionValidationError for a bad name. */
+  /**
+   * Adds a collection at the end. Throws CollectionValidationError for a bad name, or when the
+   * stored collections couldn't be read.
+   */
   createCollection: (input: CollectionInput) => MobileCollection;
   /** Deletes a collection and takes every recipe out of it (the recipes stay). */
   deleteCollection: (id: string) => void;
@@ -309,6 +313,8 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
   const [hasLoadedCollections, setHasLoadedCollections] = useState(false);
   /** The collections couldn't be read: none are written (or synced) over the stored copy. */
   const [collectionsReadFailed, setCollectionsReadFailed] = useState(false);
+  const collectionsReadFailedRef = useRef(collectionsReadFailed);
+  collectionsReadFailedRef.current = collectionsReadFailed;
   const collectionsRef = useRef<MobileCollection[]>([]);
   /** Bumped by every Family refresh, so only the newest one lands. */
   const sharedRefreshRef = useRef(0);
@@ -1301,6 +1307,13 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
 
   const createCollection = useCallback(
     (input: CollectionInput): MobileCollection => {
+      // Collections that couldn't be read aren't saved to, so a new one would vanish on restart.
+      if (collectionsReadFailedRef.current) {
+        throw new CollectionValidationError(
+          "Your collections couldn't be loaded on this phone. Close and reopen LinkDish to try again."
+        );
+      }
+
       const created = createCollectionRecord(collectionsRef.current, input);
       commitCollections((current) => [...current, created]);
       trackMobileEvent({

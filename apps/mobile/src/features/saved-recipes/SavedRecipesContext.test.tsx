@@ -491,6 +491,20 @@ describe("SavedRecipesProvider household save entitlement", () => {
     ).toBe(true);
   });
 
+  it("makes no collections when the stored ones couldn't be read", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    asyncStorageMocks.getItem.mockImplementation((key: string) =>
+      key === "linkdish.collections.v1" ? Promise.reject(new Error("disk")) : Promise.resolve(null)
+    );
+
+    await renderProvider();
+
+    expect(() => latestSavedRecipes!.createCollection({ name: "Soups" })).toThrow(
+      "Your collections couldn't be loaded"
+    );
+    expect(latestSavedRecipes?.collections).toEqual([]);
+  });
+
   it("copies damaged collections aside before writing over them", async () => {
     asyncStorageMocks.getItem.mockImplementation((key: string) =>
       Promise.resolve(key === "linkdish.collections.v1" ? '[{"id":"collection-' : null)
