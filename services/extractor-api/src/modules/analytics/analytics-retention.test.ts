@@ -82,12 +82,18 @@ describe("purgeExpiredAnalytics", () => {
     expect(
       deletes.filter((query) => query.text.startsWith("delete from analytics_events"))
     ).toHaveLength(3);
-    expect(deletes[0]?.params).toEqual(["2026-04-29T12:00:00.000Z", 2]);
-    expect(deletes[0]?.text).toContain("where received_at < $1");
-    expect(deletes.at(-1)).toEqual({
-      params: ["2023-10-27"],
-      text: "delete from external_store_metrics where date < $1::date"
-    });
+    expect(deletes.slice(0, 2)).toEqual([
+      {
+        params: ["2023-10-27"],
+        text: "delete from daily_analytics_rollups where date < $1::date"
+      },
+      {
+        params: ["2023-10-27"],
+        text: "delete from external_store_metrics where date < $1::date"
+      }
+    ]);
+    expect(deletes[2]?.params).toEqual(["2026-04-29T12:00:00.000Z", 2]);
+    expect(deletes[2]?.text).toContain("where received_at < $1");
   });
 
   it("keeps everything when no retention is set", async () => {
@@ -120,14 +126,16 @@ describe("purgeExpiredAnalytics", () => {
     expect(rowsToDelete.get("analytics_events")).toBe(5);
   });
 
-  it("stops at the time budget and reports the run as incomplete", async () => {
+  it("purges rollups, then stops raw batches at the time budget and reports the run as incomplete", async () => {
     const { purgeExpiredAnalytics } = await import("./analytics-store.js");
     rowsToDelete.set("analytics_events", 10);
+    rowsToDelete.set("daily_analytics_rollups", 3);
 
     const result = await purgeExpiredAnalytics({ batchSize: 2, now, timeBudgetMs: -1 });
 
     expect(result.complete).toBe(false);
     expect(result.deleted.analyticsEvents).toBe(0);
+    expect(result.deleted.dailyAnalyticsRollups).toBe(3);
     expect(rowsToDelete.get("analytics_events")).toBe(10);
   });
 });

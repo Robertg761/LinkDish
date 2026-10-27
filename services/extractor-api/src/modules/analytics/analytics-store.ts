@@ -179,14 +179,18 @@ const ensureSchema = async (): Promise<void> => {
     return;
   }
 
-  schemaReady ??= getPool()
+  const migrating = (schemaReady ??= getPool()
     .then(runAnalyticsMigrations)
-    .then(() => undefined);
+    .then(() => undefined));
 
   try {
-    await schemaReady;
+    await migrating;
   } catch (error) {
-    schemaReady = null;
+    // Only the caller whose run failed clears it, never a newer run another caller started.
+    if (schemaReady === migrating) {
+      schemaReady = null;
+    }
+
     throw error;
   }
 };
@@ -793,9 +797,7 @@ export const purgeExpiredAnalytics = async ({
     rawCutoff:
       rawRetentionDays === undefined ? null : subtractDays(now, rawRetentionDays).toISOString(),
     rollupCutoff:
-      rollupRetentionDays === undefined
-        ? null
-        : toDateOnly(subtractDays(now, rollupRetentionDays)),
+      rollupRetentionDays === undefined ? null : toDateOnly(subtractDays(now, rollupRetentionDays)),
     deleted: {
       analyticsEvents: 0,
       extractionAnalytics: 0,
@@ -810,9 +812,26 @@ export const purgeExpiredAnalytics = async ({
     return result;
   }
 
+  // The budget covers the migration check too, so the whole run fits the function's duration.
+  const startedAt = Date.now();
   await ensureSchema();
   const analyticsPool = await getPool();
-  const startedAt = Date.now();
+
+  // Rollups first: they are small, and a raw backlog that uses up the budget must not hold
+  // them past their own retention.
+  if (result.rollupCutoff !== null) {
+    const rollups = await analyticsPool.query(
+      "delete from daily_analytics_rollups where date < $1::date",
+      [result.rollupCutoff]
+    );
+    result.deleted.dailyAnalyticsRollups = rollups.rowCount ?? 0;
+
+    const storeMetrics = await analyticsPool.query(
+      "delete from external_store_metrics where date < $1::date",
+      [result.rollupCutoff]
+    );
+    result.deleted.externalStoreMetrics = storeMetrics.rowCount ?? 0;
+  }
 
   if (result.rawCutoff !== null) {
     for (const [table, key] of rawAnalyticsTables) {
@@ -841,20 +860,6 @@ export const purgeExpiredAnalytics = async ({
         }
       }
     }
-  }
-
-  if (result.rollupCutoff !== null) {
-    const rollups = await analyticsPool.query(
-      "delete from daily_analytics_rollups where date < $1::date",
-      [result.rollupCutoff]
-    );
-    result.deleted.dailyAnalyticsRollups = rollups.rowCount ?? 0;
-
-    const storeMetrics = await analyticsPool.query(
-      "delete from external_store_metrics where date < $1::date",
-      [result.rollupCutoff]
-    );
-    result.deleted.externalStoreMetrics = storeMetrics.rowCount ?? 0;
   }
 
   return result;
