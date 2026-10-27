@@ -31,8 +31,6 @@ describe("provider monitoring", () => {
     expect(geminiCall).toBeDefined();
     expect(geminiCall?.url).not.toContain("gemini-secret-key");
     expect(geminiCall?.url).not.toContain("key=");
-    expect(new Headers(geminiCall?.init?.headers).get("x-goog-api-key")).toBe(
-      "gemini-secret-key"
-    );
+    expect(new Headers(geminiCall?.init?.headers).get("x-goog-api-key")).toBe("gemini-secret-key");
   });
 });
