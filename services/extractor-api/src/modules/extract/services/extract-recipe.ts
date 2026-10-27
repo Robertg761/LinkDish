@@ -1092,13 +1092,15 @@ const runTextExtraction = async ({
   attempt: "primary" | "fallback";
 }): Promise<ExtractionResult> => {
   const { runtime } = context;
+  /* Instagram captions come from a browser render; TikTok's oEmbed and pasted text do not. */
+  const fetchMode: FetchMode = document.origin === "instagram" ? "browser" : "http";
   const logBase = {
     hostname,
     detection,
     attempt,
-    fetchMode: "http" as const,
+    fetchMode,
     fallbackProvider: runtime.fallbackExtractor.providerName,
-    browserAttempted: false
+    browserAttempted: fetchMode === "browser"
   };
 
   await ensureAuthorized(context);
@@ -1112,7 +1114,7 @@ const runTextExtraction = async ({
         },
         detection.sourceType,
         document.url,
-        "http"
+        fetchMode
       )
     : null;
 

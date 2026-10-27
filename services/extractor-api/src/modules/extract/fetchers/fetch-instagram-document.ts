@@ -25,12 +25,12 @@ const maxCaptionChars = 5_000;
 
 /*
  * Instagram drops empty lines from captions, so creators end lines with an invisible separator
- * (U+2063) to keep them. Without it those lines are empty again, and the text parser sees the
- * gap between the ingredients and the method.
+ * (U+2063) or fill them with a blank Braille cell (U+2800) to keep them. Without those the lines
+ * are empty again, and the text parser sees the gap between the ingredients and the method.
  */
 const cleanCaption = (caption: string): string =>
   caption
-    .replace(/[\u2063\u200b\u2060\ufeff]/gu, "")
+    .replace(/[\u2063\u200b\u2060\ufeff\u2800]/gu, "")
     .replace(/[^\S\n]+$/gmu, "")
     .trim();
 
@@ -251,10 +251,32 @@ const removedPostPattern =
 export const readInstagramEmbedPost = (
   document: HtmlSourceDocument,
   shortcode: string
-): InstagramEmbedPost | null =>
-  readPostFromPageState(document.html, shortcode) ??
-  readPostFromCaptionMarkup(document) ??
-  readPostFromRenderedText(document);
+): InstagramEmbedPost | null => {
+  const readers = [
+    () => readPostFromPageState(document.html, shortcode),
+    () => readPostFromCaptionMarkup(document),
+    () => readPostFromRenderedText(document)
+  ];
+  let captionless: InstagramEmbedPost | null = null;
+
+  /* A reader that finds the post without its caption leaves the next one a chance to find it. */
+  for (const read of readers) {
+    const post = read();
+
+    if (post?.caption.trim()) {
+      return {
+        caption: post.caption,
+        authorName: post.authorName ?? captionless?.authorName ?? null,
+        thumbnailUrl: post.thumbnailUrl ?? captionless?.thumbnailUrl ?? null,
+        isVideo: post.isVideo ?? captionless?.isVideo ?? null
+      };
+    }
+
+    captionless ??= post;
+  }
+
+  return captionless;
+};
 
 export const fetchInstagramDocument = async (
   url: string,

@@ -173,11 +173,12 @@ platforms map onto them and are told apart internally by the detection `adapterK
   and whether it is a video are read from the post's record in the page state
   (`contextJSON` or a bare `edge_media_to_caption`), then the classic `.Caption` markup, then
   the rendered text between the like count and the comments link. The invisible separators
-  (U+2063) creators put on lines to keep blank lines are dropped, and the caption goes through
-  the same text parser as TikTok. A reel's ingredients-only caption keeps the video step; a
+  (U+2063, U+2800) creators put on lines to keep blank lines are dropped, and the caption goes
+  through the same text parser as TikTok. A reel's ingredients-only caption keeps the video step; a
   photo post's does not, and reels never go to the video reader. A login redirect or a page
   with no post fails as `source_blocked`, a removed or private post as `parse_failed`.
-  Instagram links that are not a post (profiles, stories) and Facebook stay unsupported.
+  Instagram links that are not a post (profiles, stories, `/share/` redirect links) and Facebook
+  stay unsupported.
 
 ### Pasted text import
 
@@ -274,7 +275,7 @@ each app:
   only while the item still is what it was merged with; an item that keeps changing meanwhile
   keeps the pulled change as `pending` for the next run and sends nothing over it. A change the API
   turns away is held (not sent again) until the item changes. `packages/api-client/src/
-library-sync.ts` validates each change before sending, so one bad item never fails a batch.
+  library-sync.ts` validates each change before sending, so one bad item never fails a batch.
 - A device's cookbook is linked to one account: the first to sign in on it (merging the two). It
   keeps the cookbook when that account signs out. Another account that signs in doesn't sync it;
   it can replace it with its own cookbook. Deleting the account unlinks the device; its recipes

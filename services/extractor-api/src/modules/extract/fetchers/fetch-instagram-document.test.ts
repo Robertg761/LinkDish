@@ -111,7 +111,7 @@ describe("fetchInstagramDocument", () => {
 
   it("drops the invisible separators creators use to keep empty lines", async () => {
     const separated =
-      "Lemon pasta ☀️\u2063\n\u2063\n2 tbsp butter\u2063 \n1 cup cream\u2063\n\u2063\nMelt the butter.";
+      "Lemon pasta ☀️\u2063\n\u2800\n2 tbsp butter\u2063 \n1 cup cream\u2063\n\u2063\nMelt the butter.";
     const html = page(
       "",
       `<script>(${JSON.stringify({
@@ -133,6 +133,31 @@ describe("fetchInstagramDocument", () => {
     );
 
     expect(document.text).toBe("Lemon pasta ☀️\n\n2 tbsp butter\n1 cup cream\n\nMelt the butter.");
+  });
+
+  it("reads the caption markup when the page state has the post without its caption", async () => {
+    const context = {
+      gql_data: {
+        shortcode_media: {
+          shortcode,
+          is_video: true,
+          owner: { username: "cookcreator" },
+          edge_media_to_caption: { edges: [] }
+        }
+      }
+    };
+    const html = page(
+      `<div class="Caption"><a class="CaptionUsername">cookcreator</a><br>${caption
+        .split("\n")
+        .join("<br>")}</div>`,
+      `<script>({"contextJSON":${JSON.stringify(JSON.stringify(context))}})</script>`
+    );
+
+    const document = await fetchInstagramDocument(`https://www.instagram.com/p/${shortcode}/`, () =>
+      Promise.resolve(rendered(html))
+    );
+
+    expect(document).toMatchObject({ text: caption, authorName: "cookcreator", isVideo: true });
   });
 
   it("reads a caption edge that sits directly in a script", async () => {

@@ -43,6 +43,9 @@ describe("detectSourceType", () => {
     expect(detectSourceType("https://www.instagram.com/cookcreator/").sourceType).toBe("social");
     expect(detectSourceType("https://www.instagram.com/cookcreator/").adapterKey).toBeNull();
     expect(detectSourceType("https://www.instagram.com/stories/cook/123/").adapterKey).toBeNull();
+    expect(
+      detectSourceType("https://www.instagram.com/share/reel/BAbCdEf123/").adapterKey
+    ).toBeNull();
   });
 
   it("gives Instagram posts, reels and IGTV videos their own adapter key", () => {

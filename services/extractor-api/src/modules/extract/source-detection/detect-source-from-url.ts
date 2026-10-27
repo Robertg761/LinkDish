@@ -55,8 +55,9 @@ export const parseInstagramPost = (url: string): { shortcode: string; isVideo: b
       return null;
     }
 
+    /* /share/reel/<token> links carry a redirect token, not the post's shortcode. */
     const match = parsedUrl.pathname.match(
-      /^\/(?:[\w.]+\/)?(p|reels?|tv)\/([A-Za-z0-9_-]{5,64})\/?$/u
+      /^\/(?:(?!share\/)[\w.]+\/)?(p|reels?|tv)\/([A-Za-z0-9_-]{5,64})\/?$/u
     );
 
     return match?.[1] && match[2] ? { shortcode: match[2], isVideo: match[1] !== "p" } : null;
