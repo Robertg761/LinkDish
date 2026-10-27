@@ -3,20 +3,27 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   installCrashReporting,
   resetCrashReportingForTests,
-  scrubCrashBreadcrumb
+  scrubCrashBreadcrumb,
+  scrubCrashEvent
 } from "./crash-reporting";
 
 const mocks = vi.hoisted(() => ({
-  init: vi.fn()
+  init: vi.fn(),
+  platform: { OS: "android" }
 }));
 
 vi.mock("@sentry/react-native", () => ({
   init: mocks.init
 }));
 
+vi.mock("react-native", () => ({
+  Platform: mocks.platform
+}));
+
 describe("installCrashReporting", () => {
   beforeEach(() => {
     mocks.init.mockReset();
+    mocks.platform.OS = "android";
     resetCrashReportingForTests();
   });
 
@@ -48,13 +55,21 @@ describe("installCrashReporting", () => {
     );
   });
 
-  it("keeps the app starting if Sentry fails to initialize", () => {
+  it("stays off outside Android, which is all the privacy policy covers", () => {
+    vi.stubEnv("EXPO_PUBLIC_SENTRY_DSN", "https://key@o1.ingest.sentry.io/2");
+    mocks.platform.OS = "ios";
+
+    expect(installCrashReporting()).toBe(false);
+    expect(mocks.init).not.toHaveBeenCalled();
+  });
+
+  it("keeps the app starting and reports off if Sentry fails to initialize", () => {
     vi.stubEnv("EXPO_PUBLIC_SENTRY_DSN", "https://key@o1.ingest.sentry.io/2");
     mocks.init.mockImplementation(() => {
       throw new Error("native module missing");
     });
 
-    expect(() => installCrashReporting()).not.toThrow();
+    expect(installCrashReporting()).toBe(false);
   });
 });
 
@@ -81,9 +96,45 @@ describe("scrubCrashBreadcrumb", () => {
     });
   });
 
-  it("keeps other breadcrumbs unchanged", () => {
-    const breadcrumb = { category: "navigation", data: { to: "/recipes" } };
+  it("strips query strings from links in breadcrumb messages", () => {
+    expect(
+      scrubCrashBreadcrumb({
+        category: "navigation",
+        message: "opened https://example.com/r?id=1",
+        data: { to: "/recipes" }
+      })
+    ).toEqual({
+      category: "navigation",
+      message: "opened https://example.com/r",
+      data: { to: "/recipes" }
+    });
+  });
+});
 
-    expect(scrubCrashBreadcrumb(breadcrumb)).toBe(breadcrumb);
+describe("scrubCrashEvent", () => {
+  it("strips query strings from links in error messages and the request URL", () => {
+    expect(
+      scrubCrashEvent({
+        type: undefined,
+        message: "Failed https://example.com/recipe?id=123&token=abc.",
+        exception: {
+          values: [
+            { type: "TypeError", value: 'Failed to load "https://site.com/r?x=1#top" twice' },
+            { type: "Error" }
+          ]
+        },
+        request: { url: "https://api.linkdish.ca/extract?url=secret" }
+      })
+    ).toEqual({
+      type: undefined,
+      message: "Failed https://example.com/recipe",
+      exception: {
+        values: [
+          { type: "TypeError", value: 'Failed to load "https://site.com/r" twice' },
+          { type: "Error" }
+        ]
+      },
+      request: { url: "https://api.linkdish.ca/extract" }
+    });
   });
 });

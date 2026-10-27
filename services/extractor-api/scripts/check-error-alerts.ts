@@ -2,10 +2,13 @@ import { buildAnalyticsPoolSslConfig } from "../src/modules/analytics/analytics-
 import {
   canSendEmail,
   decideErrorAlert,
+  ensureErrorAlertCheckpoint,
   formatErrorAlert,
   loadErrorAlertSnapshot,
+  loadErrorAlertWindow,
   readErrorAlertChannels,
   readErrorAlertConfig,
+  saveErrorAlertCheckpoint,
   sendErrorAlert
 } from "../src/modules/analytics/error-alerts.js";
 
@@ -34,15 +37,18 @@ const main = async (): Promise<number> => {
   });
 
   try {
-    const snapshot = await loadErrorAlertSnapshot(pool, config);
+    await ensureErrorAlertCheckpoint(pool);
+    const alertWindow = await loadErrorAlertWindow(pool, config);
+    const snapshot = await loadErrorAlertSnapshot(pool, config, alertWindow);
     const decision = decideErrorAlert(snapshot, config);
 
     console.log(
-      `Last ${config.windowMinutes} minutes: ${snapshot.total} errors, ${snapshot.fatal} fatal, ` +
+      `Last ${alertWindow.minutes} min: ${snapshot.total} errors, ${snapshot.fatal} fatal, ` +
         `${decision.newGroups.length} new.`
     );
 
     if (!decision.shouldAlert) {
+      await saveErrorAlertCheckpoint(pool, alertWindow);
       return 0;
     }
 
@@ -58,17 +64,20 @@ const main = async (): Promise<number> => {
       process.env.GITHUB_SERVER_URL && process.env.GITHUB_REPOSITORY && process.env.GITHUB_RUN_ID
         ? `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`
         : undefined;
-    const result = await sendErrorAlert(
-      formatErrorAlert(snapshot, decision, config, runUrl),
-      channels
-    );
+    const result = await sendErrorAlert(formatErrorAlert(snapshot, decision, runUrl), channels);
 
     console.log(
       `Alert fired (${decision.reasons.length} reasons). Sent: ${result.sent.join(", ") || "none"}.` +
         (result.failed.length > 0 ? ` Failed: ${result.failed.join(", ")}.` : "")
     );
 
-    return result.sent.length > 0 ? 0 : 1;
+    // Undelivered alerts leave the checkpoint where it was, so the next run reports them again.
+    if (result.sent.length === 0) {
+      return 1;
+    }
+
+    await saveErrorAlertCheckpoint(pool, alertWindow);
+    return 0;
   } finally {
     await pool.end();
   }

@@ -5,14 +5,22 @@ import {
   decideErrorAlert,
   formatErrorAlert,
   loadErrorAlertSnapshot,
+  loadErrorAlertWindow,
   readErrorAlertChannels,
   readErrorAlertConfig,
   sendErrorAlert,
   type ErrorAlertGroup,
-  type ErrorAlertSnapshot
+  type ErrorAlertSnapshot,
+  type ErrorAlertWindow
 } from "./error-alerts.js";
 
 const config = readErrorAlertConfig({});
+
+const hourWindow: ErrorAlertWindow = {
+  since: new Date("2026-10-26T09:17:00.000Z"),
+  until: new Date("2026-10-26T10:17:00.000Z"),
+  minutes: 60
+};
 
 const group = (overrides: Partial<ErrorAlertGroup> = {}): ErrorAlertGroup => ({
   fingerprint: "web:/recipes:TypeError: x is undefined",
@@ -24,10 +32,16 @@ const group = (overrides: Partial<ErrorAlertGroup> = {}): ErrorAlertGroup => ({
   routeOrScreen: "/recipes",
   appVersion: "2.1.0",
   isNew: false,
+  countLastDay: 1,
+  countLastDayBeforeWindow: 0,
   ...overrides
 });
 
-const snapshot = (groups: ErrorAlertGroup[]): ErrorAlertSnapshot => ({
+const snapshot = (
+  groups: ErrorAlertGroup[],
+  window: ErrorAlertWindow = hourWindow
+): ErrorAlertSnapshot => ({
+  window,
   total: groups.reduce((sum, item) => sum + item.count, 0),
   fatal: groups.reduce((sum, item) => sum + item.fatalCount, 0),
   groups
@@ -68,6 +82,42 @@ describe("readErrorAlertChannels", () => {
   });
 });
 
+describe("loadErrorAlertWindow", () => {
+  const queryReturning = (row: Record<string, unknown>) =>
+    vi.fn().mockResolvedValue({ rows: [row] });
+
+  it("covers the configured window on the first run", async () => {
+    const query = queryReturning({ until: hourWindow.until, checked_until: null });
+
+    await expect(loadErrorAlertWindow({ query }, config)).resolves.toEqual(hourWindow);
+  });
+
+  it("starts where the last finished run stopped, so late runs miss nothing", async () => {
+    const query = queryReturning({
+      until: new Date("2026-10-26T11:45:00.000Z"),
+      checked_until: "2026-10-26T10:17:00.000Z"
+    });
+
+    await expect(loadErrorAlertWindow({ query }, config)).resolves.toEqual({
+      since: new Date("2026-10-26T10:17:00.000Z"),
+      until: new Date("2026-10-26T11:45:00.000Z"),
+      minutes: 88
+    });
+  });
+
+  it("catches up at most one day", async () => {
+    const query = queryReturning({
+      until: new Date("2026-10-26T10:00:00.000Z"),
+      checked_until: new Date("2026-10-20T10:00:00.000Z")
+    });
+
+    await expect(loadErrorAlertWindow({ query }, config)).resolves.toMatchObject({
+      since: new Date("2026-10-25T10:00:00.000Z"),
+      minutes: 1_440
+    });
+  });
+});
+
 describe("decideErrorAlert", () => {
   it("stays quiet for a few known errors", () => {
     expect(decideErrorAlert(snapshot([group({ count: 5 })]), config)).toEqual({
@@ -84,6 +134,17 @@ describe("decideErrorAlert", () => {
     expect(decision.reasons).toEqual(["25 errors in 60 minutes (alert threshold 25)"]);
   });
 
+  it("scales the spike threshold for a longer catch-up window", () => {
+    const longWindow = { ...hourWindow, minutes: 150 };
+
+    expect(decideErrorAlert(snapshot([group({ count: 60 })], longWindow), config).shouldAlert).toBe(
+      false
+    );
+    expect(decideErrorAlert(snapshot([group({ count: 63 })], longWindow), config).reasons).toEqual([
+      "63 errors in 150 minutes (alert threshold 63)"
+    ]);
+  });
+
   it("alerts on any fatal error", () => {
     const decision = decideErrorAlert(
       snapshot([group({ platform: "android", count: 1, fatalCount: 1 })]),
@@ -93,51 +154,65 @@ describe("decideErrorAlert", () => {
     expect(decision.reasons).toEqual(["1 fatal error (app crashes)"]);
   });
 
-  it("alerts on a new error once it repeats enough", () => {
-    expect(decideErrorAlert(snapshot([group({ isNew: true, count: 2 })]), config).shouldAlert).toBe(
-      false
+  it("alerts once, in the run where a new error reaches the threshold", () => {
+    expect(
+      decideErrorAlert(snapshot([group({ isNew: true, count: 2, countLastDay: 2 })]), config)
+        .shouldAlert
+    ).toBe(false);
+
+    // One occurrence fell in the previous run's window and five in this one.
+    const decision = decideErrorAlert(
+      snapshot([group({ isNew: true, count: 5, countLastDay: 6, countLastDayBeforeWindow: 1 })]),
+      config
     );
 
-    const decision = decideErrorAlert(snapshot([group({ isNew: true, count: 3 })]), config);
-
-    expect(decision.reasons).toEqual(["1 new error not seen in the previous 7 days"]);
+    expect(decision.reasons).toEqual([
+      "1 new error first seen in the last 24 hours (none in the 7 days before)"
+    ]);
     expect(decision.newGroups).toHaveLength(1);
+
+    // Already over the threshold before this window: reported by an earlier run.
+    expect(
+      decideErrorAlert(
+        snapshot([group({ isNew: true, count: 2, countLastDay: 6, countLastDayBeforeWindow: 4 })]),
+        config
+      ).shouldAlert
+    ).toBe(false);
   });
 });
 
 describe("formatErrorAlert", () => {
   it("lists reasons and the most frequent errors", () => {
-    const current = snapshot([
-      group({ count: 30, visitors: 4 }),
-      group({
-        fingerprint: "android:native:boom",
-        platform: "android",
-        message: "boom",
-        routeOrScreen: "native",
-        count: 1,
-        fatalCount: 1,
-        isNew: true
-      })
-    ]);
+    const newCrash = group({
+      fingerprint: "android:native:boom",
+      platform: "android",
+      message: "boom",
+      routeOrScreen: "native",
+      count: 1,
+      fatalCount: 1,
+      isNew: true
+    });
+    // New errors sort first in the query; the message still lists by count.
+    const current = snapshot([newCrash, group({ count: 30, visitors: 4 })]);
     const message = formatErrorAlert(
       current,
       decideErrorAlert(current, { ...config, newErrorMinCount: 1 }),
-      config,
       "https://github.com/o/r/actions/runs/1"
     );
 
     expect(message.subject).toBe("LinkDish error alert: 1 fatal error (app crashes)");
+    expect(message.text).toContain("LinkDish error alert for the last 60 minutes.");
     expect(message.text).toContain("* 31 errors in 60 minutes (alert threshold 25)");
     expect(message.text).toContain(
-      "- 30x TypeError: x is undefined (web, /recipes, v2.1.0, 4 visitors)"
+      "- 30x TypeError: x is undefined (web, /recipes, v2.1.0, 4 visitors)\n" +
+        "- 1x boom (android, native, v2.1.0, 1 visitor, 1 fatal, new)"
     );
-    expect(message.text).toContain("- 1x boom (android, native, v2.1.0, 1 visitor, 1 fatal, new)");
     expect(message.text).toContain("Workflow run: https://github.com/o/r/actions/runs/1");
   });
 });
 
 describe("loadErrorAlertSnapshot", () => {
-  it("windows on received_at and maps rows", async () => {
+  it("queries the window on received_at and maps rows", async () => {
     const query = vi
       .fn()
       .mockResolvedValueOnce({ rows: [{ total: 4, fatal: "1" }] })
@@ -152,12 +227,15 @@ describe("loadErrorAlertSnapshot", () => {
             message: "boom",
             route_or_screen: "native",
             app_version: null,
-            is_new: true
+            is_new: true,
+            count_last_day: 5,
+            count_last_day_before_window: "1"
           }
         ]
       });
 
-    await expect(loadErrorAlertSnapshot({ query }, config)).resolves.toEqual({
+    await expect(loadErrorAlertSnapshot({ query }, config, hourWindow)).resolves.toEqual({
+      window: hourWindow,
       total: 4,
       fatal: 1,
       groups: [
@@ -170,12 +248,18 @@ describe("loadErrorAlertSnapshot", () => {
           message: "boom",
           routeOrScreen: "native",
           appVersion: null,
-          isNew: true
+          isNew: true,
+          countLastDay: 5,
+          countLastDayBeforeWindow: 1
         }
       ]
     });
-    expect(String(query.mock.calls[0]?.[0])).toContain("received_at >= now()");
-    expect(query.mock.calls[1]?.[1]).toEqual([60, 7]);
+    expect(String(query.mock.calls[0]?.[0])).toContain("received_at > $1::timestamptz");
+    expect(query.mock.calls[1]?.[1]).toEqual([
+      "2026-10-26T09:17:00.000Z",
+      "2026-10-26T10:17:00.000Z",
+      7
+    ]);
   });
 });
 
@@ -201,6 +285,8 @@ describe("sendErrorAlert", () => {
     ).resolves.toEqual({ sent: ["email", "webhook"], failed: [] });
 
     expect(fetchImpl.mock.calls[0]?.[0]).toBe("https://api.resend.com/emails");
+    expect(fetchImpl.mock.calls[0]?.[1]?.signal).toBeInstanceOf(AbortSignal);
+    expect(fetchImpl.mock.calls[1]?.[1]?.signal).toBeInstanceOf(AbortSignal);
     const webhookBody = JSON.parse(fetchImpl.mock.calls[1]?.[1]?.body as string) as {
       content: string;
     };
@@ -229,12 +315,19 @@ describe("sendErrorAlert", () => {
 });
 
 describe("buildWebhookPayload", () => {
-  it("uses Discord's content field and Slack's text field", () => {
-    expect(buildWebhookPayload("https://discord.com/api/webhooks/1/abc", "hi")).toEqual({
-      content: "hi"
+  const hostile = "@everyone <!channel> <https://evil.example|free recipes> & more";
+
+  it("stops Discord from pinging or embedding client text", () => {
+    expect(buildWebhookPayload("https://discord.com/api/webhooks/1/abc", hostile)).toEqual({
+      content: hostile,
+      allowed_mentions: { parse: [] },
+      flags: 4
     });
-    expect(buildWebhookPayload("https://hooks.slack.com/services/x", "hi")).toEqual({
-      text: "hi"
+  });
+
+  it("escapes Slack control characters so mentions and links stay plain text", () => {
+    expect(buildWebhookPayload("https://hooks.slack.com/services/x", hostile)).toEqual({
+      text: "@everyone &lt;!channel&gt; &lt;https://evil.example|free recipes&gt; &amp; more"
     });
   });
 });

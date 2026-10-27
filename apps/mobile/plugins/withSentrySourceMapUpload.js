@@ -13,7 +13,7 @@ const withAppBuildGradle = require("expo/config-plugins").withAppBuildGradle;
 const SENTRY_SOURCE_MAP_UPLOAD = `// Sentry: upload release JS source maps when the build has SENTRY_AUTH_TOKEN, SENTRY_ORG and
 // SENTRY_PROJECT. Without the token the build is unchanged.
 if (System.getenv("SENTRY_AUTH_TOKEN")) {
-    apply from: new File(["node", "--print", "require('path').dirname(require.resolve('@sentry/react-native/package.json'))"].execute().text.trim(), "sentry.gradle")
+    apply from: new File(["node", "--print", "require('path').dirname(require.resolve('@sentry/react-native/package.json'))"].execute(null, rootDir).text.trim(), "sentry.gradle")
 }
 `;
 

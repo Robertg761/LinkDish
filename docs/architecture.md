@@ -220,11 +220,19 @@ parses `extractRecipeAnyRequestSchema`.
   `error_analytics` table (fingerprint = platform, route and the first 120 characters of the
   message).
 - The **Error Alerts** workflow (`.github/workflows/error-alerts.yml`, hourly at :17) runs
-  `pnpm --filter @linkdish/extractor-api alerts:errors` against that table. It alerts when the
-  last 60 minutes (by `received_at`) have any fatal error, at least 25 errors, or an error
-  fingerprint not seen in the previous 7 days that happened at least 3 times. Each run that
-  meets a rule sends one email (Resend) and/or one Slack or Discord webhook message, so a
-  spike that continues alerts again every hour.
+  `pnpm --filter @linkdish/extractor-api alerts:errors` against that table. Each run checks the
+  errors received (by `received_at`) since the last run that finished, kept in the one-row
+  `error_alert_checkpoints` table, so a late or skipped GitHub cron run neither drops errors nor
+  reports them twice. The first run, or a run after the checkpoint is lost, checks the last 60
+  minutes; catch-up is capped at 24 hours. It alerts on any fatal error; on at least 25 errors
+  (scaled up for a window longer than 60 minutes); or on a new error, first seen in the last 24
+  hours with none in the 7 days before, in the run where its count over those 24 hours reaches
+  3. Each alerting run sends one email (Resend) and/or one Slack or Discord webhook message, so
+  a spike that continues alerts again every hour. A run that cannot deliver its alert fails and
+  leaves the checkpoint where it was, so the next run reports those errors again.
+- Error messages come from clients, so the webhook message cannot ping anyone or render links
+  (Discord `allowed_mentions: { parse: [] }`, Slack text escaped). Sends time out after 10
+  seconds.
 - The repository and its Actions logs are public: the job prints counts only. Error messages
   go only to the email and webhook channels.
 - Setup, in GitHub repository settings: secrets `ANALYTICS_DATABASE_URL` (the API's analytics
@@ -235,11 +243,13 @@ parses `extractRecipeAnyRequestSchema`.
   change the thresholds. Without the database secret the job does nothing; if a rule fires
   and no channel is configured, the run fails.
 - Android crash reports go to Sentry (`@sentry/react-native`), started in `app/_layout.tsx`
-  only when the build sets `EXPO_PUBLIC_SENTRY_DSN` (`EXPO_PUBLIC_SENTRY_ENVIRONMENT` is
-  optional). It catches native crashes, ANRs and fatal JS errors, which the `client_error`
-  event usually loses because the process dies before it is sent. It sends no default PII
-  and no performance traces, drops console breadcrumbs and strips query strings from request
-  URLs. Sentry's own alert rules notify about new crash issues.
+  only on Android and only when the build sets `EXPO_PUBLIC_SENTRY_DSN`
+  (`EXPO_PUBLIC_SENTRY_ENVIRONMENT` is optional). The privacy policy covers Android only, so
+  iOS needs a policy update before it is turned on there. It catches native crashes, ANRs and
+  fatal JS errors, which the `client_error` event usually loses because the process dies before
+  it is sent. It sends no default PII and no performance traces, drops console breadcrumbs, and
+  strips query strings from URLs in breadcrumbs, error messages and the request URL. Sentry's
+  own alert rules notify about new crash issues.
 - Release builds upload JS source maps to Sentry only when the EAS build has
   `SENTRY_AUTH_TOKEN`, `SENTRY_ORG` and `SENTRY_PROJECT`; `plugins/withSentrySourceMapUpload.js`
   and the checked-in `android/app/build.gradle` apply `sentry.gradle` behind that check, so
