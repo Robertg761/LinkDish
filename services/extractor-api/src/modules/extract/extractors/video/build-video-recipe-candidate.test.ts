@@ -126,6 +126,36 @@ describe("isAmountSupported", () => {
     expect(isAmountSupported("1 cup", "add a splash of milk and 2 cups of flour")).toBe(false);
     expect(isAmountSupported("1 cup", "half a cup of butter")).toBe(false);
   });
+
+  it("holds an amount spelled with an article to its unit and number", () => {
+    expect(isAmountSupported("a tablespoon", "a tablespoon of honey")).toBe(true);
+    expect(isAmountSupported("a heaping cup", "a heaping cup of flour")).toBe(true);
+    expect(isAmountSupported("a pinch", "pinch of salt")).toBe(true);
+    expect(
+      isAmountSupported("a pinch", "add a tiny pinch of salt, then cook for 2 minutes", "salt")
+    ).toBe(true);
+    expect(isAmountSupported("a cup", "one cup of rice")).toBe(true);
+    expect(isAmountSupported("a cup", "2 heaping cups of flour")).toBe(false);
+    expect(isAmountSupported("a cup", "one and a half cups of milk")).toBe(false);
+    expect(isAmountSupported("a cup", "a cup and a half of flour")).toBe(false);
+    expect(isAmountSupported("a tablespoon", "a tablespoon and a half of honey")).toBe(false);
+    expect(isAmountSupported("a cup", "a few cups of flour")).toBe(false);
+    expect(isAmountSupported("a cup", "several cups of stock")).toBe(false);
+    expect(isAmountSupported("a cup", "2 big heaping cups of flour")).toBe(false);
+    expect(isAmountSupported("a can", "you can add beans")).toBe(false);
+    expect(isAmountSupported("a slice", "slice the onion thin")).toBe(false);
+    expect(isAmountSupported("a can", "a can of chickpeas")).toBe(true);
+    expect(isAmountSupported("a cup and a half", "half a cup of milk")).toBe(false);
+    expect(isAmountSupported("a cup and a half", "a cup and a half of milk")).toBe(true);
+    expect(isAmountSupported("a few cloves", "add a few cloves of garlic", "garlic")).toBe(true);
+    expect(isAmountSupported("several cups", "several cups of stock")).toBe(true);
+    expect(isAmountSupported("several cups", "a few cups of stock")).toBe(false);
+    expect(isAmountSupported("a few cloves", "a clove of garlic")).toBe(false);
+    expect(isAmountSupported("a tablespoon", "a teaspoon of salt")).toBe(false);
+    expect(isAmountSupported("a cup", "half a cup of butter")).toBe(false);
+    expect(isAmountSupported("a cup", "2 cups of flour")).toBe(false);
+    expect(isAmountSupported("a splash", "a pinch of salt")).toBe(false);
+  });
 });
 
 describe("isItemNamedIn", () => {

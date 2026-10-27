@@ -996,6 +996,28 @@ const readRecipeFromVideo = async (request: VideoReadRequest): Promise<VideoRead
     }
   }
 
+  /*
+   * The day's Gemini calls are capped, and counted here so a failed download never uses one up.
+   * When the count can't be checked, the read is not risked.
+   */
+  if (runtime.videoReadAllowance) {
+    let allowed: boolean;
+
+    try {
+      allowed = await runtime.videoReadAllowance.reserve();
+    } catch (error) {
+      logVideoRead("limit_unavailable", {
+        message: error instanceof Error ? error.message : "unknown"
+      });
+      return { outcome: "limit_unavailable", response: null };
+    }
+
+    if (!allowed) {
+      logVideoRead("skipped_daily_limit");
+      return { outcome: "skipped_daily_limit", response: null };
+    }
+  }
+
   let payload: VideoRecipePayload | null;
 
   try {
