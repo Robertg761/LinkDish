@@ -485,9 +485,25 @@ export const isAmountSupported = (amount: string, quote: string, item = ""): boo
     );
   }
 
-  /* "a tablespoon", "a pinch": one of the unit, which the quote must say. */
   if (amountUnits.length > 0) {
-    return amountUnits.every((unit) => statesOneOf(unit, quote));
+    const words = wordsOf(amount);
+    const meansOne = words.every(
+      (word) =>
+        articles.has(word) ||
+        sizeWords.has(word) ||
+        (unitFamilyOf.has(word) && !pluralUnitSpellings.has(word))
+    );
+
+    /* "a tablespoon", "a pinch": one of the unit, which the quote must say. */
+    if (meansOne) {
+      return amountUnits.every((unit) => statesOneOf(unit, quote));
+    }
+
+    /* "a few cloves", "several cups": the quote must say each of its words. */
+    const quoteForms = formsOf(quote);
+    return words
+      .filter((word) => !amountFillerWords.has(word))
+      .every((word) => sharesForm(word, quoteForms));
   }
 
   const quoteForms = formsOf(quote);

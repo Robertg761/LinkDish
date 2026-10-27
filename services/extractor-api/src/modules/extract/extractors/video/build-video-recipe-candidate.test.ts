@@ -147,6 +147,10 @@ describe("isAmountSupported", () => {
     expect(isAmountSupported("a can", "a can of chickpeas")).toBe(true);
     expect(isAmountSupported("a cup and a half", "half a cup of milk")).toBe(false);
     expect(isAmountSupported("a cup and a half", "a cup and a half of milk")).toBe(true);
+    expect(isAmountSupported("a few cloves", "add a few cloves of garlic", "garlic")).toBe(true);
+    expect(isAmountSupported("several cups", "several cups of stock")).toBe(true);
+    expect(isAmountSupported("several cups", "a few cups of stock")).toBe(false);
+    expect(isAmountSupported("a few cloves", "a clove of garlic")).toBe(false);
     expect(isAmountSupported("a tablespoon", "a teaspoon of salt")).toBe(false);
     expect(isAmountSupported("a cup", "half a cup of butter")).toBe(false);
     expect(isAmountSupported("a cup", "2 cups of flour")).toBe(false);
