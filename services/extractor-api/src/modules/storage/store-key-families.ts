@@ -53,8 +53,14 @@ export const backedUpKeyFamilies: readonly BackedUpKeyFamily[] = [
   { name: "library-live", pattern: /^linkdish:library:[^:]+:live:.+$/u, type: "set" },
   { name: "library-changes", pattern: /^linkdish:library:[^:]+:changes:.+$/u, type: "zset" },
   { name: "library-rev", pattern: /^linkdish:library:[^:]+:rev:.+$/u, type: "string" },
-  // Admin settings and the billing grant audit trail
+  // Admin settings and audit trails; the admin sign-in lockout counters are disposable
   { name: "admin-billing-grant", pattern: /^linkdish:admin:billing-grant:.+$/u, type: "string" },
+  {
+    expires: true,
+    name: "admin-audit",
+    pattern: /^linkdish:admin:audit:[^:]+(?::auth)?$/u,
+    type: "zset"
+  },
   {
     name: "admin-llm-settings",
     pattern: /^linkdish:admin:[^:]+:[^:]+:llm-settings$/u,
@@ -81,7 +87,7 @@ export const backedUpKeyFamilies: readonly BackedUpKeyFamily[] = [
  * `backedUpKeyFamilies`.
  */
 export const storeKeySegments: Readonly<Record<string, "backup" | "ephemeral" | "mixed">> = {
-  admin: "backup",
+  admin: "mixed",
   "auth-code": "ephemeral",
   "auth-code-lock": "ephemeral",
   "auth-login-code-rate-limit": "ephemeral",

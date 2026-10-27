@@ -49,6 +49,8 @@ describe("store key classification", () => {
     ["linkdish:library:v1:item:u1:recipe:abc", "library-item"],
     ["linkdish:admin:v1:production:llm-settings", "admin-llm-settings"],
     ["linkdish:admin:billing-grant:v1:g1", "admin-billing-grant"],
+    ["linkdish:admin:audit:v1", "admin-audit"],
+    ["linkdish:admin:audit:v1:auth", "admin-audit"],
     ["linkdish:ios-waitlist:v1:emails", "ios-waitlist-index"],
     ["linkdish:quota:v2:lifetime:import:user:u1", "quota-lifetime"]
   ])("backs up %s as %s", (key, family) => {
@@ -61,6 +63,7 @@ describe("store key classification", () => {
     "linkdish:quota:v2:lifetime:import:user:u1:pending",
     "linkdish:quota:v2:2026-10:import:user:u1",
     "linkdish:auth-code:v1:hash",
+    "linkdish:admin:auth-failures:v1:hash",
     "linkdish:extract-cache:v9:abc",
     "linkdish:ios-waitlist-rate-limit:v1:hash"
   ])("leaves out %s", (key) => {
