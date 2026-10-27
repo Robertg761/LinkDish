@@ -11,7 +11,8 @@
     "test": "vitest run",
     "check:production": "node scripts/check-production-api.mjs",
     "canary:live": "node scripts/run-live-canary.mjs ../../docs/live-canary-manifest.json",
-    "grant:plan": "tsx scripts/grant-plan-by-email.ts"
+    "grant:plan": "tsx scripts/grant-plan-by-email.ts",
+    "analytics:migrate": "tsx scripts/migrate-analytics.ts"
   },
   "dependencies": {
     "@clerk/backend": "^3.4.13",
