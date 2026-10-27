@@ -978,6 +978,10 @@ const withoutRevokedIdentities = <Candidate extends { entry: StoreSnapshotEntry 
   });
 };
 
+/* Deletes KEYS[1] only while it still holds ARGV[1]. */
+const deleteIfHoldsScript =
+  "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) end return 0";
+
 /* Restores a sign-in mapping only while its sign-in has no tombstone, in one step. */
 const setUnlessTombstonedScript =
   "if redis.call('exists', KEYS[2]) == 1 then return 0 end return redis.call('set', KEYS[1], ARGV[1])";
@@ -1370,6 +1374,30 @@ export const restoreStoreSnapshot = async (
       await restoreEntries(kept, async () => {
         await lock?.renew();
       });
+
+      // Taking the account back to the snapshot's email drops the lookup for the one it moved
+      // to since, as changing the email does.
+      const liveEmailHash = parseObject(user)?.emailHash;
+
+      if (
+        apply &&
+        overwrite &&
+        snapshotUser &&
+        typeof liveEmailHash === "string" &&
+        liveEmailHash !== emailHash
+      ) {
+        const version = snapshotUser.key.split(":")[2] ?? "";
+        await lock?.renew();
+        await run([
+          [
+            "EVAL",
+            deleteIfHoldsScript,
+            "1",
+            `linkdish:user-by-email:${version}:${liveEmailHash}`,
+            userId
+          ]
+        ]);
+      }
     } finally {
       await lock?.release();
     }

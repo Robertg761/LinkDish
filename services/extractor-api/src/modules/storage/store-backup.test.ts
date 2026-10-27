@@ -658,6 +658,14 @@ describe("restoreStoreSnapshot", () => {
     expect(moved.strings.has("linkdish:user-by-email:v1:hash")).toBe(false);
     expect(moved.strings.get("linkdish:user-by-email:v1:new")).toBe("u1");
 
+    // Overwriting takes the account back to its old email, and the newer lookup goes with it.
+    moved.strings.set("linkdish:user-by-email:v1:other", "u2");
+    await restoreStoreSnapshot(moved.run, snapshot, { apply: true, overwrite: true });
+
+    expect(moved.strings.get("linkdish:user-by-email:v1:hash")).toBe("u1");
+    expect(moved.strings.has("linkdish:user-by-email:v1:new")).toBe(false);
+    expect(moved.strings.get("linkdish:user-by-email:v1:other")).toBe("u2");
+
     // The email changes just after the restore reads the account.
     const racing = createFakeRedis(() => 0);
     const run: StorePipeline = async (commands) => {
