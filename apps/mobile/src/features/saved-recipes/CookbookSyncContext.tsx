@@ -21,6 +21,7 @@ import {
   type MobileLibraryCookbook
 } from "./librarySync";
 
+import type { MobileCollection } from "./collections";
 import type { SavedRecipeRecord } from "./store";
 import type { ExtractorApiClient } from "@linkdish/api-client";
 
@@ -59,6 +60,8 @@ const CookbookSyncContext = createContext<CookbookSyncValue | null>(null);
 interface CookbookSyncProviderProps extends PropsWithChildren {
   /** The signed-in account (null when signed out). */
   account: string | null;
+  /** The cookbook's collections as rendered: a change here starts a sync too. */
+  collections: readonly MobileCollection[];
   /** A client whose requests carry `account` only. */
   createClient: (
     account: string
@@ -80,6 +83,7 @@ const isOfflineError = (error: unknown): boolean =>
 export const CookbookSyncProvider = ({
   account,
   children,
+  collections,
   cookbook,
   createClient,
   hasLoaded,
@@ -97,6 +101,7 @@ export const CookbookSyncProvider = ({
   const unavailableUntilRef = useRef(0);
   /** The cookbook as the last sync left it: that change needs no sync of its own. */
   const syncedRecordsRef = useRef<readonly SavedRecipeRecord[] | null>(null);
+  const syncedCollectionsRef = useRef<readonly MobileCollection[] | null>(null);
 
   const runFor = useCallback(
     async (runAccount: string) => {
@@ -116,6 +121,7 @@ export const CookbookSyncProvider = ({
         }
 
         syncedRecordsRef.current = cookbook.getRecords();
+        syncedCollectionsRef.current = cookbook.getCollections();
         setStatus((current) =>
           outcome.status === "other_account"
             ? { ...current, phase: "other_account" }
@@ -195,13 +201,17 @@ export const CookbookSyncProvider = ({
 
   // Changes here.
   useEffect(() => {
-    if (!account || !hasLoaded || savedRecipes === syncedRecordsRef.current) {
+    if (
+      !account ||
+      !hasLoaded ||
+      (savedRecipes === syncedRecordsRef.current && collections === syncedCollectionsRef.current)
+    ) {
       return;
     }
 
     const timer = setTimeout(() => void syncNow(), COOKBOOK_SYNC_DELAY_MS);
     return () => clearTimeout(timer);
-  }, [account, hasLoaded, savedRecipes, syncNow]);
+  }, [account, collections, hasLoaded, savedRecipes, syncNow]);
 
   // Back in the foreground, and a slow poll while open.
   useEffect(() => {
@@ -229,7 +239,7 @@ export const CookbookSyncProvider = ({
   }, [account, hasLoaded, syncNow]);
 
   const countChangesNotSynced = useCallback(
-    () => countMobileChangesNotSynced(cookbook.getRecords()),
+    () => countMobileChangesNotSynced(cookbook.getRecords(), cookbook.getCollections()),
     [cookbook]
   );
 

@@ -10,6 +10,10 @@ import { createPendingImageImport } from "../src/features/recipe-intake/pendingI
 import { prepareSharedImageImport } from "../src/features/recipe-intake/sharedImageImport";
 import { getSharedImportTarget } from "../src/features/recipe-intake/sharedImportTarget";
 import { extractUrlFromSharedText } from "../src/features/recipe-intake/sharedText";
+import {
+  createPendingTextImport,
+  getTextInputProblem
+} from "../src/features/recipe-intake/textImport";
 import { useRecipeExtraction } from "../src/features/recipe-results/hooks/useRecipeExtraction";
 import { useSavedRecipes } from "../src/features/saved-recipes/SavedRecipesContext";
 import { EXTRACTION_ERROR_LINES, selectFlavorCopyLine } from "../src/theme/flavorCopy";
@@ -102,6 +106,14 @@ export default function ImportProgressScreen() {
     const textParam = readFirstParam(params.text);
     return urlParam ?? extractUrlFromSharedText(textParam);
   }, [params.text, params.url]);
+  // Shared text with no link in it (a note, a message): read it as recipe text.
+  const sharedRecipeText = useMemo(() => {
+    const textParam = readFirstParam(params.text);
+    return !sharedUrl && !sharedImageUri && textParam && !getTextInputProblem(textParam)
+      ? textParam
+      : undefined;
+  }, [params.text, sharedImageUri, sharedUrl]);
+  const routedTextRef = useRef<string | undefined>(undefined);
   const { getSavedRecipeBySourceUrl, hasLoadedSavedRecipes } = useSavedRecipes();
   const importTarget = getSharedImportTarget({
     findSavedRecipeId: (candidateUrl) => getSavedRecipeBySourceUrl(candidateUrl)?.id,
@@ -117,6 +129,22 @@ export default function ImportProgressScreen() {
       routeOrScreen: "import-progress"
     }
   );
+
+  useEffect(() => {
+    if (!sharedRecipeText || routedTextRef.current === sharedRecipeText) {
+      return;
+    }
+
+    routedTextRef.current = sharedRecipeText;
+    const pendingImport = createPendingTextImport(sharedRecipeText);
+    router.replace({
+      pathname: "/recipe",
+      params: {
+        textImportId: pendingImport.id,
+        url: pendingImport.sourceUrl
+      }
+    });
+  }, [sharedRecipeText]);
 
   useEffect(() => {
     if (savedRecipeIdForShare) {
@@ -217,6 +245,7 @@ export default function ImportProgressScreen() {
     <View style={styles.screen}>
       <AppSurface style={styles.card}>
         {isPreparingSharedImage ||
+        sharedRecipeText ||
         ((extraction.state.state === "loading" || extraction.state.state === "empty") &&
           sharedUrl) ? (
           <>
@@ -234,7 +263,7 @@ export default function ImportProgressScreen() {
 
         {sharedImageError ||
         extraction.state.state === "failure" ||
-        (!sharedUrl && !sharedImageUri) ? (
+        (!sharedUrl && !sharedImageUri && !sharedRecipeText) ? (
           <>
             <View style={styles.iconWrap}>
               <MaterialCommunityIcons

@@ -474,6 +474,161 @@ describe("SavedRecipesProvider household save entitlement", () => {
     expect(cookbookWritesOf().some((value) => value.includes('"timesCooked":1'))).toBe(true);
   });
 
+  it("restores a backup against the cookbook as it is and saves it at once", async () => {
+    const [here, fromBackup] = buildSavedRecipes(2);
+    storeSavedRecipes([here!]);
+
+    await renderProvider();
+
+    let cookbookSeen: { freeSlots: number; records: unknown[] } | null = null;
+
+    await act(async () => {
+      await latestSavedRecipes!.restoreBackup((cookbook) => {
+        cookbookSeen = cookbook;
+        return {
+          collections: [
+            {
+              createdAt: "2026-10-01T12:00:00.000Z",
+              id: "collection-soups",
+              name: "Soups",
+              sortOrder: 0,
+              updatedAt: "2026-10-01T12:00:00.000Z"
+            }
+          ],
+          counts: {
+            collectionsCreated: 1,
+            duplicates: 1,
+            imported: 1,
+            mealPlanAdded: 0,
+            overLimit: 0,
+            restoredStarters: 0
+          },
+          mealPlan: [],
+          membershipAdditions: [{ collectionIds: ["collection-soups"], recipeId: here!.id }],
+          records: [{ ...fromBackup!, id: "saved-from-backup" }]
+        };
+      });
+    });
+
+    expect(cookbookSeen).toMatchObject({ freeSlots: 14, records: [expect.anything()] });
+    expect(latestSavedRecipes?.savedRecipes.map((recipe) => recipe.id)).toEqual([
+      "saved-from-backup",
+      here!.id
+    ]);
+    expect(latestSavedRecipes?.getSavedRecipeById(here!.id)?.libraryExtras?.collectionIds).toEqual([
+      "collection-soups"
+    ]);
+    expect(latestSavedRecipes?.collections.map((collection) => collection.name)).toEqual(["Soups"]);
+    // Written at once, not after the debounce.
+    expect(cookbookWritesOf().at(-1)).toContain("saved-from-backup");
+    expect(
+      asyncStorageMocks.setItem.mock.calls.some(
+        ([key, value]) => key === "linkdish.collections.v1" && String(value).includes("Soups")
+      )
+    ).toBe(true);
+  });
+
+  it("loads collections an older build left in the sync state, signed out too", async () => {
+    asyncStorageMocks.getItem.mockImplementation((key: string) =>
+      Promise.resolve(
+        key === "linkdish.librarySync.v1"
+          ? JSON.stringify({
+              account: "u1",
+              bases: {},
+              collections: {
+                "collection-soups": {
+                  payload: { createdAt: "2026-10-01T12:00:00.000Z", name: "Soups", sortOrder: 0 },
+                  updatedAt: "2026-10-20T12:00:00.000Z"
+                }
+              },
+              cursor: "0",
+              linkedAt: "2026-10-20T12:00:00.000Z"
+            })
+          : null
+      )
+    );
+
+    await renderProvider();
+    await settlePersistence();
+
+    expect(latestSavedRecipes?.collections.map((collection) => collection.name)).toEqual(["Soups"]);
+    expect(latestSavedRecipes?.isCookbookReadable).toBe(true);
+    // Saved in the cookbook, then taken out of the sync state, so a deletion sticks.
+    const syncStateWrites = asyncStorageMocks.setItem.mock.calls.filter(
+      ([key]) => key === "linkdish.librarySync.v1"
+    );
+    expect(JSON.parse(String(syncStateWrites.at(-1)?.[1])) as unknown).not.toHaveProperty(
+      "collections"
+    );
+    expect(
+      asyncStorageMocks.setItem.mock.calls.some(
+        ([key, value]) => key === "linkdish.collections.v1" && String(value).includes("Soups")
+      )
+    ).toBe(true);
+  });
+
+  it("makes no collections when the stored ones couldn't be read", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    asyncStorageMocks.getItem.mockImplementation((key: string) =>
+      key === "linkdish.collections.v1" ? Promise.reject(new Error("disk")) : Promise.resolve(null)
+    );
+
+    await renderProvider();
+
+    expect(() => latestSavedRecipes!.createCollection({ name: "Soups" })).toThrow(
+      "Your collections couldn't be loaded"
+    );
+    expect(latestSavedRecipes?.collections).toEqual([]);
+  });
+
+  it("copies damaged collections aside before writing over them", async () => {
+    asyncStorageMocks.getItem.mockImplementation((key: string) =>
+      Promise.resolve(key === "linkdish.collections.v1" ? '[{"id":"collection-' : null)
+    );
+
+    await renderProvider();
+    await settlePersistence();
+
+    const collectionWrites = asyncStorageMocks.setItem.mock.calls.filter(([key]) =>
+      String(key).startsWith("linkdish.collections.")
+    );
+    expect(collectionWrites[0]).toEqual(["linkdish.collections.corrupt.v1", '[{"id":"collection-']);
+  });
+
+  it("makes sync pull damaged collections back instead of deleting them in the cloud", async () => {
+    asyncStorageMocks.getItem.mockImplementation((key: string) =>
+      Promise.resolve(
+        key === "linkdish.collections.v1"
+          ? '[{"id":"collection-'
+          : key === "linkdish.librarySync.v1"
+            ? JSON.stringify({
+                account: "u1",
+                bases: {
+                  "collection:collection-soups": { updatedAt: "2026-10-20T12:00:00.000Z" },
+                  "recipe:recipe-1": { updatedAt: "2026-10-20T12:00:00.000Z" }
+                },
+                cursor: "42",
+                linkedAt: "2026-10-20T12:00:00.000Z"
+              })
+            : null
+      )
+    );
+
+    await renderProvider();
+    await settlePersistence();
+
+    const syncStateWrites = asyncStorageMocks.setItem.mock.calls.filter(
+      ([key]) => key === "linkdish.librarySync.v1"
+    );
+    const state = JSON.parse(String(syncStateWrites.at(-1)?.[1])) as {
+      bases: Record<string, unknown>;
+      cursor: string;
+    };
+    expect(Object.keys(state.bases)).toEqual(["recipe:recipe-1"]);
+    expect(state.cursor).toBe("0");
+    expect(latestSavedRecipes?.isCookbookReadable).toBe(true);
+  });
+
   it("coalesces rapid small edits into one cookbook write", async () => {
     const storedRecipe = buildSavedRecipes(1)[0]!;
     storeSavedRecipes([storedRecipe]);
@@ -1423,6 +1578,25 @@ describe("SavedRecipesProvider household save entitlement", () => {
     // New saves are stored apart from it, and it stays for a later launch to read.
     expect(cookbookWritesOf()).toHaveLength(1);
     expect(asyncStorageMocks.data.has("linkdish.savedRecipes")).toBe(true);
+  });
+
+  it("restores no backup into a cookbook whose stored copy couldn't be read", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    storeLegacyCookbook(JSON.stringify(buildSavedRecipes(2)));
+    asyncStorageMocks.getItem.mockImplementation((key: string) =>
+      key === "linkdish.savedRecipes"
+        ? Promise.reject(new Error("Row too big to fit into CursorWindow"))
+        : Promise.resolve(asyncStorageMocks.data.get(key) ?? null)
+    );
+    const plan = vi.fn();
+
+    await renderProvider();
+    await settlePersistence();
+
+    expect(latestSavedRecipes?.isCookbookReadable).toBe(false);
+    await expect(latestSavedRecipes!.restoreBackup(plan)).resolves.toBeNull();
+    expect(plan).not.toHaveBeenCalled();
+    expect(cookbookWritesOf()).toHaveLength(0);
   });
 
   it("returns a typed reason when the free save limit is reached", async () => {
