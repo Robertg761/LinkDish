@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { extractorApiEnv } from "../services/extractor-api/src/config/env.js";
 import {
   authorizeAdminAccess,
   type AdminRequestContext
@@ -10,7 +11,10 @@ import {
   resetAdminModelSettings,
   updateAdminModelSettings
 } from "../services/extractor-api/src/modules/admin/admin-actions.js";
-import { withAdminSecurityHeaders } from "../services/extractor-api/src/modules/admin/admin-auth.js";
+import {
+  hasValidCronSecret,
+  withAdminSecurityHeaders
+} from "../services/extractor-api/src/modules/admin/admin-auth.js";
 import {
   AdminBillingGrantError,
   adminBillingGrantRequestSchema
@@ -28,6 +32,7 @@ import {
   adminUserLookupQuerySchema,
   getAdminUserAccountDetails
 } from "../services/extractor-api/src/modules/admin/user-accounts.js";
+import { purgeExpiredAnalytics } from "../services/extractor-api/src/modules/analytics/analytics-store.js";
 import { getSharedExtractorRuntime } from "../services/extractor-api/src/modules/extract/services/runtime.js";
 
 import { getVercelRequestIdentity } from "./_lib/vercel-request-identity.js";
@@ -85,8 +90,37 @@ const jsonError = (message: string, status: number, detail?: string): Response =
     }
   );
 
+/*
+ * Vercel Cron calls this daily (see `crons` in vercel.json). It lives in the admin function
+ * because the Hobby plan caps the project at 12 functions, but it authenticates with
+ * CRON_SECRET, not the dashboard token, and runs even when the dashboard is disabled.
+ */
+const handleAnalyticsRetentionCron = async (request: Request): Promise<Response> => {
+  if (!extractorApiEnv.CRON_SECRET) {
+    return jsonError("Scheduled jobs require CRON_SECRET on Vercel.", 503);
+  }
+
+  if (!hasValidCronSecret(request.headers, extractorApiEnv.CRON_SECRET)) {
+    return jsonError("Scheduled job access denied.", 401);
+  }
+
+  try {
+    const result = await purgeExpiredAnalytics();
+    console.info("Analytics retention run finished.", JSON.stringify(result));
+    return Response.json(result);
+  } catch (error) {
+    console.error("Analytics retention run failed.", error);
+    return jsonError("Analytics retention run failed.", 500);
+  }
+};
+
 const handleGet = async (request: Request): Promise<Response> => {
   const url = new URL(request.url);
+
+  if (getAdminPath(url) === "cron/analytics-retention") {
+    return handleAnalyticsRetentionCron(request);
+  }
+
   const admin = await authorizeAdminRequest(request);
 
   if (admin instanceof Response) {

@@ -1,6 +1,12 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "installCommand": "PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 pnpm install --frozen-lockfile",
+  "crons": [
+    {
+      "path": "/admin/cron/analytics-retention",
+      "schedule": "17 9 * * *"
+    }
+  ],
   "headers": [
     {
       "source": "/(.*)",
