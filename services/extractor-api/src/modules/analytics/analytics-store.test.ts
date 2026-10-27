@@ -135,6 +135,8 @@ describe("analytics-store", () => {
   });
 
   it("skips the retention purge when no database is configured", async () => {
+    vi.stubEnv("ANALYTICS_RETENTION_DAYS", "");
+    vi.stubEnv("ANALYTICS_ROLLUP_RETENTION_DAYS", "");
     const { purgeExpiredAnalytics } = await import("./analytics-store.js");
 
     await expect(
@@ -149,8 +151,8 @@ describe("analytics-store", () => {
         externalStoreMetrics: 0,
         extractionAnalytics: 0
       },
-      rawCutoff: "2026-04-29T00:00:00.000Z",
-      rollupCutoff: "2023-10-27"
+      rawCutoff: null,
+      rollupCutoff: null
     });
   });
 });

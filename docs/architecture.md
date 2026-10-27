@@ -220,14 +220,16 @@ parses `extractRecipeAnyRequestSchema`.
   analytics:migrate` applies them by hand. Never edit a shipped migration; add the next one.
   Migration 1 is the schema the API used to create on every cold start, still guarded by
   `if not exists`, so databases created that way adopt it.
-- **Retention.** Vercel Cron calls `GET /admin/cron/analytics-retention` daily (root
-  `vercel.json` `crons`; it is folded into `api/admin.ts` for the 12-function limit). It
-  authenticates with `CRON_SECRET` only, not the dashboard token, and returns 503 until that is
-  set. Raw rows (`analytics_events`, `extraction_analytics`, `error_analytics`) older than
-  `ANALYTICS_RETENTION_DAYS` (default 180) are deleted in batches by `received_at`, because
-  `occurred_at` is client-supplied. Rollups and store metrics go after
-  `ANALYTICS_ROLLUP_RETENTION_DAYS` (default 1095). A run stops after about 40 seconds and the
-  next one carries on. The privacy pages state these defaults, so change them together.
+- **Retention is off by default: analytics are kept indefinitely.** Vercel Cron calls
+  `GET /admin/cron/analytics-retention` daily (root `vercel.json` `crons`; it is folded into
+  `api/admin.ts` for the 12-function limit). It authenticates with `CRON_SECRET` only, not the
+  dashboard token, and returns 503 until that is set. It deletes nothing unless a retention is
+  set: with `ANALYTICS_RETENTION_DAYS`, raw rows (`analytics_events`, `extraction_analytics`,
+  `error_analytics`) older than that are deleted in batches by `received_at`, because
+  `occurred_at` is client-supplied; with `ANALYTICS_ROLLUP_RETENTION_DAYS`, rollups and store
+  metrics older than that go. A run stops after about 40 seconds and the next one carries on.
+  Setting either one is a permanent deletion of older rows, and the privacy pages should then
+  state the period.
 - **Account deletion** deletes every raw analytics row carrying the account's hashed id before
   anything else is removed, so an analytics database failure fails the deletion while it can
   still be retried. Rows recorded before sign-in carry only an anonymous id and expire with

@@ -200,8 +200,14 @@ const parsedExtractorApiEnv = readEnv(
       .union([trimmedBooleanString, z.boolean()])
       .default("false")
       .transform((value) => value === true || value === "true"),
-    ANALYTICS_RETENTION_DAYS: z.coerce.number().int().positive().default(180),
-    ANALYTICS_ROLLUP_RETENTION_DAYS: z.coerce.number().int().positive().default(1095),
+    // Unset means analytics are kept indefinitely; the daily purge only runs for a table group
+    // whose retention is set.
+    ANALYTICS_RETENTION_DAYS: trimmedOptionalString().pipe(
+      z.coerce.number().int().positive().optional()
+    ),
+    ANALYTICS_ROLLUP_RETENTION_DAYS: trimmedOptionalString().pipe(
+      z.coerce.number().int().positive().optional()
+    ),
     CRON_SECRET: trimmedOptionalString(),
     GOOGLE_PLAY_PACKAGE_NAME: trimmedString().default("com.linkdish.app"),
     VERCEL_API_TOKEN: trimmedOptionalString(),

@@ -90,6 +90,36 @@ describe("purgeExpiredAnalytics", () => {
     });
   });
 
+  it("keeps everything when no retention is set", async () => {
+    vi.stubEnv("ANALYTICS_RETENTION_DAYS", "");
+    vi.stubEnv("ANALYTICS_ROLLUP_RETENTION_DAYS", "");
+    const { purgeExpiredAnalytics } = await import("./analytics-store.js");
+    rowsToDelete.set("analytics_events", 5);
+    rowsToDelete.set("daily_analytics_rollups", 3);
+
+    await expect(purgeExpiredAnalytics({ now })).resolves.toMatchObject({
+      complete: true,
+      configured: true,
+      rawCutoff: null,
+      rollupCutoff: null
+    });
+    expect(queries).toEqual([]);
+  });
+
+  it("purges only the table group whose retention is set", async () => {
+    vi.stubEnv("ANALYTICS_RETENTION_DAYS", "");
+    const { purgeExpiredAnalytics } = await import("./analytics-store.js");
+    rowsToDelete.set("analytics_events", 5);
+    rowsToDelete.set("daily_analytics_rollups", 3);
+
+    await expect(purgeExpiredAnalytics({ now })).resolves.toMatchObject({
+      deleted: { analyticsEvents: 0, dailyAnalyticsRollups: 3 },
+      rawCutoff: null,
+      rollupCutoff: "2023-10-27"
+    });
+    expect(rowsToDelete.get("analytics_events")).toBe(5);
+  });
+
   it("stops at the time budget and reports the run as incomplete", async () => {
     const { purgeExpiredAnalytics } = await import("./analytics-store.js");
     rowsToDelete.set("analytics_events", 10);

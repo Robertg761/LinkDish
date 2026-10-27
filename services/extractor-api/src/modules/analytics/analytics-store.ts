@@ -740,8 +740,9 @@ export const getAnalyticsDashboardSummary = async (): Promise<AnalyticsDashboard
 
 export interface AnalyticsRetentionResult {
   configured: boolean;
-  rawCutoff: string;
-  rollupCutoff: string;
+  /* null when that retention is unset, so those rows are kept indefinitely. */
+  rawCutoff: string | null;
+  rollupCutoff: string | null;
   deleted: {
     analyticsEvents: number;
     extractionAnalytics: number;
@@ -774,22 +775,27 @@ const rawAnalyticsTables = [
 
 /**
  * Deletes raw analytics older than ANALYTICS_RETENTION_DAYS and rollups older than
- * ANALYTICS_ROLLUP_RETENTION_DAYS. Raw rows go in batches so no single statement holds locks
- * for long, and the run stops at the time budget instead of outliving its function. This runs
- * whenever the database is configured, even with ANALYTICS_ENABLED off, because rows written
- * while it was on still have to expire.
+ * ANALYTICS_ROLLUP_RETENTION_DAYS. Both are opt-in: with one unset, its tables are not touched,
+ * and with both unset the run deletes nothing. Raw rows go in batches so no single statement
+ * holds locks for long, and the run stops at the time budget instead of outliving its function.
+ * It runs whenever the database is configured, even with ANALYTICS_ENABLED off, because rows
+ * written while it was on still have to expire.
  */
 export const purgeExpiredAnalytics = async ({
   now = new Date(),
   batchSize = 5_000,
   timeBudgetMs = 40_000
 }: AnalyticsRetentionOptions = {}): Promise<AnalyticsRetentionResult> => {
-  const rawCutoff = subtractDays(now, extractorApiEnv.ANALYTICS_RETENTION_DAYS);
-  const rollupCutoff = subtractDays(now, extractorApiEnv.ANALYTICS_ROLLUP_RETENTION_DAYS);
+  const rawRetentionDays = extractorApiEnv.ANALYTICS_RETENTION_DAYS;
+  const rollupRetentionDays = extractorApiEnv.ANALYTICS_ROLLUP_RETENTION_DAYS;
   const result: AnalyticsRetentionResult = {
     configured: configured(),
-    rawCutoff: rawCutoff.toISOString(),
-    rollupCutoff: toDateOnly(rollupCutoff),
+    rawCutoff:
+      rawRetentionDays === undefined ? null : subtractDays(now, rawRetentionDays).toISOString(),
+    rollupCutoff:
+      rollupRetentionDays === undefined
+        ? null
+        : toDateOnly(subtractDays(now, rollupRetentionDays)),
     deleted: {
       analyticsEvents: 0,
       extractionAnalytics: 0,
@@ -800,7 +806,7 @@ export const purgeExpiredAnalytics = async ({
     complete: true
   };
 
-  if (!configured()) {
+  if (!configured() || (result.rawCutoff === null && result.rollupCutoff === null)) {
     return result;
   }
 
@@ -808,44 +814,48 @@ export const purgeExpiredAnalytics = async ({
   const analyticsPool = await getPool();
   const startedAt = Date.now();
 
-  for (const [table, key] of rawAnalyticsTables) {
-    for (;;) {
-      if (Date.now() - startedAt > timeBudgetMs) {
-        result.complete = false;
-        return result;
-      }
+  if (result.rawCutoff !== null) {
+    for (const [table, key] of rawAnalyticsTables) {
+      for (;;) {
+        if (Date.now() - startedAt > timeBudgetMs) {
+          result.complete = false;
+          return result;
+        }
 
-      const deleted = await analyticsPool.query(
-        `
-          delete from ${table}
-          where id in (
-            select id from ${table}
-            where received_at < $1
-            limit $2
-          )
-        `,
-        [rawCutoff.toISOString(), batchSize]
-      );
-      const count = deleted.rowCount ?? 0;
-      result.deleted[key] += count;
+        const deleted = await analyticsPool.query(
+          `
+            delete from ${table}
+            where id in (
+              select id from ${table}
+              where received_at < $1
+              limit $2
+            )
+          `,
+          [result.rawCutoff, batchSize]
+        );
+        const count = deleted.rowCount ?? 0;
+        result.deleted[key] += count;
 
-      if (count < batchSize) {
-        break;
+        if (count < batchSize) {
+          break;
+        }
       }
     }
   }
 
-  const rollups = await analyticsPool.query(
-    "delete from daily_analytics_rollups where date < $1::date",
-    [result.rollupCutoff]
-  );
-  result.deleted.dailyAnalyticsRollups = rollups.rowCount ?? 0;
+  if (result.rollupCutoff !== null) {
+    const rollups = await analyticsPool.query(
+      "delete from daily_analytics_rollups where date < $1::date",
+      [result.rollupCutoff]
+    );
+    result.deleted.dailyAnalyticsRollups = rollups.rowCount ?? 0;
 
-  const storeMetrics = await analyticsPool.query(
-    "delete from external_store_metrics where date < $1::date",
-    [result.rollupCutoff]
-  );
-  result.deleted.externalStoreMetrics = storeMetrics.rowCount ?? 0;
+    const storeMetrics = await analyticsPool.query(
+      "delete from external_store_metrics where date < $1::date",
+      [result.rollupCutoff]
+    );
+    result.deleted.externalStoreMetrics = storeMetrics.rowCount ?? 0;
+  }
 
   return result;
 };
