@@ -35,6 +35,8 @@ const MEAL_PLAN_PERSIST_DEBOUNCE_MS = 400;
 interface MealPlanContextValue {
   entries: MealPlanEntry[];
   hasLoadedMealPlan: boolean;
+  /** The stored plan loaded and could be read, so changes are saved (and a backup has it all). */
+  isMealPlanReadable: boolean;
   /** Throws MealPlanValidationError on a bad day, slot or title. */
   addEntry: (input: MealPlanEntryInput, source: MealPlanEntrySource) => MealPlanEntry;
   /** Throws MealPlanValidationError on a bad day, slot or title. */
@@ -224,6 +226,7 @@ export const MealPlanProvider = ({ children }: { children: ReactNode }) => {
       entries,
       hasLoadedMealPlan,
       importEntries,
+      isMealPlanReadable: hasLoadedMealPlan && !readFailed,
       removeEntry,
       setWeekStartsOn,
       updateEntry,
@@ -234,6 +237,7 @@ export const MealPlanProvider = ({ children }: { children: ReactNode }) => {
       entries,
       hasLoadedMealPlan,
       importEntries,
+      readFailed,
       removeEntry,
       setWeekStartsOn,
       updateEntry,

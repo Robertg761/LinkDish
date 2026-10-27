@@ -98,6 +98,7 @@ describe("MealPlanProvider", () => {
     await render();
 
     expect(latest?.hasLoadedMealPlan).toBe(true);
+    expect(latest?.isMealPlanReadable).toBe(true);
     expect(latest?.entries).toEqual([stored]);
     expect(latest?.weekStartsOn).toBe(1);
 
@@ -146,6 +147,7 @@ describe("MealPlanProvider", () => {
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
     await render();
 
+    expect(latest?.isMealPlanReadable).toBe(false);
     act(() => {
       latest?.addEntry({ date: "2026-10-26", slot: "dinner", title: "Takeout" }, "plan");
     });

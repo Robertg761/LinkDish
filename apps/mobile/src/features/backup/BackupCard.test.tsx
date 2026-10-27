@@ -22,8 +22,8 @@ const savedRecipesState = vi.hoisted(() => ({
 
 const mealPlanState = vi.hoisted(() => ({
   entries: [] as unknown[],
-  hasLoadedMealPlan: true,
-  importEntries: vi.fn()
+  importEntries: vi.fn(),
+  isMealPlanReadable: true
 }));
 
 vi.mock("expo-file-system", () => {
@@ -148,6 +148,8 @@ describe("BackupCard", () => {
     savedRecipesState.savedRecipes = [soup];
     savedRecipesState.restoreBackup.mockReset();
     mealPlanState.importEntries.mockReset().mockResolvedValue(0);
+    mealPlanState.isMealPlanReadable = true;
+    savedRecipesState.isCookbookReadable = true;
   });
 
   it("saves a backup file and opens the share sheet with it", async () => {
@@ -235,6 +237,14 @@ describe("BackupCard", () => {
 
     expect(mealPlanState.importEntries).not.toHaveBeenCalled();
     expect(textOf(renderer)).toContain("Your cookbook couldn't be read on this device");
+  });
+
+  it("waits for a cookbook and plan that loaded and could be read", async () => {
+    mealPlanState.isMealPlanReadable = false;
+    const renderer = await render();
+
+    expect(renderer.root.findByProps({ label: "Back up" }).props).toMatchObject({ disabled: true });
+    expect(renderer.root.findByProps({ label: "Restore" }).props).toMatchObject({ disabled: true });
   });
 
   it("does nothing when the picker is closed", async () => {

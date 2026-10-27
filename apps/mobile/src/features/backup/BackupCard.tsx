@@ -35,11 +35,12 @@ type Status = { kind: "error" | "done"; message: string } | null;
  */
 export const BackupCard = () => {
   const { collections, isCookbookReadable, restoreBackup, savedRecipes } = useSavedRecipes();
-  const { entries, hasLoadedMealPlan, importEntries } = useMealPlan();
+  const { entries, importEntries, isMealPlanReadable } = useMealPlan();
   const [busy, setBusy] = useState<"export" | "restore" | null>(null);
   const [status, setStatus] = useState<Status>(null);
-  // Only the whole cookbook is backed up or restored into: not one still loading or unreadable.
-  const isReady = isCookbookReadable && hasLoadedMealPlan && busy == null;
+  // Only the whole cookbook and plan are backed up or restored into: not ones still loading or
+  // unreadable.
+  const isReady = isCookbookReadable && isMealPlanReadable && busy == null;
 
   const exportBackup = async () => {
     setBusy("export");
