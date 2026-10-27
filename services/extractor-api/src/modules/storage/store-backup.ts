@@ -423,6 +423,8 @@ export interface RestoreStoreSnapshotResult {
   expired: number;
   /* Existing keys left alone, with the rest of a library that is partly there (no overwrite). */
   kept: number;
+  /* Email lookups for an address its account no longer has, left out so it can't sign in. */
+  ofChangedEmails: number;
   /* Keys of accounts or sign-ins deleted since the snapshot, left out so they stay deleted. */
   ofDeletedAccounts: number;
   /* Existing keys replaced (overwrite). */
@@ -812,14 +814,20 @@ const ownerOf = (entry: StoreSnapshotEntry, userIds: Set<string>): string | null
   return null;
 };
 
-const parseRecord = (entry: StoreSnapshotEntry): Record<string, unknown> | null => {
+const parseObject = (json: unknown): Record<string, unknown> | null => {
   try {
-    const value: unknown = typeof entry.value === "string" ? JSON.parse(entry.value) : null;
+    const value: unknown = typeof json === "string" ? JSON.parse(json) : null;
     return value && typeof value === "object" ? (value as Record<string, unknown>) : null;
   } catch {
     return null;
   }
 };
+
+const parseRecord = (entry: StoreSnapshotEntry): Record<string, unknown> | null =>
+  parseObject(entry.value);
+
+/* The last key segment: the user of `household-by-user`, the hash of `user-by-email`. */
+const lastSegment = (key: string): string => key.slice(key.lastIndexOf(":") + 1);
 
 /*
  * What a deleted account shared with a Family household goes when it is deleted: a household it
@@ -865,8 +873,8 @@ const withoutDeletedMembers = <Candidate extends { entry: StoreSnapshotEntry }>(
         typeof record?.id === "string" &&
         shoppingItems.has(record.id)) ||
       (name === "household-by-user" &&
-        typeof entry.value === "string" &&
-        households.has(entry.value)) ||
+        ((typeof entry.value === "string" && households.has(entry.value)) ||
+          deletedUserIds.has(lastSegment(entry.key)))) ||
       (name === "household-recipe-by-source" &&
         typeof entry.value === "string" &&
         recipes.has(entry.value))
@@ -972,6 +980,15 @@ const setUnlessTombstonedScript =
 const setNxUnlessTombstonedScript =
   "if redis.call('exists', KEYS[2]) == 1 then return 0 end return redis.call('set', KEYS[1], ARGV[1], 'NX')";
 
+/*
+ * Restores an email lookup only while its account's record (KEYS[2]) still has that email hash
+ * (ARGV[2], as `"emailHash":"..."`), in one step: changing an email removes the old lookup.
+ */
+const setIfEmailMatchesScript =
+  "local user = redis.call('get', KEYS[2]) if not user or not string.find(user, ARGV[2], 1, true) then return 0 end return redis.call('set', KEYS[1], ARGV[1])";
+const setNxIfEmailMatchesScript =
+  "local user = redis.call('get', KEYS[2]) if not user or not string.find(user, ARGV[2], 1, true) then return 0 end return redis.call('set', KEYS[1], ARGV[1], 'NX')";
+
 const householdFamilies = new Set([
   "household",
   "household-invites",
@@ -990,9 +1007,10 @@ const keyedByHousehold = new Set([
   "household-shopping-items"
 ]);
 
-/* The household a shared record belongs to, by its key or its householdId. */
+/* The household a shared record or membership belongs to, by its key or its householdId. */
 const householdIdOf = (entry: StoreSnapshotEntry): string | null => {
   const name = findBackedUpKeyFamily(entry.key)?.name;
+  if (name === "household-by-user") return typeof entry.value === "string" ? entry.value : null;
   if (!name || !householdFamilies.has(name)) return null;
 
   const segments = entry.key.split(":");
@@ -1009,6 +1027,10 @@ const householdPeople = (entries: StoreSnapshotEntry[], householdId: string): Se
 
   for (const entry of entries) {
     if (householdIdOf(entry) !== householdId) continue;
+    if (findBackedUpKeyFamily(entry.key)?.name === "household-by-user") {
+      people.add(lastSegment(entry.key));
+      continue;
+    }
     const record = parseRecord(entry);
 
     for (const value of [
@@ -1051,6 +1073,7 @@ export const restoreStoreSnapshot = async (
     applied: apply,
     expired: 0,
     kept: 0,
+    ofChangedEmails: 0,
     ofDeletedAccounts: 0,
     replaced: 0,
     written: 0
@@ -1100,6 +1123,7 @@ export const restoreStoreSnapshot = async (
   ): Promise<void> => {
     const libraries = new Map<string, StoreSnapshotEntry[]>();
     const others: Candidate[] = [];
+    const familyOf = (candidate: Candidate) => findBackedUpKeyFamily(candidate.entry.key)?.name;
 
     for (const candidate of group) {
       const libraryId = libraryIdOf(candidate.entry.key);
@@ -1112,6 +1136,11 @@ export const restoreStoreSnapshot = async (
         others.push(candidate);
       }
     }
+
+    // User records first: an email lookup is only written while its record has that email.
+    others.sort(
+      (left, right) => Number(familyOf(right) === "user") - Number(familyOf(left) === "user")
+    );
 
     for (const batch of chunk(others, batchSize)) {
       const exists = await run(batch.map(({ entry }) => ["EXISTS", entry.key]));
@@ -1131,20 +1160,31 @@ export const restoreStoreSnapshot = async (
           result.written += 1;
         }
 
-        writes.push(
-          ...(findBackedUpKeyFamily(entry.key)?.name === "identity"
-            ? [
-                [
-                  "EVAL",
-                  overwrite ? setUnlessTombstonedScript : setNxUnlessTombstonedScript,
-                  "2",
-                  entry.key,
-                  identityTombstoneKey(entry.key),
-                  String(entry.value)
-                ]
-              ]
-            : buildWriteCommands(entry, pttlMs, overwrite))
-        );
+        const family = findBackedUpKeyFamily(entry.key)?.name;
+
+        if (family === "identity") {
+          writes.push([
+            "EVAL",
+            overwrite ? setUnlessTombstonedScript : setNxUnlessTombstonedScript,
+            "2",
+            entry.key,
+            identityTombstoneKey(entry.key),
+            String(entry.value)
+          ]);
+        } else if (family === "user-by-email") {
+          const version = entry.key.split(":")[2] ?? "";
+          writes.push([
+            "EVAL",
+            overwrite ? setIfEmailMatchesScript : setNxIfEmailMatchesScript,
+            "2",
+            entry.key,
+            `linkdish:user:${version}:${String(entry.value)}`,
+            String(entry.value),
+            `"emailHash":${JSON.stringify(lastSegment(entry.key))}`
+          ]);
+        } else {
+          writes.push(...buildWriteCommands(entry, pttlMs, overwrite));
+        }
       });
 
       if (apply && writes.length > 0) {
@@ -1178,7 +1218,7 @@ export const restoreStoreSnapshot = async (
 
   for (const { key } of snapshot.entries) {
     if (findBackedUpKeyFamily(key)?.name === "user") {
-      userKeys.set(key.slice(key.lastIndexOf(":") + 1), key);
+      userKeys.set(lastSegment(key), key);
     }
   }
 
@@ -1199,29 +1239,27 @@ export const restoreStoreSnapshot = async (
     await findRevokedIdentities(run, candidates, batchSize)
   );
   result.ofDeletedAccounts += candidates.length - shared.length;
-  const byAccount = new Map<string, Candidate[]>();
-  const unowned: Candidate[] = [];
-
-  for (const candidate of shared) {
-    const owner = ownerOf(candidate.entry, userIds);
-    const group = owner ? byAccount.get(owner) : unowned;
-    if (group) group.push(candidate);
-    else if (owner) byAccount.set(owner, [candidate]);
-  }
 
   /*
-   * A household's shared records are written under the account locks of everyone who owns,
-   * added or belongs to them, rechecking which of those accounts are deleted, so a member's
-   * deletion that runs meanwhile either comes first and is seen or waits for the restore.
+   * A household's shared records and memberships are written under the account locks of
+   * everyone who owns, added or belongs to them, rechecking which of those accounts are deleted,
+   * so a deletion that runs meanwhile either comes first and is seen or waits for the restore.
    */
   const byHousehold = new Map<string, Candidate[]>();
+  const byAccount = new Map<string, Candidate[]>();
   const rest: Candidate[] = [];
-
-  for (const candidate of unowned) {
-    const householdId = householdIdOf(candidate.entry);
-    const group = householdId ? byHousehold.get(householdId) : rest;
+  const addTo = (groups: Map<string, Candidate[]>, id: string, candidate: Candidate) => {
+    const group = groups.get(id);
     if (group) group.push(candidate);
-    else if (householdId) byHousehold.set(householdId, [candidate]);
+    else groups.set(id, [candidate]);
+  };
+
+  for (const candidate of shared) {
+    const householdId = householdIdOf(candidate.entry);
+    const owner = householdId ? null : ownerOf(candidate.entry, userIds);
+    if (householdId) addTo(byHousehold, householdId, candidate);
+    else if (owner) addTo(byAccount, owner, candidate);
+    else rest.push(candidate);
   }
 
   await restoreEntries(rest, () => Promise.resolve());
@@ -1291,7 +1329,21 @@ export const restoreStoreSnapshot = async (
         continue;
       }
 
-      await restoreEntries(group, async () => {
+      // The record left once restored: the snapshot's with overwrite, otherwise the live one.
+      const snapshotUser = group.find(
+        ({ entry }) => findBackedUpKeyFamily(entry.key)?.name === "user"
+      )?.entry;
+      const emailHash = parseObject(
+        snapshotUser && (overwrite || user == null) ? snapshotUser.value : user
+      )?.emailHash;
+      const kept = group.filter(
+        ({ entry }) =>
+          findBackedUpKeyFamily(entry.key)?.name !== "user-by-email" ||
+          lastSegment(entry.key) === emailHash
+      );
+      result.ofChangedEmails += group.length - kept.length;
+
+      await restoreEntries(kept, async () => {
         await lock?.renew();
       });
     } finally {

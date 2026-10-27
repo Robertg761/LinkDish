@@ -66,6 +66,15 @@ const createFakeRedis = (nowMs: () => number) => {
         [key, ...args].forEach(del);
         return 1;
       case "EVAL": {
+        if (key.includes("string.find")) {
+          // Set KEYS[1] while KEYS[2] (the user record) contains ARGV[2] (its email hash).
+          const [, target = "", userKey = "", value = "", needle = ""] = args;
+          if (!strings.get(userKey)?.includes(needle)) return 0;
+          if (key.includes("'NX'") && has(target)) return null;
+          del(target);
+          strings.set(target, value);
+          return "OK";
+        }
         if (key.includes("'exists'")) {
           // Set KEYS[1] unless KEYS[2] (a tombstone) exists.
           const [, target = "", tombstone = "", value = ""] = args;
@@ -127,7 +136,7 @@ const createFakeRedis = (nowMs: () => number) => {
 };
 
 const seed = (redis: ReturnType<typeof createFakeRedis>, nowMs: number) => {
-  redis.strings.set("linkdish:user:v1:u1", JSON.stringify({ id: "u1" }));
+  redis.strings.set("linkdish:user:v1:u1", JSON.stringify({ emailHash: "hash", id: "u1" }));
   redis.strings.set("linkdish:user-by-email:v1:hash", "u1");
   redis.strings.set("linkdish:session:v1:token", JSON.stringify({ userId: "u1" }));
   redis.expiries.set("linkdish:session:v1:token", nowMs + 60_000);
@@ -635,6 +644,70 @@ describe("restoreStoreSnapshot", () => {
     });
   });
 
+  it("leaves out an email lookup for an address the account has changed", async () => {
+    const source = createFakeRedis(() => 0);
+    seed(source, 0);
+    const snapshot = await createStoreSnapshot(source.run, { now: () => new Date(0) });
+    const moved = createFakeRedis(() => 0);
+    moved.strings.set("linkdish:user:v1:u1", JSON.stringify({ emailHash: "new", id: "u1" }));
+    moved.strings.set("linkdish:user-by-email:v1:new", "u1");
+
+    const result = await restoreStoreSnapshot(moved.run, snapshot, { apply: true });
+
+    expect(result.ofChangedEmails).toBe(1);
+    expect(moved.strings.has("linkdish:user-by-email:v1:hash")).toBe(false);
+    expect(moved.strings.get("linkdish:user-by-email:v1:new")).toBe("u1");
+
+    // The email changes just after the restore reads the account.
+    const racing = createFakeRedis(() => 0);
+    const run: StorePipeline = async (commands) => {
+      const results = await racing.run(commands);
+      if (commands.some(([name, key]) => name === "GET" && key === "linkdish:user:v1:u1")) {
+        racing.strings.set("linkdish:user:v1:u1", JSON.stringify({ emailHash: "new", id: "u1" }));
+      }
+      return results;
+    };
+    racing.strings.set("linkdish:user:v1:u1", JSON.stringify({ emailHash: "hash", id: "u1" }));
+
+    await restoreStoreSnapshot(run, snapshot, { apply: true });
+
+    expect(racing.strings.has("linkdish:user-by-email:v1:hash")).toBe(false);
+  });
+
+  it("rechecks a dissolved household before restoring a member's link to it", async () => {
+    const source = createFakeRedis(() => 0);
+    source.strings.set("linkdish:user:v1:u1", JSON.stringify({ id: "u1" }));
+    source.strings.set("linkdish:user:v1:u2", JSON.stringify({ id: "u2" }));
+    source.strings.set(
+      "linkdish:household:v1:h1",
+      JSON.stringify({ id: "h1", memberUserIds: ["u1", "u2"], ownerUserId: "u1" })
+    );
+    source.strings.set("linkdish:household-by-user:v1:u2", "h1");
+    const snapshot = await createStoreSnapshot(source.run, { now: () => new Date(0) });
+    const target = createFakeRedis(() => 0);
+    // u2 has joined another household since.
+    target.strings.set("linkdish:household-by-user:v1:u2", "h2");
+    let checked = false;
+    const run: StorePipeline = async (commands) => {
+      const results = await target.run(commands);
+      if (!checked && commands.some(([name]) => name === "MGET")) {
+        // Just after the first look at the accounts, the owner deletes theirs, dissolving h1.
+        checked = true;
+        target.strings.set(
+          "linkdish:user:v1:u1",
+          JSON.stringify({ deletedAt: "2026-10-02T00:00:00.000Z", id: "u1" })
+        );
+      }
+      return results;
+    };
+
+    await restoreStoreSnapshot(run, snapshot, { apply: true, overwrite: true });
+
+    expect(checked).toBe(true);
+    expect(target.strings.get("linkdish:household-by-user:v1:u2")).toBe("h2");
+    expect(target.strings.has("linkdish:household:v1:h1")).toBe(false);
+  });
+
   it("judges keys picked by --only against the whole snapshot", async () => {
     const source = createFakeRedis(() => 0);
     source.strings.set("linkdish:user:v1:u1", JSON.stringify({ id: "u1" }));
@@ -780,7 +853,8 @@ describe("restoreStoreSnapshot", () => {
 
     const restoredMs = takenMs + 20_000;
     const target = createFakeRedis(() => restoredMs);
-    target.strings.set("linkdish:user:v1:u1", "newer");
+    const newer = JSON.stringify({ emailHash: "hash", id: "u1", name: "newer" });
+    target.strings.set("linkdish:user:v1:u1", newer);
     target.sets.set("linkdish:household-recipes:v1:h1", new Set(["r3"]));
 
     const dryRun = await restoreStoreSnapshot(target.run, snapshot, {
@@ -790,6 +864,7 @@ describe("restoreStoreSnapshot", () => {
       applied: false,
       expired: 0,
       kept: 2,
+      ofChangedEmails: 0,
       ofDeletedAccounts: 0,
       replaced: 0,
       written: 8
@@ -801,7 +876,8 @@ describe("restoreStoreSnapshot", () => {
       now: () => new Date(restoredMs)
     });
     expect(applied.written).toBe(8);
-    expect(target.strings.get("linkdish:user:v1:u1")).toBe("newer");
+    expect(target.strings.get("linkdish:user:v1:u1")).toBe(newer);
+    expect(target.strings.get("linkdish:user-by-email:v1:hash")).toBe("u1");
     expect([...(target.sets.get("linkdish:household-recipes:v1:h1") ?? [])]).toEqual(["r3"]);
     expect(target.strings.get("linkdish:household:v1:h1")).toBe(JSON.stringify({ id: "h1" }));
     expect(target.zsets.get("linkdish:library:v1:changes:u1")?.get("recipe:a")).toBe(1);
@@ -826,6 +902,7 @@ describe("restoreStoreSnapshot", () => {
       applied: true,
       expired: 0,
       kept: 3,
+      ofChangedEmails: 0,
       ofDeletedAccounts: 0,
       replaced: 0,
       written: 0
@@ -853,6 +930,7 @@ describe("restoreStoreSnapshot", () => {
       applied: true,
       expired: 0,
       kept: 0,
+      ofChangedEmails: 0,
       ofDeletedAccounts: 0,
       replaced: 1,
       written: 1

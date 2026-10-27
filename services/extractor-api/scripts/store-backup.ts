@@ -211,7 +211,8 @@ const restore = async (args: Args): Promise<void> => {
       `${apply ? "replaced" : "would replace"} ${result.replaced} existing keys`,
       `kept ${result.kept} existing keys`,
       `skipped ${result.expired} expired sessions or invites`,
-      `left out ${result.ofDeletedAccounts} keys of accounts deleted since`
+      `left out ${result.ofDeletedAccounts} keys of accounts deleted since`,
+      `and ${result.ofChangedEmails} lookups of email addresses changed since`
     ].join(", ")
   );
 

@@ -145,7 +145,8 @@ size` checks the budgets after a build (entry ≤ 115 KB gzip, landing JS ≤
   replace the live ones, items added since the backup are kept, and the merged library is
   renumbered above both the live and the backed-up counter, so every device pulls it again as new
   changes. Accounts deleted since the backup stay deleted: a restore leaves out their keys and
-  what they shared with a household, checking under the lock account deletion takes.
+  what they shared with a household, checking under the lock account deletion takes. An email
+  lookup comes back only while its account still has that address.
 
 ### Sources
 
