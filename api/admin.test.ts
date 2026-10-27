@@ -412,6 +412,18 @@ describe("Vercel admin dashboard adapter", () => {
       expect(JSON.stringify(audit)).not.toContain("wrong-token");
     });
 
+    it("hides audit entries older than the retention period", async () => {
+      await loadWithNamedTokens();
+      const audit = await import("../services/extractor-api/src/modules/admin/admin-audit.js");
+      await audit.recordAdminAuditEvent(
+        { action: "llm.reset", actor: "robert", ip: "203.0.113.1", outcome: "success" },
+        new Date(Date.now() - 181 * 86_400_000)
+      );
+      expect(sortedSets.get("linkdish:admin:audit:v1")?.size).toBe(1);
+      expect(await audit.listAdminAuditEvents()).toHaveLength(0);
+      expect([...keyTtls.values()]).toContain(180 * 86_400);
+    });
+
     it("holds a concurrent burst of bad tokens to the limit", async () => {
       await loadWithNamedTokens();
 

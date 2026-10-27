@@ -60,7 +60,9 @@ export const recordAdminAuditEvent = async (
       [
         ["ZADD", key, String(now.getTime()), JSON.stringify(record)],
         ["ZREMRANGEBYSCORE", key, "0", String(now.getTime() - retentionMs)],
-        ["ZREMRANGEBYRANK", key, "0", String(-(adminAuditMaxEntries + 1))]
+        ["ZREMRANGEBYRANK", key, "0", String(-(adminAuditMaxEntries + 1))],
+        /* A set that goes quiet for the whole retention period is dropped outright. */
+        ["EXPIRE", key, String(extractorApiEnv.ADMIN_AUDIT_RETENTION_DAYS * 86_400)]
       ],
       { timeoutMs: 2_000 }
     );
@@ -100,7 +102,11 @@ export const listAdminAuditEvents = async (limit = 50): Promise<AdminAuditEvent[
     getStoreSortedSetMembersWithScores(adminAuthAuditKey, 0, stop, "desc")
   ]);
 
+  /* Trimming only runs on writes, so a quiet set can still hold entries past retention. */
+  const cutoffMs = Date.now() - extractorApiEnv.ADMIN_AUDIT_RETENTION_DAYS * 86_400_000;
+
   return [...actions, ...signIns]
+    .filter((entry) => entry.score >= cutoffMs)
     .sort((left, right) => right.score - left.score)
     .slice(0, limit)
     .flatMap(({ member }) => parseAuditEvent(member));
