@@ -224,7 +224,8 @@ const config: ExpoConfig = {
         scheme: "linkdish"
       }
     ],
-    "@clerk/expo"
+    "@clerk/expo",
+    "./plugins/withSentrySourceMapUpload"
   ],
   experiments: {
     typedRoutes: true
