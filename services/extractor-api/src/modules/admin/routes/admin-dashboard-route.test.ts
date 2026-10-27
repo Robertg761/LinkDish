@@ -258,6 +258,20 @@ describe("admin dashboard routes", () => {
     await app.close();
   });
 
+  it("does not let a percent-encoded path skip admin auth", async () => {
+    const app = await buildTokenProtectedAdminApp();
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/%61dmin/api/dashboard",
+      remoteAddress: "203.0.113.81"
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(response.headers["cache-control"]).toBe("no-store");
+    await app.close();
+  });
+
   it("returns a dashboard snapshot for local admin requests", async () => {
     const app = buildApp();
 

@@ -54,7 +54,13 @@ const getAdminContext = (request: FastifyRequest): AdminRequestContext => {
 
 export const registerAdminDashboardRoutes = (app: FastifyInstance, runtime: ExtractorRuntime) => {
   app.addHook("preHandler", async (request, reply) => {
-    if (!request.url.startsWith("/admin")) {
+    /*
+     * Gate on the matched route, not the raw URL: the router percent-decodes paths, so
+     * "/%61dmin/..." reaches these routes while its raw URL does not start with "/admin".
+     */
+    const routeUrl = request.routeOptions.url;
+
+    if (!routeUrl?.startsWith("/admin")) {
       return;
     }
 
@@ -66,7 +72,7 @@ export const registerAdminDashboardRoutes = (app: FastifyInstance, runtime: Extr
       ip: request.ip,
       isLoopback: isLoopbackRequest(request),
       method: request.method,
-      path: request.url.split("?")[0] ?? request.url
+      path: routeUrl
     });
 
     if (!access.ok) {

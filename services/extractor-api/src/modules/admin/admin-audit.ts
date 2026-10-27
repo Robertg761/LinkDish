@@ -25,8 +25,15 @@ export interface AdminAuditEvent {
 }
 
 const adminAuditKey = "linkdish:admin:audit:v1";
-/* Hard cap so a flood of failed sign-ins cannot grow the set without bound. */
+/*
+ * Sign-in failures live in their own set so a flood of them (from many networks, each under
+ * the lockout) cannot trim real admin actions out of the log. Each set is capped separately.
+ */
+const adminAuthAuditKey = "linkdish:admin:audit:v1:auth";
 const adminAuditMaxEntries = 2_000;
+
+const getAuditKey = (action: AdminAuditAction): string =>
+  action.startsWith("auth.") ? adminAuthAuditKey : adminAuditKey;
 
 /**
  * Appends one event to the admin audit log (an Upstash sorted set scored by time, trimmed by
@@ -44,14 +51,16 @@ export const recordAdminAuditEvent = async (
   };
   const retentionMs = extractorApiEnv.ADMIN_AUDIT_RETENTION_DAYS * 86_400_000;
 
+  const key = getAuditKey(record.action);
+
   console.info("[admin-audit]", JSON.stringify(record));
 
   try {
     const results = await runStoreTransaction(
       [
-        ["ZADD", adminAuditKey, String(now.getTime()), JSON.stringify(record)],
-        ["ZREMRANGEBYSCORE", adminAuditKey, "0", String(now.getTime() - retentionMs)],
-        ["ZREMRANGEBYRANK", adminAuditKey, "0", String(-(adminAuditMaxEntries + 1))]
+        ["ZADD", key, String(now.getTime()), JSON.stringify(record)],
+        ["ZREMRANGEBYSCORE", key, "0", String(now.getTime() - retentionMs)],
+        ["ZREMRANGEBYRANK", key, "0", String(-(adminAuditMaxEntries + 1))]
       ],
       { timeoutMs: 2_000 }
     );
@@ -74,20 +83,25 @@ const isAdminAuditEvent = (value: unknown): value is AdminAuditEvent =>
   typeof (value as AdminAuditEvent).action === "string" &&
   typeof (value as AdminAuditEvent).at === "string";
 
-export const listAdminAuditEvents = async (limit = 50): Promise<AdminAuditEvent[]> => {
-  const members = await getStoreSortedSetMembersWithScores(
-    adminAuditKey,
-    0,
-    Math.max(0, limit - 1),
-    "desc"
-  );
+const parseAuditEvent = (member: string): AdminAuditEvent[] => {
+  try {
+    const parsed: unknown = JSON.parse(member);
+    return isAdminAuditEvent(parsed) ? [parsed] : [];
+  } catch {
+    return [];
+  }
+};
 
-  return members.flatMap(({ member }) => {
-    try {
-      const parsed: unknown = JSON.parse(member);
-      return isAdminAuditEvent(parsed) ? [parsed] : [];
-    } catch {
-      return [];
-    }
-  });
+/* Newest first across both sets. */
+export const listAdminAuditEvents = async (limit = 50): Promise<AdminAuditEvent[]> => {
+  const stop = Math.max(0, limit - 1);
+  const [actions, signIns] = await Promise.all([
+    getStoreSortedSetMembersWithScores(adminAuditKey, 0, stop, "desc"),
+    getStoreSortedSetMembersWithScores(adminAuthAuditKey, 0, stop, "desc")
+  ]);
+
+  return [...actions, ...signIns]
+    .sort((left, right) => right.score - left.score)
+    .slice(0, limit)
+    .flatMap(({ member }) => parseAuditEvent(member));
 };

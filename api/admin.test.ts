@@ -412,6 +412,23 @@ describe("Vercel admin dashboard adapter", () => {
       expect(JSON.stringify(audit)).not.toContain("wrong-token");
     });
 
+    it("holds a concurrent burst of bad tokens to the limit", async () => {
+      await loadWithNamedTokens();
+
+      const responses = await Promise.all(
+        Array.from({ length: 8 }, (_, index) =>
+          adminApi.GET(
+            request("/api/admin", { headers: { "x-admin-dashboard-token": `guess-${index}` } })
+          )
+        )
+      );
+      const statuses = responses.map((response) => response.status);
+
+      expect(statuses.filter((status) => status === 401)).toHaveLength(3);
+      expect(statuses.filter((status) => status === 429)).toHaveLength(5);
+      expect((await listAudit()).filter((entry) => entry.action === "auth.failed")).toHaveLength(3);
+    });
+
     it("attributes plan grants to the named admin and lists them in the snapshot", async () => {
       await loadWithNamedTokens();
       const auth = await import("../services/extractor-api/src/modules/auth/auth-service.js");

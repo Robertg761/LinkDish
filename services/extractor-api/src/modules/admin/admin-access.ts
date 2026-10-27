@@ -115,19 +115,29 @@ const readFailureState = async (
   }
 };
 
-const incrementFailures = async (key: string): Promise<number> => {
+/* INCR is the atomic step: concurrent bad guesses each get their own count, so a burst
+ * cannot all slip under the limit the way a read-then-increment would. */
+const incrementFailures = async (
+  key: string
+): Promise<{ count: number; retryAfterSeconds: number }> => {
   try {
-    const [count] = await runStoreTransaction(
+    const [count, , ttl] = await runStoreTransaction(
       [
         ["INCR", key],
-        ["EXPIRE", key, String(getFailureWindowSeconds()), "NX"]
+        ["EXPIRE", key, String(getFailureWindowSeconds()), "NX"],
+        ["TTL", key]
       ],
       { timeoutMs: adminStoreTimeoutMs }
     );
-    return toCount(count?.result);
+    const ttlSeconds = toCount(ttl?.result);
+
+    return {
+      count: toCount(count?.result),
+      retryAfterSeconds: ttlSeconds > 0 ? ttlSeconds : getFailureWindowSeconds()
+    };
   } catch (error) {
     console.error("Admin auth limiter unavailable; failure not counted.", error);
-    return 0;
+    return { count: 0, retryAfterSeconds: getFailureWindowSeconds() };
   }
 };
 
@@ -171,8 +181,8 @@ const getCrossSiteWriteFailure = (request: AdminAccessRequest): AdminAccessResul
 };
 
 /**
- * Authorizes one admin request: the dashboard switch, the cross-site write guard, a per-IP
- * lockout after repeated bad tokens, then the named-token check. Bad tokens and lockouts are
+ * Authorizes one admin request: the dashboard switch, the cross-site write guard, the
+ * named-token check, then a per-IP lockout after repeated bad tokens. Bad tokens and lockouts are
  * written to the audit log; requests that present no credential (the browser's first hit
  * before its sign-in prompt) are not counted.
  */
@@ -223,27 +233,36 @@ export const authorizeAdminAccess = async (
   }
 
   const failureKey = getFailureKey(request.ip);
-  const failureState = await readFailureState(failureKey);
   const limit = extractorApiEnv.ADMIN_AUTH_FAILURE_LIMIT_MAX;
-
-  if (failureState.count >= limit) {
-    return {
-      headers: { "retry-after": String(failureState.retryAfterSeconds) },
-      message: "Too many failed admin sign-ins from this network. Try again later.",
-      ok: false,
-      status: 429
-    };
-  }
-
+  const lockedOut = (retryAfterSeconds: number): AdminAccessResult => ({
+    headers: { "retry-after": String(retryAfterSeconds) },
+    message: "Too many failed admin sign-ins from this network. Try again later.",
+    ok: false,
+    status: 429
+  });
   const credential = matchAdminCredential(requestToken, credentials);
 
+  /*
+   * A valid token is still refused while its network is locked out; otherwise the lockout
+   * would not stop a guess from succeeding.
+   */
   if (credential) {
-    return { actor: credential.name, ip: request.ip, ok: true };
+    const failureState = await readFailureState(failureKey);
+
+    return failureState.count >= limit
+      ? lockedOut(failureState.retryAfterSeconds)
+      : { actor: credential.name, ip: request.ip, ok: true };
   }
 
   const failures = await incrementFailures(failureKey);
+
+  /* Past the limit nothing more is audited, so one network adds at most `limit` entries. */
+  if (failures.count > limit) {
+    return lockedOut(failures.retryAfterSeconds);
+  }
+
   const detail: AdminAuditDetail = {
-    failures,
+    failures: failures.count,
     method: request.method.toUpperCase(),
     path: request.path,
     scheme: requestToken.scheme
@@ -257,7 +276,7 @@ export const authorizeAdminAccess = async (
     outcome: "denied"
   });
 
-  if (failures === limit) {
+  if (failures.count === limit) {
     await recordAdminAuditEvent({
       action: "auth.locked",
       actor: null,

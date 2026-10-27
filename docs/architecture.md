@@ -366,10 +366,12 @@ protected by named tokens rather than a Clerk session. Both adapters go through
   `admin`, and the dashboard's Notes ask for it to be replaced. Malformed, duplicate or
   shared entries are skipped and reported in Notes instead of failing API startup. With no
   tokens, Fastify admits loopback callers only and Vercel refuses with 403.
-- **Lockout.** Each presented-but-wrong token increments a per-network counter in Upstash
-  (`linkdish:admin:auth-failures:v1:<hashed IP>`). After `ADMIN_AUTH_FAILURE_LIMIT_MAX`
+- **Lockout.** Each presented-but-wrong token atomically increments a per-network counter
+  in Upstash (`linkdish:admin:auth-failures:v1:<hashed IP>`), so a concurrent burst cannot
+  slip under the limit. After `ADMIN_AUTH_FAILURE_LIMIT_MAX`
   (10) failures within `ADMIN_AUTH_FAILURE_LIMIT_WINDOW_MS` (15 minutes) that network gets
-  429 even with a valid token until the window ends. A request with no credential (the
+  429 even with a valid token until the window ends (the lockout is per network, so
+  someone sharing the admin's IP can trigger it). A request with no credential (the
   browser's first hit before its prompt) is not counted. The limiter fails open if
   Upstash is unreachable, so an outage does not lock the owner out; the token check
   still runs.
@@ -378,8 +380,11 @@ protected by named tokens rather than a Clerk session. Both adapters go through
   send `application/json` (which forces a CORS preflight the admin routes never answer).
 - **Audit log.** Failed sign-ins, lockouts, account lookups, plan grants (including dry
   runs) and model changes/resets are appended to the `linkdish:admin:audit:v1` sorted set
-  with the admin's name, IP, outcome and details (never the presented token), trimmed to
-  `ADMIN_AUDIT_RETENTION_DAYS` (180) and 2,000 entries, and mirrored to the function log
+  (sign-in failures and lockouts to `linkdish:admin:audit:v1:auth`, so a flood of them
+  cannot trim real actions out) with the admin's name, IP, outcome and details (never the
+  presented token). Each set is trimmed to `ADMIN_AUDIT_RETENTION_DAYS` (180) and 2,000
+  entries, each network adds at most the lockout limit of failure entries per window, and
+  everything is mirrored to the function log
   as `[admin-audit]` lines. The dashboard shows the newest 50 under Admin Activity. Plan
   grants also keep their own `linkdish:admin:billing-grant:*` record, now with
   `grantedBy: admin-api:<name>`.

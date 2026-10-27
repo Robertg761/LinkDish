@@ -2,7 +2,6 @@ import { z } from "zod";
 
 import {
   authorizeAdminAccess,
-  isAdminAuthConfigured,
   type AdminRequestContext
 } from "../services/extractor-api/src/modules/admin/admin-access.js";
 import {
@@ -158,10 +157,6 @@ const handlePost = async (request: Request): Promise<Response> => {
 
   if (getAdminPath(url) !== "api/billing/grants") {
     return jsonError("Admin dashboard route not found.", 404);
-  }
-
-  if (!isAdminAuthConfigured()) {
-    return jsonError("Billing grants require ADMIN_DASHBOARD_TOKENS.", 403);
   }
 
   const parsedBody = adminBillingGrantRequestSchema.safeParse(await request.json());
