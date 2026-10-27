@@ -39,6 +39,7 @@ import {
   type CollectionPatch,
   type MobileCollection
 } from "./collections";
+import { createCookbookStorage } from "./cookbookStorage";
 import { CookbookSyncProvider } from "./CookbookSyncContext";
 import {
   clearStateCollections,
@@ -64,9 +65,7 @@ import {
   recordSharedLinkOwners,
   markSavedRecipeUnshared,
   withOwnSharedLink,
-  readSavedRecipeRecords,
   removeSavedRecipeRecord,
-  serializeSavedRecipeRecords,
   savedRecipeRecordToSharedRecipeRequest,
   setSavedRecipeFavorite,
   sharedRecipeToSavedRecipeRecord,
@@ -162,13 +161,12 @@ export type SavedRecipesContextValue = SavedRecipesState & SavedRecipesActions;
 
 const SavedRecipesStateContext = createContext<SavedRecipesState | null>(null);
 const SavedRecipesActionsContext = createContext<SavedRecipesActions | null>(null);
-const SAVED_RECIPES_STORAGE_KEY = "linkdish.savedRecipes";
-const SAVED_RECIPES_CORRUPT_BACKUP_STORAGE_KEY = "linkdish.savedRecipes.corrupt.v1";
 const STARTER_RECIPES_SEEDED_STORAGE_KEY = "linkdish.starterRecipesSeeded.v1";
 const RECIPE_BOOK_SHARE_MODE_STORAGE_KEY_PREFIX = "linkdish.recipeBookShareMode";
 /**
- * Small edits (times cooked, a heart, a share flag) are written once they settle instead of
- * re-serializing the whole cookbook on every tap; the write is flushed when the app backgrounds.
+ * Small edits (times cooked, a heart, a share flag) are written once they settle instead of on
+ * every tap; the write is flushed when the app backgrounds. Each write stores only the recipes
+ * that changed (see cookbookStorage.ts).
  */
 export const SAVED_RECIPES_PERSIST_DEBOUNCE_MS = 400;
 
@@ -252,14 +250,12 @@ const computeSaveLimitStatus = (
  * Cookbooks written by older builds stored the full `data:` URL in the record,
  * which is what used to make the cookbook too large for AsyncStorage to persist.
  */
-const migrateLegacySourceImages = (
-  records: SavedRecipeRecord[]
-): { didMigrate: boolean; records: SavedRecipeRecord[] } => {
+const migrateLegacySourceImages = (records: SavedRecipeRecord[]): SavedRecipeRecord[] => {
   if (!records.some((record) => record.sourceImages?.some(isDataUrlSourceImage))) {
-    return { didMigrate: false, records };
+    return records;
   }
 
-  const migratedRecords = records.map((record) => {
+  return records.map((record) => {
     if (!record.sourceImages?.some(isDataUrlSourceImage)) {
       return record;
     }
@@ -269,8 +265,6 @@ const migrateLegacySourceImages = (
       sourceImages: persistRecipeSourceImages(record.id, record.sourceImages)
     };
   });
-
-  return { didMigrate: true, records: migratedRecords };
 };
 
 const getSharedRecipeErrorMessage = (error: unknown): string => {
@@ -322,7 +316,10 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
   const collectionsRef = useRef<MobileCollection[]>([]);
   /** Bumped by every Family refresh, so only the newest one lands. */
   const sharedRefreshRef = useRef(0);
-  const lastWrittenCookbookRef = useRef<string | null>(null);
+  const cookbookStorage = useMemo(
+    () => createCookbookStorage(undefined, { prepareLegacyRecords: migrateLegacySourceImages }),
+    []
+  );
   const client = useMemo(
     () =>
       createExtractorApiClient({
@@ -418,23 +415,14 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
   const writer = useMemo(
     () =>
       createDebouncedWriter<SavedRecipeRecord[]>(
-        async (records) => {
-          const serialized = serializeSavedRecipeRecords(records);
-
-          // An explicit save already wrote this exact cookbook; skip the redundant write.
-          if (serialized === lastWrittenCookbookRef.current) {
-            return;
-          }
-
-          await AsyncStorage.setItem(SAVED_RECIPES_STORAGE_KEY, serialized);
-          lastWrittenCookbookRef.current = serialized;
-        },
+        // Writes only what changed, so one an explicit save already wrote is skipped.
+        (records) => cookbookStorage.write(records),
         SAVED_RECIPES_PERSIST_DEBOUNCE_MS,
         (error) => {
           console.warn("Failed to persist saved recipes.", error);
         }
       ),
-    []
+    [cookbookStorage]
   );
 
   /** The cookbook as cloud sync reads and changes it (see CookbookSyncProvider). */
@@ -548,8 +536,8 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
 
     const hydrateSavedRecipes = async () => {
       try {
-        const [storedRecipes, storedSeeded] = await Promise.all([
-          AsyncStorage.getItem(SAVED_RECIPES_STORAGE_KEY),
+        const [{ incomplete, records: loadedRecipes, status }, storedSeeded] = await Promise.all([
+          cookbookStorage.read(),
           AsyncStorage.getItem(STARTER_RECIPES_SEEDED_STORAGE_KEY)
         ]);
 
@@ -557,28 +545,22 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
           return;
         }
 
-        const { records: loadedRecipes, status } = readSavedRecipeRecords(storedRecipes);
-
         if (status === "corrupt") {
-          console.warn("Saved recipes could not be read. Keeping the stored copy for recovery.");
           setHasUnreadableStoredRecipes(true);
-
-          try {
-            await AsyncStorage.setItem(
-              SAVED_RECIPES_CORRUPT_BACKUP_STORAGE_KEY,
-              storedRecipes ?? ""
-            );
-          } catch (error) {
-            console.warn("Failed to back up the unreadable saved recipes.", error);
-          }
         }
 
-        const { didMigrate, records: migratedRecipes } = migrateLegacySourceImages(loadedRecipes);
+        // Stored recipes that couldn't be read aren't in what shows, so nothing syncs.
+        if (incomplete) {
+          setCookbookReadFailed(true);
+        }
+
+        // Inlined scans were moved to files by the storage read (prepareLegacyRecords). Seeding is
+        // stored by the write that follows the load, which skips recipes stored as they are.
         const shouldSeedStarterRecipes =
-          status !== "corrupt" && migratedRecipes.length === 0 && storedSeeded !== "true";
+          status !== "corrupt" && loadedRecipes.length === 0 && storedSeeded !== "true";
         const hydratedRecipes = shouldSeedStarterRecipes
           ? createStarterRecipeSeedRecords().map(starterRecipeSeedRecordToSavedRecipeRecord)
-          : migratedRecipes;
+          : loadedRecipes;
 
         if (status !== "corrupt" && storedSeeded !== "true") {
           await AsyncStorage.setItem(STARTER_RECIPES_SEEDED_STORAGE_KEY, "true");
@@ -586,11 +568,6 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
 
         if (!isMounted) {
           return;
-        }
-
-        // What was just read needs no write-back; a migration or seeding does.
-        if (status === "ok" && !didMigrate && !shouldSeedStarterRecipes) {
-          lastWrittenCookbookRef.current = serializeSavedRecipeRecords(hydratedRecipes);
         }
 
         commitSavedRecipes((current) =>
@@ -617,7 +594,7 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
     return () => {
       isMounted = false;
     };
-  }, [commitSavedRecipes]);
+  }, [commitSavedRecipes, cookbookStorage]);
 
   useEffect(() => {
     let isMounted = true;

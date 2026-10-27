@@ -194,6 +194,13 @@
               error summaries.
             </li>
             <li>
+              In the Android app, crash and error reports sent to Sentry when the app crashes or
+              stops responding: the error and where in the app code it happened, recent app events,
+              the app version, and the device model and operating system version. LinkDish does not
+              attach your account details to these reports, leaves out console logs, and removes
+              query strings from web addresses in them.
+            </li>
+            <li>
               On the linkdish.ca website only, page-view statistics collected by Plausible
               Analytics: the page visited, the referring site, browser, operating system, device
               type, and country. Plausible does not set cookies and, according to its
@@ -300,8 +307,8 @@
             account, session, external sign-in identity, synced cookbook, invite, household, and
             shared recipe records are stored by LinkDish's backend. iOS notification list records are stored by
             LinkDish's backend. First-party analytics records are stored by LinkDish's backend using
-            anonymous or hashed identifiers. Website page-view statistics are processed and stored
-            in aggregate by Plausible Analytics.
+            anonymous or hashed identifiers. Android crash reports are processed and stored by Sentry. Website page-view statistics
+            are processed and stored in aggregate by Plausible Analytics.
           </p>
 
           <h2 id="choices">Your choices</h2>
