@@ -104,4 +104,55 @@ describe("analytics-store", () => {
     expect(summary.failureDrilldown.recent[0]?.visitorAlias).toMatch(/^visitor-[a-f0-9]{10}$/u);
     expect(summary.failureDrilldown.recent[0]?.sessionAlias).toMatch(/^session-[a-f0-9]{10}$/u);
   });
+
+  it("deletes only the deleted account's events", async () => {
+    const { deleteAnalyticsForAccount, getAnalyticsDashboardSummary, writeAnalyticsEvents } =
+      await import("./analytics-store.js");
+    const { hashAnalyticsUserId } = await import("./analytics-privacy.js");
+
+    await writeAnalyticsEvents([
+      {
+        accountUserHash: hashAnalyticsUserId("user_deleted"),
+        eventName: "web_app_loaded",
+        platform: "web_app",
+        properties: {}
+      },
+      {
+        accountUserHash: hashAnalyticsUserId("user_kept"),
+        eventName: "recipe_saved",
+        platform: "web_app",
+        properties: {}
+      },
+      { eventName: "web_route_viewed", platform: "web_app", properties: {} }
+    ]);
+
+    await deleteAnalyticsForAccount("user_deleted");
+
+    await expect(getAnalyticsDashboardSummary()).resolves.toMatchObject({
+      byEventName: { recipe_saved: 1, web_route_viewed: 1 },
+      totals: { events: 2 }
+    });
+  });
+
+  it("skips the retention purge when no database is configured", async () => {
+    vi.stubEnv("ANALYTICS_RETENTION_DAYS", "");
+    vi.stubEnv("ANALYTICS_ROLLUP_RETENTION_DAYS", "");
+    const { purgeExpiredAnalytics } = await import("./analytics-store.js");
+
+    await expect(
+      purgeExpiredAnalytics({ now: new Date("2026-10-26T00:00:00.000Z") })
+    ).resolves.toEqual({
+      complete: true,
+      configured: false,
+      deleted: {
+        analyticsEvents: 0,
+        dailyAnalyticsRollups: 0,
+        errorAnalytics: 0,
+        externalStoreMetrics: 0,
+        extractionAnalytics: 0
+      },
+      rawCutoff: null,
+      rollupCutoff: null
+    });
+  });
 });
