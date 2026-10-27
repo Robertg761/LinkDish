@@ -2,6 +2,9 @@ import { createHash, randomUUID } from "node:crypto";
 
 import { extractorApiEnv } from "../../config/env.js";
 
+import { runAnalyticsMigrations } from "./analytics-migrations.js";
+import { hashAnalyticsUserId } from "./analytics-privacy.js";
+
 import type {
   AnalyticsEventInput,
   AnalyticsPlatform,
@@ -91,7 +94,7 @@ export interface AnalyticsDashboardSummary {
 const memoryEvents: AnalyticsWriteEvent[] = [];
 const memoryExtractions: AnalyticsExtractionEventInput[] = [];
 let pool: Pool | null = null;
-let schemaReady = false;
+let schemaReady: Promise<void> | null = null;
 
 const enabled = (): boolean => extractorApiEnv.ANALYTICS_ENABLED;
 const configured = (): boolean => Boolean(extractorApiEnv.ANALYTICS_DATABASE_URL);
@@ -114,8 +117,7 @@ const isLocalDatabaseUrl = (databaseUrl: string): boolean => {
  * default for every non-localhost URL.
  */
 export const buildAnalyticsPoolSslConfig = ():
-  | undefined
-  | { ca?: string; rejectUnauthorized: boolean } => {
+  undefined | { ca?: string; rejectUnauthorized: boolean } => {
   const databaseUrl = extractorApiEnv.ANALYTICS_DATABASE_URL;
 
   if (!databaseUrl || isLocalDatabaseUrl(databaseUrl)) {
@@ -166,144 +168,36 @@ const getPool = async (): Promise<Pool> => {
   return pool;
 };
 
+/*
+ * The schema comes from versioned migrations (analytics-migrations.ts). They are applied here on
+ * first use in each process, which is a cheap version check once the database is current, and
+ * can also be applied ahead of a deploy with `pnpm --filter @linkdish/extractor-api
+ * analytics:migrate`. A failed run is retried on the next call.
+ */
 const ensureSchema = async (): Promise<void> => {
-  if (schemaReady || !enabled() || !configured()) {
+  if (!configured()) {
     return;
   }
 
-  const analyticsPool = await getPool();
+  const migrating = (schemaReady ??= getPool()
+    .then(runAnalyticsMigrations)
+    .then(() => undefined));
 
-  await analyticsPool.query(`
-    create table if not exists analytics_events (
-      id uuid primary key,
-      occurred_at timestamptz not null,
-      received_at timestamptz not null default now(),
-      platform text not null,
-      event_name text not null,
-      anonymous_id uuid,
-      session_id uuid,
-      account_user_hash text,
-      correlation_id uuid,
-      request_id text,
-      app_version text,
-      build_number text,
-      route_or_screen text,
-      referrer_hostname text,
-      utm_source text,
-      utm_medium text,
-      utm_campaign text,
-      device_class text,
-      os_name text,
-      browser_name text,
-      properties jsonb not null default '{}'::jsonb
-    );
+  try {
+    await migrating;
+  } catch (error) {
+    // Only the caller whose run failed clears it, never a newer run another caller started.
+    if (schemaReady === migrating) {
+      schemaReady = null;
+    }
 
-    create index if not exists analytics_events_time_idx
-      on analytics_events (occurred_at desc);
-    create index if not exists analytics_events_platform_time_idx
-      on analytics_events (platform, occurred_at desc);
-    create index if not exists analytics_events_name_time_idx
-      on analytics_events (event_name, occurred_at desc);
-    create unique index if not exists analytics_events_request_id_unique_idx
-      on analytics_events (request_id)
-      where request_id is not null;
-
-    create table if not exists extraction_analytics (
-      id uuid primary key,
-      occurred_at timestamptz not null,
-      received_at timestamptz not null default now(),
-      platform text not null,
-      anonymous_id uuid,
-      session_id uuid,
-      account_user_hash text,
-      correlation_id uuid,
-      app_version text,
-      build_number text,
-      source_hostname text,
-      source_type text not null,
-      status text not null,
-      attempt text not null,
-      strategy text not null,
-      fetch_mode text,
-      fallback_provider text,
-      confidence_score numeric,
-      latency_ms integer not null,
-      billing_plan text,
-      blocked_reason text,
-      error_code text,
-      properties jsonb not null default '{}'::jsonb
-    );
-
-    create index if not exists extraction_analytics_time_idx
-      on extraction_analytics (occurred_at desc);
-    create index if not exists extraction_analytics_platform_time_idx
-      on extraction_analytics (platform, occurred_at desc);
-    create index if not exists extraction_analytics_status_time_idx
-      on extraction_analytics (status, occurred_at desc);
-    create index if not exists extraction_analytics_source_time_idx
-      on extraction_analytics (source_hostname, occurred_at desc);
-
-    alter table analytics_events
-      add column if not exists correlation_id uuid;
-    alter table extraction_analytics
-      add column if not exists correlation_id uuid;
-    alter table extraction_analytics
-      add column if not exists app_version text;
-    alter table extraction_analytics
-      add column if not exists build_number text;
-
-    create index if not exists analytics_events_correlation_idx
-      on analytics_events (correlation_id)
-      where correlation_id is not null;
-    create index if not exists extraction_analytics_correlation_idx
-      on extraction_analytics (correlation_id)
-      where correlation_id is not null;
-
-    create table if not exists error_analytics (
-      id uuid primary key,
-      occurred_at timestamptz not null,
-      received_at timestamptz not null default now(),
-      platform text not null,
-      source text not null,
-      severity text not null,
-      error_fingerprint text not null,
-      error_code text,
-      message_class text,
-      app_version text,
-      build_number text,
-      route_or_screen text,
-      account_user_hash text,
-      anonymous_id uuid,
-      session_id uuid,
-      provider_event_url text,
-      properties jsonb not null default '{}'::jsonb
-    );
-
-    create table if not exists daily_analytics_rollups (
-      date date not null,
-      platform text not null,
-      metric_name text not null,
-      dimension_key text,
-      dimension_value text,
-      count bigint not null default 0,
-      numeric_value numeric,
-      primary key (date, platform, metric_name, dimension_key, dimension_value)
-    );
-
-    create table if not exists external_store_metrics (
-      id uuid primary key,
-      date date not null,
-      provider text not null,
-      metric_name text not null,
-      value numeric not null,
-      dimensions jsonb not null default '{}'::jsonb,
-      imported_at timestamptz not null default now(),
-      source text not null
-    );
-  `);
-
-  schemaReady = true;
+    throw error;
+  }
 };
+
+/* For the analytics:migrate script: applies pending migrations and returns their versions. */
+export const migrateAnalyticsDatabase = async (): Promise<number[]> =>
+  runAnalyticsMigrations(await getPool());
 
 const parseOccurredAt = (value: string | undefined): Date => {
   const parsed = value ? new Date(value) : new Date();
@@ -848,11 +742,180 @@ export const getAnalyticsDashboardSummary = async (): Promise<AnalyticsDashboard
   }
 };
 
+export interface AnalyticsRetentionResult {
+  configured: boolean;
+  /* null when that retention is unset, so those rows are kept indefinitely. */
+  rawCutoff: string | null;
+  rollupCutoff: string | null;
+  deleted: {
+    analyticsEvents: number;
+    extractionAnalytics: number;
+    errorAnalytics: number;
+    dailyAnalyticsRollups: number;
+    externalStoreMetrics: number;
+  };
+  /* false when the time budget ran out first; the next run carries on. */
+  complete: boolean;
+}
+
+export interface AnalyticsRetentionOptions {
+  now?: Date;
+  batchSize?: number;
+  timeBudgetMs?: number;
+}
+
+const dayMs = 24 * 60 * 60 * 1_000;
+
+const subtractDays = (date: Date, days: number): Date => new Date(date.getTime() - days * dayMs);
+
+const toDateOnly = (date: Date): string => date.toISOString().slice(0, 10);
+
+/* Raw tables are purged by received_at: occurred_at is client-supplied and can be any date. */
+const rawAnalyticsTables = [
+  ["analytics_events", "analyticsEvents"],
+  ["extraction_analytics", "extractionAnalytics"],
+  ["error_analytics", "errorAnalytics"]
+] as const;
+
+/**
+ * Deletes raw analytics older than ANALYTICS_RETENTION_DAYS and rollups older than
+ * ANALYTICS_ROLLUP_RETENTION_DAYS. Both are opt-in: with one unset, its tables are not touched,
+ * and with both unset the run deletes nothing. Raw rows go in batches so no single statement
+ * holds locks for long, and the run stops at the time budget instead of outliving its function.
+ * It runs whenever the database is configured, even with ANALYTICS_ENABLED off, because rows
+ * written while it was on still have to expire.
+ */
+export const purgeExpiredAnalytics = async ({
+  now = new Date(),
+  batchSize = 5_000,
+  timeBudgetMs = 40_000
+}: AnalyticsRetentionOptions = {}): Promise<AnalyticsRetentionResult> => {
+  const rawRetentionDays = extractorApiEnv.ANALYTICS_RETENTION_DAYS;
+  const rollupRetentionDays = extractorApiEnv.ANALYTICS_ROLLUP_RETENTION_DAYS;
+  const result: AnalyticsRetentionResult = {
+    configured: configured(),
+    rawCutoff:
+      rawRetentionDays === undefined ? null : subtractDays(now, rawRetentionDays).toISOString(),
+    rollupCutoff:
+      rollupRetentionDays === undefined ? null : toDateOnly(subtractDays(now, rollupRetentionDays)),
+    deleted: {
+      analyticsEvents: 0,
+      extractionAnalytics: 0,
+      errorAnalytics: 0,
+      dailyAnalyticsRollups: 0,
+      externalStoreMetrics: 0
+    },
+    complete: true
+  };
+
+  if (!configured() || (result.rawCutoff === null && result.rollupCutoff === null)) {
+    return result;
+  }
+
+  // The budget covers the migration check too, so the whole run fits the function's duration.
+  const startedAt = Date.now();
+  await ensureSchema();
+  const analyticsPool = await getPool();
+
+  // Rollups first: they are small, and a raw backlog that uses up the budget must not hold
+  // them past their own retention.
+  if (result.rollupCutoff !== null) {
+    const rollups = await analyticsPool.query(
+      "delete from daily_analytics_rollups where date < $1::date",
+      [result.rollupCutoff]
+    );
+    result.deleted.dailyAnalyticsRollups = rollups.rowCount ?? 0;
+
+    const storeMetrics = await analyticsPool.query(
+      "delete from external_store_metrics where date < $1::date",
+      [result.rollupCutoff]
+    );
+    result.deleted.externalStoreMetrics = storeMetrics.rowCount ?? 0;
+  }
+
+  if (result.rawCutoff !== null) {
+    for (const [table, key] of rawAnalyticsTables) {
+      for (;;) {
+        if (Date.now() - startedAt > timeBudgetMs) {
+          result.complete = false;
+          return result;
+        }
+
+        const deleted = await analyticsPool.query(
+          `
+            delete from ${table}
+            where id in (
+              select id from ${table}
+              where received_at < $1
+              limit $2
+            )
+          `,
+          [result.rawCutoff, batchSize]
+        );
+        const count = deleted.rowCount ?? 0;
+        result.deleted[key] += count;
+
+        if (count < batchSize) {
+          break;
+        }
+      }
+    }
+  }
+
+  return result;
+};
+
+export interface AnalyticsAccountDeletionResult {
+  analyticsEvents: number;
+  extractionAnalytics: number;
+  errorAnalytics: number;
+}
+
+/**
+ * Deletes every analytics row linked to a LinkDish account (by its hashed user id), for account
+ * deletion. Like the purge, it runs whenever the database is configured. Rows recorded before
+ * the person signed in carry only an anonymous device id and are left to expire.
+ */
+export const deleteAnalyticsForAccount = async (
+  userId: string
+): Promise<AnalyticsAccountDeletionResult> => {
+  const accountUserHash = hashAnalyticsUserId(userId);
+  const result: AnalyticsAccountDeletionResult = {
+    analyticsEvents: 0,
+    extractionAnalytics: 0,
+    errorAnalytics: 0
+  };
+
+  for (const list of [memoryEvents, memoryExtractions]) {
+    for (let index = list.length - 1; index >= 0; index -= 1) {
+      if (list[index]?.accountUserHash === accountUserHash) {
+        list.splice(index, 1);
+      }
+    }
+  }
+
+  if (!configured()) {
+    return result;
+  }
+
+  await ensureSchema();
+  const analyticsPool = await getPool();
+
+  for (const [table, key] of rawAnalyticsTables) {
+    const deleted = await analyticsPool.query(`delete from ${table} where account_user_hash = $1`, [
+      accountUserHash
+    ]);
+    result[key] = deleted.rowCount ?? 0;
+  }
+
+  return result;
+};
+
 export const closeAnalyticsStore = async (): Promise<void> => {
   if (pool) {
     await pool.end();
     pool = null;
-    schemaReady = false;
+    schemaReady = null;
   }
 };
 

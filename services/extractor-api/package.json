@@ -12,6 +12,7 @@
     "check:production": "node scripts/check-production-api.mjs",
     "canary:live": "node scripts/run-live-canary.mjs ../../docs/live-canary-manifest.json",
     "grant:plan": "tsx scripts/grant-plan-by-email.ts",
+    "analytics:migrate": "tsx scripts/migrate-analytics.ts",
     "backup:store": "tsx scripts/store-backup.ts"
   },
   "dependencies": {
