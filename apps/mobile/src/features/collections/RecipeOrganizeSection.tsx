@@ -30,7 +30,9 @@ const MAX_LISTED_PLANS = 3;
  */
 export const RecipeOrganizeSection = ({ record }: { record: SavedRecipeRecord }) => {
   const { collections } = useSavedRecipes();
-  const { entries } = useMealPlan();
+  const { entries, hasLoadedMealPlan, isMealPlanReadable } = useMealPlan();
+  // A plan that couldn't be read isn't saved to, so there is nothing to add to.
+  const canPlan = !hasLoadedMealPlan || isMealPlanReadable;
   const [openSheet, setOpenSheet] = useState<"collections" | "plan" | "tags" | null>(null);
   const tags = getRecipeTags(record);
   const memberCollections = useMemo(() => {
@@ -65,14 +67,16 @@ export const RecipeOrganizeSection = ({ record }: { record: SavedRecipeRecord })
         onEdit={() => setOpenSheet("collections")}
         values={memberCollections.map(formatCollectionLabel)}
       />
-      <OrganizeRow
-        editIcon="plus"
-        emptyLabel="Add to meal plan"
-        icon="calendar-week"
-        label="Meal plan"
-        onEdit={() => setOpenSheet("plan")}
-        values={upcomingPlans}
-      />
+      {canPlan ? (
+        <OrganizeRow
+          editIcon="plus"
+          emptyLabel="Add to meal plan"
+          icon="calendar-week"
+          label="Meal plan"
+          onEdit={() => setOpenSheet("plan")}
+          values={upcomingPlans}
+        />
+      ) : null}
       <TagEditorSheet
         onClose={() => setOpenSheet(null)}
         recipeId={record.id}
@@ -83,7 +87,7 @@ export const RecipeOrganizeSection = ({ record }: { record: SavedRecipeRecord })
         recipeId={record.id}
         visible={openSheet === "collections"}
       />
-      {openSheet === "plan" ? (
+      {openSheet === "plan" && canPlan ? (
         <AddToPlanSheet onClose={() => setOpenSheet(null)} record={record} visible />
       ) : null}
     </View>

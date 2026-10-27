@@ -231,6 +231,17 @@ describe("PlanScreen", () => {
     expect(textOf(renderer)).toContain("Oct 25 – Oct 31");
   });
 
+  it("pauses planning when the stored plan couldn't be read", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    asyncStorageMocks.getItem.mockImplementation((key: string) =>
+      key === "linkdish.mealPlan.v1" ? Promise.reject(new Error("disk")) : Promise.resolve(null)
+    );
+    const renderer = await render();
+
+    expect(textOf(renderer)).toContain("Your meal plan couldn't be loaded");
+    expect(renderer.root.findAllByProps({ testID: "plan-add-2026-10-26" })).toHaveLength(0);
+  });
+
   it("plans a quick note and moves to next week", async () => {
     const renderer = await render();
 

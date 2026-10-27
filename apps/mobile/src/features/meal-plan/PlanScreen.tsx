@@ -41,7 +41,8 @@ import type { SavedRecipeRecord } from "../saved-recipes/store";
 export const PlanScreen = () => {
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{ date?: string }>();
-  const { entries, hasLoadedMealPlan, setWeekStartsOn, weekStartsOn } = useMealPlan();
+  const { entries, hasLoadedMealPlan, isMealPlanReadable, setWeekStartsOn, weekStartsOn } =
+    useMealPlan();
   const { savedRecipes } = useSavedRecipes();
   const [today, setToday] = useState(() => toIsoDate(new Date()));
   const [weekStart, setWeekStart] = useState(() => startOfWeek(today, weekStartsOn));
@@ -139,17 +140,27 @@ export const PlanScreen = () => {
 
         {!hasLoadedMealPlan ? <AppText muted>Loading your plan...</AppText> : null}
 
-        {days.map((day) => (
-          <DayCard
-            date={day.date}
-            entries={day.entries}
-            isToday={day.date === today}
-            key={day.date}
-            onAdd={() => setAddingDate(day.date)}
-            onOpenEntry={(entry) => setOpenEntryId(entry.id)}
-            recipesById={recipesById}
-          />
-        ))}
+        {/* A plan that couldn't be read isn't saved to, so nothing can be planned over it. */}
+        {hasLoadedMealPlan && !isMealPlanReadable ? (
+          <AppSurface style={styles.unreadable}>
+            <AppText muted>
+              Your meal plan couldn&apos;t be loaded on this phone, so planning is paused to keep it
+              safe. Close and reopen LinkDish to try again.
+            </AppText>
+          </AppSurface>
+        ) : (
+          days.map((day) => (
+            <DayCard
+              date={day.date}
+              entries={day.entries}
+              isToday={day.date === today}
+              key={day.date}
+              onAdd={() => setAddingDate(day.date)}
+              onOpenEntry={(entry) => setOpenEntryId(entry.id)}
+              recipesById={recipesById}
+            />
+          ))
+        )}
 
         <Pressable
           accessibilityHint="Changes which day each week starts on"
@@ -403,6 +414,9 @@ const styles = StyleSheet.create({
   toolbarButton: {
     flex: 1,
     minHeight: 44
+  },
+  unreadable: {
+    padding: appSpacing.lg
   },
   weekButton: {
     alignItems: "center",
