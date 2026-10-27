@@ -258,6 +258,20 @@ describe("admin dashboard routes", () => {
     await app.close();
   });
 
+  it("does not let a percent-encoded path skip admin auth", async () => {
+    const app = await buildTokenProtectedAdminApp();
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/%61dmin/api/dashboard",
+      remoteAddress: "203.0.113.81"
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(response.headers["cache-control"]).toBe("no-store");
+    await app.close();
+  });
+
   it("returns a dashboard snapshot for local admin requests", async () => {
     const app = buildApp();
 
@@ -543,7 +557,7 @@ describe("admin dashboard routes", () => {
 
     expect(response.statusCode).toBe(403);
     expect(response.json()).toMatchObject({
-      message: "Billing grants require ADMIN_DASHBOARD_TOKEN."
+      message: "Billing grants require ADMIN_DASHBOARD_TOKENS."
     });
     expect(revenueCatRequests).toHaveLength(0);
   });
@@ -659,5 +673,70 @@ describe("admin dashboard routes", () => {
       message: "No active LinkDish account exists for that email."
     });
     expect(revenueCatRequests).toHaveLength(0);
+  });
+
+  it("locks out repeated bad tokens and audits named admin changes", async () => {
+    const opsToken = "ops_token_0123456789abcdef0123456789abcd";
+    vi.stubEnv("UPSTASH_REDIS_REST_URL", "");
+    vi.stubEnv("UPSTASH_REDIS_REST_TOKEN", "");
+    vi.stubEnv("ADMIN_DASHBOARD_TOKENS", `ops:${opsToken}`);
+    vi.stubEnv("ADMIN_AUTH_FAILURE_LIMIT_MAX", "2");
+    vi.resetModules();
+    ({ buildApp } = await import("../../../app.js"));
+    const audit = await import("../admin-audit.js");
+    const auth = await import("../../auth/auth-service.js");
+    await auth.upsertUserByEmail("looked-up@example.com");
+    const app = buildApp();
+
+    const lookup = await app.inject({
+      headers: { authorization: `Bearer ${opsToken}` },
+      method: "GET",
+      remoteAddress: "203.0.113.10",
+      url: "/admin/api/users?email=looked-up%40example.com"
+    });
+
+    expect(lookup.statusCode).toBe(200);
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const response = await app.inject({
+        headers: { "x-admin-dashboard-token": "not-the-token" },
+        method: "GET",
+        remoteAddress: "203.0.113.99",
+        url: "/admin"
+      });
+      expect(response.statusCode).toBe(401);
+    }
+
+    const locked = await app.inject({
+      headers: { authorization: `Bearer ${opsToken}` },
+      method: "GET",
+      remoteAddress: "203.0.113.99",
+      url: "/admin"
+    });
+    const otherNetwork = await app.inject({
+      headers: { authorization: `Bearer ${opsToken}` },
+      method: "GET",
+      remoteAddress: "203.0.113.10",
+      url: "/admin"
+    });
+
+    expect(locked.statusCode).toBe(429);
+    expect(locked.headers["retry-after"]).toBeDefined();
+    expect(otherNetwork.statusCode).toBe(200);
+
+    const entries = await audit.listAdminAuditEvents();
+    expect(entries.map((entry) => entry.action).sort()).toEqual([
+      "auth.failed",
+      "auth.failed",
+      "auth.locked",
+      "user.lookup"
+    ]);
+    expect(entries.find((entry) => entry.action === "user.lookup")).toMatchObject({
+      actor: "ops",
+      detail: { email: "looked-up@example.com" },
+      ip: "203.0.113.10",
+      outcome: "success"
+    });
+    await app.close();
   });
 });
