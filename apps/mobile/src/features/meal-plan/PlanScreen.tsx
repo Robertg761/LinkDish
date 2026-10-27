@@ -8,7 +8,7 @@ import {
 } from "@linkdish/recipe-domain";
 import { AppButton, AppSurface, AppText } from "@linkdish/ui";
 import { useFocusEffect, useLocalSearchParams } from "expo-router";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -49,6 +49,8 @@ export const PlanScreen = () => {
   const [openEntryId, setOpenEntryId] = useState<string | null>(null);
   const [isShopping, setIsShopping] = useState(false);
   const currentWeekStart = startOfWeek(today, weekStartsOn);
+  const todayRef = useRef(today);
+  todayRef.current = today;
 
   // The day can turn over while the app sits in the background.
   useFocusEffect(
@@ -66,9 +68,14 @@ export const PlanScreen = () => {
   }, [requestedDate, weekStartsOn]);
 
   // Changing the first day of the week (or loading the saved choice) keeps the same week in view:
-  // re-anchored on its middle, since rounding its old first day would land on the week before.
+  // the week with today in it if that was showing, otherwise the one around the old week's middle
+  // (rounding its old first day would land on the week before).
   useEffect(() => {
-    setWeekStart((current) => startOfWeek(addDaysToIsoDate(current, 3), weekStartsOn));
+    setWeekStart((current) => {
+      const today = todayRef.current;
+      const showsToday = today >= current && today <= addDaysToIsoDate(current, 6);
+      return startOfWeek(showsToday ? today : addDaysToIsoDate(current, 3), weekStartsOn);
+    });
   }, [weekStartsOn]);
 
   const dates = useMemo(() => weekDays(weekStart), [weekStart]);

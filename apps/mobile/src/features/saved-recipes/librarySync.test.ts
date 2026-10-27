@@ -402,6 +402,41 @@ describe("mobile cookbook sync", () => {
     expect(cloud.get("collection:c-web")).toMatchObject({ deleted: true });
   });
 
+  it("counts the cookbook's own collection over an older copy left in the sync state", async () => {
+    const cloud = createCloud();
+    const local = createCookbook([], [weeknights]);
+    await syncMobileLibrary({
+      account: "u1",
+      client: cloud.client,
+      cookbook: local.cookbook,
+      isCurrent: () => true
+    });
+    const state = JSON.parse(storage.get(LIBRARY_SYNC_STORAGE_KEY)!) as Record<string, unknown>;
+    storage.set(
+      LIBRARY_SYNC_STORAGE_KEY,
+      JSON.stringify({
+        ...state,
+        collections: {
+          [weeknights.id]: {
+            payload: {
+              createdAt: weeknights.createdAt,
+              emoji: "🍝",
+              name: "Weeknights",
+              sortOrder: 0
+            },
+            updatedAt: weeknights.updatedAt
+          }
+        }
+      })
+    );
+
+    local.setCollections([{ ...weeknights, name: "School nights" }]);
+
+    await expect(
+      countMobileChangesNotSynced(local.cookbook.getRecords(), local.cookbook.getCollections())
+    ).resolves.toBe(1);
+  });
+
   it("moves collections an older build kept in the sync state into the cookbook", async () => {
     const cloud = createCloud();
     storage.set(

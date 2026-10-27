@@ -17,6 +17,8 @@ import type { LibraryCollection } from "@linkdish/api-contracts";
  */
 
 export const COLLECTIONS_STORAGE_KEY = "linkdish.collections.v1";
+/** Where collections that could not be read are copied before they are written over. */
+export const COLLECTIONS_CORRUPT_BACKUP_STORAGE_KEY = "linkdish.collections.corrupt.v1";
 
 export interface MobileCollection {
   id: string;

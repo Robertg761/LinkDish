@@ -34,11 +34,12 @@ type Status = { kind: "error" | "done"; message: string } | null;
  * nothing already on this device is changed or removed.
  */
 export const BackupCard = () => {
-  const { collections, hasLoadedSavedRecipes, restoreBackup, savedRecipes } = useSavedRecipes();
+  const { collections, isCookbookReadable, restoreBackup, savedRecipes } = useSavedRecipes();
   const { entries, hasLoadedMealPlan, importEntries } = useMealPlan();
   const [busy, setBusy] = useState<"export" | "restore" | null>(null);
   const [status, setStatus] = useState<Status>(null);
-  const isReady = hasLoadedSavedRecipes && hasLoadedMealPlan && busy == null;
+  // Only the whole cookbook is backed up or restored into: not one still loading or unreadable.
+  const isReady = isCookbookReadable && hasLoadedMealPlan && busy == null;
 
   const exportBackup = async () => {
     setBusy("export");
@@ -116,6 +117,14 @@ export const BackupCard = () => {
           now
         })
       );
+      if (!plan) {
+        setStatus({
+          kind: "error",
+          message: "Your cookbook couldn't be read on this device, so nothing was restored."
+        });
+        return;
+      }
+
       await importEntries(plan.mealPlan);
       trackMobileEvent({
         eventName: "library_imported",

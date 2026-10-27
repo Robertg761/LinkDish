@@ -452,6 +452,20 @@ describe("SavedRecipesProvider household save entitlement", () => {
     ).toBe(true);
   });
 
+  it("copies damaged collections aside before writing over them", async () => {
+    asyncStorageMocks.getItem.mockImplementation((key: string) =>
+      Promise.resolve(key === "linkdish.collections.v1" ? '[{"id":"collection-' : null)
+    );
+
+    await renderProvider();
+    await settlePersistence();
+
+    const collectionWrites = asyncStorageMocks.setItem.mock.calls.filter(([key]) =>
+      String(key).startsWith("linkdish.collections.")
+    );
+    expect(collectionWrites[0]).toEqual(["linkdish.collections.corrupt.v1", '[{"id":"collection-']);
+  });
+
   it("coalesces rapid small edits into one cookbook write", async () => {
     const storedRecipe = buildSavedRecipes(1)[0]!;
     storeSavedRecipes([storedRecipe]);

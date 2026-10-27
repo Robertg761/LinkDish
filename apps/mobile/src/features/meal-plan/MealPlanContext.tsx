@@ -13,10 +13,12 @@ import { AppState } from "react-native";
 
 import { trackMobileEvent } from "../../analytics/client";
 import { createDebouncedWriter } from "../../lib/debouncedWriter";
+import { isUnreadableStoredList } from "../../lib/storedList";
 
 import {
   compareMealPlanEntries,
   createMealPlanEntry,
+  MEAL_PLAN_CORRUPT_BACKUP_STORAGE_KEY,
   MEAL_PLAN_STORAGE_KEY,
   parseMealPlan,
   updateMealPlanEntryRecord,
@@ -87,7 +89,12 @@ export const MealPlanProvider = ({ children }: { children: ReactNode }) => {
     let isMounted = true;
 
     AsyncStorage.getItem(MEAL_PLAN_STORAGE_KEY)
-      .then((stored) => {
+      .then(async (stored) => {
+        // A plan that can't be read is copied aside first; if that fails, nothing is written.
+        if (isUnreadableStoredList(stored)) {
+          await AsyncStorage.setItem(MEAL_PLAN_CORRUPT_BACKUP_STORAGE_KEY, stored!);
+        }
+
         if (isMounted) {
           // Anything planned before this read landed is kept.
           commit((current) => {

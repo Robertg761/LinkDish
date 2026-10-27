@@ -16,6 +16,7 @@ import { AppState } from "react-native";
 import { trackMobileEvent } from "../../analytics/client";
 import { mobileEnv } from "../../config/env";
 import { createDebouncedWriter } from "../../lib/debouncedWriter";
+import { isUnreadableStoredList } from "../../lib/storedList";
 import { isAccountChangedError } from "../account/account-changed-error";
 import { useAccount } from "../account/AccountContext";
 import { useBilling } from "../billing/BillingContext";
@@ -23,6 +24,7 @@ import { billingPlans } from "../billing/plans";
 import { canSaveAnotherRecipe } from "../billing/store";
 
 import {
+  COLLECTIONS_CORRUPT_BACKUP_STORAGE_KEY,
   COLLECTIONS_STORAGE_KEY,
   createCollectionRecord,
   getRecipeCollectionIds,
@@ -86,6 +88,11 @@ export interface SavedRecipesState {
   getSharedRecipeById: (id: string) => SharedRecipe | undefined;
   hasLoadedSavedRecipes: boolean;
   hasLoadedSharedRecipes: boolean;
+  /**
+   * Everything stored for the cookbook (recipes and collections) has loaded and could be read,
+   * so what shows is the whole cookbook: a backup made now is complete, and a restore is allowed.
+   */
+  isCookbookReadable: boolean;
   savedRecipes: SavedRecipeRecord[];
   sharedRecipeError: string | null;
   sharedRecipes: SharedRecipe[];
@@ -106,9 +113,12 @@ export interface SavedRecipesActions {
   /**
    * Adds what `plan` decides a backup brings (see planBackupRestore), planned against the
    * cookbook as it is now, and saves the cookbook at once. A planned record whose id is already
-   * here replaces that record. Returns the plan it applied.
+   * here replaces that record. Returns the plan it applied, or null (changing nothing) when the
+   * stored cookbook isn't readable (see isCookbookReadable).
    */
-  restoreBackup: (plan: (cookbook: BackupRestoreCookbook) => RestorePlan) => Promise<RestorePlan>;
+  restoreBackup: (
+    plan: (cookbook: BackupRestoreCookbook) => RestorePlan
+  ) => Promise<RestorePlan | null>;
   saveRecipe: (
     state: SuccessfulExtractionState
   ) => Promise<SaveRecipeResult & { recipeId?: string }>;
@@ -602,7 +612,12 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
     let isMounted = true;
 
     AsyncStorage.getItem(COLLECTIONS_STORAGE_KEY)
-      .then((stored) => {
+      .then(async (stored) => {
+        // Collections that can't be read are copied aside first; if that fails, nothing is written.
+        if (isUnreadableStoredList(stored)) {
+          await AsyncStorage.setItem(COLLECTIONS_CORRUPT_BACKUP_STORAGE_KEY, stored!);
+        }
+
         if (isMounted) {
           // Anything a sync or the cook changed before this read landed is kept.
           commitCollections((current) => {
@@ -1303,8 +1318,23 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
     [commitCollections, commitSavedRecipes]
   );
 
+  const isCookbookReadable =
+    hasLoadedSavedRecipes &&
+    hasLoadedCollections &&
+    !hasUnreadableStoredRecipes &&
+    !cookbookReadFailed &&
+    !collectionsReadFailed;
+  const isCookbookReadableRef = useRef(isCookbookReadable);
+  isCookbookReadableRef.current = isCookbookReadable;
+
   const restoreBackup = useCallback(
-    async (plan: (cookbook: BackupRestoreCookbook) => RestorePlan): Promise<RestorePlan> => {
+    async (plan: (cookbook: BackupRestoreCookbook) => RestorePlan): Promise<RestorePlan | null> => {
+      // Restoring into a cookbook that isn't all here would save the restored copy over the one
+      // that couldn't be read.
+      if (!isCookbookReadableRef.current) {
+        return null;
+      }
+
       const { canUseSharedRecipeBook: unlimited, tier } = latestRef.current;
       const limit = billingPlans[tier].limits.savedRecipes;
       const applied = plan({
@@ -1349,15 +1379,14 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
         });
       }
 
-      // Collections that could not be read are never written over (see the schedule effect).
       await Promise.all([
         writer.writeNow(savedRecipesRef.current),
-        ...(collectionsReadFailed ? [] : [collectionsWriter.writeNow(collectionsRef.current)])
+        collectionsWriter.writeNow(collectionsRef.current)
       ]);
 
       return applied;
     },
-    [collectionsReadFailed, collectionsWriter, commitCollections, commitSavedRecipes, writer]
+    [collectionsWriter, commitCollections, commitSavedRecipes, writer]
   );
 
   const setRecipeFavorite = useCallback(
@@ -1747,6 +1776,7 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
       getSharedRecipeById,
       hasLoadedSavedRecipes,
       hasLoadedSharedRecipes,
+      isCookbookReadable,
       savedRecipes: visibleSavedRecipes,
       sharedRecipeError,
       sharedRecipes,
@@ -1761,6 +1791,7 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
       getSharedRecipeById,
       hasLoadedSavedRecipes,
       hasLoadedSharedRecipes,
+      isCookbookReadable,
       sharedRecipeError,
       sharedRecipes,
       shareMode,
@@ -1825,13 +1856,7 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
           collections={collections}
           cookbook={syncedCookbook}
           createClient={createSyncClient}
-          hasLoaded={
-            hasLoadedSavedRecipes &&
-            hasLoadedCollections &&
-            !hasUnreadableStoredRecipes &&
-            !cookbookReadFailed &&
-            !collectionsReadFailed
-          }
+          hasLoaded={isCookbookReadable}
           savedRecipes={savedRecipes}
         >
           {children}

@@ -29,6 +29,8 @@ import type { ComponentProps } from "react";
  */
 
 export const MEAL_PLAN_STORAGE_KEY = "linkdish.mealPlan.v1";
+/** Where a plan that could not be read is copied before it is written over. */
+export const MEAL_PLAN_CORRUPT_BACKUP_STORAGE_KEY = "linkdish.mealPlan.corrupt.v1";
 
 export type MealPlanSlot = MealSlot;
 

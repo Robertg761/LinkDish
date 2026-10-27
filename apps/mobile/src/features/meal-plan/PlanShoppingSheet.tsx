@@ -18,7 +18,12 @@ import { appColors, appSpacing } from "../../theme/tokens";
 import { useShoppingList } from "../shopping/ShoppingListContext";
 
 import { SheetLabel } from "./PlanControls";
-import { buildPlanShopping, toShoppingListInput, type MealPlanEntry } from "./store";
+import {
+  buildPlanShopping,
+  toShoppingListInput,
+  type MealPlanEntry,
+  type PlanShopping
+} from "./store";
 
 import type { SavedRecipeRecord } from "../saved-recipes/store";
 import type { AggregatedShoppingItem } from "@linkdish/recipe-domain";
@@ -45,7 +50,11 @@ export const PlanShoppingSheet = ({
   weekLabel: string;
 }) => {
   const { addItems, shoppingItems } = useShoppingList();
-  const planned = useMemo(() => buildPlanShopping(entries, recipesById), [entries, recipesById]);
+  const current = useMemo(() => buildPlanShopping(entries, recipesById), [entries, recipesById]);
+  // The list is fixed while the sheet is open, so a sync landing meanwhile can't shift what the
+  // ticks (by position) point at.
+  const [opened, setOpened] = useState<PlanShopping | null>(null);
+  const planned = opened ?? current;
   const [selected, setSelected] = useState<Set<number>>(() => new Set());
   const [added, setAdded] = useState<number | null>(null);
   const wasVisibleRef = useRef(false);
@@ -56,12 +65,15 @@ export const PlanShoppingSheet = ({
     wasVisibleRef.current = visible;
 
     if (visible && !wasVisible) {
+      setOpened(current);
       setSelected(
-        new Set(planned.items.flatMap((item, index) => (isPantryStaple(item.text) ? [] : [index])))
+        new Set(current.items.flatMap((item, index) => (isPantryStaple(item.text) ? [] : [index])))
       );
       setAdded(null);
+    } else if (!visible && wasVisible) {
+      setOpened(null);
     }
-  }, [planned.items, visible]);
+  }, [current, visible]);
 
   const openKeys = useMemo(
     () =>

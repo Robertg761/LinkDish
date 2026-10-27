@@ -291,6 +291,15 @@ describe("restoring", () => {
     ]);
   });
 
+  it("adds no collections past the limit", () => {
+    const here = Array.from({ length: 199 }, (_, index) =>
+      collection(`collection-here-${index}`, `Here ${index}`, index)
+    );
+    const plan = restoreFrom(JSON.stringify(exported().backup), emptyDevice({ collections: here }));
+
+    expect(plan.collections.map((entry) => entry.name)).toEqual(["Weeknights"]);
+  });
+
   it("treats a recipe with the same id as the one already here", () => {
     const { backup } = buildMobileBackup({
       collections: [],

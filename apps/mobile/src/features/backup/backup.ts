@@ -5,6 +5,7 @@ import {
   MAX_LIBRARY_COLLECTION_DESCRIPTION_LENGTH,
   MAX_LIBRARY_COLLECTION_EMOJI_LENGTH,
   MAX_LIBRARY_COLLECTION_NAME_LENGTH,
+  MAX_LIBRARY_COLLECTIONS,
   MAX_LIBRARY_COOK_LOG_ENTRIES,
   MAX_LIBRARY_COOK_LOG_NOTE_LENGTH
 } from "@linkdish/api-contracts";
@@ -425,6 +426,11 @@ export const planBackupRestore = (
 
     if (match) {
       collectionIdMap.set(collection.id, match.id);
+      continue;
+    }
+
+    // Past the collection limit (which sync enforces too), recipes just don't join this one.
+    if (context.collections.length + createdCollections.length >= MAX_LIBRARY_COLLECTIONS) {
       continue;
     }
 

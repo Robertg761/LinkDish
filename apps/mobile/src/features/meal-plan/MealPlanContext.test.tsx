@@ -24,7 +24,11 @@ vi.mock("react-native", () => ({
 }));
 
 import { MealPlanProvider, useMealPlan, WEEK_STARTS_ON_STORAGE_KEY } from "./MealPlanContext";
-import { MEAL_PLAN_STORAGE_KEY, type MealPlanEntry } from "./store";
+import {
+  MEAL_PLAN_CORRUPT_BACKUP_STORAGE_KEY,
+  MEAL_PLAN_STORAGE_KEY,
+  type MealPlanEntry
+} from "./store";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -146,6 +150,35 @@ describe("MealPlanProvider", () => {
       latest?.addEntry({ date: "2026-10-26", slot: "dinner", title: "Takeout" }, "plan");
     });
 
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    expect(
+      asyncStorageMocks.setItem.mock.calls.filter(([key]) => key === MEAL_PLAN_STORAGE_KEY)
+    ).toEqual([]);
+  });
+
+  it("copies a damaged plan aside before writing, and writes nothing if it can't", async () => {
+    asyncStorageMocks.getItem.mockImplementation((key: string) =>
+      Promise.resolve(key === MEAL_PLAN_STORAGE_KEY ? '[{"id":"plan-' : null)
+    );
+    await render();
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    expect(asyncStorageMocks.setItem).toHaveBeenCalledWith(
+      MEAL_PLAN_CORRUPT_BACKUP_STORAGE_KEY,
+      '[{"id":"plan-'
+    );
+
+    asyncStorageMocks.setItem.mockReset().mockRejectedValue(new Error("full"));
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    await render();
+    act(() => {
+      latest?.addEntry({ date: "2026-10-26", slot: "dinner", title: "Takeout" }, "plan");
+    });
     await act(async () => {
       await vi.runAllTimersAsync();
     });

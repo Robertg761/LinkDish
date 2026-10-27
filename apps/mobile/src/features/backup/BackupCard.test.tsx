@@ -15,7 +15,7 @@ const sharingMocks = vi.hoisted(() => ({
 
 const savedRecipesState = vi.hoisted(() => ({
   collections: [] as unknown[],
-  hasLoadedSavedRecipes: true,
+  isCookbookReadable: true,
   restoreBackup: vi.fn(),
   savedRecipes: [] as unknown[]
 }));
@@ -87,6 +87,7 @@ vi.mock("../meal-plan/MealPlanContext", () => ({
   useMealPlan: () => mealPlanState
 }));
 
+import { buildMobileBackup } from "./backup";
 import { BackupCard } from "./BackupCard";
 
 import type { RestorePlan } from "./backup";
@@ -105,6 +106,14 @@ const soup: SavedRecipeRecord = {
   timesCooked: 2,
   warnings: []
 };
+
+const validBackup = () =>
+  buildMobileBackup({
+    collections: [],
+    exportedAt: "2026-10-26T12:00:00.000Z",
+    mealPlan: [],
+    records: [soup]
+  }).backup;
 
 const render = async () => {
   let renderer: ReactTestRenderer | undefined;
@@ -212,6 +221,20 @@ describe("BackupCard", () => {
 
     expect(savedRecipesState.restoreBackup).not.toHaveBeenCalled();
     expect(textOf(renderer)).toContain("This is not a LinkDish backup.");
+  });
+
+  it("restores nothing into a cookbook that couldn't be read", async () => {
+    fileMocks.pickFileAsync.mockResolvedValue({
+      canceled: false,
+      result: { size: 2, text: () => Promise.resolve(JSON.stringify(validBackup())) }
+    });
+    savedRecipesState.restoreBackup.mockResolvedValue(null);
+    const renderer = await render();
+
+    await pressButton(renderer, "Restore");
+
+    expect(mealPlanState.importEntries).not.toHaveBeenCalled();
+    expect(textOf(renderer)).toContain("Your cookbook couldn't be read on this device");
   });
 
   it("does nothing when the picker is closed", async () => {

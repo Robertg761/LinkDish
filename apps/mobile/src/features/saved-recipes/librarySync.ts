@@ -471,11 +471,14 @@ export const countMobileChangesNotSynced = async (
     return 0;
   }
 
+  // Collections still in the sync state count until the next sync moves them, and only where
+  // the cookbook has none with that id (as moveStateCollections does).
+  const known = new Set(collections.map((collection) => collection.id));
   const local = readLocalItems(records, [
     ...collections,
-    ...Object.entries(state.collections ?? {}).map(([id, stored]) =>
-      fromLibraryCollection(id, stored.payload, stored.updatedAt)
-    )
+    ...Object.entries(state.collections ?? {})
+      .filter(([id]) => !known.has(id))
+      .map(([id, stored]) => fromLibraryCollection(id, stored.payload, stored.updatedAt))
   ]);
   let count = 0;
 

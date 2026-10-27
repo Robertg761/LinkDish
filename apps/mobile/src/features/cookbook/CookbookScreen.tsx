@@ -492,16 +492,19 @@ export const CookbookScreen = () => {
     [savedRecipes]
   );
   // A filter on a collection that was deleted, or a tag no recipe has any more, falls away.
-  const activeListFilter =
-    activeTab !== "personal" || !listFilter
-      ? null
-      : listFilter.kind === "collection"
-        ? collections.some((collection) => collection.id === listFilter.id)
-          ? listFilter
-          : null
-        : savedRecipes.some((entry) => recipeHasTag(entry, listFilter.label))
-          ? listFilter
-          : null;
+  const activeListFilter = useMemo(
+    () =>
+      activeTab !== "personal" || !listFilter
+        ? null
+        : listFilter.kind === "collection"
+          ? collections.some((collection) => collection.id === listFilter.id)
+            ? listFilter
+            : null
+          : savedRecipes.some((entry) => recipeHasTag(entry, listFilter.label))
+            ? listFilter
+            : null,
+    [activeTab, collections, listFilter, savedRecipes]
+  );
   const activeCollection =
     activeListFilter?.kind === "collection"
       ? collections.find((collection) => collection.id === activeListFilter.id)
