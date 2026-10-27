@@ -19,7 +19,7 @@ on:
 
 concurrency:
   group: deploy-api-production
-  # Queue instead of cancelling: a cancelled run can stop between the deploy and its canary.
+  # Queue instead of cancelling: a cancelled run can stop between the promotion and its final check.
   cancel-in-progress: false
 
 permissions:
@@ -27,6 +27,8 @@ permissions:
 
 jobs:
   deploy:
+    # A manual run from another branch would otherwise ship that branch to api.linkdish.ca.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
@@ -60,14 +62,106 @@ jobs:
       - name: Build Vercel output
         run: vercel build --prod --token="${{ secrets.VERCEL_TOKEN }}"
 
-      - name: Deploy API to production
-        run: vercel deploy --prebuilt --prod --token="${{ secrets.VERCEL_TOKEN }}"
+      # The new version is built with production settings but api.linkdish.ca keeps serving the
+      # current one until the checks below pass against the deployment's own URL.
+      - name: Stage API deployment without production domains
+        id: stage
+        run: |
+          deployment_url="$(vercel deploy --prebuilt --prod --skip-domain --token="${{ secrets.VERCEL_TOKEN }}")"
+          # The canary sends LINKDISH_CANARY_AUTH_TOKEN to this URL, so only accept a Vercel deployment host.
+          if [[ ! "$deployment_url" =~ ^https://[a-z0-9-]+\.vercel\.app$ ]]; then
+            echo "Unexpected deployment URL from vercel deploy: ${deployment_url}" >&2
+            exit 1
+          fi
+          echo "url=${deployment_url}" >> "$GITHUB_OUTPUT"
+          echo "Staged API deployment: ${deployment_url}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify staged API
+        env:
+          LINKDISH_PRODUCTION_API_BASE_URL: ${{ steps.stage.outputs.url }}
+        run: pnpm release:api:production
+
+      - name: Run canary against staged API
+        env:
+          LINKDISH_CANARY_BASE_URL: ${{ steps.stage.outputs.url }}
+          LINKDISH_CANARY_AUTH_TOKEN: ${{ secrets.LINKDISH_CANARY_AUTH_TOKEN }}
+        run: pnpm canary:live
+
+      - name: Upload canary artifacts
+        if: always() && steps.stage.outputs.url != ''
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: deploy-canary-results
+          path: services/extractor-api/.artifacts/live-canary/*.json
+          retention-days: 7
+
+      - name: Record current production deployment
+        id: previous
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        # Only used for the rollback hint below, so a failed lookup must not block the release.
+        run: |
+          previous_host="$(curl -fsS -H "Authorization: Bearer ${VERCEL_TOKEN}" \
+            "https://api.vercel.com/v13/deployments/api.linkdish.ca?teamId=${VERCEL_ORG_ID}" | jq -r '.url // empty' || true)"
+          if [[ -n "$previous_host" ]]; then
+            echo "url=https://${previous_host}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Promote API to production
+        id: promote
+        env:
+          STAGED_URL: ${{ steps.stage.outputs.url }}
+        run: vercel promote "$STAGED_URL" --yes --token="${{ secrets.VERCEL_TOKEN }}"
+
+      # /health alone would also pass on the previous deployment, so first check where the domain points.
+      - name: Confirm api.linkdish.ca serves the promoted deployment
+        env:
+          STAGED_URL: ${{ steps.stage.outputs.url }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          for attempt in 1 2 3 4 5 6; do
+            current_host="$(curl -fsS -H "Authorization: Bearer ${VERCEL_TOKEN}" \
+              "https://api.vercel.com/v13/deployments/api.linkdish.ca?teamId=${VERCEL_ORG_ID}" | jq -r '.url // empty' || true)"
+            if [[ "https://${current_host}" == "$STAGED_URL" ]]; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "api.linkdish.ca still points at https://${current_host}, not ${STAGED_URL}." >&2
+          exit 1
 
       - name: Verify production API
         run: pnpm release:api:production
 
-      - name: Run production canary
+      - name: Explain failed release
+        if: failure() && steps.stage.outputs.url != ''
         env:
-          LINKDISH_CANARY_BASE_URL: https://api.linkdish.ca
-          LINKDISH_CANARY_AUTH_TOKEN: ${{ secrets.LINKDISH_CANARY_AUTH_TOKEN }}
-        run: pnpm canary:live
+          STAGED_URL: ${{ steps.stage.outputs.url }}
+          PREVIOUS_URL: ${{ steps.previous.outputs.url }}
+          PROMOTE_OUTCOME: ${{ steps.promote.outcome }}
+        run: |
+          {
+            if [[ "$PROMOTE_OUTCOME" == "success" ]]; then
+              echo "### API promoted, but the production check failed"
+              echo
+              echo "api.linkdish.ca was switched to ${STAGED_URL}. To go back to the previous deployment:"
+              echo
+              echo "    vercel rollback ${PREVIOUS_URL:-<previous deployment URL>}"
+            elif [[ "$PROMOTE_OUTCOME" == "failure" ]]; then
+              echo "### API promotion failed"
+              echo
+              echo "${STAGED_URL} passed its checks, but \`vercel promote\` failed, so the switch may be"
+              echo "incomplete. Run \`vercel promote status\` to see which deployment api.linkdish.ca serves."
+            else
+              echo "### API not promoted"
+              echo
+              echo "api.linkdish.ca still serves the previous deployment. ${STAGED_URL} failed its checks."
+              echo "If the failure is a third-party recipe site rather than this change, it can be promoted"
+              echo "by hand, but first make sure no later run has promoted a newer deployment"
+              echo "(\`vercel promote status\` or the project's Deployments page): promoting this one"
+              echo "afterwards would roll production back."
+              echo
+              echo "    vercel promote ${STAGED_URL}"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
