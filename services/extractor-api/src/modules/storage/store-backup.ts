@@ -812,6 +812,84 @@ const ownerOf = (entry: StoreSnapshotEntry, userIds: Set<string>): string | null
   return null;
 };
 
+const parseRecord = (entry: StoreSnapshotEntry): Record<string, unknown> | null => {
+  try {
+    const value: unknown = typeof entry.value === "string" ? JSON.parse(entry.value) : null;
+    return value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+};
+
+/*
+ * What a deleted account shared with a Family household goes when it is deleted: a household it
+ * owned is dissolved (with its recipes, list, invites), and a recipe it shared is removed, as is
+ * its membership. A restore leaves all of that out rather than show it to the others again.
+ */
+const withoutDeletedMembers = <Candidate extends { entry: StoreSnapshotEntry }>(
+  candidates: Candidate[],
+  deletedUserIds: Set<string>
+): Candidate[] => {
+  if (deletedUserIds.size === 0) return candidates;
+
+  const family = (entry: StoreSnapshotEntry) => findBackedUpKeyFamily(entry.key)?.name;
+  const households = new Set<string>();
+  const recipes = new Set<string>();
+
+  for (const { entry } of candidates) {
+    const record = parseRecord(entry);
+    const owner = record?.ownerUserId;
+    if (typeof owner !== "string" || !deletedUserIds.has(owner) || typeof record?.id !== "string") {
+      continue;
+    }
+    if (family(entry) === "household") households.add(record.id);
+    if (family(entry) === "household-recipe") recipes.add(record.id);
+  }
+
+  return candidates.flatMap((candidate) => {
+    const { entry } = candidate;
+    const record = parseRecord(entry);
+    const name = family(entry);
+
+    if (
+      entry.key.split(":").some((segment) => households.has(segment)) ||
+      (typeof record?.householdId === "string" && households.has(record.householdId)) ||
+      (name === "household-recipe" && typeof record?.id === "string" && recipes.has(record.id)) ||
+      (name === "household-by-user" &&
+        typeof entry.value === "string" &&
+        households.has(entry.value)) ||
+      (name === "household-recipe-by-source" &&
+        typeof entry.value === "string" &&
+        recipes.has(entry.value))
+    ) {
+      return [];
+    }
+
+    if (name === "household-recipes") {
+      const members = (entry.value as string[]).filter((member) => !recipes.has(member));
+      return members.length > 0 ? [{ ...candidate, entry: { ...entry, value: members } }] : [];
+    }
+
+    if (name === "household" && record && Array.isArray(record.memberUserIds)) {
+      const memberJoinedAt = Object.fromEntries(
+        Object.entries((record.memberJoinedAt as Record<string, unknown> | undefined) ?? {}).filter(
+          ([userId]) => !deletedUserIds.has(userId)
+        )
+      );
+      const value = JSON.stringify({
+        ...record,
+        memberUserIds: (record.memberUserIds as unknown[]).filter(
+          (userId) => typeof userId !== "string" || !deletedUserIds.has(userId)
+        ),
+        ...(record.memberJoinedAt ? { memberJoinedAt } : {})
+      });
+      return [{ ...candidate, entry: { ...entry, value } }];
+    }
+
+    return [candidate];
+  });
+};
+
 const isDeletedUserRecord = (value: unknown): boolean => {
   try {
     return (
@@ -959,10 +1037,23 @@ export const restoreStoreSnapshot = async (
   }
 
   const userIds = new Set(userKeys.keys());
+  const deletedUserIds = new Set<string>();
+
+  for (const batch of chunk([...userKeys], batchSize)) {
+    const [values] = await run([["MGET", ...batch.map(([, key]) => key)]]);
+    batch.forEach(([userId], index) => {
+      if (isDeletedUserRecord(Array.isArray(values) ? values[index] : null)) {
+        deletedUserIds.add(userId);
+      }
+    });
+  }
+
+  const shared = withoutDeletedMembers(candidates, deletedUserIds);
+  result.ofDeletedAccounts += candidates.length - shared.length;
   const byAccount = new Map<string, Candidate[]>();
   const unowned: Candidate[] = [];
 
-  for (const candidate of candidates) {
+  for (const candidate of shared) {
     const owner = ownerOf(candidate.entry, userIds);
     const group = owner ? byAccount.get(owner) : unowned;
     if (group) group.push(candidate);

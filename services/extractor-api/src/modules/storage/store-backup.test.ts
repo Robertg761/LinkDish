@@ -502,6 +502,55 @@ describe("restoreStoreSnapshot", () => {
     }
   });
 
+  it("leaves out what a deleted account shared with a household", async () => {
+    const source = createFakeRedis(() => 0);
+    source.strings.set("linkdish:user:v1:u1", JSON.stringify({ id: "u1" }));
+    source.strings.set("linkdish:user:v1:u2", JSON.stringify({ id: "u2" }));
+    source.strings.set(
+      "linkdish:household:v1:h1",
+      JSON.stringify({
+        id: "h1",
+        memberJoinedAt: { u1: "2026-01-01T00:00:00.000Z", u2: "2026-01-01T00:00:00.000Z" },
+        memberUserIds: ["u2", "u1"],
+        ownerUserId: "u2"
+      })
+    );
+    source.strings.set(
+      "linkdish:household-recipe:v1:s1",
+      JSON.stringify({ householdId: "h1", id: "s1", ownerUserId: "u1" })
+    );
+    source.strings.set(
+      "linkdish:household-recipe:v1:s2",
+      JSON.stringify({ householdId: "h1", id: "s2", ownerUserId: "u2" })
+    );
+    source.strings.set("linkdish:household-recipe-by-source:v1:h1:u1:saved", "s1");
+    source.sets.set("linkdish:household-recipes:v1:h1", new Set(["s1", "s2"]));
+    source.strings.set(
+      "linkdish:household:v1:h9",
+      JSON.stringify({ id: "h9", memberUserIds: ["u1"], ownerUserId: "u1" })
+    );
+    source.sets.set("linkdish:household-shopping-items:v1:h9", new Set(["i1"]));
+    const snapshot = await createStoreSnapshot(source.run, { now: () => new Date(0) });
+    const target = createFakeRedis(() => 0);
+    target.strings.set(
+      "linkdish:user:v1:u1",
+      JSON.stringify({ deletedAt: "2026-10-02T00:00:00.000Z", id: "u1" })
+    );
+
+    await restoreStoreSnapshot(target.run, snapshot, { apply: true });
+
+    expect(target.strings.has("linkdish:household:v1:h9")).toBe(false);
+    expect(target.sets.has("linkdish:household-shopping-items:v1:h9")).toBe(false);
+    expect(target.strings.has("linkdish:household-recipe:v1:s1")).toBe(false);
+    expect(target.strings.has("linkdish:household-recipe-by-source:v1:h1:u1:saved")).toBe(false);
+    expect([...(target.sets.get("linkdish:household-recipes:v1:h1") ?? [])]).toEqual(["s2"]);
+    expect(JSON.parse(target.strings.get("linkdish:household:v1:h1") ?? "{}")).toMatchObject({
+      memberJoinedAt: { u2: "2026-01-01T00:00:00.000Z" },
+      memberUserIds: ["u2"]
+    });
+    expect(target.strings.has("linkdish:household-recipe:v1:s2")).toBe(true);
+  });
+
   it("checks for a deleted account under the lock account deletion holds", async () => {
     const source = createFakeRedis(() => 0);
     seed(source, 0);
