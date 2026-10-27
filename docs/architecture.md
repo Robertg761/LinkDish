@@ -80,6 +80,20 @@ size` checks the budgets after a build (entry ≤ 115 KB gzip, landing JS ≤
 - The Cookbook renders with a FlatList; saved-recipes and shopping state are split into
   state and action contexts, and AsyncStorage writes go through a debounced writer that
   flushes when the app goes to the background.
+- The Android cookbook is stored one AsyncStorage value per recipe
+  (`linkdish.cookbook.v2.recipe:<id>`) plus an ordered index (`linkdish.cookbook.v2.index`), in
+  `cookbookStorage.ts`. A write stores only the recipes that changed, together with the index in
+  one `multiSet` (one SQLite transaction), then deletes removed recipes' values; values the index
+  doesn't list are cleaned up on launch. Builds up to 2.0.x kept the whole cookbook in one value
+  (`linkdish.savedRecipes`), which got slow to rewrite and can't be read back on Android past
+  about 2 MB. It is moved over on the first launch and deleted only once the copy is written; if
+  the move fails, that launch keeps writing the old value and the next one retries. Inlined scan photos
+  are written to files before the move, so the moved copy points at them. An old value (or one
+  recipe's value) that can't be read is never deleted, and sync stays off while it is unread so
+  it isn't taken for a deletion; an old value that can't be understood is backed up to
+  `linkdish.savedRecipes.corrupt.v1` first, as before. Android's
+  AsyncStorage database cap is raised from 6 MB to 64 MB (`AsyncStorage_db_size_in_MB`, set in
+  `android/gradle.properties` and by `app.config.ts` on prebuild).
 - Search, shopping aggregation (aisle grouping, clean fractions), US/metric conversion and
   servings/time formatting come from `@linkdish/recipe-domain`, the same code the web uses.
 
@@ -252,7 +266,8 @@ parses `extractRecipeAnyRequestSchema`.
   database is current that is a version read and no DDL. `pnpm --filter @linkdish/extractor-api
   analytics:migrate` applies them by hand. Never edit a shipped migration; add the next one.
   Migration 1 is the schema the API used to create on every cold start, still guarded by
-  `if not exists`, so databases created that way adopt it.
+  `if not exists`, so databases created that way adopt it. Migration 3 adds the error alert
+  fingerprint index and checkpoint table; the alert job also applies pending migrations itself.
 - **Retention is off by default: analytics are kept indefinitely.** Vercel Cron calls
   `GET /admin/cron/analytics-retention` daily (root `vercel.json` `crons`; it is folded into
   `api/admin.ts` for the 12-function limit). It authenticates with `CRON_SECRET` only, not the
@@ -272,6 +287,47 @@ parses `extractRecipeAnyRequestSchema`.
   API before shipping clients that send new names. Older APIs rejected whole batches with
   unknown names; the current one drops only those events, but they are still lost until
   the API knows them.
+
+### Error alerts and crash reports
+
+- Web and Android send `client_error` analytics events, which the API also writes to the
+  `error_analytics` table (fingerprint = platform, route and the first 120 characters of the
+  message).
+- The **Error Alerts** workflow (`.github/workflows/error-alerts.yml`, hourly at :17) runs
+  `pnpm --filter @linkdish/extractor-api alerts:errors` against that table. Each run checks the
+  errors received (by `received_at`) since the last run that finished, kept in the one-row
+  `error_alert_checkpoints` table, so a late or skipped GitHub cron run neither drops errors nor
+  reports them twice. The first run, or a run after the checkpoint is lost, checks the last 60
+  minutes; catch-up is capped at 24 hours. It alerts on any fatal error; on at least 25 errors
+  (scaled up for a window longer than 60 minutes); or on a new error, first seen in the last 24
+  hours with none in the 7 days before, in the run where its count over those 24 hours reaches
+  3. Each alerting run sends one email (Resend) and/or one Slack or Discord webhook message, so
+  a spike that continues alerts again every hour. A run that cannot deliver its alert fails and
+  leaves the checkpoint where it was, so the next run reports those errors again.
+- Error messages come from clients, so the webhook message cannot ping anyone or render links
+  (Discord `allowed_mentions: { parse: [] }`, Slack text escaped). Sends time out after 10
+  seconds.
+- The repository and its Actions logs are public: the job prints counts only. Error messages
+  go only to the email and webhook channels.
+- Setup, in GitHub repository settings: secrets `ANALYTICS_DATABASE_URL` (the API's analytics
+  database; `ANALYTICS_DATABASE_CA_CERT` too if the API uses one), `RESEND_API_KEY`,
+  `ERROR_ALERT_EMAIL_TO` (comma-separated) and/or `ERROR_ALERT_WEBHOOK_URL`; variable
+  `ERROR_ALERT_EMAIL_FROM` (a sender on the Resend-verified domain). Optional variables
+  `ERROR_ALERT_MIN_ERRORS`, `ERROR_ALERT_WINDOW_MINUTES` and `ERROR_ALERT_NEW_ERROR_MIN_COUNT`
+  change the thresholds. Without the database secret the job does nothing; if a rule fires
+  and no channel is configured, the run fails.
+- Android crash reports go to Sentry (`@sentry/react-native`), started in `app/_layout.tsx`
+  only on Android and only when the build sets `EXPO_PUBLIC_SENTRY_DSN`
+  (`EXPO_PUBLIC_SENTRY_ENVIRONMENT` is optional). The privacy policy covers Android only, so
+  iOS needs a policy update before it is turned on there. It catches native crashes, ANRs and
+  fatal JS errors, which the `client_error` event usually loses because the process dies before
+  it is sent. It sends no default PII and no performance traces, drops console breadcrumbs, and
+  strips query strings from URLs in breadcrumbs, error messages and the request URL. Sentry's
+  own alert rules notify about new crash issues.
+- Release builds upload JS source maps to Sentry only when the EAS build has
+  `SENTRY_AUTH_TOKEN`, `SENTRY_ORG` and `SENTRY_PROJECT`; `plugins/withSentrySourceMapUpload.js`
+  and the checked-in `android/app/build.gradle` apply `sentry.gradle` behind that check, so
+  builds without the token are unchanged. iOS source maps are not wired yet.
 
 ### Personal library sync
 

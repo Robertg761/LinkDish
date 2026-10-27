@@ -171,6 +171,19 @@ export const analyticsMigrations: readonly AnalyticsMigration[] = [
         on error_analytics (account_user_hash)
         where account_user_hash is not null;
     `
+  },
+  {
+    version: 3,
+    name: "error_alerts",
+    sql: `
+      create index if not exists error_analytics_fingerprint_received_idx
+        on error_analytics (error_fingerprint, received_at);
+
+      create table if not exists error_alert_checkpoints (
+        id smallint primary key,
+        checked_until timestamptz not null
+      );
+    `
   }
 ];
 

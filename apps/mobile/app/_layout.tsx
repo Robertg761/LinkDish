@@ -8,6 +8,7 @@ import { useEffect, type ReactNode } from "react";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { installMobileErrorTracking, trackMobileAppOpened } from "../src/analytics/client";
+import { installCrashReporting } from "../src/analytics/crash-reporting";
 import { AccountProvider } from "../src/features/account/AccountContext";
 import { ClerkSessionBridge } from "../src/features/account/ClerkSessionBridge";
 import { NoClerkSessionProvider } from "../src/features/account/ClerkSessionContext";
@@ -21,6 +22,9 @@ import { appColors } from "../src/theme/tokens";
 const readPublicEnv = (value: unknown): string => (typeof value === "string" ? value : "");
 const clerkPublishableKey = readPublicEnv(process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY);
 const clerkTokenCacheProps = tokenCache ? { tokenCache } : {};
+
+// Before anything renders, so a crash during startup is still reported.
+installCrashReporting();
 
 void SplashScreen.preventAutoHideAsync().catch(() => undefined);
 
