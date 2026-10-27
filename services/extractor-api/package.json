@@ -13,7 +13,8 @@
     "canary:live": "node scripts/run-live-canary.mjs ../../docs/live-canary-manifest.json",
     "alerts:errors": "tsx scripts/check-error-alerts.ts",
     "grant:plan": "tsx scripts/grant-plan-by-email.ts",
-    "analytics:migrate": "tsx scripts/migrate-analytics.ts"
+    "analytics:migrate": "tsx scripts/migrate-analytics.ts",
+    "backup:store": "tsx scripts/store-backup.ts"
   },
   "dependencies": {
     "@clerk/backend": "^3.4.13",

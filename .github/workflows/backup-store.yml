@@ -1,0 +1,123 @@
+name: Account Data Backup
+
+# Copies the account data in production Upstash (users, sessions, identities, households,
+# synced libraries) into an encrypted GitHub Actions artifact every night.
+#
+# Secrets: BACKUP_UPSTASH_REDIS_REST_URL and BACKUP_UPSTASH_REDIS_REST_READONLY_TOKEN (the
+# production database's read-only REST token), and LINKDISH_BACKUP_PUBLIC_KEY (the public half
+# of a key made with `backup:store keygen`; the private half stays offline and is the only way
+# to read a backup). Restoring: `pnpm --filter @linkdish/extractor-api backup:store help`.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "23 7 * * *"
+
+concurrency:
+  group: backup-store
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      issues: write
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 10.8.0
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+        run: pnpm install --frozen-lockfile
+
+      - name: Write encrypted backup
+        id: backup
+        env:
+          UPSTASH_REDIS_REST_URL: ${{ secrets.BACKUP_UPSTASH_REDIS_REST_URL }}
+          UPSTASH_REDIS_REST_TOKEN: ${{ secrets.BACKUP_UPSTASH_REDIS_REST_READONLY_TOKEN }}
+          LINKDISH_BACKUP_PUBLIC_KEY: ${{ secrets.LINKDISH_BACKUP_PUBLIC_KEY }}
+        run: |
+          stamp="$(date -u +%Y-%m-%dT%H%MZ)"
+          echo "name=linkdish-store-backup-${stamp}" >> "$GITHUB_OUTPUT"
+          pnpm --filter @linkdish/extractor-api backup:store create \
+            --out "$GITHUB_WORKSPACE/.artifacts/store-backup/linkdish-store-${stamp}.ldbak"
+
+      - name: Upload encrypted backup
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ steps.backup.outputs.name }}
+          path: .artifacts/store-backup/*.ldbak
+          if-no-files-found: error
+          retention-days: 90
+          # Already gzipped before encryption.
+          compression-level: 0
+
+      - name: Report backup failure
+        if: failure()
+        continue-on-error: true
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const title = "Account data backup failing";
+            const label = "data-backup";
+            const runUrl = `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`;
+
+            try {
+              try {
+                await github.rest.issues.getLabel({ owner, repo, name: label });
+              } catch (error) {
+                if (error.status !== 404) {
+                  throw error;
+                }
+
+                await github.rest.issues.createLabel({
+                  owner,
+                  repo,
+                  name: label,
+                  color: "d73a4a",
+                  description: "Nightly account data backup failures"
+                });
+              }
+
+              const { data: issues } = await github.rest.issues.listForRepo({
+                owner,
+                repo,
+                state: "open",
+                labels: label,
+                per_page: 100
+              });
+              let issue = issues.find((candidate) => candidate.title === title);
+
+              if (!issue) {
+                const created = await github.rest.issues.create({
+                  owner,
+                  repo,
+                  title,
+                  labels: [label],
+                  body: "Automated tracking issue for nightly account data backup failures."
+                });
+                issue = created.data;
+              }
+
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: issue.number,
+                body: `Account data backup failed: ${runUrl}`
+              });
+            } catch (error) {
+              core.warning(`Could not report backup failure: ${error.message}`);
+            }

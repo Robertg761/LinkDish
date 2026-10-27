@@ -132,6 +132,21 @@ size` checks the budgets after a build (entry ≤ 115 KB gzip, landing JS ≤
   active. The one other LLM call is the video reader (below), the last resort for a TikTok
   or YouTube link with no written recipe.
 - The root `api/extract.ts` Vercel handler is an adapter into the full extractor runtime. Production routing lives in the root `vercel.json`.
+- Accounts, sessions, sign-in identities, Family households and synced libraries live only in
+  Upstash. The **Account Data Backup** workflow copies them every night into an encrypted
+  GitHub Actions artifact kept 90 days; caches, locks, rate limits and one-time codes are left
+  out. Which keys count as account data is listed in
+  `modules/storage/store-key-families.ts`, and a test fails on any `linkdish:` key segment that
+  is not listed there. `pnpm --filter @linkdish/extractor-api backup:store` makes the key pair,
+  inspects a backup and restores it (a dry run unless `--confirm`; only missing keys unless
+  `--overwrite`). A synced library is read as one unit (feed, items, live sets and revision
+  counter from the same moment) and restored whole under the library service's own lock, so a
+  restore never leaves pulls resetting or skipping changes. With `--overwrite` the backup's items
+  replace the live ones, items added since the backup are kept, and the merged library is
+  renumbered above both the live and the backed-up counter, so every device pulls it again as new
+  changes. Accounts deleted since the backup (or while it was read) stay deleted: a restore leaves
+  out their keys and what they shared with a household, checking under the lock account deletion
+  takes. An email lookup comes back only while its account still has that address.
 
 ### Sources
 

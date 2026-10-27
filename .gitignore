@@ -27,6 +27,8 @@ apps/web/playwright-report
 
 # Private and generated working material
 .tmp_*
+*.ldbak
+linkdish-backup-private.pem
 home_screen*.png
 store-shots/
 apps/mobile/store-assets/
