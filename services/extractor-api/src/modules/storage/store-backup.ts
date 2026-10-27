@@ -966,6 +966,63 @@ const withoutRevokedIdentities = <Candidate extends { entry: StoreSnapshotEntry 
   });
 };
 
+/* Restores a sign-in mapping only while its sign-in has no tombstone, in one step. */
+const setUnlessTombstonedScript =
+  "if redis.call('exists', KEYS[2]) == 1 then return 0 end return redis.call('set', KEYS[1], ARGV[1])";
+const setNxUnlessTombstonedScript =
+  "if redis.call('exists', KEYS[2]) == 1 then return 0 end return redis.call('set', KEYS[1], ARGV[1], 'NX')";
+
+const householdFamilies = new Set([
+  "household",
+  "household-invites",
+  "household-recipe",
+  "household-recipe-by-source",
+  "household-recipes",
+  "household-shopping-item",
+  "household-shopping-items",
+  "invite"
+]);
+
+const keyedByHousehold = new Set([
+  "household",
+  "household-invites",
+  "household-recipes",
+  "household-shopping-items"
+]);
+
+/* The household a shared record belongs to, by its key or its householdId. */
+const householdIdOf = (entry: StoreSnapshotEntry): string | null => {
+  const name = findBackedUpKeyFamily(entry.key)?.name;
+  if (!name || !householdFamilies.has(name)) return null;
+
+  const segments = entry.key.split(":");
+  if (name === "household-recipe-by-source") return segments[3] ?? null;
+  if (keyedByHousehold.has(name)) return segments.at(-1) ?? null;
+
+  const householdId = parseRecord(entry)?.householdId;
+  return typeof householdId === "string" ? householdId : null;
+};
+
+/* Everyone who owns, belongs to or added something to a household in the snapshot. */
+const householdPeople = (entries: StoreSnapshotEntry[], householdId: string): Set<string> => {
+  const people = new Set<string>();
+
+  for (const entry of entries) {
+    if (householdIdOf(entry) !== householdId) continue;
+    const record = parseRecord(entry);
+
+    for (const value of [
+      record?.ownerUserId,
+      record?.addedBy,
+      ...(Array.isArray(record?.memberUserIds) ? (record.memberUserIds as unknown[]) : [])
+    ]) {
+      if (typeof value === "string") people.add(value);
+    }
+  }
+
+  return people;
+};
+
 const isDeletedUserRecord = (value: unknown): boolean => {
   try {
     return (
@@ -1074,7 +1131,20 @@ export const restoreStoreSnapshot = async (
           result.written += 1;
         }
 
-        writes.push(...buildWriteCommands(entry, pttlMs, overwrite));
+        writes.push(
+          ...(findBackedUpKeyFamily(entry.key)?.name === "identity"
+            ? [
+                [
+                  "EVAL",
+                  overwrite ? setUnlessTombstonedScript : setNxUnlessTombstonedScript,
+                  "2",
+                  entry.key,
+                  identityTombstoneKey(entry.key),
+                  String(entry.value)
+                ]
+              ]
+            : buildWriteCommands(entry, pttlMs, overwrite))
+        );
       });
 
       if (apply && writes.length > 0) {
@@ -1139,7 +1209,68 @@ export const restoreStoreSnapshot = async (
     else if (owner) byAccount.set(owner, [candidate]);
   }
 
-  await restoreEntries(unowned, () => Promise.resolve());
+  /*
+   * A household's shared records are written under the account locks of everyone who owns,
+   * added or belongs to them, rechecking which of those accounts are deleted, so a member's
+   * deletion that runs meanwhile either comes first and is seen or waits for the restore.
+   */
+  const byHousehold = new Map<string, Candidate[]>();
+  const rest: Candidate[] = [];
+
+  for (const candidate of unowned) {
+    const householdId = householdIdOf(candidate.entry);
+    const group = householdId ? byHousehold.get(householdId) : rest;
+    if (group) group.push(candidate);
+    else if (householdId) byHousehold.set(householdId, [candidate]);
+  }
+
+  await restoreEntries(rest, () => Promise.resolve());
+
+  for (const [householdId, group] of [...byHousehold].sort(([left], [right]) =>
+    left < right ? -1 : 1
+  )) {
+    const involved = [...householdPeople(snapshot.entries, householdId)]
+      .filter((userId) => userKeys.has(userId))
+      .sort();
+    const locks: HeldLock[] = [];
+
+    try {
+      if (apply) {
+        for (const userId of involved) {
+          locks.push(
+            await takeLock(
+              run,
+              accountLockKey(userId),
+              `the account of user ${userId}`,
+              lockAttempts,
+              lockRetryDelayMs
+            )
+          );
+        }
+      }
+
+      const deletedNow = new Set(deletedUserIds);
+
+      if (involved.length > 0) {
+        const [values] = await run([
+          ["MGET", ...involved.map((userId) => userKeys.get(userId) as string)]
+        ]);
+        involved.forEach((userId, index) => {
+          if (isDeletedUserRecord(Array.isArray(values) ? values[index] : null)) {
+            deletedNow.add(userId);
+          }
+        });
+      }
+
+      const kept = withoutDeletedMembers(group, snapshot.entries, deletedNow);
+      result.ofDeletedAccounts += group.length - kept.length;
+      await restoreEntries(kept, async () => {
+        for (const lock of locks) await lock.renew();
+      });
+    } finally {
+      for (const lock of locks) await lock.release();
+    }
+  }
 
   for (const [userId, group] of [...byAccount].sort(([left], [right]) => (left < right ? -1 : 1))) {
     const lock = apply
