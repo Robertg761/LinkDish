@@ -52,13 +52,13 @@ const writeScanFile = (
  * Moves scan photos out of the saved-recipe record and onto the filesystem.
  *
  * Scans arrive from the importer as `data:image/...;base64,...` strings. Those
- * are megabytes each, and the cookbook is persisted as a single AsyncStorage
- * value, whose Android (SQLite) backing store rejects writes of a few MB. Keeping
- * the bytes on disk and only the URI in the record keeps the cookbook small
- * enough to persist reliably.
+ * are megabytes each, and the cookbook is persisted in AsyncStorage, whose
+ * Android (SQLite) backing store can't read back values past about 2 MB and caps
+ * the whole database. Keeping the bytes on disk and only the URI in the record
+ * keeps each recipe small enough to persist reliably.
  *
  * A scan that cannot be written is dropped rather than inlined: losing one photo
- * is far better than losing the recipe (and every other recipe in the blob).
+ * is far better than losing the recipe.
  *
  * With a `version`, the files get names of their own, so the ones a stored record (or a clone
  * of it) already uses are never overwritten before the cookbook that points at the new ones is

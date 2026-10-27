@@ -80,6 +80,20 @@ size` checks the budgets after a build (entry ≤ 115 KB gzip, landing JS ≤
 - The Cookbook renders with a FlatList; saved-recipes and shopping state are split into
   state and action contexts, and AsyncStorage writes go through a debounced writer that
   flushes when the app goes to the background.
+- The Android cookbook is stored one AsyncStorage value per recipe
+  (`linkdish.cookbook.v2.recipe:<id>`) plus an ordered index (`linkdish.cookbook.v2.index`), in
+  `cookbookStorage.ts`. A write stores only the recipes that changed, together with the index in
+  one `multiSet` (one SQLite transaction), then deletes removed recipes' values; values the index
+  doesn't list are cleaned up on launch. Builds up to 2.0.x kept the whole cookbook in one value
+  (`linkdish.savedRecipes`), which got slow to rewrite and can't be read back on Android past
+  about 2 MB. It is moved over on the first launch and deleted only once the copy is written; if
+  the move fails, that launch keeps writing the old value and the next one retries. Inlined scan photos
+  are written to files before the move, so the moved copy points at them. An old value (or one
+  recipe's value) that can't be read is never deleted, and sync stays off while it is unread so
+  it isn't taken for a deletion; an old value that can't be understood is backed up to
+  `linkdish.savedRecipes.corrupt.v1` first, as before. Android's
+  AsyncStorage database cap is raised from 6 MB to 64 MB (`AsyncStorage_db_size_in_MB`, set in
+  `android/gradle.properties` and by `app.config.ts` on prebuild).
 - Search, shopping aggregation (aisle grouping, clean fractions), US/metric conversion and
   servings/time formatting come from `@linkdish/recipe-domain`, the same code the web uses.
 
