@@ -1,6 +1,12 @@
 import { randomBytes } from "node:crypto";
 
 import {
+  libraryItemKinds,
+  libraryKeysFor,
+  releaseLibraryLockScript
+} from "../library/library-keys.js";
+
+import {
   type BackedUpKeyFamily,
   type BackupValueType,
   backedUpKeyFamilies,
@@ -8,6 +14,8 @@ import {
   getStoreKeySegment,
   storeKeySegments
 } from "./store-key-families.js";
+
+import type { LibraryItemKind } from "../../../../../packages/api-contracts/src/index.js";
 
 /*
  * Nightly snapshot and restore of the account data in Upstash (users, sessions, identities,
@@ -35,6 +43,8 @@ export interface StoreSnapshot {
   /* Entries per family name. */
   families: Record<string, number>;
   format: typeof STORE_SNAPSHOT_FORMAT;
+  /* Synced libraries still changing on every read, so taken as last read (see readLibrary). */
+  incoherentLibraries?: number;
   /* Keys left out, per `linkdish:<segment>:`. */
   skipped: Record<string, number>;
   /* Keys under a segment marked "backup" (or not listed at all) that no family matched. */
@@ -199,36 +209,52 @@ const libraryKeyPattern = /^linkdish:library:([^:]+):(?:item|live|changes|rev):(
  * carries the revision the feed gives it. Otherwise it is read again; a library that keeps
  * changing for every attempt is taken as last read.
  */
+type LibraryKeys = ReturnType<typeof libraryKeysFor>;
+
+/* A feed member is `<kind>:<id>`. */
+const libraryItemKey = (keys: LibraryKeys, userId: string, member: string): string => {
+  const separator = member.indexOf(":");
+  return keys.item(
+    userId,
+    member.slice(0, separator) as LibraryItemKind,
+    member.slice(separator + 1)
+  );
+};
+
 const readLibrary = async (
   run: StorePipeline,
   version: string,
   userId: string,
-  attempts: number,
-  retryDelayMs: number
-): Promise<StoreSnapshotEntry[]> => {
-  const prefix = `linkdish:library:${version}`;
-  const revKey = `${prefix}:rev:${userId}`;
-  const changesKey = `${prefix}:changes:${userId}`;
-  const liveKeys = ["recipe", "collection"].map((kind) => `${prefix}:live:${userId}:${kind}`);
+  options: { attempts: number; batchSize: number; retryDelayMs: number }
+): Promise<{ coherent: boolean; entries: StoreSnapshotEntry[] }> => {
+  const keys = libraryKeysFor(version);
+  const revKey = keys.rev(userId);
+  const changesKey = keys.changes(userId);
+  const liveKeys = libraryItemKinds.map((kind) => keys.live(userId, kind));
   let entries: StoreSnapshotEntry[] = [];
 
-  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+  for (let attempt = 1; attempt <= options.attempts; attempt += 1) {
     const [revBefore, changesResult] = await run([
       ["GET", revKey],
       ["ZRANGE", changesKey, "0", "-1", "WITHSCORES"]
     ]);
     const changes = toZsetPairs(changesResult);
-    const itemKeys = changes.map(([member]) => `${prefix}:item:${userId}:${member}`);
-    const results = await run([
-      ...(itemKeys.length > 0 ? [["MGET", ...itemKeys]] : []),
+    const itemKeys = changes.map(([member]) => libraryItemKey(keys, userId, member));
+    // In batches: a library at its limits holds thousands of full recipes.
+    const items: unknown[] = [];
+
+    for (const batch of chunk(itemKeys, options.batchSize)) {
+      const [values] = await run([["MGET", ...batch]]);
+      items.push(...(Array.isArray(values) ? (values as unknown[]) : batch.map(() => null)));
+    }
+
+    const [recipeLive, collectionLive, revAfter] = await run([
       ...liveKeys.map((key) => ["SMEMBERS", key]),
       ["GET", revKey]
     ]);
-    const items = itemKeys.length > 0 ? (results[0] as unknown[]) : [];
-    const [recipeLive, collectionLive, revAfter] = results.slice(itemKeys.length > 0 ? 1 : 0);
     const topScore = changes.reduce((top, [, score]) => Math.max(top, score), 0);
     const itemsMatch = changes.every(([, score], index) => {
-      const value = Array.isArray(items) ? items[index] : null;
+      const value = items[index];
 
       try {
         return typeof value === "string" && (JSON.parse(value) as { rev?: unknown }).rev === score;
@@ -243,7 +269,7 @@ const readLibrary = async (
         : []),
       ...(changes.length > 0 ? [{ key: changesKey, type: "zset" as const, value: changes }] : []),
       ...changes.flatMap((_, index) => {
-        const value = Array.isArray(items) ? items[index] : null;
+        const value = items[index];
         return typeof value === "string"
           ? [{ key: itemKeys[index] as string, type: "string" as const, value }]
           : [];
@@ -267,15 +293,15 @@ const readLibrary = async (
       itemsMatch;
 
     if (coherent) {
-      break;
+      return { coherent, entries };
     }
 
-    if (attempt < attempts) {
-      await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+    if (attempt < options.attempts) {
+      await new Promise((resolve) => setTimeout(resolve, options.retryDelayMs));
     }
   }
 
-  return entries;
+  return { coherent: false, entries };
 };
 
 export const createStoreSnapshot = async (
@@ -323,6 +349,7 @@ export const createStoreSnapshot = async (
   }
 
   const entries: StoreSnapshotEntry[] = [];
+  let incoherentLibraries = 0;
 
   for (const batch of chunk(toRead, batchSize)) {
     entries.push(...(await readBatch(run, now().getTime(), batch)));
@@ -330,9 +357,13 @@ export const createStoreSnapshot = async (
 
   for (const [version, userIds] of libraries) {
     for (const userId of [...userIds].sort()) {
-      entries.push(
-        ...(await readLibrary(run, version, userId, libraryAttempts, libraryRetryDelayMs))
-      );
+      const library = await readLibrary(run, version, userId, {
+        attempts: libraryAttempts,
+        batchSize,
+        retryDelayMs: libraryRetryDelayMs
+      });
+      entries.push(...library.entries);
+      incoherentLibraries += library.coherent ? 0 : 1;
     }
   }
 
@@ -351,6 +382,7 @@ export const createStoreSnapshot = async (
     entries,
     families,
     format: STORE_SNAPSHOT_FORMAT,
+    incoherentLibraries,
     skipped,
     unclassified,
     version: STORE_SNAPSHOT_VERSION
@@ -391,6 +423,8 @@ export interface RestoreStoreSnapshotResult {
   expired: number;
   /* Existing keys left alone, with the rest of a library that is partly there (no overwrite). */
   kept: number;
+  /* Keys of accounts deleted since the snapshot, left out so they stay deleted. */
+  ofDeletedAccounts: number;
   /* Existing keys replaced (overwrite). */
   replaced: number;
   /* Keys that did not exist and are written. */
@@ -439,26 +473,31 @@ const buildWriteCommands = (
   ];
 };
 
-/* The library service's own lock release: deletes the lock only while it still holds our token. */
-const releaseLockScript =
-  "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end";
 /* Extends the lock while it still holds our token; 0 once another holder has it. */
 const renewLockScript =
   "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('pexpire', KEYS[1], ARGV[2]) else return 0 end";
 const libraryRestoreLockMs = 120_000;
 
-/*
- * Restores one synced library whole, under the library service's own lock so no push or account
- * deletion runs in between. Without overwrite a library that has any of its counter, feed or
- * live sets is left as it is; with it, those four keys are cleared first (a live set the
- * snapshot has no members for included). Items go first and the feed last, so a pull during the
- * restore never sees feed entries without their items.
- */
+/* The snapshot's feed members that it also holds the item of, oldest first. */
+const restorableMembers = (
+  entries: StoreSnapshotEntry[],
+  keys: LibraryKeys,
+  userId: string
+): string[] => {
+  const feed = entries.find((entry) => entry.type === "zset");
+  const itemKeys = new Set(entries.map((entry) => entry.key));
+
+  return [...(feed ? (feed.value as Array<[string, number]>) : [])]
+    .sort((left, right) => left[1] - right[1])
+    .map(([member]) => member)
+    .filter((member) => itemKeys.has(libraryItemKey(keys, userId, member)));
+};
+
 /*
  * Replacing a library that devices already sync from. Devices hold their own copies, so the
  * restore merges rather than removes: the snapshot's items replace the live ones, and items only
  * the live library has (added since the snapshot) stay, as they are and still live if they were.
- * The merged feed is renumbered above the live counter (snapshot items first, in their order,
+ * The merged feed is renumbered above both counters (snapshot items first, in their order,
  * then the kept ones; each item's stored rev to match) and the counter continues from there, so
  * every device pulls the whole library again as new changes, whatever cursor it holds,
  * including one that read the old feed while it was being replaced.
@@ -466,27 +505,16 @@ const libraryRestoreLockMs = 120_000;
 const mergeLibraryForOverwrite = (
   entries: StoreSnapshotEntry[],
   current: {
-    feed: Array<[string, number]>;
-    items: Map<string, string>;
-    live: Record<"collection" | "recipe", string[]>;
+    /* Live items the snapshot does not restore, in feed order. */
+    kept: Map<string, string>;
+    live: Record<LibraryItemKind, string[]>;
     rev: number;
   },
-  keys: {
-    changes: string;
-    item: (member: string) => string;
-    live: (kind: string) => string;
-    rev: string;
-  }
+  keys: LibraryKeys,
+  userId: string
 ): StoreSnapshotEntry[] => {
-  const feed = entries.find((entry) => entry.type === "zset");
-  const snapshotMembers = [...(feed ? (feed.value as Array<[string, number]>) : [])]
-    .sort((left, right) => left[1] - right[1])
-    .map(([member]) => member);
-  const inSnapshot = new Set(snapshotMembers);
-  const keptMembers = current.feed
-    .map(([member]) => member)
-    .filter((member) => !inSnapshot.has(member) && current.items.has(member));
-  const kept = new Set(keptMembers);
+  const snapshotMembers = restorableMembers(entries, keys, userId);
+  const keptMembers = [...current.kept.keys()];
   /*
    * Above both counters: devices may hold cursors from the live library or from the one the
    * snapshot was taken of (after a rollback the live counter can be the lower one), and a
@@ -494,7 +522,7 @@ const mergeLibraryForOverwrite = (
    */
   const floor = Math.max(
     current.rev,
-    Number(entries.find((entry) => entry.key === keys.rev)?.value) || 0
+    Number(entries.find((entry) => entry.key === keys.rev(userId))?.value) || 0
   );
   const newRevs = new Map(
     [...snapshotMembers, ...keptMembers].map((member, index) => [member, floor + index + 1])
@@ -519,18 +547,18 @@ const mergeLibraryForOverwrite = (
     }
   }
 
-  for (const member of keptMembers) {
+  for (const [member, value] of current.kept) {
     merged.push({
-      key: keys.item(member),
+      key: libraryItemKey(keys, userId, member),
       type: "string",
-      value: withRev(current.items.get(member) as string, newRevs.get(member) as number)
+      value: withRev(value, newRevs.get(member) as number)
     });
   }
 
-  for (const kind of ["recipe", "collection"] as const) {
-    const key = keys.live(kind);
+  for (const kind of libraryItemKinds) {
+    const key = keys.live(userId, kind);
     const snapshotLive = entries.find((entry) => entry.key === key);
-    const keptLive = current.live[kind].filter((id) => kept.has(`${kind}:${id}`));
+    const keptLive = current.live[kind].filter((id) => current.kept.has(`${kind}:${id}`));
     const members = [
       ...new Set([...((snapshotLive?.value as string[] | undefined) ?? []), ...keptLive])
     ].sort();
@@ -541,12 +569,12 @@ const mergeLibraryForOverwrite = (
   }
 
   if (floor + newRevs.size > 0) {
-    merged.push({ key: keys.rev, type: "string", value: String(floor + newRevs.size) });
+    merged.push({ key: keys.rev(userId), type: "string", value: String(floor + newRevs.size) });
   }
 
   if (newRevs.size > 0) {
     merged.push({
-      key: keys.changes,
+      key: keys.changes(userId),
       type: "zset",
       value: [...newRevs].map(([member, rev]): [string, number] => [member, rev])
     });
@@ -555,6 +583,12 @@ const mergeLibraryForOverwrite = (
   return merged;
 };
 
+/*
+ * Restores one synced library whole, under the library service's own lock so no push or account
+ * deletion runs in between. Without overwrite a library that has any of its counter, feed or
+ * live sets is left as it is. Items go first and the feed last, so a pull during the restore
+ * never sees feed entries without their items.
+ */
 const restoreLibrary = async (
   run: StorePipeline,
   version: string,
@@ -568,15 +602,10 @@ const restoreLibrary = async (
     overwrite: boolean;
   }
 ): Promise<{ kept: number; replaced: number; written: number }> => {
-  const prefix = `linkdish:library:${version}`;
-  const lockKey = `${prefix}:lock:${userId}`;
-  const coreKeys = [
-    `${prefix}:rev:${userId}`,
-    `${prefix}:changes:${userId}`,
-    `${prefix}:live:${userId}:recipe`,
-    `${prefix}:live:${userId}:collection`
-  ];
-  const itemKey = (member: string): string => `${prefix}:item:${userId}:${member}`;
+  const keys = libraryKeysFor(version);
+  const lockKey = keys.lock(userId);
+  const liveKeys = libraryItemKinds.map((kind) => keys.live(userId, kind));
+  const coreKeys = [keys.rev(userId), keys.changes(userId), ...liveKeys];
   const token = randomBytes(16).toString("base64url");
   let locked = false;
   // Before every write: a large library on a slow link can outlast one lease, and a write after
@@ -634,29 +663,25 @@ const restoreLibrary = async (
       let restored = entries;
 
       if (options.overwrite) {
-        const [currentRev, currentFeed, liveRecipes, liveCollections] = await run([
-          ["GET", coreKeys[0] as string],
-          ["ZRANGE", coreKeys[1] as string, "0", "-1", "WITHSCORES"],
-          ["SMEMBERS", coreKeys[2] as string],
-          ["SMEMBERS", coreKeys[3] as string]
+        const [currentRev, currentFeed, ...currentLive] = await run([
+          ["GET", keys.rev(userId)],
+          ["ZRANGE", keys.changes(userId), "0", "-1", "WITHSCORES"],
+          ...liveKeys.map((key) => ["SMEMBERS", key])
         ]);
-        const feed = toZsetPairs(currentFeed);
-        const inSnapshot = new Set(
-          entries.flatMap((entry) =>
-            entry.type === "zset"
-              ? (entry.value as Array<[string, number]>).map(([member]) => member)
-              : []
-          )
-        );
-        const keptMembers = feed.map(([member]) => member).filter((m) => !inSnapshot.has(m));
-        const items = new Map<string, string>();
+        const restoring = new Set(restorableMembers(entries, keys, userId));
+        const keptMembers = toZsetPairs(currentFeed)
+          .map(([member]) => member)
+          .filter((member) => !restoring.has(member));
+        const kept = new Map<string, string>();
 
         for (const batch of chunk(keptMembers, options.batchSize)) {
-          const [values] = await run([["MGET", ...batch.map(itemKey)]]);
+          const [values] = await run([
+            ["MGET", ...batch.map((member) => libraryItemKey(keys, userId, member))]
+          ]);
           batch.forEach((member, index) => {
             const value: unknown = Array.isArray(values) ? values[index] : null;
             if (typeof value === "string") {
-              items.set(member, value);
+              kept.set(member, value);
             }
           });
         }
@@ -664,20 +689,17 @@ const restoreLibrary = async (
         restored = mergeLibraryForOverwrite(
           entries,
           {
-            feed,
-            items,
-            live: {
-              collection: Array.isArray(liveCollections) ? liveCollections.map(String) : [],
-              recipe: Array.isArray(liveRecipes) ? liveRecipes.map(String) : []
-            },
+            kept,
+            live: Object.fromEntries(
+              libraryItemKinds.map((kind, index) => {
+                const members = currentLive[index];
+                return [kind, Array.isArray(members) ? members.map(String) : []];
+              })
+            ) as Record<LibraryItemKind, string[]>,
             rev: Number(currentRev) || 0
           },
-          {
-            changes: coreKeys[1] as string,
-            item: itemKey,
-            live: (kind) => `${prefix}:live:${userId}:${kind}`,
-            rev: coreKeys[0] as string
-          }
+          keys,
+          userId
         );
       }
 
@@ -687,7 +709,7 @@ const restoreLibrary = async (
        * scratch key and swapped in with one RENAME, the feed last.
        */
       const swapIn = (entry: StoreSnapshotEntry): string[][] => {
-        const scratch = `${prefix}:restoring:${userId}`;
+        const scratch = `linkdish:library:${version}:restoring:${userId}`;
         const fill =
           entry.type === "set"
             ? ["SADD", scratch, ...(entry.value as string[])]
@@ -726,9 +748,70 @@ const restoreLibrary = async (
     return { kept: 0, replaced, written: entries.length - replaced };
   } finally {
     if (locked) {
-      await run([["EVAL", releaseLockScript, "1", lockKey, token]]);
+      await run([["EVAL", releaseLibraryLockScript, "1", lockKey, token]]);
     }
   }
+};
+
+/*
+ * Deleting an account keeps its user record (marked deletedAt) but removes its email lookup,
+ * sessions, sign-in identities and library. Those are missing, not lost, so a restore leaves
+ * them out rather than bring the account back.
+ */
+const findDeletedUsers = async (
+  run: StorePipeline,
+  snapshot: StoreSnapshot,
+  batchSize: number
+): Promise<Set<string>> => {
+  const userKeys = snapshot.entries
+    .filter((entry) => findBackedUpKeyFamily(entry.key)?.name === "user")
+    .map((entry) => entry.key);
+  const deleted = new Set<string>();
+
+  for (const batch of chunk(userKeys, batchSize)) {
+    const [values] = await run([["MGET", ...batch]]);
+
+    batch.forEach((key, index) => {
+      const value: unknown = Array.isArray(values) ? values[index] : null;
+
+      try {
+        const user =
+          typeof value === "string"
+            ? (JSON.parse(value) as { deletedAt?: unknown; id?: unknown })
+            : null;
+        if (user?.deletedAt && typeof user.id === "string") deleted.add(user.id);
+      } catch {
+        // Not a user record this tool can read; restore it as usual.
+      }
+    });
+  }
+
+  return deleted;
+};
+
+/* The deleted account an entry belongs to, by a key segment or what a lookup points at. */
+const ownerOf = (entry: StoreSnapshotEntry, deletedUserIds: Set<string>): string | null => {
+  if (deletedUserIds.size === 0) return null;
+
+  const fromKey = entry.key.split(":").find((segment) => deletedUserIds.has(segment));
+  if (fromKey) return fromKey;
+
+  const family = findBackedUpKeyFamily(entry.key)?.name;
+  if (typeof entry.value !== "string") return null;
+  if ((family === "user-by-email" || family === "identity") && deletedUserIds.has(entry.value)) {
+    return entry.value;
+  }
+
+  if (family === "session") {
+    try {
+      const { userId } = JSON.parse(entry.value) as { userId?: unknown };
+      return typeof userId === "string" && deletedUserIds.has(userId) ? userId : null;
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
 };
 
 export const restoreStoreSnapshot = async (
@@ -749,6 +832,7 @@ export const restoreStoreSnapshot = async (
     applied: apply,
     expired: 0,
     kept: 0,
+    ofDeletedAccounts: 0,
     replaced: 0,
     written: 0
   };
@@ -790,15 +874,22 @@ export const restoreStoreSnapshot = async (
     candidates.push({ entry, pttlMs: remainingMs });
   }
 
+  const deletedUserIds = await findDeletedUsers(run, snapshot, batchSize);
   const libraries = new Map<string, StoreSnapshotEntry[]>();
   const others: typeof candidates = [];
 
   for (const candidate of candidates) {
-    const match = libraryKeyPattern.exec(candidate.entry.key);
+    if (ownerOf(candidate.entry, deletedUserIds)) {
+      result.ofDeletedAccounts += 1;
+      continue;
+    }
 
-    if (match) {
-      const id = `${match[1]}:${match[2]}`;
-      libraries.set(id, [...(libraries.get(id) ?? []), candidate.entry]);
+    const libraryId = libraryIdOf(candidate.entry.key);
+
+    if (libraryId) {
+      const library = libraries.get(libraryId);
+      if (library) library.push(candidate.entry);
+      else libraries.set(libraryId, [candidate.entry]);
     } else {
       others.push(candidate);
     }

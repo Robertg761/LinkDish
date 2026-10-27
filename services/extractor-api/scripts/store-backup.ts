@@ -160,6 +160,13 @@ const create = async (args: Args): Promise<void> => {
     );
   }
 
+  if (snapshot.incoherentLibraries) {
+    console.warn(
+      `${snapshot.incoherentLibraries} synced libraries kept changing while being read and were ` +
+        "taken as last read; restoring them may make devices pull them again."
+    );
+  }
+
   const envelope = encryptBackup(JSON.stringify(snapshot), publicKeyPem);
   mkdirSync(dirname(out), { recursive: true });
   writeFileSync(out, envelope);
@@ -178,9 +185,12 @@ const inspect = (args: Args): void => {
   console.log(`Backed up, per family:\n${describeCounts(snapshot.families)}`);
   console.log(`Left out as disposable, per segment:\n${describeCounts(snapshot.skipped)}`);
   console.log(`Left out as unclassified, per segment:\n${describeCounts(snapshot.unclassified)}`);
+  console.log(`Libraries taken as last read: ${snapshot.incoherentLibraries ?? 0}`);
 
   if (typeof args.out === "string") {
     writeFileSync(args.out, JSON.stringify(snapshot, null, 2), { mode: 0o600 });
+    // The mode only applies to a new file.
+    chmodSync(args.out, 0o600);
     console.log(`Decrypted snapshot written to ${args.out}`);
   }
 };
@@ -200,7 +210,8 @@ const restore = async (args: Args): Promise<void> => {
       `${apply ? "Wrote" : "Would write"} ${result.written} missing keys`,
       `${apply ? "replaced" : "would replace"} ${result.replaced} existing keys`,
       `kept ${result.kept} existing keys`,
-      `skipped ${result.expired} expired sessions or invites`
+      `skipped ${result.expired} expired sessions or invites`,
+      `left out ${result.ofDeletedAccounts} keys of accounts deleted since`
     ].join(", ")
   );
 

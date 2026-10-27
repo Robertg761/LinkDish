@@ -110,7 +110,7 @@ size` checks the budgets after a build (entry ≤ 115 KB gzip, landing JS ≤
   restore never leaves pulls resetting or skipping changes. With `--overwrite` the backup's items
   replace the live ones, items added since the backup are kept, and the merged library is
   renumbered above both the live and the backed-up counter, so every device pulls it again as new
-  changes.
+  changes. Accounts deleted since the backup stay deleted: a restore leaves out their keys.
 
 ### Sources
 
@@ -273,7 +273,7 @@ each app:
   only while the item still is what it was merged with; an item that keeps changing meanwhile
   keeps the pulled change as `pending` for the next run and sends nothing over it. A change the API
   turns away is held (not sent again) until the item changes. `packages/api-client/src/
-library-sync.ts` validates each change before sending, so one bad item never fails a batch.
+  library-sync.ts` validates each change before sending, so one bad item never fails a batch.
 - A device's cookbook is linked to one account: the first to sign in on it (merging the two). It
   keeps the cookbook when that account signs out. Another account that signs in doesn't sync it;
   it can replace it with its own cookbook. Deleting the account unlinks the device; its recipes

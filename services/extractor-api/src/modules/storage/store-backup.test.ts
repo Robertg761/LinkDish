@@ -228,6 +228,30 @@ describe("createStoreSnapshot", () => {
     expect(snapshot.families["library-live"]).toBe(1);
   });
 
+  it("reads a large library's items in batches, and flags one that never holds still", async () => {
+    const redis = createFakeRedis(() => 0);
+    seed(redis, 0);
+    redis.strings.set("linkdish:library:v1:item:u1:recipe:b", JSON.stringify({ rev: 2 }));
+    redis.zsets.get("linkdish:library:v1:changes:u1")?.set("recipe:b", 2);
+    redis.strings.set("linkdish:library:v1:rev:u1", "2");
+
+    const steady = await createStoreSnapshot(redis.run, { batchSize: 1 });
+    const libraryReads = redis.commands.filter(
+      ([name, key]) => name === "MGET" && key?.includes(":library:")
+    );
+
+    expect(libraryReads.every((command) => command.length === 2)).toBe(true);
+    expect(steady.families["library-item"]).toBe(2);
+    expect(steady.incoherentLibraries).toBe(0);
+
+    // A counter bumped by a push whose transaction never landed stays above the feed.
+    redis.strings.set("linkdish:library:v1:rev:u1", "3");
+    const stuck = await createStoreSnapshot(redis.run, { libraryRetryDelayMs: 0 });
+
+    expect(stuck.incoherentLibraries).toBe(1);
+    expect(stuck.families["library-item"]).toBe(2);
+  });
+
   it("leaves out keys deleted between the scan and the read", async () => {
     const redis = createFakeRedis(() => 0);
     redis.strings.set("linkdish:user:v1:u1", "{}");
@@ -416,6 +440,68 @@ describe("restoreStoreSnapshot", () => {
     expect(target.strings.get("linkdish:library:v1:rev:u1")).toBe("102");
   });
 
+  it("keeps the live item of a feed member the snapshot has no item for, with overwrite", async () => {
+    const source = createFakeRedis(() => 0);
+    seed(source, 0);
+    const snapshot = await createStoreSnapshot(source.run, { now: () => new Date(0) });
+    // The snapshot lists recipe:b in its feed but caught no item for it.
+    const feed = snapshot.entries.find((entry) => entry.key === "linkdish:library:v1:changes:u1");
+    (feed?.value as Array<[string, number]>).push(["recipe:b", 1]);
+    const target = createFakeRedis(() => 0);
+    target.strings.set("linkdish:library:v1:rev:u1", "3");
+    target.strings.set("linkdish:library:v1:item:u1:recipe:b", JSON.stringify({ rev: 3 }));
+    target.zsets.set("linkdish:library:v1:changes:u1", new Map([["recipe:b", 3]]));
+
+    await restoreStoreSnapshot(target.run, snapshot, { apply: true, overwrite: true });
+
+    expect([...(target.zsets.get("linkdish:library:v1:changes:u1") ?? [])]).toEqual([
+      ["recipe:a", 4],
+      ["recipe:b", 5]
+    ]);
+    // Every item carries the revision the feed gives it.
+    expect(target.strings.get("linkdish:library:v1:item:u1:recipe:b")).toBe(
+      JSON.stringify({ rev: 5 })
+    );
+  });
+
+  it("leaves accounts deleted since the snapshot deleted", async () => {
+    const source = createFakeRedis(() => 0);
+    seed(source, 0);
+    source.strings.set("linkdish:identity:v1:google:sub", "u1");
+    source.sets.set("linkdish:user-identities:v1:u1", new Set(["google:sub"]));
+    const snapshot = await createStoreSnapshot(source.run, { now: () => new Date(0) });
+    const target = createFakeRedis(() => 0);
+    // What deleting the account leaves behind.
+    target.strings.set(
+      "linkdish:user:v1:u1",
+      JSON.stringify({ deletedAt: "2026-10-02T00:00:00.000Z", id: "u1" })
+    );
+    target.strings.set("linkdish:identity-deleted:v1:google:sub", "u1");
+    target.strings.set("linkdish:household:v1:h1", JSON.stringify({ id: "h1" }));
+
+    for (const overwrite of [false, true]) {
+      const result = await restoreStoreSnapshot(target.run, snapshot, { apply: true, overwrite });
+
+      expect(result.ofDeletedAccounts).toBeGreaterThan(0);
+      expect(JSON.parse(target.strings.get("linkdish:user:v1:u1") ?? "{}")).toHaveProperty(
+        "deletedAt"
+      );
+      for (const key of [
+        "linkdish:user-by-email:v1:hash",
+        "linkdish:session:v1:token",
+        "linkdish:identity:v1:google:sub",
+        "linkdish:library:v1:rev:u1",
+        "linkdish:quota:v2:lifetime:import:u1"
+      ]) {
+        expect(target.strings.has(key)).toBe(false);
+      }
+      expect(target.sets.has("linkdish:user-sessions:v1:u1")).toBe(false);
+      expect(target.sets.has("linkdish:user-identities:v1:u1")).toBe(false);
+      // Other accounts' data still comes back.
+      expect(target.sets.has("linkdish:household-recipes:v1:h1")).toBe(true);
+    }
+  });
+
   it("takes a whole library when a prefix selects part of it", async () => {
     const source = createFakeRedis(() => 0);
     seed(source, 0);
@@ -500,7 +586,14 @@ describe("restoreStoreSnapshot", () => {
     const dryRun = await restoreStoreSnapshot(target.run, snapshot, {
       now: () => new Date(restoredMs)
     });
-    expect(dryRun).toEqual({ applied: false, expired: 0, kept: 2, replaced: 0, written: 8 });
+    expect(dryRun).toEqual({
+      applied: false,
+      expired: 0,
+      kept: 2,
+      ofDeletedAccounts: 0,
+      replaced: 0,
+      written: 8
+    });
     expect(target.strings.has("linkdish:household:v1:h1")).toBe(false);
 
     const applied = await restoreStoreSnapshot(target.run, snapshot, {
@@ -529,7 +622,14 @@ describe("restoreStoreSnapshot", () => {
       now: () => new Date(0)
     });
 
-    expect(result).toEqual({ applied: true, expired: 0, kept: 3, replaced: 0, written: 0 });
+    expect(result).toEqual({
+      applied: true,
+      expired: 0,
+      kept: 3,
+      ofDeletedAccounts: 0,
+      replaced: 0,
+      written: 0
+    });
     expect(target.strings.has("linkdish:library:v1:item:u1:recipe:a")).toBe(false);
     expect(target.zsets.has("linkdish:library:v1:changes:u1")).toBe(false);
   });
@@ -549,7 +649,14 @@ describe("restoreStoreSnapshot", () => {
       overwrite: true
     });
 
-    expect(result).toEqual({ applied: true, expired: 0, kept: 0, replaced: 1, written: 1 });
+    expect(result).toEqual({
+      applied: true,
+      expired: 0,
+      kept: 0,
+      ofDeletedAccounts: 0,
+      replaced: 1,
+      written: 1
+    });
     expect([...(target.sets.get("linkdish:household-recipes:v1:h1") ?? [])].sort()).toEqual([
       "r1",
       "r2"

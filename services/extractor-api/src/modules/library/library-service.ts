@@ -23,6 +23,8 @@ import {
   setStoreString
 } from "../storage/upstash-store.js";
 
+import { libraryKeys, releaseLibraryLockScript as releaseLockScript } from "./library-keys.js";
+
 /*
  * A signed-in account's own cookbook, kept so it follows the account between devices. Every
  * recipe and collection is one item holding the newest copy any device sent (or its tombstone).
@@ -42,24 +44,11 @@ export class LibraryError extends Error {
   }
 }
 
-const libraryVersion = "v1";
 const lockTtlSeconds = 30;
 const lockRetryDelaysMs = [25, 75, 150, 300, 600];
-const releaseLockScript =
-  "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end";
 /* Keeps a pull page well under Vercel's 4.5 MB response cap (UTF-8 bytes, as it is sent). */
 const MAX_PULL_PAGE_BYTES = 2_000_000;
 const DELETE_KEYS_CHUNK_SIZE = 500;
-
-const libraryKeys = {
-  changes: (userId: string) => `linkdish:library:${libraryVersion}:changes:${userId}`,
-  item: (userId: string, kind: LibraryItemKind, itemId: string) =>
-    `linkdish:library:${libraryVersion}:item:${userId}:${kind}:${itemId}`,
-  live: (userId: string, kind: LibraryItemKind) =>
-    `linkdish:library:${libraryVersion}:live:${userId}:${kind}`,
-  lock: (userId: string) => `linkdish:library:${libraryVersion}:lock:${userId}`,
-  rev: (userId: string) => `linkdish:library:${libraryVersion}:rev:${userId}`
-};
 
 const libraryLimits: Record<LibraryItemKind, number> = {
   collection: MAX_LIBRARY_COLLECTIONS,
