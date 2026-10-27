@@ -107,10 +107,11 @@ size` checks the budgets after a build (entry ≤ 115 KB gzip, landing JS ≤
 - HTML fetching now prefers browser-like HTTP requests and can optionally escalate to Playwright browser rendering when a site is blocked or JS-heavy.
 - Source detection now uses fetched HTML hints in addition to URL heuristics.
 - Success responses include `fetchMode` and extraction provenance metadata.
-- Links, YouTube videos, TikTok captions and pasted text are read by rules only; no LLM is
-  called for them, whatever `attempt` says. Photo scans are the one import read by an LLM,
-  behind a provider interface that is optional at runtime. The backend controls whether
-  Gemini, OpenAI, or no provider is active.
+- Links, YouTube videos, TikTok captions and pasted text are read by rules only, whatever
+  `attempt` says. Photo scans are read by an LLM, behind a provider interface that is
+  optional at runtime; the backend controls whether Gemini, OpenAI, or no provider is
+  active. The one other LLM call is the video reader (below), the last resort for a TikTok
+  or YouTube link with no written recipe.
 - The root `api/extract.ts` Vercel handler is an adapter into the full extractor runtime. Production routing lives in the root `vercel.json`.
 
 ### Sources
@@ -178,6 +179,24 @@ platforms map onto them and are told apart internally by the detection `adapterK
   the text parser on the first attempt. An ingredients-only caption keeps the video step,
   as YouTube does. Captions without a recipe fail with `parse_failed`. Instagram and
   Facebook stay unsupported.
+- **Video reader** (`extractors/video/`, behind `VIDEO_RECIPE_READER_ENABLED` and
+  `GEMINI_API_KEY`): when a TikTok caption has no recipe or only the ingredients, or a
+  YouTube video's description, creator comments and linked pages have none, Gemini
+  (`VIDEO_RECIPE_MODEL`) watches the video. TikToks are downloaded from the embed page's
+  MP4 (larger than 14 MB through the Files API, deleted after the read); YouTube is passed
+  by URL, only for Shorts and videos of known length up to `VIDEO_RECIPE_MAX_SECONDS`.
+  Every ingredient comes back with its evidence (words heard, text shown, a caption line),
+  and `build-video-recipe-candidate.ts` drops an ingredient its quote doesn't name and an
+  amount its quote doesn't state ("a tablespoon" needs one tablespoon, not "a teaspoon",
+  "half a tablespoon" or "a few tablespoons"); the gaps become a warning. Results use the `llm-fallback` strategy and `llm`
+  provenance, are metered as plain imports and are never cached. Reads need 15 s of
+  request time left (10 s after a TikTok download) and are capped at
+  `VIDEO_RECIPE_DAILY_READ_LIMIT` Gemini calls per UTC day, counted just before each call
+  (one Upstash counter across instances, per instance without Upstash). Past the cap the
+  outcome is `skipped_daily_limit`; when the counter can't be checked the read is skipped
+  as `limit_unavailable`. Each read logs a
+  `video_recipe_read` line, and the outcome is stored as `videoRead` in the extraction
+  analytics `properties`.
 
 ### Pasted text import
 
