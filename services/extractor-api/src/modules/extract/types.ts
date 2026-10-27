@@ -1,6 +1,7 @@
 import type { ExtractionResultCache } from "./cache/extraction-cache.js";
 import type { RequestDeadline } from "./deadline.js";
 import type { VideoRecipeReader } from "./extractors/video/gemini-video-recipe-reader.js";
+import type { VideoReadAllowance } from "./extractors/video/video-read-allowance.js";
 import type { TikTokVideoFile } from "./fetchers/fetch-tiktok-video.js";
 import type { ValidateSourceUrl } from "./source-url-safety.js";
 import type {
@@ -52,18 +53,23 @@ export interface YouTubeSourceDocument {
 }
 
 /**
- * Recipe text that did not come from a fetched page: a TikTok caption read through oEmbed, or
- * text the user pasted. It is read by the rule-based text parser (extractors/text).
+ * Recipe text that did not come from a fetched page: a TikTok caption read through oEmbed, an
+ * Instagram caption read from the post's embed page, or text the user pasted. It is read by the rule-based text parser (extractors/text).
  */
 export interface TextSourceDocument {
   kind: "text";
   /** The recipe's source URL (the video's canonical URL, or the pasted text's source/synthetic URL). */
   url: string;
-  origin: "paste" | "tiktok";
+  origin: "paste" | "tiktok" | "instagram";
   text: string;
   title: string | null;
   authorName: string | null;
   thumbnailUrl: string | null;
+  /**
+   * For an Instagram post, whether it is a video (a reel). A photo post has no video to hold the
+   * method, so an ingredients-only caption is no recipe. TikToks are always videos.
+   */
+  isVideo?: boolean | undefined;
   /** For a TikTok, what the caption fetch learned about the video, for the video reader. */
   tiktokVideo?: TikTokVideoLocator | undefined;
 }
@@ -202,8 +208,8 @@ export interface ExtractorRuntime {
     options?: SourceFetchOptions
   ): Promise<YouTubeSourceDocument>;
   /**
-   * Reads a social post's caption (TikTok oEmbed today). Runtimes without it treat those
-   * links as unsupported.
+   * Reads a social post's caption (TikTok through oEmbed, Instagram from its rendered embed
+   * page). Runtimes without it treat those links as unsupported.
    */
   fetchSocialDocument?: (url: string, options?: SourceFetchOptions) => Promise<TextSourceDocument>;
   /** Downloads a TikTok post's video for the video recipe reader. */
@@ -216,6 +222,8 @@ export interface ExtractorRuntime {
    * written recipe. Absent, or unavailable, while VIDEO_RECIPE_READER_ENABLED is off.
    */
   videoRecipeReader?: VideoRecipeReader;
+  /** The daily cap on video reads. Runtimes without it do not cap them. */
+  videoReadAllowance?: VideoReadAllowance;
   fallbackExtractor: FallbackRecipeExtractor;
   recipeTextCleaner?: RecipeTextCleaner;
   /** URL-keyed store of validated success responses. Test runtimes omit it unless they opt in. */
@@ -225,7 +233,14 @@ export interface ExtractorRuntime {
 }
 
 export type VideoReadOutcome =
-  "read" | "no_recipe" | "failed" | "download_failed" | "too_long" | "skipped_budget";
+  | "read"
+  | "no_recipe"
+  | "failed"
+  | "download_failed"
+  | "too_long"
+  | "skipped_budget"
+  | "skipped_daily_limit"
+  | "limit_unavailable";
 
 export type ExtractionFailureReason = ExtractRecipeFailure["reason"];
 

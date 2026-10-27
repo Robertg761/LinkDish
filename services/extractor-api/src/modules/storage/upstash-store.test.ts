@@ -66,6 +66,23 @@ describe("memory store commands used by library sync", () => {
   });
 });
 
+describe("memory ZREMRANGEBYRANK", () => {
+  it("trims only beyond the kept size, matching Redis rank semantics", async () => {
+    const key = "linkdish-test:zremrangebyrank";
+    await runStoreTransaction(
+      Array.from({ length: 5 }, (_, index) => ["ZADD", key, String(index), `m${index}`])
+    );
+
+    const [underCap] = await runStoreTransaction([["ZREMRANGEBYRANK", key, "0", "-7"]]);
+    expect(underCap?.result).toBe(0);
+
+    const [overCap] = await runStoreTransaction([["ZREMRANGEBYRANK", key, "0", "-4"]]);
+    const [remaining] = await runStoreTransaction([["ZRANGE", key, "0", "-1"]]);
+    expect(overCap?.result).toBe(2);
+    expect(remaining?.result).toEqual(["m2", "m3", "m4"]);
+  });
+});
+
 describe("setStoreStringUnlessBlocked", () => {
   afterEach(() => {
     extractorApiEnv.UPSTASH_REDIS_REST_URL = originalUpstashUrl;

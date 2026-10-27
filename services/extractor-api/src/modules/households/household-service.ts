@@ -26,6 +26,7 @@ import {
   shoppingItemSchema
 } from "../../../../../packages/recipe-domain/src/index.js";
 import { extractorApiEnv } from "../../config/env.js";
+import { deleteAnalyticsForAccount } from "../analytics/analytics-store.js";
 import {
   createSessionForUser,
   getUserByEmail,
@@ -1280,6 +1281,10 @@ export const deleteAccountAndHouseholdAccess = async (
       );
     }
 
+    // First, so an analytics database failure stops the deletion before anything else is gone
+    // and the person can retry; the delete is idempotent.
+    await deleteAnalyticsForAccount(user.id);
+
     const householdId = await getHouseholdIdForUser(user.id);
     const household = householdId ? await getHouseholdById(householdId) : null;
 
@@ -1292,6 +1297,13 @@ export const deleteAccountAndHouseholdAccess = async (
     await deleteLibraryForUser(user.id);
     await markUserDeleted(user.id);
     await tombstoneExternalIdentitiesForUser(user.id);
+
+    // Again now that the account's sessions are gone, for events written by requests that were
+    // still in flight after the first pass. The account is already deleted, so a failure here
+    // is logged rather than reported to the person.
+    await deleteAnalyticsForAccount(user.id).catch((error: unknown) => {
+      console.error("Failed to delete late analytics for a deleted account.", error);
+    });
   });
 };
 

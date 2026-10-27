@@ -25,6 +25,10 @@ const trimmedOptionalString = () =>
     .trim()
     .optional()
     .transform((value) => (value === "" ? undefined : value));
+const optionalPositiveIntegerString = () =>
+  trimmedOptionalString()
+    .transform((value) => (value === undefined ? undefined : Number(value)))
+    .pipe(z.number().int().positive().optional());
 const trimmedBooleanString = z
   .string()
   .trim()
@@ -101,6 +105,11 @@ const parsedExtractorApiEnv = readEnv(
     /* Longer videos are not sent: they cost more and cannot be read inside the request deadline. */
     VIDEO_RECIPE_MAX_SECONDS: z.coerce.number().int().positive().default(240),
     VIDEO_RECIPE_TIMEOUT_MS: z.coerce.number().int().positive().default(40_000),
+    /*
+     * Gemini video reads per UTC day, across instances with Upstash (per instance without); 0
+     * stops them. Bounds the reader's spend.
+     */
+    VIDEO_RECIPE_DAILY_READ_LIMIT: z.coerce.number().int().nonnegative().default(300),
     LLM_FALLBACK_DAILY_BUDGET_USD: z.coerce.number().nonnegative().default(0),
     BILLING_ENFORCEMENT_ENABLED: z
       .union([trimmedBooleanString, z.boolean()])
@@ -189,6 +198,10 @@ const parsedExtractorApiEnv = readEnv(
       .default("true")
       .transform((value) => value === true || value === "true"),
     ADMIN_DASHBOARD_TOKEN: trimmedOptionalString(),
+    ADMIN_DASHBOARD_TOKENS: trimmedOptionalString(),
+    ADMIN_AUTH_FAILURE_LIMIT_MAX: z.coerce.number().int().positive().default(10),
+    ADMIN_AUTH_FAILURE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(900_000),
+    ADMIN_AUDIT_RETENTION_DAYS: z.coerce.number().int().positive().default(180),
     ANALYTICS_ENABLED: z
       .union([trimmedBooleanString, z.boolean()])
       .default("false")
@@ -200,8 +213,11 @@ const parsedExtractorApiEnv = readEnv(
       .union([trimmedBooleanString, z.boolean()])
       .default("false")
       .transform((value) => value === true || value === "true"),
-    ANALYTICS_RETENTION_DAYS: z.coerce.number().int().positive().default(180),
-    ANALYTICS_ROLLUP_RETENTION_DAYS: z.coerce.number().int().positive().default(1095),
+    // Unset means analytics are kept indefinitely; the daily purge only runs for a table group
+    // whose retention is set.
+    ANALYTICS_RETENTION_DAYS: optionalPositiveIntegerString(),
+    ANALYTICS_ROLLUP_RETENTION_DAYS: optionalPositiveIntegerString(),
+    CRON_SECRET: trimmedOptionalString(),
     GOOGLE_PLAY_PACKAGE_NAME: trimmedString().default("com.linkdish.app"),
     VERCEL_API_TOKEN: trimmedOptionalString(),
     VERCEL_PROJECT_ID: trimmedOptionalString(),

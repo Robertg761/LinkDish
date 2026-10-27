@@ -80,6 +80,20 @@ size` checks the budgets after a build (entry ≤ 115 KB gzip, landing JS ≤
 - The Cookbook renders with a FlatList; saved-recipes and shopping state are split into
   state and action contexts, and AsyncStorage writes go through a debounced writer that
   flushes when the app goes to the background.
+- The Android cookbook is stored one AsyncStorage value per recipe
+  (`linkdish.cookbook.v2.recipe:<id>`) plus an ordered index (`linkdish.cookbook.v2.index`), in
+  `cookbookStorage.ts`. A write stores only the recipes that changed, together with the index in
+  one `multiSet` (one SQLite transaction), then deletes removed recipes' values; values the index
+  doesn't list are cleaned up on launch. Builds up to 2.0.x kept the whole cookbook in one value
+  (`linkdish.savedRecipes`), which got slow to rewrite and can't be read back on Android past
+  about 2 MB. It is moved over on the first launch and deleted only once the copy is written; if
+  the move fails, that launch keeps writing the old value and the next one retries. Inlined scan photos
+  are written to files before the move, so the moved copy points at them. An old value (or one
+  recipe's value) that can't be read is never deleted, and sync stays off while it is unread so
+  it isn't taken for a deletion; an old value that can't be understood is backed up to
+  `linkdish.savedRecipes.corrupt.v1` first, as before. Android's
+  AsyncStorage database cap is raised from 6 MB to 64 MB (`AsyncStorage_db_size_in_MB`, set in
+  `android/gradle.properties` and by `app.config.ts` on prebuild).
 - Search, shopping aggregation (aisle grouping, clean fractions), US/metric conversion and
   servings/time formatting come from `@linkdish/recipe-domain`, the same code the web uses.
 
@@ -93,10 +107,11 @@ size` checks the budgets after a build (entry ≤ 115 KB gzip, landing JS ≤
 - HTML fetching now prefers browser-like HTTP requests and can optionally escalate to Playwright browser rendering when a site is blocked or JS-heavy.
 - Source detection now uses fetched HTML hints in addition to URL heuristics.
 - Success responses include `fetchMode` and extraction provenance metadata.
-- Links, YouTube videos, TikTok captions and pasted text are read by rules only; no LLM is
-  called for them, whatever `attempt` says. Photo scans are the one import read by an LLM,
-  behind a provider interface that is optional at runtime. The backend controls whether
-  Gemini, OpenAI, or no provider is active.
+- Links, YouTube videos, TikTok captions and pasted text are read by rules only, whatever
+  `attempt` says. Photo scans are read by an LLM, behind a provider interface that is
+  optional at runtime; the backend controls whether Gemini, OpenAI, or no provider is
+  active. The one other LLM call is the video reader (below), the last resort for a TikTok
+  or YouTube link with no written recipe.
 - The root `api/extract.ts` Vercel handler is an adapter into the full extractor runtime. Production routing lives in the root `vercel.json`.
 
 ### Sources
@@ -154,16 +169,49 @@ platforms map onto them and are told apart internally by the detection `adapterK
   (`og:see_also`, else `"link"` in the pin's app state), when it is a valid recipe
   `sourceUrl` (http(s), at most 2048 characters), is validated with the same SSRF
   checks and extracted instead, through the same path a direct link to it takes: YouTube
-  through the transcript path, TikTok through its caption, and other social or video
-  sites are rejected as `unsupported_source` before anything is fetched. The recipe's
-  `sourceUrl` is that page, and the result is cached under its URL, so a later direct
-  import of the same recipe hits the cache.
+  through the transcript path, TikTok and Instagram posts through their caption, and other
+  social or video sites are rejected as `unsupported_source` before anything is fetched. The
+  recipe's `sourceUrl` is that page, and the result is cached under its URL, so a later
+  direct import of the same recipe hits the cache.
 - **TikTok**: the caption is read through the public oEmbed endpoint
   (`fetchers/fetch-tiktok-document.ts`; short links are resolved hop by hop, TikTok hosts
   only, each hop SSRF-validated, with the request deadline and a byte cap) and parsed by
   the text parser on the first attempt. An ingredients-only caption keeps the video step,
-  as YouTube does. Captions without a recipe fail with `parse_failed`. Instagram and
-  Facebook stay unsupported.
+  as YouTube does. Captions without a recipe fail with `parse_failed`.
+- **Instagram** posts, reels and IGTV links (`/p/`, `/reel/`, `/reels/`, `/tv/`, also under a
+  profile path, and instagr.am): Instagram answers plain server requests for a post or its
+  embed page with a logged-out shell and no caption, and Meta's oEmbed API stopped returning
+  captions in November 2025. The post's public embed page
+  (`instagram.com/p/<code>/embed/captioned/`) is rendered by the browser fetcher instead
+  (`fetchers/fetch-instagram-document.ts`; the render waits for billing like every browser
+  render, and its budget comes from the request deadline). The caption, author, cover image
+  and whether it is a video are read from the post's record in the page state
+  (`contextJSON` or a bare `edge_media_to_caption`), then the classic `.Caption` markup, then
+  the rendered text between the like count and the comments link. The invisible separators
+  (U+2063, U+2800) creators put on lines to keep blank lines are dropped, and the caption goes
+  through the same text parser as TikTok. A reel's ingredients-only caption keeps the video step; a
+  photo post's does not, and reels never go to the video reader. A login redirect or a page
+  with no post fails as `source_blocked`, a removed or private post as `parse_failed`.
+  Instagram links that are not a post (profiles, stories, `/share/` redirect links) and Facebook
+  stay unsupported.
+- **Video reader** (`extractors/video/`, behind `VIDEO_RECIPE_READER_ENABLED` and
+  `GEMINI_API_KEY`): when a TikTok caption has no recipe or only the ingredients, or a
+  YouTube video's description, creator comments and linked pages have none, Gemini
+  (`VIDEO_RECIPE_MODEL`) watches the video. TikToks are downloaded from the embed page's
+  MP4 (larger than 14 MB through the Files API, deleted after the read); YouTube is passed
+  by URL, only for Shorts and videos of known length up to `VIDEO_RECIPE_MAX_SECONDS`.
+  Every ingredient comes back with its evidence (words heard, text shown, a caption line),
+  and `build-video-recipe-candidate.ts` drops an ingredient its quote doesn't name and an
+  amount its quote doesn't state ("a tablespoon" needs one tablespoon, not "a teaspoon",
+  "half a tablespoon" or "a few tablespoons"); the gaps become a warning. Results use the `llm-fallback` strategy and `llm`
+  provenance, are metered as plain imports and are never cached. Reads need 15 s of
+  request time left (10 s after a TikTok download) and are capped at
+  `VIDEO_RECIPE_DAILY_READ_LIMIT` Gemini calls per UTC day, counted just before each call
+  (one Upstash counter across instances, per instance without Upstash). Past the cap the
+  outcome is `skipped_daily_limit`; when the counter can't be checked the read is skipped
+  as `limit_unavailable`. Each read logs a
+  `video_recipe_read` line, and the outcome is stored as `videoRead` in the extraction
+  analytics `properties`.
 
 ### Pasted text import
 
@@ -209,10 +257,78 @@ parses `extractRecipeAnyRequestSchema`.
   counted; the rest are written. The response is `{ accepted, dropped }` (`dropped` is an
   optional, additive field). Only a malformed envelope is a 400.
 - Postgres stores `event_name` as free text, so new names need no migration.
+
+### Analytics storage
+
+- The Postgres schema is versioned in
+  `services/extractor-api/src/modules/analytics/analytics-migrations.ts`, tracked in
+  `analytics_schema_migrations`. The API applies pending migrations on first use in each process
+  (one transaction under an advisory lock, so concurrent cold starts apply each once); when the
+  database is current that is a version read and no DDL. `pnpm --filter @linkdish/extractor-api
+  analytics:migrate` applies them by hand. Never edit a shipped migration; add the next one.
+  Migration 1 is the schema the API used to create on every cold start, still guarded by
+  `if not exists`, so databases created that way adopt it. Migration 3 adds the error alert
+  fingerprint index and checkpoint table; the alert job also applies pending migrations itself.
+- **Retention is off by default: analytics are kept indefinitely.** Vercel Cron calls
+  `GET /admin/cron/analytics-retention` daily (root `vercel.json` `crons`; it is folded into
+  `api/admin.ts` for the 12-function limit). It authenticates with `CRON_SECRET` only, not the
+  dashboard token, and returns 503 until that is set. It deletes nothing unless a retention is
+  set: with `ANALYTICS_RETENTION_DAYS`, raw rows (`analytics_events`, `extraction_analytics`,
+  `error_analytics`) older than that are deleted in batches by `received_at`, because
+  `occurred_at` is client-supplied; with `ANALYTICS_ROLLUP_RETENTION_DAYS`, rollups and store
+  metrics older than that go. A run stops after about 40 seconds and the next one carries on.
+  Setting either one is a permanent deletion of older rows, and the privacy pages should then
+  state the period.
+- **Account deletion** deletes every raw analytics row carrying the account's hashed id before
+  anything else is removed, so an analytics database failure fails the deletion while it can
+  still be retried. Rows recorded before sign-in carry only an anonymous id and expire with
+  retention. Purge and account deletion run whenever `ANALYTICS_DATABASE_URL` is set, even with
+  `ANALYTICS_ENABLED` off.
 - **Deploy order**: event names are a closed enum in `packages/api-contracts`. Deploy the
   API before shipping clients that send new names. Older APIs rejected whole batches with
   unknown names; the current one drops only those events, but they are still lost until
   the API knows them.
+
+### Error alerts and crash reports
+
+- Web and Android send `client_error` analytics events, which the API also writes to the
+  `error_analytics` table (fingerprint = platform, route and the first 120 characters of the
+  message).
+- The **Error Alerts** workflow (`.github/workflows/error-alerts.yml`, hourly at :17) runs
+  `pnpm --filter @linkdish/extractor-api alerts:errors` against that table. Each run checks the
+  errors received (by `received_at`) since the last run that finished, kept in the one-row
+  `error_alert_checkpoints` table, so a late or skipped GitHub cron run neither drops errors nor
+  reports them twice. The first run, or a run after the checkpoint is lost, checks the last 60
+  minutes; catch-up is capped at 24 hours. It alerts on any fatal error; on at least 25 errors
+  (scaled up for a window longer than 60 minutes); or on a new error, first seen in the last 24
+  hours with none in the 7 days before, in the run where its count over those 24 hours reaches
+  3. Each alerting run sends one email (Resend) and/or one Slack or Discord webhook message, so
+  a spike that continues alerts again every hour. A run that cannot deliver its alert fails and
+  leaves the checkpoint where it was, so the next run reports those errors again.
+- Error messages come from clients, so the webhook message cannot ping anyone or render links
+  (Discord `allowed_mentions: { parse: [] }`, Slack text escaped). Sends time out after 10
+  seconds.
+- The repository and its Actions logs are public: the job prints counts only. Error messages
+  go only to the email and webhook channels.
+- Setup, in GitHub repository settings: secrets `ANALYTICS_DATABASE_URL` (the API's analytics
+  database; `ANALYTICS_DATABASE_CA_CERT` too if the API uses one), `RESEND_API_KEY`,
+  `ERROR_ALERT_EMAIL_TO` (comma-separated) and/or `ERROR_ALERT_WEBHOOK_URL`; variable
+  `ERROR_ALERT_EMAIL_FROM` (a sender on the Resend-verified domain). Optional variables
+  `ERROR_ALERT_MIN_ERRORS`, `ERROR_ALERT_WINDOW_MINUTES` and `ERROR_ALERT_NEW_ERROR_MIN_COUNT`
+  change the thresholds. Without the database secret the job does nothing; if a rule fires
+  and no channel is configured, the run fails.
+- Android crash reports go to Sentry (`@sentry/react-native`), started in `app/_layout.tsx`
+  only on Android and only when the build sets `EXPO_PUBLIC_SENTRY_DSN`
+  (`EXPO_PUBLIC_SENTRY_ENVIRONMENT` is optional). The privacy policy covers Android only, so
+  iOS needs a policy update before it is turned on there. It catches native crashes, ANRs and
+  fatal JS errors, which the `client_error` event usually loses because the process dies before
+  it is sent. It sends no default PII and no performance traces, drops console breadcrumbs, and
+  strips query strings from URLs in breadcrumbs, error messages and the request URL. Sentry's
+  own alert rules notify about new crash issues.
+- Release builds upload JS source maps to Sentry only when the EAS build has
+  `SENTRY_AUTH_TOKEN`, `SENTRY_ORG` and `SENTRY_PROJECT`; `plugins/withSentrySourceMapUpload.js`
+  and the checked-in `android/app/build.gradle` apply `sentry.gradle` behind that check, so
+  builds without the token are unchanged. iOS source maps are not wired yet.
 
 ### Personal library sync
 
@@ -260,7 +376,7 @@ each app:
   only while the item still is what it was merged with; an item that keeps changing meanwhile
   keeps the pulled change as `pending` for the next run and sends nothing over it. A change the API
   turns away is held (not sent again) until the item changes. `packages/api-client/src/
-  library-sync.ts` validates each change before sending, so one bad item never fails a batch.
+library-sync.ts` validates each change before sending, so one bad item never fails a batch.
 - A device's cookbook is linked to one account: the first to sign in on it (merging the two). It
   keeps the cookbook when that account signs out. Another account that signs in doesn't sync it;
   it can replace it with its own cookbook. Deleting the account unlinks the device; its recipes
@@ -352,6 +468,43 @@ Performance pieces in `services/extractor-api/src/modules/extract`:
 - `GET /auth/config` lets mobile discover whether Clerk sign-in and email-code fallback should be visible without requiring a signed-in session.
 - Google sign-in is supported through Clerk. Apple sign-in is intentionally hidden until an Apple Developer account and production Apple credentials exist.
 
+### Admin dashboard
+
+`/admin` (rewritten to `api/admin` on Vercel, `registerAdminDashboardRoutes` on Fastify) is
+protected by named tokens rather than a Clerk session. Both adapters go through
+`authorizeAdminAccess` in `modules/admin/admin-access.ts`:
+
+- **Named tokens.** `ADMIN_DASHBOARD_TOKENS` holds one `name:token` pair per person,
+  comma separated (lowercase names; tokens from `openssl rand -hex 32`). The browser
+  prompt takes the name as the username and the token as the password; scripts send
+  `Authorization: Bearer <token>` or `x-admin-dashboard-token`. Revoking one person means
+  deleting their pair. The older shared `ADMIN_DASHBOARD_TOKEN` still works as the user
+  `admin`, and the dashboard's Notes ask for it to be replaced. Malformed, duplicate or
+  shared entries are skipped and reported in Notes instead of failing API startup. With no
+  tokens, Fastify admits loopback callers only and Vercel refuses with 403.
+- **Lockout.** Each presented-but-wrong token atomically increments a per-network counter
+  in Upstash (`linkdish:admin:auth-failures:v1:<hashed IP>`), so a concurrent burst cannot
+  slip under the limit. After `ADMIN_AUTH_FAILURE_LIMIT_MAX`
+  (10) failures within `ADMIN_AUTH_FAILURE_LIMIT_WINDOW_MS` (15 minutes) that network gets
+  429 even with a valid token until the window ends (the lockout is per network, so
+  someone sharing the admin's IP can trigger it). A request with no credential (the
+  browser's first hit before its prompt) is not counted. The limiter fails open if
+  Upstash is unreachable, so an outage does not lock the owner out; the token check
+  still runs.
+- **Cross-site writes.** Browsers replay cached Basic credentials, so POST/PUT/DELETE are
+  refused when `Sec-Fetch-Site` is anything but `same-origin`/`none`, and POST/PUT must
+  send `application/json` (which forces a CORS preflight the admin routes never answer).
+- **Audit log.** Failed sign-ins, lockouts, account lookups, plan grants (including dry
+  runs) and model changes/resets are appended to the `linkdish:admin:audit:v1` sorted set
+  (sign-in failures and lockouts to `linkdish:admin:audit:v1:auth`, so a flood of them
+  cannot trim real actions out) with the admin's name, IP, outcome and details (never the
+  presented token). Each set is trimmed to `ADMIN_AUDIT_RETENTION_DAYS` (180) and 2,000
+  entries, each network adds at most the lockout limit of failure entries per window, and
+  everything is mirrored to the function log
+  as `[admin-audit]` lines. The dashboard shows the newest 50 under Admin Activity. Plan
+  grants also keep their own `linkdish:admin:billing-grant:*` record, now with
+  `grantedBy: admin-api:<name>`.
+
 ## Extraction Fallback Contract
 
 Production extraction is expected to follow this ladder:
@@ -393,6 +546,10 @@ If production `/extract` skips the browser fetch, it is a deployment regression 
 - `pnpm validate` runs lint, every typecheck, all package tests, the Vercel handler tests
   and the site check. The web bundle budget (`pnpm --filter @linkdish/web size`) needs a
   build first, so it is not part of `validate`.
+- `pnpm test:e2e:web` runs the web app's key flows (import, cookbook, shopping list, meal
+  plan) in Playwright against a production build with the API mocked
+  (`apps/web/e2e/README.md`). CI runs it as the `e2e-web` job; it is not part of `validate`
+  because it needs a build and a browser.
 - The live canary manifest is intentionally separate from PR-blocking CI so real-world regressions can be measured without making the pipeline flaky.
 - API deploys (`deploy-api.yml`) are gated on it instead: the workflow deploys with
   `--prod --skip-domain`, runs the health check and the live canary against that deployment's

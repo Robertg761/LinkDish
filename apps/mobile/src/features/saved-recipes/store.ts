@@ -786,3 +786,7 @@ const stripUnpersistableSourceImages = (record: SavedRecipeRecord): SavedRecipeR
 
 export const serializeSavedRecipeRecords = (savedRecipes: SavedRecipeRecord[]): string =>
   JSON.stringify(savedRecipes.map(stripUnpersistableSourceImages));
+
+/** One recipe as the cookbook stores it (see cookbookStorage.ts). */
+export const serializeSavedRecipeRecord = (savedRecipe: SavedRecipeRecord): string =>
+  JSON.stringify(stripUnpersistableSourceImages(savedRecipe));

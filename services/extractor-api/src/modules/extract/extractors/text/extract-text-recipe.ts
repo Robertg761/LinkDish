@@ -173,35 +173,42 @@ const firstWords = (text: string, maxLength: number): string | null => {
   return withoutRecipePointer(sentence.replace(/[.!?]+$/u, "")) || null;
 };
 
-/** Pasted text and TikTok captions: the recipe is read from the text alone. */
+const captionSiteNames = { tiktok: "TikTok", instagram: "Instagram" } as const;
+
+/** Pasted text and TikTok or Instagram captions: the recipe is read from the text alone. */
 export const extractTextRecipe = (document: TextSourceDocument): TextRecipeExtraction | null => {
   const parsed = parseRecipeText(document.text);
-  const isTikTok = document.origin === "tiktok";
-  const captionTitle = isTikTok ? firstWords(document.text, 80) : null;
+
+  if (document.origin === "paste") {
+    return buildTextRecipeCandidate(parsed, {
+      sourceTitle: document.title,
+      fallbackTitle: "Untitled recipe",
+      strategy: "article-pattern",
+      provenance: "visible-text",
+      recipe: { sourceUrl: document.url, image: null }
+    });
+  }
+
+  const siteName = captionSiteNames[document.origin];
+  /* A TikTok is always a video; an Instagram post is one when it is a reel. */
+  const isVideo = document.origin === "tiktok" || Boolean(document.isVideo);
 
   return buildTextRecipeCandidate(parsed, {
     sourceTitle: document.title,
     fallbackTitle:
-      captionTitle ??
-      (isTikTok
-        ? document.authorName
-          ? `TikTok recipe from ${document.authorName}`
-          : "TikTok recipe"
-        : "Untitled recipe"),
-    isVideo: isTikTok,
+      firstWords(document.text, 80) ??
+      (document.authorName
+        ? `${siteName} recipe from ${document.authorName}`
+        : `${siteName} recipe`),
+    isVideo,
     strategy: "article-pattern",
     provenance: "visible-text",
     recipe: {
       sourceUrl: document.url,
-      image:
-        isTikTok && document.thumbnailUrl ? { url: document.thumbnailUrl, source: "og" } : null,
-      ...(isTikTok
-        ? {
-            siteName: "TikTok",
-            videoUrl: document.url,
-            ...(document.authorName ? { author: document.authorName } : {})
-          }
-        : {})
+      image: document.thumbnailUrl ? { url: document.thumbnailUrl, source: "og" } : null,
+      siteName,
+      ...(isVideo ? { videoUrl: document.url } : {}),
+      ...(document.authorName ? { author: document.authorName } : {})
     }
   });
 };
