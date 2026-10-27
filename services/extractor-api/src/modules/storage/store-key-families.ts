@@ -110,7 +110,9 @@ export const storeKeySegments: Readonly<Record<string, "backup" | "ephemeral" | 
   user: "backup",
   "user-by-email": "backup",
   "user-identities": "backup",
-  "user-sessions": "backup"
+  "user-sessions": "backup",
+  // Daily counters of paid video reads; they expire in two days.
+  "video-reader": "ephemeral"
 };
 
 export const findBackedUpKeyFamily = (key: string): BackedUpKeyFamily | undefined =>
