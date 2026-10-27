@@ -1,8 +1,8 @@
+import { runAnalyticsMigrations } from "../src/modules/analytics/analytics-migrations.js";
 import { buildAnalyticsPoolSslConfig } from "../src/modules/analytics/analytics-store.js";
 import {
   canSendEmail,
   decideErrorAlert,
-  ensureErrorAlertCheckpoint,
   formatErrorAlert,
   loadErrorAlertSnapshot,
   loadErrorAlertWindow,
@@ -37,7 +37,8 @@ const main = async (): Promise<number> => {
   });
 
   try {
-    await ensureErrorAlertCheckpoint(pool);
+    // The API applies these on first use too; this covers a check that runs before that deploy.
+    await runAnalyticsMigrations(pool);
     const alertWindow = await loadErrorAlertWindow(pool, config);
     const snapshot = await loadErrorAlertSnapshot(pool, config, alertWindow);
     const decision = decideErrorAlert(snapshot, config);

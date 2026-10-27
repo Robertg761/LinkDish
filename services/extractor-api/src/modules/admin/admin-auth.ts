@@ -66,6 +66,12 @@ export const hasValidAdminToken = (headers: RequestHeaders, expectedToken: strin
   return requestToken ? constantTimeEquals(requestToken, expectedToken) : false;
 };
 
+/* Vercel Cron sends `Authorization: Bearer <CRON_SECRET>`; nothing else is accepted. */
+export const hasValidCronSecret = (headers: RequestHeaders, expectedSecret: string): boolean => {
+  const requestSecret = getBearerToken(getHeader(headers, "authorization"));
+  return requestSecret ? constantTimeEquals(requestSecret, expectedSecret) : false;
+};
+
 export const withAdminSecurityHeaders = (response: Response): Response => {
   const headers = new Headers(response.headers);
 

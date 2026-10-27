@@ -3,9 +3,9 @@
  * "Error Alerts" workflow runs it and sends the result to email (Resend) and/or a chat webhook.
  *
  * Each run checks the errors received since the last run that finished (a checkpoint row in
- * error_alert_checkpoints), so a late or skipped GitHub cron run neither drops errors nor reports
- * them twice. A run that fires an alert but cannot deliver it leaves the checkpoint alone, and the
- * next run covers both windows. Catch-up is capped at a day.
+ * error_alert_checkpoints, from analytics migration 3), so a late or skipped GitHub cron run
+ * neither drops errors nor reports them twice. A run that fires an alert but cannot deliver it
+ * leaves the checkpoint alone, and the next run covers both windows. Catch-up is capped at a day.
  *
  * The repository and its Actions logs are public, so error messages only ever go to those private
  * channels; anything printed to stdout is counts.
@@ -129,18 +129,6 @@ const toDate = (value: unknown): Date | null => {
 
 const MINUTE_MS = 60_000;
 const MAX_CATCH_UP_MS = 24 * 60 * MINUTE_MS;
-
-export const ensureErrorAlertCheckpoint = async (pool: ErrorAlertQueryable): Promise<void> => {
-  await pool.query(
-    `
-      create table if not exists error_alert_checkpoints (
-        id smallint primary key,
-        checked_until timestamptz not null
-      )
-    `,
-    []
-  );
-};
 
 /*
  * Windows use received_at and the database clock rather than the client-reported occurred_at,
