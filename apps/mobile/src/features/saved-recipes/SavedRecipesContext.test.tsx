@@ -477,6 +477,13 @@ describe("SavedRecipesProvider household save entitlement", () => {
 
     expect(latestSavedRecipes?.collections.map((collection) => collection.name)).toEqual(["Soups"]);
     expect(latestSavedRecipes?.isCookbookReadable).toBe(true);
+    // Saved in the cookbook, then taken out of the sync state, so a deletion sticks.
+    const syncStateWrites = asyncStorageMocks.setItem.mock.calls.filter(
+      ([key]) => key === "linkdish.librarySync.v1"
+    );
+    expect(JSON.parse(String(syncStateWrites.at(-1)?.[1])) as unknown).not.toHaveProperty(
+      "collections"
+    );
     expect(
       asyncStorageMocks.setItem.mock.calls.some(
         ([key, value]) => key === "linkdish.collections.v1" && String(value).includes("Soups")

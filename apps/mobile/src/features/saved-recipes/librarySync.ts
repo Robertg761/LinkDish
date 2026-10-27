@@ -96,6 +96,16 @@ export const readStateCollections = async (): Promise<MobileCollection[]> => {
 const writeState = (state: MobileLibrarySyncState): Promise<void> =>
   AsyncStorage.setItem(LIBRARY_SYNC_STORAGE_KEY, JSON.stringify(state));
 
+/** Takes the collections an older build kept out of the sync state, once the cookbook saved them. */
+export const clearStateCollections = async (): Promise<void> => {
+  const state = await readMobileLibrarySyncState();
+
+  if (state?.collections) {
+    delete state.collections;
+    await writeState(state);
+  }
+};
+
 const newState = (account: string): MobileLibrarySyncState => ({
   account,
   bases: {},

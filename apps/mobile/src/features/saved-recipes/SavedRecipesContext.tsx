@@ -39,7 +39,7 @@ import {
   type MobileCollection
 } from "./collections";
 import { CookbookSyncProvider } from "./CookbookSyncContext";
-import { readStateCollections } from "./librarySync";
+import { clearStateCollections, readStateCollections } from "./librarySync";
 import {
   createScanVersion,
   deleteRecipeSourceImageFiles,
@@ -638,6 +638,17 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
             );
             return [...current, ...loaded];
           });
+
+          // They live in the cookbook now: once saved here, they leave the sync state, so one
+          // deleted later can't come back from there.
+          if (fromSyncState.length > 0) {
+            try {
+              await collectionsWriter.writeNow(collectionsRef.current);
+              await clearStateCollections();
+            } catch (error) {
+              console.warn("Failed to move collections out of the sync state.", error);
+            }
+          }
         }
       })
       .catch((error: unknown) => {
@@ -656,7 +667,7 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
     return () => {
       isMounted = false;
     };
-  }, [commitCollections]);
+  }, [collectionsWriter, commitCollections]);
 
   useEffect(() => {
     if (hasLoadedCollections && !collectionsReadFailed) {
