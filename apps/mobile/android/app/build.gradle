@@ -81,6 +81,12 @@ def enableMinifyInReleaseBuilds = (findProperty('android.enableMinifyInReleaseBu
  */
 def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
 
+// Sentry: upload release JS source maps when the build has SENTRY_AUTH_TOKEN, SENTRY_ORG and
+// SENTRY_PROJECT. Without the token the build is unchanged.
+if (System.getenv("SENTRY_AUTH_TOKEN")) {
+    apply from: new File(["node", "--print", "require('path').dirname(require.resolve('@sentry/react-native/package.json'))"].execute(null, rootDir).text.trim(), "sentry.gradle")
+}
+
 android {
     kotlinOptions {
         // Clerk: allow reading metadata from newer Kotlin versions

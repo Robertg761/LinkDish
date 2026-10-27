@@ -6,39 +6,44 @@ const { queries, rowsToDelete } = vi.hoisted(() => ({
 }));
 
 /* A Postgres stand-in whose database is already migrated and holds `rowsToDelete` per table. */
-vi.mock("pg", () => ({
-  Pool: class {
-    public query(text: string, params?: unknown[]) {
-      const statement = text.replace(/\s+/gu, " ").trim();
-      queries.push({ text: statement, params });
+vi.mock("pg", async () => {
+  const { analyticsMigrations } = await import("./analytics-migrations.js");
+  const appliedVersions = analyticsMigrations.map(({ version }) => ({ version }));
 
-      if (statement.startsWith("select to_regclass")) {
-        return Promise.resolve({ rowCount: 1, rows: [{ exists: true }] });
+  return {
+    Pool: class {
+      public query(text: string, params?: unknown[]) {
+        const statement = text.replace(/\s+/gu, " ").trim();
+        queries.push({ text: statement, params });
+
+        if (statement.startsWith("select to_regclass")) {
+          return Promise.resolve({ rowCount: 1, rows: [{ exists: true }] });
+        }
+
+        if (statement.startsWith("select version from")) {
+          return Promise.resolve({ rowCount: appliedVersions.length, rows: appliedVersions });
+        }
+
+        const table = /^delete from (\w+)/u.exec(statement)?.[1];
+
+        if (!table) {
+          return Promise.resolve({ rowCount: 0, rows: [] });
+        }
+
+        const remaining = rowsToDelete.get(table) ?? 0;
+        const limit = typeof params?.[1] === "number" ? params[1] : remaining;
+        const deleted = Math.min(remaining, limit);
+        rowsToDelete.set(table, remaining - deleted);
+
+        return Promise.resolve({ rowCount: deleted, rows: [] });
       }
 
-      if (statement.startsWith("select version from")) {
-        return Promise.resolve({ rowCount: 2, rows: [{ version: 1 }, { version: 2 }] });
+      public end() {
+        return Promise.resolve();
       }
-
-      const table = /^delete from (\w+)/u.exec(statement)?.[1];
-
-      if (!table) {
-        return Promise.resolve({ rowCount: 0, rows: [] });
-      }
-
-      const remaining = rowsToDelete.get(table) ?? 0;
-      const limit = typeof params?.[1] === "number" ? params[1] : remaining;
-      const deleted = Math.min(remaining, limit);
-      rowsToDelete.set(table, remaining - deleted);
-
-      return Promise.resolve({ rowCount: deleted, rows: [] });
     }
-
-    public end() {
-      return Promise.resolve();
-    }
-  }
-}));
+  };
+});
 
 beforeEach(() => {
   vi.resetModules();
