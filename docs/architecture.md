@@ -169,16 +169,31 @@ platforms map onto them and are told apart internally by the detection `adapterK
   (`og:see_also`, else `"link"` in the pin's app state), when it is a valid recipe
   `sourceUrl` (http(s), at most 2048 characters), is validated with the same SSRF
   checks and extracted instead, through the same path a direct link to it takes: YouTube
-  through the transcript path, TikTok through its caption, and other social or video
-  sites are rejected as `unsupported_source` before anything is fetched. The recipe's
-  `sourceUrl` is that page, and the result is cached under its URL, so a later direct
-  import of the same recipe hits the cache.
+  through the transcript path, TikTok and Instagram posts through their caption, and other
+  social or video sites are rejected as `unsupported_source` before anything is fetched. The
+  recipe's `sourceUrl` is that page, and the result is cached under its URL, so a later
+  direct import of the same recipe hits the cache.
 - **TikTok**: the caption is read through the public oEmbed endpoint
   (`fetchers/fetch-tiktok-document.ts`; short links are resolved hop by hop, TikTok hosts
   only, each hop SSRF-validated, with the request deadline and a byte cap) and parsed by
   the text parser on the first attempt. An ingredients-only caption keeps the video step,
-  as YouTube does. Captions without a recipe fail with `parse_failed`. Instagram and
-  Facebook stay unsupported.
+  as YouTube does. Captions without a recipe fail with `parse_failed`.
+- **Instagram** posts, reels and IGTV links (`/p/`, `/reel/`, `/reels/`, `/tv/`, also under a
+  profile path, and instagr.am): Instagram answers plain server requests for a post or its
+  embed page with a logged-out shell and no caption, and Meta's oEmbed API stopped returning
+  captions in November 2025. The post's public embed page
+  (`instagram.com/p/<code>/embed/captioned/`) is rendered by the browser fetcher instead
+  (`fetchers/fetch-instagram-document.ts`; the render waits for billing like every browser
+  render, and its budget comes from the request deadline). The caption, author, cover image
+  and whether it is a video are read from the post's record in the page state
+  (`contextJSON` or a bare `edge_media_to_caption`), then the classic `.Caption` markup, then
+  the rendered text between the like count and the comments link. The invisible separators
+  (U+2063, U+2800) creators put on lines to keep blank lines are dropped, and the caption goes
+  through the same text parser as TikTok. A reel's ingredients-only caption keeps the video step; a
+  photo post's does not, and reels never go to the video reader. A login redirect or a page
+  with no post fails as `source_blocked`, a removed or private post as `parse_failed`.
+  Instagram links that are not a post (profiles, stories, `/share/` redirect links) and Facebook
+  stay unsupported.
 - **Video reader** (`extractors/video/`, behind `VIDEO_RECIPE_READER_ENABLED` and
   `GEMINI_API_KEY`): when a TikTok caption has no recipe or only the ingredients, or a
   YouTube video's description, creator comments and linked pages have none, Gemini

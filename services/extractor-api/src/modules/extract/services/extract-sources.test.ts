@@ -568,18 +568,169 @@ describe("TikTok captions", () => {
     expect(response.status).toBe("success");
   });
 
-  it("stays unsupported for runtimes without a caption reader, and for Instagram", async () => {
+  it("stays unsupported for runtimes without a caption reader", async () => {
     const withoutReader = await extractRecipe(
       { url: tiktokUrl, attempt: "primary" },
       createRuntime()
     );
-    const instagram = await extractRecipe(
-      { url: "https://www.instagram.com/reel/abc123", attempt: "primary" },
-      createRuntime({ fetchSocialDocument: () => Promise.resolve(tiktokDocument()) })
-    );
 
     expect(withoutReader.response).toMatchObject({ reason: "unsupported_source" });
-    expect(instagram.response).toMatchObject({ reason: "unsupported_source" });
+  });
+});
+
+describe("Instagram captions", () => {
+  const reelUrl = "https://www.instagram.com/reel/DAbc123xyz/?igsh=share";
+  const postUrl = "https://www.instagram.com/reel/DAbc123xyz/";
+  const instagramDocument = (
+    text = tiktokCaption,
+    overrides: Partial<TextSourceDocument> = {}
+  ): TextSourceDocument => ({
+    kind: "text",
+    url: postUrl,
+    origin: "instagram",
+    text,
+    title: null,
+    authorName: "cookcreator",
+    thumbnailUrl: "https://scontent.cdninstagram.com/v/t51/cover.jpg",
+    isVideo: true,
+    ...overrides
+  });
+
+  it("reads a post's caption without the LLM, waiting for billing before the render", async () => {
+    const extract = vi.fn(() => Promise.resolve(llmCandidate()));
+    const fetchSocialDocument = vi.fn(async (_url: string, options?: SourceFetchOptions) => {
+      await options?.awaitAuthorized?.();
+      return instagramDocument();
+    });
+    const runtime = createRuntime({
+      fetchSocialDocument,
+      fallbackExtractor: fallbackExtractor(extract)
+    });
+
+    const { response } = await extractRecipe({ url: reelUrl, attempt: "fallback" }, runtime);
+
+    expect(fetchSocialDocument).toHaveBeenCalledWith(reelUrl, expect.anything());
+    expect(extract).not.toHaveBeenCalled();
+    expect(response).toMatchObject({
+      status: "success",
+      recipe: {
+        title: "Easy chili",
+        sourceUrl: postUrl,
+        siteName: "Instagram",
+        author: "cookcreator",
+        videoUrl: postUrl,
+        image: { url: "https://scontent.cdninstagram.com/v/t51/cover.jpg" }
+      },
+      extraction: { sourceType: "social" }
+    });
+  });
+
+  it("does not render the post when billing denies the import", async () => {
+    const fetchSocialDocument = vi.fn(async (_url: string, options?: SourceFetchOptions) => {
+      await options?.awaitAuthorized?.();
+      return instagramDocument();
+    });
+
+    await expect(
+      extractRecipe({ url: reelUrl, attempt: "primary" }, createRuntime({ fetchSocialDocument }), {
+        authorization: Promise.resolve(false)
+      })
+    ).rejects.toThrow("Billing did not authorize this extraction.");
+  });
+
+  it("keeps a reel's ingredients-only caption, but not a photo post's", async () => {
+    const ingredientsOnly = [
+      "Garlic butter noodles",
+      "Ingredients:",
+      "200 g noodles",
+      "3 tbsp butter",
+      "4 cloves garlic"
+    ].join("\n");
+    const reel = await extractRecipe(
+      { url: reelUrl, attempt: "primary" },
+      createRuntime({
+        fetchSocialDocument: () => Promise.resolve(instagramDocument(ingredientsOnly))
+      })
+    );
+    const photo = await extractRecipe(
+      { url: "https://www.instagram.com/p/DAbc123xyz/", attempt: "primary" },
+      createRuntime({
+        fetchSocialDocument: () =>
+          Promise.resolve(
+            instagramDocument(ingredientsOnly, {
+              url: "https://www.instagram.com/p/DAbc123xyz/",
+              isVideo: false
+            })
+          )
+      })
+    );
+
+    expect(reel.response).toMatchObject({
+      status: "success",
+      recipe: { steps: [{ index: 1, text: "Follow the video for the method." }] }
+    });
+    expect(photo.response).toMatchObject({
+      status: "failure",
+      reason: "parse_failed",
+      userMessage:
+        "That post's caption doesn't include a written recipe. Try the recipe's website instead."
+    });
+  });
+
+  it("explains private posts and posts Instagram would not show", async () => {
+    const removed = await extractRecipe(
+      { url: reelUrl, attempt: "primary" },
+      createRuntime({
+        fetchSocialDocument: () => Promise.reject(new SocialFetchError("removed", "not_found", 200))
+      })
+    );
+    const blocked = await extractRecipe(
+      { url: reelUrl, attempt: "primary" },
+      createRuntime({
+        fetchSocialDocument: () => Promise.reject(new SocialFetchError("login", "blocked"))
+      })
+    );
+
+    expect(removed.response).toMatchObject({
+      reason: "parse_failed",
+      userMessage: "That post is private, removed or not available to read."
+    });
+    expect(blocked.response).toMatchObject({
+      reason: "source_blocked",
+      userMessage: "Instagram did not let LinkDish read that post right now."
+    });
+  });
+
+  it("never sends a reel to the video reader", async () => {
+    const read = vi.fn<VideoRecipeReader["read"]>();
+    const fetchSocialVideo = vi.fn<NonNullable<ExtractorRuntime["fetchSocialVideo"]>>();
+    const runtime = createRuntime({
+      fetchSocialDocument: () => Promise.resolve(instagramDocument("so good 😍 #dinner")),
+      fetchSocialVideo,
+      videoRecipeReader: { available: true, model: "gemini-test", read }
+    });
+
+    const { response } = await extractRecipe({ url: reelUrl, attempt: "primary" }, runtime);
+
+    expect(response).toMatchObject({ status: "failure", reason: "parse_failed" });
+    expect(fetchSocialVideo).not.toHaveBeenCalled();
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it("rejects Instagram links that are not a post without fetching them", async () => {
+    const fetchSocialDocument = vi.fn(() => Promise.resolve(instagramDocument()));
+
+    const { response } = await extractRecipe(
+      { url: "https://www.instagram.com/cookcreator/", attempt: "primary" },
+      createRuntime({ fetchSocialDocument })
+    );
+
+    expect(response).toMatchObject({
+      reason: "unsupported_source",
+      userMessage:
+        "That Instagram link isn't a post. Share a single post or reel, or paste the recipe instead."
+    });
+    expect(fetchSocialDocument).not.toHaveBeenCalled();
   });
 });
 
