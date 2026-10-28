@@ -73,6 +73,7 @@ import type {
 type ExtractRecipeUrlRequest = {
   attempt: "primary" | "fallback";
   url: string;
+  inspired?: true;
 };
 
 type ExtractRecipeImageRequest = {
@@ -917,6 +918,7 @@ type VideoReadRequest = {
   videoContext: VideoRecipeContext;
   fallbackTitle: string;
   recipe: Partial<Recipe>;
+  inspired?: boolean;
 } & (
   | { platform: "tiktok"; locator: TikTokVideoLocator | undefined }
   | { platform: "youtube"; watchUrl: string; durationSeconds: number | null; isShort: boolean }
@@ -1033,7 +1035,12 @@ const readRecipeFromVideo = async (request: VideoReadRequest): Promise<VideoRead
   let payload: VideoRecipePayload | null;
 
   try {
-    payload = await reader.read({ source, context: request.videoContext, deadline });
+    payload = await reader.read({
+      source,
+      context: request.videoContext,
+      deadline,
+      ...(request.inspired ? { inspired: true } : {})
+    });
   } catch (error) {
     if (error instanceof ExtractionCancelledError) {
       throw error;
@@ -1046,6 +1053,69 @@ const readRecipeFromVideo = async (request: VideoReadRequest): Promise<VideoRead
   if (!payload) {
     logVideoRead("failed", { message: "no usable answer" });
     return { outcome: "failed", response: null };
+  }
+
+  if (request.inspired) {
+    const disclaimer =
+      "AI-created recipe inspired by the video. Ingredients, quantities and steps may differ from the creator's.";
+    if (
+      !payload.recipeInVideo ||
+      !payload.title?.trim() ||
+      !payload.ingredients.length ||
+      !payload.steps.length
+    ) {
+      logVideoRead("no_recipe");
+      return { outcome: "no_recipe", response: null };
+    }
+    const result = extractRecipeSuccessSchema.safeParse({
+      status: "success",
+      recipe: {
+        ...request.recipe,
+        author: null,
+        title: payload.title.trim(),
+        sourceUrl: request.url,
+        sourceType: request.detection.sourceType,
+        ingredients: payload.ingredients.map((ingredient) => ({
+          text: [ingredient.amount?.trim(), ingredient.item.trim()].filter(Boolean).join(" "),
+          section: ingredient.section?.trim() || null
+        })),
+        steps: payload.steps.map((step, index) => ({ index: index + 1, text: step.text.trim() })),
+        servings: payload.servings?.trim() || null,
+        prepTimeMinutes: payload.prepTimeMinutes,
+        cookTimeMinutes: payload.cookTimeMinutes,
+        nutrition: null,
+        confidence: {
+          score: 0.5,
+          summary: disclaimer,
+          missingFields: [],
+          notes: [disclaimer],
+          fieldProvenance: {
+            title: "llm",
+            ingredients: "llm",
+            steps: "llm",
+            servings: "llm",
+            prepTimeMinutes: "llm",
+            cookTimeMinutes: "llm",
+            nutrition: null
+          }
+        }
+      },
+      extraction: {
+        sourceType: request.detection.sourceType,
+        strategy: "llm-fallback",
+        confidenceScore: 0.5,
+        missingFields: [],
+        warnings: [disclaimer],
+        fetchMode: "http",
+        provenance: ["llm"]
+      }
+    });
+    if (!result.success) {
+      logVideoRead("failed", { message: "Invalid generated recipe" });
+      return { outcome: "failed", response: null };
+    }
+    logVideoRead("read", { inspired: true });
+    return { outcome: "read", response: result.data };
   }
 
   const { candidate, rejections } = (await loadVideoRecipeCandidateBuilder())(payload, {
@@ -1435,7 +1505,7 @@ const extractFromUrl = async (
   const { runtime } = context;
   const initialDetection = detectSourceTypeFromUrl(request.url);
   const hostname = new URL(request.url).hostname;
-  const cacheLookupEnabled = isCacheLookupEnabled(context, initialDetection);
+  const cacheLookupEnabled = !request.inspired && isCacheLookupEnabled(context, initialDetection);
 
   /* URL safety (DNS) and the cache lookup are independent. */
   const validation = runtime.validateSourceUrl(request.url);
@@ -1476,6 +1546,25 @@ const extractFromUrl = async (
           ...initialDetection,
           reasons: [...initialDetection.reasons, `Rejected unsafe URL: ${sourceUrlSafety.reason}`]
         },
+        attempt: request.attempt,
+        response,
+        strategy: "none",
+        fetchMode: "none",
+        fallbackProvider: runtime.fallbackExtractor.providerName,
+        browserAttempted: false
+      })
+    };
+  }
+
+  if (request.inspired && initialDetection.sourceType !== "youtube") {
+    const response = noRecipeInTextResponse(
+      "An inspired recipe can only be created from a supported YouTube video."
+    );
+    return {
+      response,
+      logContext: makeLogContext({
+        hostname,
+        detection: initialDetection,
         attempt: request.attempt,
         response,
         strategy: "none",
@@ -1614,9 +1703,13 @@ const extractFromUrl = async (
    */
   if (
     sourceDocument.kind === "youtube" &&
-    (decision.kind !== "success" || candidate?.signals.requiredFieldsInferred === true)
+    (request.inspired ||
+      decision.kind !== "success" ||
+      candidate?.signals.requiredFieldsInferred === true)
   ) {
-    const linked = await extractFromYouTubeRecipeLinks(request, context, hostname, sourceDocument);
+    const linked = request.inspired
+      ? null
+      : await extractFromYouTubeRecipeLinks(request, context, hostname, sourceDocument);
 
     if (linked) {
       return linked;
@@ -1626,6 +1719,7 @@ const extractFromUrl = async (
       context,
       detection,
       url: sourceDocument.url,
+      ...(request.inspired ? { inspired: true } : {}),
       platform: "youtube",
       watchUrl: toYouTubeWatchUrl(sourceDocument.videoId),
       durationSeconds: sourceDocument.durationSeconds ?? null,
@@ -1677,7 +1771,20 @@ const extractFromUrl = async (
     }
   }
 
-  const response = extractRecipeResponseSchema.parse(asApiResponse(decision));
+  const response = request.inspired
+    ? noRecipeInTextResponse(
+        "LinkDish could not create a recipe from this video. Try another food video."
+      )
+    : youTubeVideoRead === "no_recipe" && decision.kind !== "success"
+      ? extractRecipeResponseSchema.parse({
+          status: "failure",
+          reason: "parse_failed",
+          userMessage:
+            "LinkDish could not find a complete recipe in the video or its available text.",
+          inspiredAvailable: true,
+          recovery: noRecipeRecovery
+        })
+      : extractRecipeResponseSchema.parse(asApiResponse(decision));
 
   if (response.status === "success") {
     await scheduleCacheWrite(context, sourceRequest.url, response, sourceDocument, detection);
@@ -1706,7 +1813,10 @@ export const extractRecipeFromUrl = async (
   runtime: ExtractorRuntime = getSharedExtractorRuntime(),
   options: ExtractRecipeOptions = {}
 ): Promise<ExtractionResult> => {
-  const { context, dispose } = createExtractionContext(runtime, options);
+  const { context, dispose } = createExtractionContext(
+    runtime,
+    request.inspired ? { ...options, cacheMode: "bypass" } : options
+  );
   const cacheStatus: NonNullable<ExtractionLogContext["cacheStatus"]> = isCacheLookupEnabled(
     context,
     detectSourceTypeFromUrl(request.url)
@@ -2014,7 +2124,8 @@ export const extractRecipe = (
     return extractRecipeFromUrl(
       {
         attempt: request.attempt ?? "primary",
-        url: request.url
+        url: request.url,
+        ...(request.inspired ? { inspired: true as const } : {})
       },
       runtime,
       options

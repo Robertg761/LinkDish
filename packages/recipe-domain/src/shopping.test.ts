@@ -14,6 +14,10 @@ describe("shoppingItemSchema", () => {
       unit: "bottle",
       recipeId: "recipe_1",
       recipeTitle: "Lemon Pasta",
+      recipeSources: [
+        { recipeId: "recipe_1", recipeTitle: "Lemon Pasta" },
+        { recipeId: "recipe_2", recipeTitle: "Salad" }
+      ],
       section: "Pantry",
       addedBy: "user_1",
       checked: true,

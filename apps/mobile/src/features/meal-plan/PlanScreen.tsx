@@ -15,6 +15,7 @@ import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context"
 import { selectionTick } from "../../lib/haptics";
 import { pressedOpacity } from "../../theme/interactions";
 import { appColors, appSpacing } from "../../theme/tokens";
+import { useTabBarScroll } from "../navigation/TabBarVisibility";
 import { useSavedRecipes } from "../saved-recipes/SavedRecipesContext";
 
 import { useMealPlan } from "./MealPlanContext";
@@ -39,6 +40,7 @@ import type { SavedRecipeRecord } from "../saved-recipes/store";
  * or a note, tap a meal to move, rescale or remove it, and turn the week into a shopping list.
  */
 export const PlanScreen = () => {
+  const onTabScroll = useTabBarScroll();
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{ date?: string }>();
   const { entries, hasLoadedMealPlan, isMealPlanReadable, setWeekStartsOn, weekStartsOn } =
@@ -125,9 +127,11 @@ export const PlanScreen = () => {
   return (
     <SafeAreaView edges={["top", "left", "right"]} style={styles.screen}>
       <ScrollView
+        onScroll={onTabScroll}
+        scrollEventThrottle={16}
         contentContainerStyle={[
           styles.content,
-          { paddingBottom: Math.max(insets.bottom, appSpacing.xl) + appSpacing.xl }
+          { paddingBottom: Math.max(insets.bottom, appSpacing.xl) + 100 }
         ]}
         showsVerticalScrollIndicator={false}
       >

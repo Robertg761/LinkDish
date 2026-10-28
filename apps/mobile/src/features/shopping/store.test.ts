@@ -9,6 +9,8 @@ import {
   clearCheckedShoppingItemsInList,
   deleteShoppingItemInList,
   getPendingShoppingChanges,
+  getShoppingIngredientKey,
+  getShoppingRecipeSources,
   getShoppingListItems,
   getSyncableDirtyItems,
   groupShoppingItemsByAisle,
@@ -330,6 +332,50 @@ describe("shopping store helpers", () => {
     expect(blank).not.toHaveProperty("section");
     expect(blank.unit).toBe("cup");
     expect(shoppingItemSchema.safeParse(blank).success).toBe(true);
+  });
+
+  it("keeps every recipe an item was added from through merges, storage and sync", () => {
+    const first = addShoppingItemsToList(
+      [],
+      [{ recipeId: "recipe_1", recipeTitle: "Rice bowl", text: "1 tbsp rice vinegar" }],
+      { canSync: true, now }
+    );
+    const merged = addShoppingItemsToList(
+      first,
+      [{ recipeId: "recipe_2", recipeTitle: "Salad", text: "2 tbsp rice vinegar" }],
+      { canSync: true, now: "2026-07-04T12:01:00.000Z" }
+    );
+    const sources = [
+      { recipeId: "recipe_1", recipeTitle: "Rice bowl" },
+      { recipeId: "recipe_2", recipeTitle: "Salad" }
+    ];
+    const item = merged[0]!;
+
+    expect(merged).toHaveLength(1);
+    expect(item.qty).toBe(3);
+    expect(getShoppingRecipeSources(item)).toEqual(sources);
+    expect(shoppingItemSchema.parse(toApiShoppingItem(item)).recipeSources).toEqual(sources);
+    expect(parseShoppingItems(serializeShoppingItems(merged))[0]?.recipeSources).toEqual(sources);
+
+    const fromOlderServer = toApiShoppingItem({ ...item, updatedAt: "2026-07-04T12:05:00.000Z" });
+    delete fromOlderServer.recipeSources;
+    expect(applyRemoteShoppingItems([item], [fromOlderServer])[0]?.recipeSources).toEqual(sources);
+  });
+
+  it("treats an item's lone recipeId/recipeTitle as its source", () => {
+    expect(
+      getShoppingRecipeSources(buildItem({ recipeId: "recipe_1", recipeTitle: "Soup" }))
+    ).toEqual([{ recipeId: "recipe_1", recipeTitle: "Soup" }]);
+    expect(getShoppingRecipeSources(buildItem())).toEqual([]);
+  });
+
+  it("keys ingredient lines by what to buy, not how they are written", () => {
+    expect(getShoppingIngredientKey("2 tbsp rice vinegar")).toBe(
+      getShoppingIngredientKey("rice vinegar")
+    );
+    expect(getShoppingIngredientKey("3 scallions, sliced")).toBe(
+      getShoppingIngredientKey("green onions")
+    );
   });
 
   it("marks check-off transitions dirty with the acting user", () => {

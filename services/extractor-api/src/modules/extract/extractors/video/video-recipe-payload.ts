@@ -136,3 +136,13 @@ export const buildVideoRecipePrompt = (context: VideoRecipeContext): string =>
     ...(context.authorName ? [`Creator: ${context.authorName}`] : []),
     `Caption: ${context.caption?.trim().slice(0, maxContextChars) || "(none)"}`
   ].join("\n");
+
+/** A separate, explicitly requested creation, never used for normal extraction. */
+export const buildInspiredVideoRecipePrompt = (context: VideoRecipeContext): string =>
+  [
+    "Watch the video and identify a specific food shown or discussed. If no food can be identified, set recipeInVideo to false and leave ingredients and steps empty.",
+    "Otherwise create a practical recipe inspired by that food, using general cooking knowledge for any missing ingredients, amounts and steps. This is a newly created recipe, not a transcription of the creator's recipe. Do not claim that estimated details were in the video.",
+    "Give realistic quantities and clear, complete cooking steps. Use safe cooking temperatures where relevant. Set recipeInVideo to true when a food can be identified; title, ingredients and steps must describe the new recipe. For each ingredient and step set source to visual and quote to 'AI-created'.",
+    `Video title: ${context.title?.slice(0, 500) ?? "(none)"}`,
+    `Caption: ${context.caption?.slice(0, maxContextChars) ?? "(none)"}`
+  ].join("\n");

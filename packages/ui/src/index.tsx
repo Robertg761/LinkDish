@@ -448,13 +448,13 @@ const styles = StyleSheet.create({
     color: appColors.text,
     fontSize: 40,
     letterSpacing: 0,
-    lineHeight: 43
+    lineHeight: 52
   },
   headline: {
     color: appColors.text,
     fontSize: 31,
     letterSpacing: 0,
-    lineHeight: 36
+    lineHeight: 42
   },
   inputContainer: {
     flexDirection: "row",
@@ -524,6 +524,6 @@ const styles = StyleSheet.create({
     color: appColors.text,
     fontSize: 22,
     letterSpacing: 0,
-    lineHeight: 28
+    lineHeight: 32
   }
 });

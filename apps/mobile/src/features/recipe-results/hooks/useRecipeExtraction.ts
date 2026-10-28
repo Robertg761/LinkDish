@@ -19,8 +19,10 @@ interface UseRecipeExtractionResult {
   state: ExtractionUiState;
   retryPrimary: () => Promise<void>;
   retryWithFallback: () => Promise<void>;
+  createInspiredRecipe: () => Promise<void>;
 }
 
+export const EXTRACTION_TIMEOUT_MS = 150_000;
 type RecipeExtractionSource = MobileExtractionRequest | string | undefined;
 type RecipeExtractionEntrySource = "in_app" | "share_sheet";
 type InFlightExtraction = {
@@ -235,6 +237,30 @@ export const useRecipeExtraction = (
           : { state: "empty" }
   );
 
+  useEffect(() => {
+    if (state.state !== "loading" || !requestSourceUrl) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      requestVersionRef.current += 1;
+      inFlightExtractionRef.current = null;
+      const lifecycle = importLifecycleRef.current;
+      if (lifecycle) {
+        lifecycle.terminal = true;
+      }
+      setState({
+        state: "failure",
+        reason: "transport_error",
+        message: "This is taking longer than expected. Please try again.",
+        allowFallback: false,
+        suggestedAction: "retry_primary"
+      });
+    }, EXTRACTION_TIMEOUT_MS);
+
+    return () => clearTimeout(timer);
+  }, [requestSourceUrl, state.state, state.state === "loading" ? state.attempt : undefined]);
+
   const trackAbandonedImport = (
     lifecycle: ImportLifecycle | null,
     reason: string,
@@ -258,7 +284,7 @@ export const useRecipeExtraction = (
 
   const runExtraction = (
     attempt: "primary" | "fallback",
-    options: { requestVersion?: number; correlationId?: string } = {}
+    options: { requestVersion?: number; correlationId?: string; inspired?: boolean } = {}
   ): Promise<void> => {
     const requestVersion = options.requestVersion ?? requestVersionRef.current + 1;
 
@@ -337,7 +363,11 @@ export const useRecipeExtraction = (
     }
 
     const lifecycle = importLifecycleRef.current!;
-    const request = buildRequestForAttempt(extractionRequest, attempt, lifecycle.correlationId);
+    const baseRequest = buildRequestForAttempt(extractionRequest, attempt, lifecycle.correlationId);
+    const request =
+      options.inspired && "url" in baseRequest
+        ? { ...baseRequest, inspired: true as const }
+        : baseRequest;
     const requestAttempt = request.attempt;
     const inFlightKey = getExtractionRequestKey(request);
 
@@ -373,7 +403,11 @@ export const useRecipeExtraction = (
         return;
       }
 
-      setState({ state: "loading", attempt: requestAttempt });
+      setState({
+        state: "loading",
+        attempt: requestAttempt,
+        ...(options.inspired ? { inspired: true } : {})
+      });
 
       try {
         const authToken = await getAuthToken();
@@ -502,6 +536,7 @@ export const useRecipeExtraction = (
           message: formatMonthlyQuotaCopy(response.quota, response.userMessage),
           allowFallback: response.recovery?.allowFallback ?? false,
           quota: response.quota,
+          inspiredAvailable: response.inspiredAvailable,
           suggestedAction: response.recovery?.suggestedAction ?? "try_another_url"
         });
       } catch (error) {
@@ -626,8 +661,24 @@ export const useRecipeExtraction = (
         }
 
         if (draftRecipe) {
-          displayedRecipeUrlRef.current = requestSourceUrl;
-          setState(restoreSavedRecipeState(draftRecipe));
+          if (
+            draftRecipe.recipe.confidence.notes.some((note) =>
+              note.startsWith("AI-created recipe inspired by the video.")
+            )
+          ) {
+            setState({
+              state: "failure",
+              reason: "parse_failed",
+              message:
+                "LinkDish could not find a complete recipe in the video or its available text.",
+              inspiredAvailable: true,
+              allowFallback: false,
+              suggestedAction: "try_another_url"
+            });
+          } else {
+            displayedRecipeUrlRef.current = requestSourceUrl;
+            setState(restoreSavedRecipeState(draftRecipe));
+          }
           return;
         }
       } catch (error) {
@@ -674,6 +725,7 @@ export const useRecipeExtraction = (
 
   return {
     state,
+    createInspiredRecipe: () => runExtraction("primary", { inspired: true }),
     retryPrimary: async () => {
       await runExtraction("primary", {
         ...(state.state === "retryable" && importLifecycleRef.current

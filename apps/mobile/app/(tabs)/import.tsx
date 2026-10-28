@@ -5,7 +5,6 @@ import { router } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
   Animated,
-  Easing,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -18,11 +17,13 @@ import {
 
 import { useAccount } from "../../src/features/account/AccountContext";
 import { useBilling } from "../../src/features/billing/BillingContext";
+import { useTabBarScroll } from "../../src/features/navigation/TabBarVisibility";
 import { PasteTextSheet } from "../../src/features/recipe-intake/components/PasteTextSheet";
 import { UrlForm } from "../../src/features/recipe-intake/components/UrlForm";
 import { subscribeToRecipeUrlReset } from "../../src/features/recipe-intake/intakeResetEvents";
 import { createPendingImageImport } from "../../src/features/recipe-intake/pendingImageImports";
 import { createPendingTextImport } from "../../src/features/recipe-intake/textImport";
+import { easeInCubic, easeOutCubic } from "../../src/theme/easing";
 import { pressedOpacity } from "../../src/theme/interactions";
 import { appColors, appSpacing } from "../../src/theme/tokens";
 
@@ -39,6 +40,7 @@ const HERO_ENTRANCE_DURATION_MS = 340;
 const HERO_ENTRANCE_DELAYS_MS = [0, 70, 140, 240] as const;
 
 export default function HomeScreen() {
+  const onTabScroll = useTabBarScroll();
   const { canStartImport } = useBilling();
   const { isSignedIn } = useAccount();
   const { height: windowHeight } = useWindowDimensions();
@@ -60,7 +62,7 @@ export default function HomeScreen() {
       Animated.timing(value, {
         delay: HERO_ENTRANCE_DELAYS_MS[index],
         duration: HERO_ENTRANCE_DURATION_MS,
-        easing: Easing.out(Easing.cubic),
+        easing: easeOutCubic,
         toValue: 1,
         useNativeDriver: true
       }).start();
@@ -98,11 +100,6 @@ export default function HomeScreen() {
   );
 
   const handleSubmit = (url: string) => {
-    if (!useServerBillingGate && !importGate.allowed) {
-      router.push("/upgrade");
-      return;
-    }
-
     router.push({
       pathname: "/recipe",
       params: {
@@ -258,7 +255,7 @@ export default function HomeScreen() {
     Animated.timing(sheetProgress, {
       toValue: 0,
       duration: 220,
-      easing: Easing.bezier(0.25, 1, 0.5, 1),
+      easing: easeInCubic,
       useNativeDriver: true
     }).start(({ finished }) => {
       if (finished) {
@@ -271,8 +268,8 @@ export default function HomeScreen() {
     if (isScanSheetVisible) {
       Animated.timing(sheetProgress, {
         toValue: 1,
-        duration: 260,
-        easing: Easing.out(Easing.cubic),
+        duration: 220,
+        easing: easeOutCubic,
         useNativeDriver: true
       }).start();
     }
@@ -285,6 +282,8 @@ export default function HomeScreen() {
         style={styles.keyboardAvoiding}
       >
         <ScrollView
+          onScroll={onTabScroll}
+          scrollEventThrottle={16}
           contentContainerStyle={[
             styles.container,
             { paddingBottom: appSpacing.xxl + windowHeight * 0.12 }
@@ -313,7 +312,11 @@ export default function HomeScreen() {
             </View>
           </View>
 
-          <Animated.View style={[styles.formContainer, getHeroEntranceStyle(3)]}>
+          <Animated.View
+            needsOffscreenAlphaCompositing
+            renderToHardwareTextureAndroid
+            style={[styles.formContainer, getHeroEntranceStyle(3)]}
+          >
             <UrlForm
               disabled={false}
               helperText={
@@ -380,22 +383,12 @@ const ScanOptionsSheet = ({
 }: ScanOptionsSheetProps) => {
   const { width: windowWidth } = useWindowDimensions();
 
-  const translateX = progress.interpolate({
-    inputRange: [0, 1],
-    outputRange: [-8, 0]
-  });
-
   const translateY = progress.interpolate({
     inputRange: [0, 1],
     outputRange: [8, 0]
   });
 
-  const scaleX = progress.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0.985, 1]
-  });
-
-  const scaleY = progress.interpolate({
+  const scale = progress.interpolate({
     inputRange: [0, 1],
     outputRange: [0.985, 1]
   });
@@ -416,14 +409,13 @@ const ScanOptionsSheet = ({
         />
         <View style={styles.sheetLayoutWrapper} pointerEvents="box-none">
           <Animated.View
+            needsOffscreenAlphaCompositing
+            renderToHardwareTextureAndroid
             style={[
               styles.sheetContainer,
               {
-                opacity: progress.interpolate({
-                  inputRange: [0, 0.18, 1],
-                  outputRange: [0, 0.82, 1]
-                }),
-                transform: [{ translateX }, { translateY }, { scaleX }, { scaleY }],
+                opacity: progress,
+                transform: [{ translateY }, { scale }],
                 width: Math.min(windowWidth - 28, 480)
               }
             ]}
@@ -561,7 +553,7 @@ const styles = StyleSheet.create({
     lineHeight: 18
   },
   title: {
-    lineHeight: 48,
+    lineHeight: 52,
     textAlign: "center"
   },
   sheetBackdrop: {

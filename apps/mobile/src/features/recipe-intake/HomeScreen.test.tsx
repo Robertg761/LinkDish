@@ -288,7 +288,7 @@ describe("HomeScreen import gate", () => {
     });
   });
 
-  it("keeps anonymous users locally gated when free imports are exhausted", async () => {
+  it("opens the recipe limit screen when anonymous free imports are exhausted", async () => {
     await act(async () => {
       create(<HomeScreen />);
       await flushAsyncWork();
@@ -302,7 +302,10 @@ describe("HomeScreen import gate", () => {
       urlFormState.props?.onSubmit("https://example.com/free-limit");
     });
 
-    expect(routerMocks.push).toHaveBeenCalledWith("/upgrade");
+    expect(routerMocks.push).toHaveBeenCalledWith({
+      pathname: "/recipe",
+      params: { url: "https://example.com/free-limit" }
+    });
   });
 
   it("routes a camera scan to the recipe screen with a pending image import", async () => {

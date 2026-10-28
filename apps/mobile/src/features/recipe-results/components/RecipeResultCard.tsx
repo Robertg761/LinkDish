@@ -1933,7 +1933,7 @@ const styles = StyleSheet.create({
   },
   cookModeFinaleTitle: {
     color: appColors.accent,
-    lineHeight: 48,
+    lineHeight: 52,
     textAlign: "center"
   },
   cookModeHeader: {
@@ -2046,7 +2046,7 @@ const styles = StyleSheet.create({
   },
   cookModeStepText: {
     fontSize: 31,
-    lineHeight: 39,
+    lineHeight: 42,
     marginTop: 16,
     textAlign: "center"
   },
@@ -2267,7 +2267,7 @@ const styles = StyleSheet.create({
   recipeTitle: {
     fontSize: 34,
     letterSpacing: 0,
-    lineHeight: 39
+    lineHeight: 45
   },
   section: {
     gap: 18

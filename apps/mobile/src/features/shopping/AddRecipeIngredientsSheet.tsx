@@ -254,6 +254,6 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 28,
-    lineHeight: 32
+    lineHeight: 37
   }
 });
