@@ -730,6 +730,7 @@ export default function AccountScreen() {
   return (
     <>
       <ScrollView
+        style={styles.page}
         onScroll={onTabScroll}
         scrollEventThrottle={16}
         contentContainerStyle={[
@@ -1069,6 +1070,10 @@ export default function AccountScreen() {
 }
 
 const styles = StyleSheet.create({
+  page: {
+    backgroundColor: appColors.background,
+    flex: 1
+  },
   accountActions: {
     width: "100%"
   },
@@ -1369,6 +1374,7 @@ const styles = StyleSheet.create({
     width: "100%"
   },
   screen: {
+    backgroundColor: appColors.background,
     alignItems: "center",
     flex: 1,
     justifyContent: "center",
