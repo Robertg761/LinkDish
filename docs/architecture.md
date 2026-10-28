@@ -593,6 +593,9 @@ If production `/extract` skips the browser fetch, it is a deployment regression 
   A failing check leaves api.linkdish.ca on the previous deployment, and the run summary names the
   staged URL so it can be promoted by hand when the failure is a third-party site rather than the
   change (only if no later run has promoted a newer one). A failure after promotion gets a
-  `vercel rollback` hint instead. The workflow only runs from `main`. This relies
+  `vercel rollback` hint instead. The workflow only runs from `main`, and it is the only way the
+  API deploys: root `vercel.json` sets `git.deploymentEnabled: false`, because Vercel's Git
+  integration otherwise put every push to `main` on api.linkdish.ca before the checks ran, built a
+  preview for every PR push, and used up the Hobby plan's 100 deployments a day. This relies
   on the API project having no Vercel Deployment Protection; turning it on would need a bypass
   header in both check scripts.
