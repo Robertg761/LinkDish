@@ -19,6 +19,10 @@ const tabIcons = {
   shopping: "cart-outline"
 } as const satisfies Record<string, ComponentProps<typeof MaterialCommunityIcons>["name"]>;
 
+export const unstable_settings = {
+  anchor: "index"
+};
+
 // A tab screen regains focus when the recipe screen that covered the tab bar closes, so that
 // is when a "recipe saved" bounce requested on the recipe screen can actually be seen.
 const tabScreenListeners = {
@@ -32,7 +36,6 @@ export default function TabLayout() {
     <TabBarVisibilityProvider>
       <Tabs
         tabBar={(props) => <FloatingTabBar {...props} />}
-        initialRouteName="index"
         screenListeners={tabScreenListeners}
         screenOptions={({ route }) => ({
           headerShown: false,
@@ -40,11 +43,12 @@ export default function TabLayout() {
           tabBarInactiveTintColor: appColors.muted,
           tabBarIcon: ({ color, size }) => {
             const name = tabIcons[route.name as keyof typeof tabIcons];
+            const iconColor = typeof color === "string" ? color : appColors.muted;
 
             return route.name === "index" ? (
-              <CookbookTabIcon color={color} name={name} size={size} />
+              <CookbookTabIcon color={iconColor} name={name} size={size} />
             ) : (
-              <MaterialCommunityIcons color={color} name={name} size={size} />
+              <MaterialCommunityIcons color={iconColor} name={name} size={size} />
             );
           },
           tabBarLabelStyle: styles.tabLabel,

@@ -1,7 +1,7 @@
 import { AppText } from "@linkdish/ui";
 import { decodeHtmlEntities } from "@linkdish/utils";
 import React, { forwardRef } from "react";
-import { Image, StyleSheet, View } from "react-native";
+import { Image, StyleSheet, View, type ViewInstance } from "react-native";
 
 import { buildProxiedRecipeImageUrl } from "../../lib/recipeImage";
 import { appColors } from "../../theme/tokens";
@@ -11,7 +11,7 @@ import type { Recipe } from "@linkdish/recipe-domain";
 const decodeDisplayText = (value: string) => decodeHtmlEntities(value).replace(/\u00a0/gu, " ");
 
 export const ShareCard = forwardRef<
-  View,
+  ViewInstance,
   {
     recipe: Recipe;
     sourceLabel: string;

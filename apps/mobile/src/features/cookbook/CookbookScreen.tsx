@@ -21,6 +21,7 @@ import {
   View,
   type ListRenderItem,
   type StyleProp,
+  type TextInputInstance,
   type ViewStyle
 } from "react-native";
 import Reanimated, {
@@ -442,7 +443,7 @@ export const CookbookScreen = () => {
   } = useSavedRecipes();
   const { showUpgradeMoment } = useOptionalUpgradeMoment();
   const insets = useSafeAreaInsets();
-  const searchInputRef = useRef<TextInput>(null);
+  const searchInputRef = useRef<TextInputInstance>(null);
   const lockedFamilyHintTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sortPreferencesChangedRef = useRef(false);
   const [activeTab, setActiveTab] = useState<CookbookTab>("personal");

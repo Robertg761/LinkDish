@@ -56,7 +56,7 @@ export const BackupCard = () => {
       });
       const file = new File(Paths.cache, backupFileName(now));
       file.create({ intermediates: true, overwrite: true });
-      file.write(JSON.stringify(backup));
+      await file.write(JSON.stringify(backup));
 
       if (!(await Sharing.isAvailableAsync())) {
         throw new Error("Sharing is not available.");

@@ -40,7 +40,7 @@ const writeScanFile = (
   );
 
   file.create({ intermediates: true, overwrite: true });
-  file.write(payload, { encoding: "base64" });
+  file.writeSync(payload, { encoding: "base64" });
 
   return {
     mimeType: image.mimeType,

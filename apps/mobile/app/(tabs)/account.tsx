@@ -7,7 +7,6 @@ import { router, useLocalSearchParams } from "expo-router";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
-  Easing,
   Modal,
   Platform,
   Pressable,
@@ -28,6 +27,7 @@ import { useTabBarScroll } from "../../src/features/navigation/TabBarVisibility"
 import { CookbookSyncCard } from "../../src/features/saved-recipes/CookbookSyncCard";
 import { useSavedRecipes } from "../../src/features/saved-recipes/SavedRecipesContext";
 import { useReduceMotion } from "../../src/hooks/useReduceMotion";
+import { easeInCubic, easeOutCubic } from "../../src/theme/easing";
 import { pressedOpacity } from "../../src/theme/interactions";
 import { appColors, appSpacing } from "../../src/theme/tokens";
 
@@ -276,7 +276,7 @@ const EmojiPicker = ({
     emojiPickerProgress.setValue(0);
     Animated.timing(emojiPickerProgress, {
       duration: 160,
-      easing: Easing.out(Easing.cubic),
+      easing: easeOutCubic,
       toValue: 1,
       useNativeDriver: true
     }).start();
@@ -293,7 +293,7 @@ const EmojiPicker = ({
     }
     Animated.timing(emojiPickerProgress, {
       duration: 120,
-      easing: Easing.in(Easing.cubic),
+      easing: easeInCubic,
       toValue: 0,
       useNativeDriver: true
     }).start(({ finished }) => {

@@ -48,7 +48,7 @@ vi.mock("expo-file-system", () => {
       fileSystemMocks.deleted.push(this.uri);
     }
 
-    public write(content: string, options?: { encoding?: string }) {
+    public writeSync(content: string, options?: { encoding?: string }) {
       if (fileSystemMocks.failWritesFor && this.uri.includes(fileSystemMocks.failWritesFor)) {
         throw new Error("No space left on device");
       }

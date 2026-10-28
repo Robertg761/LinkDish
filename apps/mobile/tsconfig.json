@@ -1,7 +1,11 @@
 {
-  "extends": "expo/tsconfig.base",
+  "extends": "expo/tsconfig.base.json",
   "compilerOptions": {
     "strict": true,
+    // Expo's base config resolves the "react-native" export condition, which makes TypeScript
+    // type-check dependency sources (e.g. react-native-view-shot/src) under our strict flags.
+    // Clearing it resolves their published .d.ts files instead.
+    "customConditions": [],
     "noImplicitOverride": true,
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,

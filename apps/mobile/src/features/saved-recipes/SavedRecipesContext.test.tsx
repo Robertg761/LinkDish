@@ -191,7 +191,7 @@ vi.mock("expo-file-system", () => {
       fileSystemMocks.deleted.push(this.uri);
     }
 
-    public write(content: string) {
+    public writeSync(content: string) {
       fileSystemMocks.writes.push({ content, uri: this.uri });
 
       if (fileSystemMocks.trackWrites) {

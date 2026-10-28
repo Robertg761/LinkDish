@@ -226,6 +226,7 @@ const config: ExpoConfig = {
       }
     ],
     "@clerk/expo",
+    "@clerk/expo-google-signin",
     "./plugins/withSentrySourceMapUpload"
   ],
   experiments: {
