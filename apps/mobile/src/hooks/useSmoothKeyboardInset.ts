@@ -1,9 +1,5 @@
 import { useEffect, useState } from "react";
-import { Keyboard, LayoutAnimation, Platform } from "react-native";
-
-const configureSmoothKeyboardLayout = () => {
-  LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-};
+import { Keyboard, Platform } from "react-native";
 
 export const useSmoothKeyboardInset = ({ enabled = true }: { enabled?: boolean } = {}) => {
   const [keyboardBottomInset, setKeyboardBottomInset] = useState(0);
@@ -14,12 +10,12 @@ export const useSmoothKeyboardInset = ({ enabled = true }: { enabled?: boolean }
       return undefined;
     }
 
+    // Android exposes did-events here. Apply the inset as soon as each event arrives;
+    // a second, unrelated layout animation would lag behind the keyboard.
     const keyboardShowSubscription = Keyboard.addListener("keyboardDidShow", (event) => {
-      configureSmoothKeyboardLayout();
       setKeyboardBottomInset(event.endCoordinates.height);
     });
     const keyboardHideSubscription = Keyboard.addListener("keyboardDidHide", () => {
-      configureSmoothKeyboardLayout();
       setKeyboardBottomInset(0);
     });
 
