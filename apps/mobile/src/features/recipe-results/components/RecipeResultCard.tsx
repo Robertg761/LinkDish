@@ -22,7 +22,8 @@ import {
   Switch,
   Text,
   useWindowDimensions,
-  View
+  View,
+  type ScrollViewInstance
 } from "react-native";
 import Reanimated, {
   Easing,
@@ -595,7 +596,7 @@ export const RecipeResultCard = ({
     <Reanimated.View
       entering={FadeInDown.duration(RESULT_CARD_ENTER_DURATION_MS)
         .easing(Easing.out(Easing.cubic))
-        .withInitialValues({ opacity: 0, transform: [{ translateY: 8 }, { scale: 0.985 }] })
+        .withInitialValues({ opacity: 0, transform: [{ translateY: 8 }] })
         .reduceMotion(ReduceMotion.System)}
       style={styles.container}
     >
@@ -960,7 +961,7 @@ const CookingModeModal = ({
   const stepTransitionGenerationRef = useRef(0);
   const cookModeStartedAtRef = useRef<number | null>(null);
   const hasTrackedCookModeCompletionRef = useRef(false);
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useRef<ScrollViewInstance>(null);
   const { width: modalWidth } = useWindowDimensions();
 
   const invalidateStepTransition = useCallback(() => {

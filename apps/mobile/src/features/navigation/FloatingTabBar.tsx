@@ -20,7 +20,13 @@ const icons = {
 
 type TabBarProps = Parameters<NonNullable<ComponentProps<typeof Tabs>["tabBar"]>>[0];
 
-export const FloatingTabBar = ({ state, descriptors, navigation, insets }: TabBarProps) => {
+export const FloatingTabBar = ({
+  state,
+  descriptors,
+  emitter,
+  navigateToTab,
+  insets
+}: TabBarProps) => {
   const reduceMotion = useReduceMotion();
   const { visible, setVisible } = useTabBarVisibility();
   const [keyboardVisible, setKeyboardVisible] = useState(false);
@@ -108,16 +114,15 @@ export const FloatingTabBar = ({ state, descriptors, navigation, insets }: TabBa
               accessibilityState={{ selected: focused }}
               accessibilityLabel={options?.tabBarAccessibilityLabel ?? label}
               onPress={() => {
-                const event = navigation.emit({
+                const event = emitter.emit({
                   type: "tabPress",
                   target: route.key,
                   canPreventDefault: true
                 });
-                if (!focused && !event.defaultPrevented)
-                  navigation.navigate(route.name, route.params);
+                if (!focused && !event.defaultPrevented) navigateToTab(route.key);
                 setVisible(true);
               }}
-              onLongPress={() => navigation.emit({ type: "tabLongPress", target: route.key })}
+              onLongPress={() => emitter.emit({ type: "tabLongPress", target: route.key })}
               style={styles.item}
             >
               {options?.tabBarIcon ? (

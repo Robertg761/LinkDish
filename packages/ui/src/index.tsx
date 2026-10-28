@@ -1,5 +1,13 @@
 import { createContext, forwardRef, useContext, useState } from "react";
-import { Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import {
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  type TextInputInstance,
+  View
+} from "react-native";
 
 import type { PropsWithChildren, ReactNode } from "react";
 import type { StyleProp, TextStyle, ViewStyle } from "react-native";
@@ -290,7 +298,7 @@ interface AppTextFieldProps {
   value: string;
 }
 
-export const AppTextField = forwardRef<TextInput, AppTextFieldProps>(
+export const AppTextField = forwardRef<TextInputInstance, AppTextFieldProps>(
   ({ value, placeholder, onChangeText, onSubmitEditing, rightElement }, ref) => {
     const [isFocused, setIsFocused] = useState(false);
     return (

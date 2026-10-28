@@ -5,7 +5,6 @@ import { router, useLocalSearchParams } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
-  Easing,
   Modal,
   Pressable,
   ScrollView,
@@ -22,6 +21,7 @@ import { useBilling } from "../src/features/billing/BillingContext";
 import { useOptionalUpgradeMoment } from "../src/features/billing/UpgradeMomentContext";
 import { useSavedRecipes } from "../src/features/saved-recipes/SavedRecipesContext";
 import { useReduceMotion } from "../src/hooks/useReduceMotion";
+import { easeOutCubic } from "../src/theme/easing";
 import { pressedOpacity } from "../src/theme/interactions";
 import { appColors } from "../src/theme/tokens";
 
@@ -92,7 +92,7 @@ const RemoveMemberButton = ({
     }
     Animated.timing(pressProgress, {
       duration,
-      easing: Easing.out(Easing.cubic),
+      easing: easeOutCubic,
       toValue,
       useNativeDriver: true
     }).start();

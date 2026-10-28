@@ -15,6 +15,9 @@ import {
   StyleSheet,
   TextInput,
   View,
+  type ScrollViewInstance,
+  type TextInputInstance,
+  type ViewInstance
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { captureRef } from "react-native-view-shot";
@@ -195,7 +198,7 @@ export default function RecipeScreen() {
   const [draftIngredients, setDraftIngredients] = useState("");
   const [draftSteps, setDraftSteps] = useState<DraftStep[]>([]);
   const [draftNotes, setDraftNotes] = useState("");
-  const shareCardRef = useRef<View>(null);
+  const shareCardRef = useRef<ViewInstance>(null);
   const extractionErrorTitle = useMemo(() => selectFlavorCopyLine(EXTRACTION_ERROR_LINES), []);
   const routeSavedRecipe = savedId
     ? getSavedRecipeById(savedId)
@@ -1411,7 +1414,7 @@ const RecipeEditorModal = ({
   setDraftTitle: (value: string) => void;
   visible: boolean;
 }) => {
-  const scrollViewRef = useRef<ScrollView>(null);
+  const scrollViewRef = useRef<ScrollViewInstance>(null);
   const fieldLayoutsRef = useRef<Record<string, { height: number; offsetY: number }>>({});
   const focusedEditorLayoutRef = useRef<{ height: number; offsetY: number } | null>(null);
   const editorScrollYRef = useRef(0);
@@ -1600,7 +1603,7 @@ const MethodStepsEditor = ({
   const pendingFocusStepCountRef = useRef<number | null>(null);
   const pendingFocusStepIdRef = useRef<string | null>(null);
   const stepLayoutsRef = useRef<Record<string, { height: number; offsetY: number }>>({});
-  const stepInputRefs = useRef<Record<string, TextInput | null>>({});
+  const stepInputRefs = useRef<Record<string, TextInputInstance | null>>({});
 
   // Rows are keyed by id, so drop the measurements and refs of rows that are gone
   // instead of shifting every entry after a removal.
