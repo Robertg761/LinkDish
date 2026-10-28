@@ -205,7 +205,8 @@ const config: ExpoConfig = {
       "expo-splash-screen",
       {
         backgroundColor: "#f4efe7",
-        image: "./assets/splash-wordmark.png",
+        image: "./assets/splash-wordmark-trimmed.png",
+        imageWidth: 180,
         resizeMode: "contain"
       }
     ],
