@@ -54,13 +54,14 @@ export interface YouTubeSourceDocument {
 
 /**
  * Recipe text that did not come from a fetched page: a TikTok caption read through oEmbed, an
- * Instagram caption read from the post's embed page, or text the user pasted. It is read by the rule-based text parser (extractors/text).
+ * Instagram caption read from the post's embed page, a Facebook caption read from the post's
+ * public page metadata, or text the user pasted. It is read by the rule-based text parser (extractors/text).
  */
 export interface TextSourceDocument {
   kind: "text";
   /** The recipe's source URL (the video's canonical URL, or the pasted text's source/synthetic URL). */
   url: string;
-  origin: "paste" | "tiktok" | "instagram";
+  origin: "paste" | "tiktok" | "instagram" | "facebook";
   text: string;
   title: string | null;
   authorName: string | null;
@@ -70,6 +71,17 @@ export interface TextSourceDocument {
    * method, so an ingredients-only caption is no recipe. TikToks are always videos.
    */
   isVideo?: boolean | undefined;
+  /**
+   * For a Facebook post, whether the caption is only part of the recipe: Facebook cut it
+   * (its public metadata ends a long caption with "...") or the creator did (an ingredient
+   * line ends in "..." above a "Full recipe" link). Such a caption is never turned into a recipe.
+   */
+  captionTruncated?: boolean | undefined;
+  /**
+   * For a Facebook post, links to other sites that the page itself shares (the link-out
+   * Facebook wraps in l.facebook.com), already unwrapped. Candidates for the written recipe.
+   */
+  linkedUrls?: string[] | undefined;
   /** For a TikTok, what the caption fetch learned about the video, for the video reader. */
   tiktokVideo?: TikTokVideoLocator | undefined;
 }
@@ -209,7 +221,8 @@ export interface ExtractorRuntime {
   ): Promise<YouTubeSourceDocument>;
   /**
    * Reads a social post's caption (TikTok through oEmbed, Instagram from its rendered embed
-   * page). Runtimes without it treat those links as unsupported.
+   * page, Facebook from the post's public page metadata). Runtimes without it treat those links
+   * as unsupported.
    */
   fetchSocialDocument?: (url: string, options?: SourceFetchOptions) => Promise<TextSourceDocument>;
   /** Downloads a TikTok post's video for the video recipe reader. */

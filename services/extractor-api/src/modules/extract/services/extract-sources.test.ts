@@ -734,6 +734,469 @@ describe("Instagram captions", () => {
   });
 });
 
+describe("Facebook posts and reels", () => {
+  const reelPageUrl =
+    "https://www.facebook.com/dinnerwithdana/videos/lemon-chicken/900000000000001/";
+  const postPageUrl =
+    "https://www.facebook.com/WeeknightPastaClub/posts/creamy-pasta/122200000000000002/";
+  const recipeUrl = "https://fixtures.linkdish.test/recipe-jsonld";
+  const fullCaption = [
+    "Lemon garlic chicken 🍋",
+    "Ingredients:",
+    "4 chicken thighs",
+    "2 tbsp olive oil",
+    "3 cloves garlic",
+    "Method:",
+    "1. Season the chicken.",
+    "2. Sear it in the oil, add the garlic and roast for 25 minutes."
+  ].join("\n");
+  const cutCaption = `${fullCaption.slice(0, 120)}...`;
+  const facebookDocument = (
+    text = fullCaption,
+    overrides: Partial<TextSourceDocument> = {}
+  ): TextSourceDocument => ({
+    kind: "text",
+    url: reelPageUrl,
+    origin: "facebook",
+    text,
+    title: null,
+    authorName: "Dinner with Dana",
+    thumbnailUrl: "https://scontent.xx.fbcdn.net/v/t15/cover.jpg",
+    isVideo: true,
+    captionTruncated: false,
+    linkedUrls: [],
+    ...overrides
+  });
+
+  it("reads a reel's caption without the LLM, and does not cache or render it", async () => {
+    const extract = vi.fn(() => Promise.resolve(llmCandidate()));
+    const fetchSocialDocument = vi.fn(() => Promise.resolve(facebookDocument()));
+    const fetchHtmlDocument = vi.fn((url: string) =>
+      Promise.resolve(htmlResult(url, recipeJsonLd))
+    );
+    const runtime = createRuntime({
+      fetchSocialDocument,
+      fetchHtmlDocument,
+      fallbackExtractor: fallbackExtractor(extract)
+    });
+    const requestedUrl = "https://www.facebook.com/reel/900000000000001/";
+
+    const { response } = await extractRecipe({ url: requestedUrl, attempt: "primary" }, runtime);
+
+    expect(fetchSocialDocument).toHaveBeenCalledWith(requestedUrl, expect.anything());
+    expect(fetchHtmlDocument).not.toHaveBeenCalled();
+    expect(extract).not.toHaveBeenCalled();
+    expect(response).toMatchObject({
+      status: "success",
+      recipe: {
+        title: "Lemon garlic chicken",
+        sourceUrl: reelPageUrl,
+        siteName: "Facebook",
+        author: "Dinner with Dana",
+        videoUrl: reelPageUrl,
+        image: { url: "https://scontent.xx.fbcdn.net/v/t15/cover.jpg" },
+        ingredients: [
+          { text: "4 chicken thighs" },
+          { text: "2 tbsp olive oil" },
+          { text: "3 cloves garlic" }
+        ]
+      },
+      extraction: { sourceType: "social", fetchMode: "http" }
+    });
+  });
+
+  it("reads every Facebook link form through the Facebook path", async () => {
+    for (const url of [
+      "https://m.facebook.com/reel/900000000000001/",
+      "https://www.facebook.com/share/r/1AbCdEfGhI/",
+      "https://fb.watch/xYz_12AbC/",
+      "https://fb.me/abc123XYZ",
+      "https://fb.com/reel/900000000000001",
+      "https://web.facebook.com/watch/?v=900000000000001"
+    ]) {
+      const fetchSocialDocument = vi.fn(() => Promise.resolve(facebookDocument()));
+      const { response } = await extractRecipe(
+        { url, attempt: "primary" },
+        createRuntime({ fetchSocialDocument })
+      );
+
+      expect(fetchSocialDocument).toHaveBeenCalledWith(url, expect.anything());
+      expect(response.status).toBe("success");
+    }
+  });
+
+  it("does not turn a cut caption into a recipe, and says Facebook only shares part of it", async () => {
+    const fetchHtmlDocument = vi.fn((url: string) =>
+      Promise.resolve(htmlResult(url, recipeJsonLd))
+    );
+    const { response } = await extractRecipe(
+      { url: postPageUrl, attempt: "primary" },
+      createRuntime({
+        fetchSocialDocument: () =>
+          Promise.resolve(
+            facebookDocument(cutCaption, { url: postPageUrl, captionTruncated: true })
+          ),
+        fetchHtmlDocument
+      })
+    );
+
+    expect(response).toMatchObject({
+      status: "failure",
+      reason: "source_blocked",
+      userMessage:
+        "Facebook only shares part of that post's text with other apps, so LinkDish can't read the whole recipe. Paste the full recipe text or import a screenshot of the post instead.",
+      recovery: { retryable: false, allowFallback: false }
+    });
+    expect(fetchHtmlDocument).not.toHaveBeenCalled();
+  });
+
+  it("follows a recipe link in the post's page when the caption is cut, validating it first", async () => {
+    const fetchHtmlDocument = vi.fn((url: string) =>
+      Promise.resolve(htmlResult(url, recipeJsonLd))
+    );
+    const validateSourceUrl = vi.fn(() => Promise.resolve({ safe: true as const }));
+    const { response } = await extractRecipe(
+      { url: postPageUrl, attempt: "primary" },
+      createRuntime({
+        fetchSocialDocument: () =>
+          Promise.resolve(
+            facebookDocument(cutCaption, {
+              url: postPageUrl,
+              isVideo: false,
+              captionTruncated: true,
+              linkedUrls: ["https://www.spotify.com/track/1", `${recipeUrl}?fbclid=IwAR0`]
+            })
+          ),
+        fetchHtmlDocument,
+        validateSourceUrl
+      })
+    );
+
+    expect(fetchHtmlDocument.mock.calls.map(([url]) => url)).toEqual([`${recipeUrl}?fbclid=IwAR0`]);
+    expect(validateSourceUrl).toHaveBeenCalledWith(`${recipeUrl}?fbclid=IwAR0`);
+    expect(response).toMatchObject({
+      status: "success",
+      recipe: { title: "One-Pan Tomato Pasta" },
+      extraction: { strategy: "recipe-schema" }
+    });
+    expect(response.status === "success" && response.recipe.videoUrl).toBeFalsy();
+  });
+
+  it("follows a recipe link written in the caption, keeping the reel as the video", async () => {
+    const fetchHtmlDocument = vi.fn((url: string) =>
+      Promise.resolve(htmlResult(url, recipeJsonLd))
+    );
+    const { response } = await extractRecipe(
+      { url: reelPageUrl, attempt: "primary" },
+      createRuntime({
+        fetchSocialDocument: () =>
+          Promise.resolve(
+            facebookDocument(`Easiest pasta ever 🍝\nFull recipe: ${recipeUrl}\n#pasta`)
+          ),
+        fetchHtmlDocument,
+        validateSourceUrl: vi.fn(() => Promise.resolve({ safe: true as const }))
+      })
+    );
+
+    expect(fetchHtmlDocument.mock.calls.map(([url]) => url)).toEqual([recipeUrl]);
+    expect(response).toMatchObject({
+      status: "success",
+      recipe: { title: "One-Pan Tomato Pasta", sourceUrl: recipeUrl, videoUrl: reelPageUrl }
+    });
+  });
+
+  describe("a creator's teaser caption with a full-recipe link", () => {
+    const teaserUrl = "https://recipes-ideas.com/garbage-bread/";
+    const teaser = [
+      "AD",
+      "Ingredients:",
+      "1 tbsp steak seasoning (I used McCormick)",
+      "12 oz. Velveeta, cubed",
+      "1/2 lb. chopped bacon...",
+      `FULL RECIPE: ${teaserUrl}`
+    ].join("\n");
+    const teaserDocument = (text = teaser) =>
+      facebookDocument(text, {
+        url: postPageUrl,
+        captionTruncated: true
+      });
+
+    it("follows the link and returns the linked page's recipe", async () => {
+      const fetchHtmlDocument = vi.fn((url: string) =>
+        Promise.resolve(htmlResult(url, recipeJsonLd))
+      );
+      const { response } = await extractRecipe(
+        { url: postPageUrl, attempt: "primary" },
+        createRuntime({
+          fetchSocialDocument: () => Promise.resolve(teaserDocument()),
+          fetchHtmlDocument
+        })
+      );
+
+      expect(fetchHtmlDocument.mock.calls.map(([url]) => url)).toEqual([teaserUrl]);
+      expect(response).toMatchObject({
+        status: "success",
+        recipe: { title: "One-Pan Tomato Pasta", sourceUrl: teaserUrl }
+      });
+    });
+
+    it("never returns the teaser itself when the link gives no recipe", async () => {
+      for (const fetchHtmlDocument of [
+        (url: string) => Promise.resolve(htmlResult(url, articleWeak)),
+        () => Promise.reject(new Error("down"))
+      ]) {
+        const { response } = await extractRecipe(
+          { url: postPageUrl, attempt: "primary" },
+          createRuntime({
+            fetchSocialDocument: () => Promise.resolve(teaserDocument()),
+            fetchHtmlDocument
+          })
+        );
+
+        expect(response).toMatchObject({
+          status: "failure",
+          reason: "source_blocked",
+          userMessage: expect.stringContaining("only shares part of that post's text") as string
+        });
+      }
+    });
+
+    it("fails the same way when the link is unsafe", async () => {
+      const fetchHtmlDocument = vi.fn((url: string) =>
+        Promise.resolve(htmlResult(url, recipeJsonLd))
+      );
+      const { response } = await extractRecipe(
+        { url: postPageUrl, attempt: "primary" },
+        createRuntime({
+          fetchSocialDocument: () => Promise.resolve(teaserDocument()),
+          fetchHtmlDocument,
+          validateSourceUrl: (url: string) =>
+            Promise.resolve(
+              url === teaserUrl ? { safe: false, reason: "private_address" } : { safe: true }
+            )
+        })
+      );
+
+      expect(fetchHtmlDocument).not.toHaveBeenCalled();
+      expect(response).toMatchObject({ status: "failure", reason: "source_blocked" });
+    });
+  });
+
+  it("tries a caption's Full recipe link first, and keeps the caption when the link has no recipe", async () => {
+    const link = "https://recipes-ideas.com/lemon-chicken/";
+    const text = `${fullCaption}\nFull recipe: ${link}`;
+    const fetchHtmlDocument = vi.fn((url: string) =>
+      Promise.resolve(htmlResult(url, recipeJsonLd))
+    );
+    const linked = await extractRecipe(
+      { url: reelPageUrl, attempt: "primary" },
+      createRuntime({
+        fetchSocialDocument: () => Promise.resolve(facebookDocument(text)),
+        fetchHtmlDocument
+      })
+    );
+    const fallback = await extractRecipe(
+      { url: reelPageUrl, attempt: "primary" },
+      createRuntime({
+        fetchSocialDocument: () => Promise.resolve(facebookDocument(text)),
+        fetchHtmlDocument: (url: string) => Promise.resolve(htmlResult(url, articleWeak))
+      })
+    );
+
+    expect(fetchHtmlDocument.mock.calls.map(([url]) => url)).toEqual([link]);
+    expect(linked.response).toMatchObject({
+      status: "success",
+      recipe: { sourceUrl: link, videoUrl: reelPageUrl }
+    });
+    expect(fallback.response).toMatchObject({
+      status: "success",
+      recipe: { title: "Lemon garlic chicken", siteName: "Facebook" }
+    });
+  });
+
+  it("skips an unsafe link and falls back to the cut-caption message", async () => {
+    const fetchHtmlDocument = vi.fn((url: string) =>
+      Promise.resolve(htmlResult(url, recipeJsonLd))
+    );
+    const { response } = await extractRecipe(
+      { url: postPageUrl, attempt: "primary" },
+      createRuntime({
+        fetchSocialDocument: () =>
+          Promise.resolve(
+            facebookDocument(cutCaption, {
+              captionTruncated: true,
+              linkedUrls: ["http://169.254.169.254/latest/meta-data/recipe"]
+            })
+          ),
+        fetchHtmlDocument,
+        validateSourceUrl: (url: string) =>
+          Promise.resolve(
+            url.includes("169.254") ? { safe: false, reason: "private_address" } : { safe: true }
+          )
+      })
+    );
+
+    expect(fetchHtmlDocument).not.toHaveBeenCalled();
+    expect(response).toMatchObject({ status: "failure", reason: "source_blocked" });
+  });
+
+  it("keeps a reel's own ingredients when its linked page has no recipe", async () => {
+    const { response } = await extractRecipe(
+      { url: reelPageUrl, attempt: "primary" },
+      createRuntime({
+        fetchSocialDocument: () =>
+          Promise.resolve(
+            facebookDocument(
+              [
+                "Garlic noodles",
+                "Ingredients:",
+                "200 g noodles",
+                "3 tbsp butter",
+                "4 cloves garlic"
+              ].join("\n"),
+              { linkedUrls: [`${recipeUrl}-weak`] }
+            )
+          ),
+        fetchHtmlDocument: (url: string) => Promise.resolve(htmlResult(url, articleWeak)),
+        validateSourceUrl: vi.fn(() => Promise.resolve({ safe: true as const }))
+      })
+    );
+
+    expect(response).toMatchObject({
+      status: "success",
+      recipe: { steps: [{ index: 1, text: "Follow the video for the method." }] }
+    });
+  });
+
+  it("says the caption has no recipe when a whole caption has none", async () => {
+    const { response } = await extractRecipe(
+      { url: reelPageUrl, attempt: "primary" },
+      createRuntime({
+        fetchSocialDocument: () => Promise.resolve(facebookDocument("so good 😍 #dinner"))
+      })
+    );
+
+    expect(response).toMatchObject({
+      status: "failure",
+      reason: "parse_failed",
+      userMessage:
+        "That post's caption doesn't include a written recipe. Try the recipe's website instead."
+    });
+  });
+
+  it("tells the person Facebook blocked the page and to paste the text or use a screenshot", async () => {
+    for (const reason of ["blocked"] as const) {
+      const { response } = await extractRecipe(
+        { url: reelPageUrl, attempt: "primary" },
+        createRuntime({
+          fetchSocialDocument: () => Promise.reject(new SocialFetchError("login wall", reason, 200))
+        })
+      );
+
+      expect(response).toMatchObject({
+        status: "failure",
+        reason: "source_blocked",
+        userMessage:
+          "Facebook blocked LinkDish from reading that post. Paste the recipe text or import a screenshot of the post instead.",
+        recovery: { retryable: false, allowFallback: false, suggestedAction: "try_another_url" }
+      });
+    }
+
+    const removed = await extractRecipe(
+      { url: reelPageUrl, attempt: "primary" },
+      createRuntime({
+        fetchSocialDocument: () => Promise.reject(new SocialFetchError("gone", "not_found", 404))
+      })
+    );
+
+    expect(removed.response).toMatchObject({
+      reason: "parse_failed",
+      userMessage: "That post is private, removed or not available to read."
+    });
+  });
+
+  it("does not read the post when billing denies the import", async () => {
+    await expect(
+      extractRecipe(
+        { url: reelPageUrl, attempt: "primary" },
+        createRuntime({ fetchSocialDocument: () => Promise.resolve(facebookDocument()) }),
+        { authorization: Promise.resolve(false) }
+      )
+    ).rejects.toThrow("Billing did not authorize this extraction.");
+  });
+
+  it("rejects Facebook pages that are not a post without fetching them", async () => {
+    const fetchSocialDocument = vi.fn(() => Promise.resolve(facebookDocument()));
+
+    for (const url of [
+      "https://www.facebook.com/dinnerwithdana",
+      "https://www.facebook.com/profile.php?id=100001"
+    ]) {
+      const { response } = await extractRecipe(
+        { url, attempt: "primary" },
+        createRuntime({ fetchSocialDocument })
+      );
+
+      expect(response).toMatchObject({
+        reason: "unsupported_source",
+        userMessage:
+          "That Facebook link isn't a post or reel. Share a single public post or reel, or paste the recipe instead."
+      });
+    }
+
+    expect(fetchSocialDocument).not.toHaveBeenCalled();
+  });
+
+  it("treats a l.facebook.com link to a recipe site as that site's link, with the usual safety checks", async () => {
+    const fetchHtmlDocument = vi.fn((url: string) =>
+      Promise.resolve(htmlResult(url, recipeJsonLd))
+    );
+    const fetchSocialDocument = vi.fn(() => Promise.resolve(facebookDocument()));
+    const validateSourceUrl = vi.fn(() => Promise.resolve({ safe: true as const }));
+    const wrapped = `https://l.facebook.com/l.php?u=${encodeURIComponent(recipeUrl)}&h=AT0abc`;
+
+    const { response } = await extractRecipe(
+      { url: wrapped, attempt: "primary" },
+      createRuntime({ fetchHtmlDocument, fetchSocialDocument, validateSourceUrl })
+    );
+
+    expect(validateSourceUrl).toHaveBeenCalledWith(recipeUrl);
+    expect(fetchHtmlDocument.mock.calls.map(([url]) => url)).toEqual([recipeUrl]);
+    expect(fetchSocialDocument).not.toHaveBeenCalled();
+    expect(response).toMatchObject({
+      status: "success",
+      recipe: { sourceUrl: recipeUrl }
+    });
+
+    const unsafe = await extractRecipe(
+      {
+        url: `https://lm.facebook.com/l.php?u=${encodeURIComponent("http://127.0.0.1/recipe")}`,
+        attempt: "primary"
+      },
+      createRuntime({
+        fetchHtmlDocument,
+        validateSourceUrl: () => Promise.resolve({ safe: false, reason: "private_address" })
+      })
+    );
+
+    expect(unsafe.response).toMatchObject({ status: "failure", reason: "unsupported_source" });
+    expect(fetchHtmlDocument).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends a l.facebook.com link to a Facebook reel down the Facebook path", async () => {
+    const fetchSocialDocument = vi.fn(() => Promise.resolve(facebookDocument()));
+    const reel = "https://www.facebook.com/reel/900000000000001/";
+
+    const { response } = await extractRecipe(
+      { url: `https://l.facebook.com/l.php?u=${encodeURIComponent(reel)}`, attempt: "primary" },
+      createRuntime({ fetchSocialDocument })
+    );
+
+    expect(fetchSocialDocument).toHaveBeenCalledWith(reel, expect.anything());
+    expect(response.status).toBe("success");
+  });
+});
+
 describe("pasted text", () => {
   const recipeText = [
     "Grandma's chili",

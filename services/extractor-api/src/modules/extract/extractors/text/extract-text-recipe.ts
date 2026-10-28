@@ -173,9 +173,13 @@ const firstWords = (text: string, maxLength: number): string | null => {
   return withoutRecipePointer(sentence.replace(/[.!?]+$/u, "")) || null;
 };
 
-const captionSiteNames = { tiktok: "TikTok", instagram: "Instagram" } as const;
+const captionSiteNames = {
+  tiktok: "TikTok",
+  instagram: "Instagram",
+  facebook: "Facebook"
+} as const;
 
-/** Pasted text and TikTok or Instagram captions: the recipe is read from the text alone. */
+/** Pasted text and TikTok, Instagram or Facebook captions: the recipe is read from the text alone. */
 export const extractTextRecipe = (document: TextSourceDocument): TextRecipeExtraction | null => {
   const parsed = parseRecipeText(document.text);
 
@@ -190,7 +194,7 @@ export const extractTextRecipe = (document: TextSourceDocument): TextRecipeExtra
   }
 
   const siteName = captionSiteNames[document.origin];
-  /* A TikTok is always a video; an Instagram post is one when it is a reel. */
+  /* A TikTok is always a video; an Instagram or Facebook post is one when it is a reel or video. */
   const isVideo = document.origin === "tiktok" || Boolean(document.isVideo);
 
   return buildTextRecipeCandidate(parsed, {

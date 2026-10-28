@@ -38,8 +38,8 @@ describe("detectSourceType", () => {
   });
 
   it("marks unsupported social URLs as social", () => {
-    expect(detectSourceType("https://www.facebook.com/reel/123456").sourceType).toBe("social");
-    expect(detectSourceType("https://www.facebook.com/reel/123456").adapterKey).toBeNull();
+    expect(detectSourceType("https://www.facebook.com/cookcreator").sourceType).toBe("social");
+    expect(detectSourceType("https://www.facebook.com/cookcreator").adapterKey).toBeNull();
     expect(detectSourceType("https://www.instagram.com/cookcreator/").sourceType).toBe("social");
     expect(detectSourceType("https://www.instagram.com/cookcreator/").adapterKey).toBeNull();
     expect(detectSourceType("https://www.instagram.com/stories/cook/123/").adapterKey).toBeNull();

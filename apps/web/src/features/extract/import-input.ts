@@ -157,7 +157,14 @@ export const getImportHost = (url: string | null | undefined): string | null => 
 };
 
 const SOCIAL_HOST_PATTERN =
-  /(?:^|\.)(?:tiktok\.com|instagram\.com|facebook\.com|fb\.watch|threads\.net|pinterest\.[a-z.]+|pin\.it|x\.com|twitter\.com)$/u;
+  /(?:^|\.)(?:tiktok\.com|instagram\.com|facebook\.com|fb\.com|fb\.me|fb\.watch|threads\.net|pinterest\.[a-z.]+|pin\.it|x\.com|twitter\.com)$/u;
+
+/** Whether a link is on Facebook (facebook.com and its subdomains, fb.com, fb.me, fb.watch). */
+export const isFacebookImportUrl = (url: string | null | undefined): boolean => {
+  const host = getImportHost(url);
+
+  return host !== null && /(?:^|\.)(?:facebook\.com|fb\.com|fb\.me|fb\.watch)$/u.test(host);
+};
 
 /**
  * Social posts (TikTok, Instagram, Pinterest, Facebook, YouTube Shorts…) keep the recipe in a

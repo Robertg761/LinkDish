@@ -3,6 +3,8 @@ import { getApiErrorKind, isExtractorApiError } from "../../api/errors";
 import { isAccountChangedError } from "../../api/request-binding";
 import { formatMonthlyQuotaCopy, hasMonthlyQuotaFields } from "../billing/quota-copy";
 
+import { isFacebookImportUrl } from "./import-input";
+
 import type { IconName } from "../../components/Icon";
 import type { WebBillingTier } from "../billing/web-billing";
 import type {
@@ -89,6 +91,8 @@ export interface ImportProblem {
 export interface ImportOutcomeContext {
   kind: ImportKind;
   plan: WebBillingTier;
+  /** The link being imported, when there is one; some sites get their own wording. */
+  sourceUrl?: string | null | undefined;
 }
 
 const IMPORTS_ONLY_COUNT_WHEN_THEY_WORK = "Imports only count when they work.";
@@ -215,16 +219,21 @@ export const describeImportFailure = (
         title: "We couldn't reach that page"
       };
 
-    case "source_blocked":
+    case "source_blocked": {
+      // Facebook often hides posts from anyone who isn't logged in, or shares only the start of a caption.
+      const facebook = kind === "url" && isFacebookImportUrl(context.sourceUrl);
+
       return {
         ...base,
         actions: withSuggestion(recovery, kind, ["paste_text", "scan_photo", "another_link"]),
         icon: "lock",
         kind: "blocked",
-        message:
-          "Some sites don't let recipe savers in. Copy the recipe from the page and paste it here, or snap a photo of it.",
-        title: "That site kept its door shut"
+        message: facebook
+          ? "Facebook doesn't let apps read this post, or only shares the start of it. Copy the recipe text from the post and paste it here, or scan a screenshot of it."
+          : "Some sites don't let recipe savers in. Copy the recipe from the page and paste it here, or snap a photo of it.",
+        title: facebook ? "Facebook wouldn't share that post" : "That site kept its door shut"
       };
+    }
 
     case "timeout":
       return {

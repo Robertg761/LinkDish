@@ -5,7 +5,7 @@ import { ExtractionCancelledError } from "../deadline.js";
 import { createGeminiVideoRecipeReader } from "../extractors/video/gemini-video-recipe-reader.js";
 import { createDailyVideoReadAllowance } from "../extractors/video/video-read-allowance.js";
 import { BrowserFetchError, HtmlFetchError } from "../fetchers/errors.js";
-import { isInstagramUrl } from "../source-detection/detect-source-from-url.js";
+import { isFacebookUrl, isInstagramUrl } from "../source-detection/detect-source-from-url.js";
 import { getDomainAdapter } from "../source-detection/domain-adapters.js";
 import { parseYouTubeVideoId } from "../source-detection/parse-youtube-video-id.js";
 import { validatePublicSourceUrl } from "../source-url-safety.js";
@@ -15,6 +15,7 @@ import {
 } from "../text-cleanup/gemini-recipe-text-cleaner.js";
 
 import type * as BrowserEscalation from "./browser-escalation.js";
+import type * as FacebookFetcher from "../fetchers/fetch-facebook-document.js";
 import type * as HtmlFetcher from "../fetchers/fetch-html-document.js";
 import type * as InstagramFetcher from "../fetchers/fetch-instagram-document.js";
 import type * as TikTokFetcher from "../fetchers/fetch-tiktok-document.js";
@@ -44,6 +45,7 @@ let youTubeFetcherModule: Promise<typeof YouTubeFetcher> | null = null;
 let tikTokFetcherModule: Promise<typeof TikTokFetcher> | null = null;
 let tikTokVideoFetcherModule: Promise<typeof TikTokVideoFetcher> | null = null;
 let instagramFetcherModule: Promise<typeof InstagramFetcher> | null = null;
+let facebookFetcherModule: Promise<typeof FacebookFetcher> | null = null;
 
 const loadHtmlFetcher = () => {
   htmlFetcherModule ??= import("../fetchers/fetch-html-document.js");
@@ -63,6 +65,11 @@ const loadTikTokFetcher = () => {
 const loadInstagramFetcher = () => {
   instagramFetcherModule ??= import("../fetchers/fetch-instagram-document.js");
   return instagramFetcherModule;
+};
+
+const loadFacebookFetcher = () => {
+  facebookFetcherModule ??= import("../fetchers/fetch-facebook-document.js");
+  return facebookFetcherModule;
 };
 
 const loadTikTokVideoFetcher = () => {
@@ -239,6 +246,19 @@ export const createDefaultExtractorRuntime = (): ExtractorRuntime => {
         return fetchInstagramDocument(url, (embedUrl) =>
           fetchWithBrowser(embedUrl, options, undefined)
         );
+      }
+
+      /* Facebook's public page head carries the caption; it is a plain request, no browser. */
+      if (isFacebookUrl(url)) {
+        const { fetchFacebookDocument } = await loadFacebookFetcher();
+
+        return fetchFacebookDocument(url, fetchImplementation, {
+          timeoutMs: deadline
+            ? deadline.budgetMs(extractorApiEnv.FETCH_HTTP_TIMEOUT_MS)
+            : extractorApiEnv.FETCH_HTTP_TIMEOUT_MS,
+          ...(deadline ? { signal: deadline.signal } : {}),
+          validateUrl: validatePublicSourceUrl
+        });
       }
 
       const { fetchTikTokDocument } = await loadTikTokFetcher();
