@@ -927,7 +927,7 @@ const styles = StyleSheet.create({
   },
   title: {
     flex: 1,
-    fontSize: 38,
-    lineHeight: 50
+    fontSize: 42,
+    lineHeight: 54
   }
 });

@@ -27,6 +27,7 @@ import { useBilling } from "../../src/features/billing/BillingContext";
 import { useTabBarScroll } from "../../src/features/navigation/TabBarVisibility";
 import { CookbookSyncCard } from "../../src/features/saved-recipes/CookbookSyncCard";
 import { useSavedRecipes } from "../../src/features/saved-recipes/SavedRecipesContext";
+import { useReduceMotion } from "../../src/hooks/useReduceMotion";
 import { pressedOpacity } from "../../src/theme/interactions";
 import { appColors, appSpacing } from "../../src/theme/tokens";
 
@@ -244,6 +245,7 @@ const EmojiPicker = ({
   selectedEmoji: string;
   onSelect: (emoji: string) => void;
 }) => {
+  const reduceMotion = useReduceMotion();
   const [isCustomPickerVisible, setIsCustomPickerVisible] = useState(false);
   const [activePickerSection, setActivePickerSection] =
     useState<EmojiPickerSectionLabel>(defaultEmojiPickerSection);
@@ -267,6 +269,10 @@ const EmojiPicker = ({
       return;
     }
 
+    if (reduceMotion) {
+      emojiPickerProgress.setValue(1);
+      return;
+    }
     emojiPickerProgress.setValue(0);
     Animated.timing(emojiPickerProgress, {
       duration: 160,
@@ -274,13 +280,17 @@ const EmojiPicker = ({
       toValue: 1,
       useNativeDriver: true
     }).start();
-  }, [emojiPickerProgress, isCustomPickerVisible]);
+  }, [emojiPickerProgress, isCustomPickerVisible, reduceMotion]);
 
   const showCustomPicker = () => {
     setIsCustomPickerVisible(true);
   };
 
   const hideCustomPicker = () => {
+    if (reduceMotion) {
+      setIsCustomPickerVisible(false);
+      return;
+    }
     Animated.timing(emojiPickerProgress, {
       duration: 120,
       easing: Easing.in(Easing.cubic),
@@ -459,7 +469,7 @@ const EmojiPicker = ({
                 maxLength={16}
                 onChangeText={handleCustomEmojiTextInput}
                 placeholder="Paste emoji"
-                placeholderTextColor={appColors.muted}
+                placeholderTextColor={appColors.placeholder}
                 style={styles.emojiPickerPasteInput}
                 value=""
               />
@@ -720,6 +730,7 @@ export default function AccountScreen() {
   return (
     <>
       <ScrollView
+        style={styles.page}
         onScroll={onTabScroll}
         scrollEventThrottle={16}
         contentContainerStyle={[
@@ -771,7 +782,7 @@ export default function AccountScreen() {
                   setProfileSavedMessage(null);
                 }}
                 placeholder="Display name"
-                placeholderTextColor={appColors.muted}
+                placeholderTextColor={appColors.placeholder}
                 style={[styles.input, styles.centeredInput]}
                 value={profileDisplayName}
               />
@@ -853,7 +864,7 @@ export default function AccountScreen() {
                 keyboardType="email-address"
                 onChangeText={setConfirmEmail}
                 placeholder="Confirm your email"
-                placeholderTextColor={appColors.muted}
+                placeholderTextColor={appColors.placeholder}
                 style={[styles.input, styles.centeredInput]}
                 value={confirmEmail}
               />
@@ -891,7 +902,7 @@ export default function AccountScreen() {
                   keyboardType="email-address"
                   onChangeText={setEmail}
                   placeholder="Email address"
-                  placeholderTextColor={appColors.muted}
+                  placeholderTextColor={appColors.placeholder}
                   style={[styles.input, styles.centeredInput]}
                   value={email}
                 />
@@ -902,7 +913,7 @@ export default function AccountScreen() {
                       maxLength={6}
                       onChangeText={setCode}
                       placeholder="6-digit code"
-                      placeholderTextColor={appColors.muted}
+                      placeholderTextColor={appColors.placeholder}
                       style={[styles.input, styles.centeredInput]}
                       value={code}
                     />
@@ -915,7 +926,7 @@ export default function AccountScreen() {
                         maxLength={40}
                         onChangeText={setSignupDisplayName}
                         placeholder="Display name"
-                        placeholderTextColor={appColors.muted}
+                        placeholderTextColor={appColors.placeholder}
                         style={[styles.input, styles.centeredInput]}
                         value={signupDisplayName}
                       />
@@ -999,7 +1010,7 @@ export default function AccountScreen() {
               }}
               onSubmitEditing={handleJoinHousehold}
               placeholder="Invite code"
-              placeholderTextColor={appColors.muted}
+              placeholderTextColor={appColors.placeholder}
               returnKeyType="done"
               style={[styles.input, styles.centeredInput]}
               value={inviteCode}
@@ -1059,6 +1070,10 @@ export default function AccountScreen() {
 }
 
 const styles = StyleSheet.create({
+  page: {
+    backgroundColor: appColors.background,
+    flex: 1
+  },
   accountActions: {
     width: "100%"
   },
@@ -1096,8 +1111,11 @@ const styles = StyleSheet.create({
     textAlign: "center"
   },
   container: {
+    alignSelf: "center",
+    maxWidth: 760,
+    width: "100%",
     gap: 16,
-    padding: 20,
+    padding: appSpacing.lg,
     paddingBottom: 36
   },
   householdHeader: {
@@ -1306,7 +1324,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     top: 0,
-    backgroundColor: "rgba(31, 33, 29, 0.42)"
+    backgroundColor: appColors.backdrop
   },
   joinModalBackdropTapTarget: {
     position: "absolute",
@@ -1359,6 +1377,7 @@ const styles = StyleSheet.create({
     width: "100%"
   },
   screen: {
+    backgroundColor: appColors.background,
     alignItems: "center",
     flex: 1,
     justifyContent: "center",

@@ -36,6 +36,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { trackMobileEvent } from "../../../analytics/client";
 import { AppDialog } from "../../../components/AppDialog";
+import { useReduceMotion } from "../../../hooks/useReduceMotion";
 import { selectionTick, success } from "../../../lib/haptics";
 import { buildProxiedRecipeImageUrl } from "../../../lib/recipeImage";
 import {
@@ -58,7 +59,7 @@ const COOK_MODE_REVIEW_REQUESTED_STORAGE_KEY = "linkdish.reviewRequested.v1";
 const COOK_MODE_SWIPE_HORIZONTAL_DOMINANCE = 1.15;
 const COOK_MODE_SWIPE_THRESHOLD = 36;
 const COOK_MODE_TAP_MOVEMENT_TOLERANCE = 10;
-const COOK_MODE_STEP_TRANSITION_DURATION_MS = 170;
+const COOK_MODE_STEP_TRANSITION_DURATION_MS = 140;
 const COOK_MODE_INGREDIENTS_ANIMATION_DURATION_MS = 260;
 const COOK_MODE_PROGRESS_DURATION_MS = 400;
 const COOK_MODE_INGREDIENT_CHECK_DURATION_MS = 180;
@@ -931,6 +932,7 @@ const CookingModeModal = ({
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
   const [keepAwake, setKeepAwake] = useState(true);
   const [transitionDirection, setTransitionDirection] = useState<1 | -1>(1);
+  const reduceMotion = useReduceMotion();
   const [isStepTransitionAnimating, setIsStepTransitionAnimating] = useState(false);
   const [isIngredientsExpanded, setIsIngredientsExpanded] = useState(false);
   const [checkedIngredientKeys, setCheckedIngredientKeys] = useState<Set<string>>(() => new Set());
@@ -1197,55 +1199,25 @@ const CookingModeModal = ({
       }
 
       selectionTick();
-      const transitionGeneration = stepTransitionGenerationRef.current + 1;
-      stepTransitionGenerationRef.current = transitionGeneration;
-      isStepTransitionAnimatingRef.current = true;
-      setIsStepTransitionAnimating(true);
+      activeStepTransitionRef.current?.stop();
+      setCurrentStepIndex(nextStepIndex);
       setTransitionDirection(direction);
-      stepTransition.setValue(0);
-
-      const completeTransition = () => {
-        if (stepTransitionGenerationRef.current !== transitionGeneration) {
-          return;
-        }
-
-        activeStepTransitionRef.current = null;
-        isStepTransitionAnimatingRef.current = false;
-        setIsStepTransitionAnimating(false);
+      if (reduceMotion) {
         stepTransition.setValue(0);
-      };
-
-      const exitAnimation = Animated.timing(stepTransition, {
+        return;
+      }
+      stepTransition.setValue(-1);
+      const entrance = Animated.timing(stepTransition, {
         duration: COOK_MODE_STEP_TRANSITION_DURATION_MS,
-        toValue: 1,
+        toValue: 0,
         useNativeDriver: true
       });
-      activeStepTransitionRef.current = exitAnimation;
-      exitAnimation.start(({ finished }) => {
-        if (stepTransitionGenerationRef.current !== transitionGeneration) {
-          return;
-        }
-
-        if (!finished) {
-          completeTransition();
-          return;
-        }
-
-        setCurrentStepIndex(nextStepIndex);
-        stepTransition.setValue(-1);
-
-        const enterAnimation = Animated.timing(stepTransition, {
-          duration: COOK_MODE_STEP_TRANSITION_DURATION_MS,
-          toValue: 0,
-          useNativeDriver: true
-        });
-        activeStepTransitionRef.current = enterAnimation;
-        enterAnimation.start(() => {
-          completeTransition();
-        });
+      activeStepTransitionRef.current = entrance;
+      entrance.start(() => {
+        if (activeStepTransitionRef.current === entrance) activeStepTransitionRef.current = null;
       });
     },
-    [currentStepIndex, stepTransition, steps.length]
+    [currentStepIndex, reduceMotion, stepTransition, steps.length]
   );
 
   const goToPreviousStep = useCallback(() => {
@@ -1386,13 +1358,13 @@ const CookingModeModal = ({
       {
         translateX: stepTransition.interpolate({
           inputRange: [-1, 0, 1],
-          outputRange: [transitionDirection * 44, 0, transitionDirection * -44]
+          outputRange: [transitionDirection * 16, 0, transitionDirection * -16]
         })
       },
       {
         rotateY: stepTransition.interpolate({
           inputRange: [-1, 0, 1],
-          outputRange: [`${transitionDirection * -18}deg`, "0deg", `${transitionDirection * 18}deg`]
+          outputRange: [`${transitionDirection * -4}deg`, "0deg", `${transitionDirection * 4}deg`]
         })
       }
     ]

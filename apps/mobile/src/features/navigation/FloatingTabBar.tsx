@@ -2,6 +2,7 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import React, { useEffect, useRef, useState } from "react";
 import { Animated, Keyboard, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 
+import { useReduceMotion } from "../../hooks/useReduceMotion";
 import { appColors } from "../../theme/tokens";
 
 import { useTabBarVisibility } from "./TabBarVisibility";
@@ -20,6 +21,7 @@ const icons = {
 type TabBarProps = Parameters<NonNullable<ComponentProps<typeof Tabs>["tabBar"]>>[0];
 
 export const FloatingTabBar = ({ state, descriptors, navigation, insets }: TabBarProps) => {
+  const reduceMotion = useReduceMotion();
   const { visible, setVisible } = useTabBarVisibility();
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const [width, setWidth] = useState(0);
@@ -27,6 +29,11 @@ export const FloatingTabBar = ({ state, descriptors, navigation, insets }: TabBa
   const reveal = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
+    if (reduceMotion) {
+      selected.setValue(state.index);
+      setVisible(true);
+      return;
+    }
     Animated.spring(selected, {
       toValue: state.index,
       speed: 18,
@@ -34,15 +41,19 @@ export const FloatingTabBar = ({ state, descriptors, navigation, insets }: TabBa
       useNativeDriver: true
     }).start();
     setVisible(true);
-  }, [selected, setVisible, state.index]);
+  }, [reduceMotion, selected, setVisible, state.index]);
 
   useEffect(() => {
+    if (reduceMotion) {
+      reveal.setValue(visible && !keyboardVisible ? 1 : 0);
+      return;
+    }
     Animated.timing(reveal, {
       toValue: visible && !keyboardVisible ? 1 : 0,
       duration: 220,
       useNativeDriver: true
     }).start();
-  }, [keyboardVisible, reveal, visible]);
+  }, [keyboardVisible, reduceMotion, reveal, visible]);
 
   useEffect(() => {
     const show = Keyboard.addListener("keyboardDidShow", () => setKeyboardVisible(true));

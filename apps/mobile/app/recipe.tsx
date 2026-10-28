@@ -4,7 +4,6 @@ import { AppButton, AppSurface, AppText } from "@linkdish/ui";
 import { Stack, router, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
 import {
-  AccessibilityInfo,
   ActivityIndicator,
   Animated,
   Image,
@@ -16,16 +15,8 @@ import {
   StyleSheet,
   TextInput,
   View,
-  useWindowDimensions
 } from "react-native";
-import Reanimated, {
-  Easing as ReanimatedEasing,
-  runOnJS,
-  useAnimatedStyle,
-  useSharedValue,
-  withTiming
-} from "react-native-reanimated";
-import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { captureRef } from "react-native-view-shot";
 
 import { trackMobileEvent } from "../src/analytics/client";
@@ -33,7 +24,6 @@ import { AppDialog } from "../src/components/AppDialog";
 import { useAccount } from "../src/features/account/AccountContext";
 import { useOptionalUpgradeMoment } from "../src/features/billing/UpgradeMomentContext";
 import { RecipeOrganizeSection } from "../src/features/collections/RecipeOrganizeSection";
-import { requestRecipeBookBounce } from "../src/features/navigation/recipeBookBounceEvents";
 import { ExtractionAnimation } from "../src/features/recipe-intake/components/ExtractionAnimation";
 import { requestRecipeUrlReset } from "../src/features/recipe-intake/intakeResetEvents";
 import {
@@ -62,6 +52,7 @@ import {
 import { ShareCard } from "../src/features/share/ShareCard";
 import { shareRecipeCardImage } from "../src/features/share/shareRecipeCard";
 import { AddRecipeIngredientsSheet } from "../src/features/shopping/AddRecipeIngredientsSheet";
+import { useReduceMotion } from "../src/hooks/useReduceMotion";
 import { useSmoothKeyboardInset } from "../src/hooks/useSmoothKeyboardInset";
 import { success, warn } from "../src/lib/haptics";
 import { EXTRACTION_ERROR_LINES, selectFlavorCopyLine } from "../src/theme/flavorCopy";
@@ -81,7 +72,6 @@ export const EXTRACTION_LOADING_COPY = [
 
 const EXTRACTION_COPY_INTERVAL_MS = 1800;
 const EXTRACTION_COPY_SWAP_MS = 250;
-const SAVE_TOSS_DURATION_MS = 350;
 
 const truncateShoppingRecipeId = (value: string): string =>
   value.length <= 180 ? value : `recipe:${value.slice(0, 173)}`;
@@ -180,8 +170,6 @@ export default function RecipeScreen() {
     updateRecipe
   } = useSavedRecipes();
   const { showUpgradeMoment } = useOptionalUpgradeMoment();
-  const insets = useSafeAreaInsets();
-  const { width: windowWidth } = useWindowDimensions();
   const [saveLimitMessage, setSaveLimitMessage] = useState<string | null>(null);
   const [editorError, setEditorError] = useState<string | null>(null);
   const [isEditorVisible, setIsEditorVisible] = useState(false);
@@ -199,8 +187,6 @@ export default function RecipeScreen() {
     title: string;
   } | null>(null);
   const [isSaveTargetSaving, setIsSaveTargetSaving] = useState(false);
-  const [isSaveTossVisible, setIsSaveTossVisible] = useState(false);
-  const [saveTossKey, setSaveTossKey] = useState(0);
   const [isSourceImageViewerVisible, setIsSourceImageViewerVisible] = useState(false);
   const [shoppingSheetConfig, setShoppingSheetConfig] =
     useState<RecipeShoppingActionContext | null>(null);
@@ -345,35 +331,6 @@ export default function RecipeScreen() {
       }
     });
   }, [currentSavedRecipe, displayedRecipe, savedId, sharedId]);
-
-  const finishSaveSuccessFeedback = useCallback(() => {
-    // The tab bar is hidden under this screen; the Cookbook tab icon bounces once it is back
-    // in view (see recipeBookBounceEvents).
-    requestRecipeBookBounce();
-    success();
-  }, []);
-
-  const playSaveSuccessFeedback = useCallback(() => {
-    void AccessibilityInfo.isReduceMotionEnabled()
-      .then((isReduceMotionEnabled) => {
-        if (isReduceMotionEnabled) {
-          finishSaveSuccessFeedback();
-          return;
-        }
-
-        setSaveTossKey((current) => current + 1);
-        setIsSaveTossVisible(true);
-      })
-      .catch(() => {
-        setSaveTossKey((current) => current + 1);
-        setIsSaveTossVisible(true);
-      });
-  }, [finishSaveSuccessFeedback]);
-
-  const handleSaveTossComplete = useCallback(() => {
-    setIsSaveTossVisible(false);
-    finishSaveSuccessFeedback();
-  }, [finishSaveSuccessFeedback]);
 
   useEffect(() => {
     const previousState = previousExtractionHapticStateRef.current;
@@ -537,9 +494,9 @@ export default function RecipeScreen() {
           return;
         }
 
-        setSaveLimitMessage(result.message ?? null);
+        setSaveLimitMessage(result.message ?? "Recipe saved.");
         setIsSaveTargetModalVisible(false);
-        playSaveSuccessFeedback();
+        success();
         return;
       }
 
@@ -567,13 +524,13 @@ export default function RecipeScreen() {
         return;
       }
 
-      setSaveLimitMessage(result.message ?? null);
+      setSaveLimitMessage(result.message ?? "Recipe saved.");
 
       if (isSaveTargetAction) {
         setIsSaveTargetModalVisible(false);
       }
 
-      playSaveSuccessFeedback();
+      success();
     } finally {
       if (isSaveTargetAction) {
         setIsSaveTargetSaving(false);
@@ -1170,14 +1127,6 @@ export default function RecipeScreen() {
         />
       </ScrollView>
 
-      <SaveTossOverlay
-        animationKey={saveTossKey}
-        onComplete={handleSaveTossComplete}
-        targetTop={insets.top + 32}
-        visible={isSaveTossVisible}
-        windowWidth={windowWidth}
-      />
-
       {displayedRecipe ? (
         <View collapsable={false} pointerEvents="none" style={styles.hiddenShareCard}>
           <ShareCard ref={shareCardRef} recipe={displayedRecipe} sourceLabel={sourceLabel} />
@@ -1188,88 +1137,6 @@ export default function RecipeScreen() {
 }
 
 type IconName = ComponentProps<typeof MaterialCommunityIcons>["name"];
-
-const SaveTossOverlay = ({
-  animationKey,
-  onComplete,
-  targetTop,
-  visible,
-  windowWidth
-}: {
-  animationKey: number;
-  onComplete: () => void;
-  targetTop: number;
-  visible: boolean;
-  windowWidth: number;
-}) => {
-  const progress = useSharedValue(0);
-  const startLeft = Math.max(28, windowWidth / 2 - 58);
-  const startTop = Math.max(230, targetTop + 190);
-  const translateX = 40 - startLeft;
-  const translateY = targetTop - startTop;
-
-  useEffect(() => {
-    if (!visible) {
-      progress.value = 0;
-      return;
-    }
-
-    progress.value = 0;
-    progress.value = withTiming(
-      1,
-      {
-        duration: SAVE_TOSS_DURATION_MS,
-        easing: ReanimatedEasing.in(ReanimatedEasing.cubic)
-      },
-      (finished) => {
-        if (finished) {
-          runOnJS(onComplete)();
-        }
-      }
-    );
-  }, [animationKey, onComplete, progress, visible]);
-
-  const animatedStyle = useAnimatedStyle(() => {
-    const arcLift = Math.sin(progress.value * Math.PI) * -42;
-
-    return {
-      opacity: 1 - progress.value,
-      transform: [
-        {
-          translateX: progress.value * translateX
-        },
-        {
-          translateY: progress.value * translateY + arcLift
-        },
-        {
-          scale: 1 - progress.value * 0.85
-        }
-      ]
-    };
-  });
-
-  if (!visible) {
-    return null;
-  }
-
-  return (
-    <Reanimated.View
-      pointerEvents="none"
-      style={[
-        styles.saveTossCard,
-        {
-          left: startLeft,
-          top: startTop
-        },
-        animatedStyle
-      ]}
-    >
-      <View style={styles.saveTossCardHeader} />
-      <View style={styles.saveTossCardLine} />
-      <View style={[styles.saveTossCardLine, styles.saveTossCardLineShort]} />
-    </Reanimated.View>
-  );
-};
 
 function SourceImageViewer({
   images,
@@ -1316,11 +1183,16 @@ function SourceImageViewer({
 }
 
 const ExtractionLoadingCopy = () => {
+  const reduceMotion = useReduceMotion();
   const [copyIndex, setCopyIndex] = useState(0);
   const copyProgress = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     const timer = setInterval(() => {
+      if (reduceMotion) {
+        setCopyIndex((current) => (current + 1) % EXTRACTION_LOADING_COPY.length);
+        return;
+      }
       Animated.timing(copyProgress, {
         duration: EXTRACTION_COPY_SWAP_MS,
         toValue: 1,
@@ -1344,7 +1216,7 @@ const ExtractionLoadingCopy = () => {
       clearInterval(timer);
       copyProgress.stopAnimation();
     };
-  }, [copyProgress]);
+  }, [copyProgress, reduceMotion]);
 
   return (
     <Animated.View
@@ -2035,38 +1907,6 @@ const styles = StyleSheet.create({
     flexBasis: "100%",
     fontSize: 14,
     lineHeight: 20
-  },
-  saveTossCard: {
-    backgroundColor: appColors.surface,
-    borderColor: appColors.border,
-    borderRadius: 14,
-    borderWidth: 1,
-    elevation: Platform.OS === "android" ? 5 : 0,
-    gap: 8,
-    height: 74,
-    padding: 12,
-    position: "absolute",
-    shadowColor: appColors.shadow,
-    shadowOffset: { height: 8, width: 0 },
-    shadowOpacity: 0.12,
-    shadowRadius: 18,
-    width: 116,
-    zIndex: 50
-  },
-  saveTossCardHeader: {
-    backgroundColor: appColors.accentSoft,
-    borderRadius: 999,
-    height: 14,
-    width: 44
-  },
-  saveTossCardLine: {
-    backgroundColor: appColors.border,
-    borderRadius: 999,
-    height: 8,
-    width: "100%"
-  },
-  saveTossCardLineShort: {
-    width: "68%"
   },
   saveTargetBackdrop: {
     alignItems: "center",
