@@ -35,11 +35,14 @@ import { normalizeExtractionCandidate } from "../normalizers/index.js";
 import {
   detectHostedMediaSourceType,
   detectSourceTypeFromUrl,
+  FACEBOOK_ADAPTER_KEY,
   INSTAGRAM_ADAPTER_KEY,
+  isFacebookUrl,
   isInstagramUrl,
   isPinterestPinUrl,
   TIKTOK_ADAPTER_KEY
 } from "../source-detection/detect-source-from-url.js";
+import { unwrapFacebookRedirect } from "../source-detection/parse-facebook-url.js";
 import { toYouTubeWatchUrl } from "../source-detection/parse-youtube-video-id.js";
 import { isSourceUrlRejection } from "../source-url-safety.js";
 import { recipeNeedsTextCleanup } from "../text-cleanup/needs-text-cleanup.js";
@@ -66,8 +69,7 @@ import type {
   SourceDocument,
   TextSourceDocument,
   TikTokVideoLocator,
-  VideoReadOutcome,
-  YouTubeSourceDocument
+  VideoReadOutcome
 } from "../types.js";
 
 type ExtractRecipeUrlRequest = {
@@ -132,7 +134,9 @@ const logTaskFailure = (event: string) => (error: unknown) => {
 };
 
 const unsupportedSourceMessages = {
-  social: "Facebook links are not supported yet. Paste a written recipe page instead.",
+  social: "That social link is not supported yet. Paste a written recipe page instead.",
+  facebook:
+    "That Facebook link isn't a post or reel. Share a single public post or reel, or paste the recipe instead.",
   instagram:
     "That Instagram link isn't a post. Share a single post or reel, or paste the recipe instead.",
   video: "That video site is not supported yet. Paste a written recipe page instead.",
@@ -151,16 +155,28 @@ const isUnsupportedInitialSource = (
   sourceType === "social" || sourceType === "video" || sourceType === "unknown";
 
 /*
- * TikTok and Instagram posts have a supported path: the caption, read through TikTok's oEmbed or
- * Instagram's rendered embed page.
+ * TikTok, Instagram and Facebook posts have a supported path: the caption, read through TikTok's
+ * oEmbed, Instagram's rendered embed page or Facebook's public page metadata.
  */
 const isSupportedSocialSource = (detection: DetectionResult, runtime: ExtractorRuntime) =>
   detection.sourceType === "social" &&
-  (detection.adapterKey === TIKTOK_ADAPTER_KEY || detection.adapterKey === INSTAGRAM_ADAPTER_KEY) &&
+  (detection.adapterKey === TIKTOK_ADAPTER_KEY ||
+    detection.adapterKey === INSTAGRAM_ADAPTER_KEY ||
+    detection.adapterKey === FACEBOOK_ADAPTER_KEY) &&
   typeof runtime.fetchSocialDocument === "function";
 
-const socialPlatformName = (detection: DetectionResult): "Instagram" | "TikTok" =>
-  detection.adapterKey === INSTAGRAM_ADAPTER_KEY ? "Instagram" : "TikTok";
+const socialPlatformName = (detection: DetectionResult): "Facebook" | "Instagram" | "TikTok" =>
+  detection.adapterKey === FACEBOOK_ADAPTER_KEY
+    ? "Facebook"
+    : detection.adapterKey === INSTAGRAM_ADAPTER_KEY
+      ? "Instagram"
+      : "TikTok";
+
+/* Facebook blocks anonymous readers often; the way out is always the paste-text or screenshot import. */
+const FACEBOOK_BLOCKED_MESSAGE =
+  "Facebook blocked LinkDish from reading that post. Paste the recipe text or import a screenshot of the post instead.";
+const FACEBOOK_TRUNCATED_MESSAGE =
+  "Facebook only shares part of that post's text with other apps, so LinkDish can't read the whole recipe. Paste the full recipe text or import a screenshot of the post instead.";
 
 const createExtractionContext = (
   runtime: ExtractorRuntime,
@@ -296,7 +312,7 @@ const mapFetchErrorToResponse = (
   sourceType: DetectionResult["sourceType"],
   socialPlatform: ReturnType<typeof socialPlatformName> = "TikTok"
 ): ExtractRecipeResponse => {
-  const socialPost = socialPlatform === "Instagram" ? "post" : "video";
+  const socialPost = socialPlatform === "TikTok" ? "video" : "post";
 
   if (
     error instanceof BrowserFetchError ||
@@ -325,7 +341,9 @@ const mapFetchErrorToResponse = (
           sourceType === "youtube"
             ? "That YouTube source blocked extraction right now."
             : sourceType === "social"
-              ? `${socialPlatform} did not let LinkDish read that ${socialPost} right now.`
+              ? socialPlatform === "Facebook"
+                ? FACEBOOK_BLOCKED_MESSAGE
+                : `${socialPlatform} did not let LinkDish read that ${socialPost} right now.`
               : "That site blocked recipe extraction right now.",
         recovery: {
           retryable: false,
@@ -1096,7 +1114,8 @@ const loadTextRecipeExtractor = async () => {
 };
 
 /*
- * Text that did not come from a fetched page: a TikTok or Instagram caption, or pasted text. The recipe is
+ * Text that did not come from a fetched page: a TikTok, Instagram or Facebook caption, or pasted
+ * text. The recipe is
  * read from the text's own headings or layout (see parse-recipe-text.ts); text without a clear
  * ingredient list fails with a message that says what to add.
  */
@@ -1188,7 +1207,7 @@ const runTextExtraction = async ({
     const response = noRecipeInTextResponse(
       document.origin === "tiktok"
         ? "That video's caption doesn't include a written recipe. Try the recipe's website instead."
-        : document.origin === "instagram"
+        : document.origin === "instagram" || document.origin === "facebook"
           ? "That post's caption doesn't include a written recipe. Try the recipe's website instead."
           : looksLikeRecipeText(document.text)
             ? 'LinkDish couldn\'t tell the ingredients from the steps. Put the ingredients under an "Ingredients" heading and the steps under a "Method" heading, then try again.'
@@ -1224,9 +1243,101 @@ const runTextExtraction = async ({
   };
 };
 
+const maxFacebookRecipeLinks = 3;
+
 /*
- * TikTok and Instagram: the caption (through TikTok's oEmbed, or Instagram's embed page rendered
- * in the browser) is parsed like pasted text.
+ * A Facebook caption, plus the recipe sites its post links to. Facebook cuts the public caption
+ * short ("..."), and a cut caption is half a recipe, so it is only used to find a link: with no
+ * link that yields a recipe the import fails and points at the paste-text or screenshot import.
+ * A whole caption is parsed like pasted text, and a link is tried when the caption is no full
+ * recipe (none, or only the ingredients of a video).
+ */
+const extractFromFacebookCaption = async (
+  request: ExtractRecipeUrlRequest,
+  context: ExtractionContext,
+  hostname: string,
+  detection: DetectionResult,
+  document: TextSourceDocument
+): Promise<ExtractionResult> => {
+  const { runtime } = context;
+
+  await ensureAuthorized(context);
+
+  const textExtraction = document.captionTruncated
+    ? null
+    : (await loadTextRecipeExtractor())(document);
+
+  /* The last word of a cut caption may be half a link. */
+  const readableText = document.captionTruncated
+    ? document.text.replace(/\S*(?:\.{3}|\u2026)\s*$/u, "")
+    : document.text;
+  const { findRecipeLinksInText, isRecipeLinkCandidate } = await loadYouTubeExtractorModule();
+  const captionLinks = findRecipeLinksInText(readableText);
+
+  /*
+   * A link the caption itself points at ("Full recipe: https://...") is tried first, even when
+   * the caption parses: the linked page has the whole recipe. Links the page shares are only
+   * tried when the caption has no full recipe of its own.
+   */
+  if (captionLinks.length > 0 || !textExtraction || textExtraction.methodInVideo) {
+    const links = [
+      ...new Set([...captionLinks, ...(document.linkedUrls ?? []).filter(isRecipeLinkCandidate)])
+    ].slice(0, maxFacebookRecipeLinks);
+    const linked =
+      links.length > 0
+        ? await extractFromLinkedRecipePages(
+            request,
+            context,
+            hostname,
+            links,
+            document.isVideo ? document.url : null
+          )
+        : null;
+
+    if (linked) {
+      return linked;
+    }
+  }
+
+  if (document.captionTruncated) {
+    const response = extractRecipeResponseSchema.parse({
+      status: "failure",
+      reason: "source_blocked",
+      userMessage: FACEBOOK_TRUNCATED_MESSAGE,
+      recovery: {
+        retryable: false,
+        allowFallback: false,
+        suggestedAction: "try_another_url"
+      }
+    });
+
+    return {
+      response,
+      logContext: makeLogContext({
+        hostname,
+        detection,
+        attempt: request.attempt,
+        response,
+        strategy: "none",
+        fetchMode: "http",
+        fallbackProvider: runtime.fallbackExtractor.providerName,
+        browserAttempted: false
+      })
+    };
+  }
+
+  return runTextExtraction({
+    context,
+    document,
+    detection,
+    hostname,
+    attempt: request.attempt
+  });
+};
+
+/*
+ * TikTok, Instagram and Facebook: the caption (through TikTok's oEmbed, Instagram's embed page
+ * rendered in the browser, or Facebook's public page metadata) is parsed like pasted text.
  */
 const extractFromSocialCaption = async (
   request: ExtractRecipeUrlRequest,
@@ -1279,6 +1390,10 @@ const extractFromSocialCaption = async (
     };
   }
 
+  if (document.origin === "facebook") {
+    return extractFromFacebookCaption(request, context, hostname, detection, document);
+  }
+
   return runTextExtraction({
     context,
     document,
@@ -1307,7 +1422,9 @@ const rejectUnsupportedSource = (
     userMessage:
       sourceType === "social" && isInstagramUrl(request.url)
         ? unsupportedSourceMessages.instagram
-        : unsupportedSourceMessages[sourceType],
+        : sourceType === "social" && isFacebookUrl(request.url)
+          ? unsupportedSourceMessages.facebook
+          : unsupportedSourceMessages[sourceType],
     recovery: {
       retryable: false,
       allowFallback: false,
@@ -1334,21 +1451,20 @@ const rejectUnsupportedSource = (
 const minimumLinkedPageBudgetMs = 4_000;
 
 /**
- * Reads the written recipe a YouTube description links to ("Full recipe: https://..."). Each
- * link is validated like a user URL and must be an ordinary web page; the first one whose page
- * yields a recipe wins. The recipe keeps the video as its videoUrl. Returns null when no link
- * yields one, so the description's own result (or failure) stands.
+ * Reads the written recipe a video's description or caption links to ("Full recipe:
+ * https://..."). Each link is validated like a user URL and must be an ordinary web page; the
+ * first one whose page yields a recipe wins. The recipe keeps the video as its videoUrl (when
+ * there is one). Returns null when no link yields one, so the description's own result (or
+ * failure) stands.
  */
-const extractFromYouTubeRecipeLinks = async (
+const extractFromLinkedRecipePages = async (
   request: ExtractRecipeUrlRequest,
   context: ExtractionContext,
   hostname: string,
-  video: YouTubeSourceDocument
+  links: string[],
+  videoUrl: string | null
 ): Promise<ExtractionResult | null> => {
-  const { findYouTubeRecipeLinks } = await loadYouTubeExtractorModule();
-  const videoUrl = toYouTubeWatchUrl(video.videoId);
-
-  for (const link of findYouTubeRecipeLinks(video)) {
+  for (const link of links) {
     if (context.deadline.remainingMs() < minimumLinkedPageBudgetMs) {
       return null;
     }
@@ -1404,7 +1520,7 @@ const extractFromYouTubeRecipeLinks = async (
           ...decision.result,
           recipe: {
             ...decision.result.recipe,
-            videoUrl: decision.result.recipe.videoUrl ?? videoUrl
+            ...(videoUrl ? { videoUrl: decision.result.recipe.videoUrl ?? videoUrl } : {})
           }
         }
       })
@@ -1616,7 +1732,14 @@ const extractFromUrl = async (
     sourceDocument.kind === "youtube" &&
     (decision.kind !== "success" || candidate?.signals.requiredFieldsInferred === true)
   ) {
-    const linked = await extractFromYouTubeRecipeLinks(request, context, hostname, sourceDocument);
+    const { findYouTubeRecipeLinks } = await loadYouTubeExtractorModule();
+    const linked = await extractFromLinkedRecipePages(
+      request,
+      context,
+      hostname,
+      findYouTubeRecipeLinks(sourceDocument),
+      toYouTubeWatchUrl(sourceDocument.videoId)
+    );
 
     if (linked) {
       return linked;
@@ -1702,10 +1825,18 @@ const extractFromUrl = async (
 };
 
 export const extractRecipeFromUrl = async (
-  request: ExtractRecipeUrlRequest,
+  requestedUrl: ExtractRecipeUrlRequest,
   runtime: ExtractorRuntime = getSharedExtractorRuntime(),
   options: ExtractRecipeOptions = {}
 ): Promise<ExtractionResult> => {
+  /*
+   * A link copied out of Facebook (l.facebook.com/l.php?u=...) is just a link to its target:
+   * a Facebook post, or any other site, which then takes the same path as a direct link to it
+   * and goes through the same URL safety checks.
+   */
+  const unwrappedUrl = unwrapFacebookRedirect(requestedUrl.url);
+  const request =
+    unwrappedUrl === requestedUrl.url ? requestedUrl : { ...requestedUrl, url: unwrappedUrl };
   const { context, dispose } = createExtractionContext(runtime, options);
   const cacheStatus: NonNullable<ExtractionLogContext["cacheStatus"]> = isCacheLookupEnabled(
     context,

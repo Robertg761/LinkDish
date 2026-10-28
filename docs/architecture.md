@@ -226,8 +226,33 @@ platforms map onto them and are told apart internally by the detection `adapterK
   through the same text parser as TikTok. A reel's ingredients-only caption keeps the video step; a
   photo post's does not, and reels never go to the video reader. A login redirect or a page
   with no post fails as `source_blocked`, a removed or private post as `parse_failed`.
-  Instagram links that are not a post (profiles, stories, `/share/` redirect links) and Facebook
-  stay unsupported.
+  Instagram links that are not a post (profiles, stories, `/share/` redirect links) stay
+  unsupported.
+- **Facebook** public posts, photos, videos and reels (`/<page>/posts/<id>`, `permalink.php`,
+  `story.php`, `/photo`, `/watch?v=`, `/videos/`, `/reel/<id>`, groups' `/posts/` and
+  `/permalink/`, `/share/p|r|v/<token>`, `fb.watch`, `fb.me`, `fb.com`, and the `m.`,
+  `mbasic.`, `web.` and `touch.` hosts; `source-detection/parse-facebook-url.ts`). A
+  `l.facebook.com`/`lm.facebook.com` link wrapper is unwrapped to its `u=` target before
+  anything else, so a wrapped recipe site is imported as that site (same URL safety checks) and
+  a wrapped Facebook post takes this path. The fetcher (`fetchers/fetch-facebook-document.ts`)
+  is a plain request, no browser: always to `www.facebook.com` (`m.` and friends redirect to a
+  login page), with the honest LinkDishBot user-agent (Facebook answers a spoofed desktop
+  browser with HTTP 400; LinkDish never poses as Facebook's own crawler or a search engine),
+  redirects followed by hand with every hop validated and kept on Facebook. The caption is the
+  longest of og:description, the meta and Twitter descriptions, JSON-LD, and, for videos and
+  reels, the caption in og:title (`<caption> | <page>`) and the oEmbed link's title, which
+  Facebook does not cut. Facebook cuts og:description at about 200 characters with `...`; when
+  that is all there is (typically a photo or text post) the document is flagged
+  `captionTruncated`, and half a recipe is never imported: LinkDish follows a recipe link in
+  the caption or in the page's `l.php` link-outs (same safety checks and linked-page path as a
+  YouTube description's "Full recipe:" link), and without one fails as `source_blocked` saying
+  Facebook only shares part of the post. A login, checkpoint or consent redirect, HTTP
+  400/401/403/429, or a generic page with no post content (the front page's og tags) also
+  fails as `source_blocked` ("Facebook blocked LinkDish from reading that post. Paste the
+  recipe text or import a screenshot of the post instead."); a removed post is `parse_failed`.
+  Captions go through the same text parser as TikTok and Instagram (a video's ingredients-only
+  caption keeps the video step), nothing is cached, and no Facebook login or cookie is ever
+  used. Facebook pages that are not a post (profiles, groups, events) are unsupported.
 - **Video reader** (`extractors/video/`, behind `VIDEO_RECIPE_READER_ENABLED` and
   `GEMINI_API_KEY`): when a TikTok caption has no recipe or only the ingredients, or a
   YouTube video's description, creator comments and linked pages have none, Gemini

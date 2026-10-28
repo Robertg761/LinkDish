@@ -4,6 +4,7 @@ import {
   findCaptionSourceUrl,
   getImportHost,
   getTextInputProblem,
+  isFacebookImportUrl,
   isSocialImportUrl,
   MAX_BATCH_LINKS,
   parseLinkList,
@@ -109,8 +110,35 @@ describe("source helpers", () => {
     expect(isSocialImportUrl("https://www.instagram.com/p/xyz/")).toBe(true);
     expect(isSocialImportUrl("https://pin.it/abc")).toBe(true);
     expect(isSocialImportUrl("https://www.youtube.com/shorts/abcdefg")).toBe(true);
+    expect(isSocialImportUrl("https://www.facebook.com/reel/725554398033140/")).toBe(true);
+    expect(isSocialImportUrl("https://fb.watch/abc123/")).toBe(true);
+    expect(isSocialImportUrl("https://fb.me/abc123")).toBe(true);
+    expect(isSocialImportUrl("https://notfacebook.com/reel/1")).toBe(false);
     expect(isSocialImportUrl("https://www.youtube.com/watch?v=abcdefg")).toBe(false);
     expect(isSocialImportUrl("https://www.seriouseats.com/chili")).toBe(false);
+  });
+
+  it("recognises Facebook links and not lookalikes", () => {
+    for (const url of [
+      "https://www.facebook.com/reel/725554398033140/",
+      "https://m.facebook.com/story.php?story_fbid=1&id=2",
+      "https://mbasic.facebook.com/photo.php?fbid=1",
+      "https://fb.com/reel/1",
+      "https://fb.me/abc",
+      "https://fb.watch/abc/"
+    ]) {
+      expect(isFacebookImportUrl(url)).toBe(true);
+    }
+
+    for (const url of [
+      "https://notfacebook.com/reel/1",
+      "https://facebook.com.example.test/reel/1",
+      "https://www.instagram.com/p/xyz/",
+      null,
+      "nope"
+    ]) {
+      expect(isFacebookImportUrl(url)).toBe(false);
+    }
   });
 
   it("shortens hosts", () => {

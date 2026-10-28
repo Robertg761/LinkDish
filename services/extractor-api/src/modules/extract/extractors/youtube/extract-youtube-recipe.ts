@@ -1,3 +1,4 @@
+import { unwrapFacebookRedirect } from "../../source-detection/parse-facebook-url.js";
 import { toYouTubeWatchUrl } from "../../source-detection/parse-youtube-video-id.js";
 import {
   buildTextRecipeCandidate,
@@ -77,18 +78,35 @@ const recipeCuePattern =
 
 const maxRecipeLinks = 2;
 
+/** Whether a link a post shares can lead to a written recipe: not a social, shop or music host, not a home page. */
+export const isRecipeLinkCandidate = (url: string): boolean => {
+  try {
+    const parsed = new URL(url);
+
+    return (
+      (parsed.protocol === "https:" || parsed.protocol === "http:") &&
+      !nonRecipeHostPattern.test(parsed.hostname) &&
+      !(parsed.pathname.replace(/\/+$/u, "") === "" && parsed.search === "" && parsed.hash === "")
+    );
+  } catch {
+    return false;
+  }
+};
+
 /**
- * Links in a video's description that likely lead to its written recipe, best first: links on
- * (or right under) a line like "Full recipe:", then lines that mention a recipe, then links
- * whose path says "recipe". Home pages and social, shop and music links are left out.
+ * Links in a video's description (or a social caption) that likely lead to its written recipe,
+ * best first: links on (or right under) a line like "Full recipe:", then lines that mention a
+ * recipe, then links whose path says "recipe". Home pages and social, shop and music links are
+ * left out.
  */
-export const findYouTubeRecipeLinks = (document: YouTubeSourceDocument): string[] => {
-  const ranked = findTextLinks(document.description ?? "")
+export const findRecipeLinksInText = (text: string): string[] => {
+  const ranked = findTextLinks(text)
     .map(({ url, line }, order) => {
       let parsed: URL;
 
       try {
-        parsed = new URL(url);
+        /* A link copied out of Facebook is wrapped in l.facebook.com/l.php?u=<the real link>. */
+        parsed = new URL(unwrapFacebookRedirect(url));
       } catch {
         return null;
       }
@@ -122,3 +140,6 @@ export const findYouTubeRecipeLinks = (document: YouTubeSourceDocument): string[
 
   return [...new Set(ranked.map((entry) => entry.url))].slice(0, maxRecipeLinks);
 };
+
+export const findYouTubeRecipeLinks = (document: YouTubeSourceDocument): string[] =>
+  findRecipeLinksInText(document.description ?? "");

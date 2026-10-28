@@ -4,7 +4,12 @@ import { describe, expect, it } from "vitest";
 
 import { VIDEO_METHOD_STEP } from "../text/extract-text-recipe";
 
-import { extractYouTubeRecipe, findYouTubeRecipeLinks } from "./extract-youtube-recipe";
+import {
+  extractYouTubeRecipe,
+  findRecipeLinksInText,
+  findYouTubeRecipeLinks,
+  isRecipeLinkCandidate
+} from "./extract-youtube-recipe";
 
 import type { YouTubeSourceDocument } from "../../types";
 
@@ -222,5 +227,27 @@ describe("findYouTubeRecipeLinks", () => {
     expect(
       findYouTubeRecipeLinks(video({ description: "Follow me https://tiktok.com/@cook" }))
     ).toEqual([]);
+  });
+});
+
+describe("findRecipeLinksInText", () => {
+  it("unwraps a link copied out of Facebook and leaves Facebook's own links out", () => {
+    const wrapped = `https://l.facebook.com/l.php?u=${encodeURIComponent("https://cookblog.example/lemon-chicken")}&h=AT0abc`;
+
+    expect(
+      findRecipeLinksInText(
+        `Full recipe: ${wrapped}\nMore on https://www.facebook.com/dinnerwithdana/posts/1\n`
+      )
+    ).toEqual(["https://cookblog.example/lemon-chicken"]);
+  });
+});
+
+describe("isRecipeLinkCandidate", () => {
+  it("accepts recipe pages and rejects home pages, social and shop hosts", () => {
+    expect(isRecipeLinkCandidate("https://cookblog.example/lemon-chicken")).toBe(true);
+    expect(isRecipeLinkCandidate("https://cookblog.example/")).toBe(false);
+    expect(isRecipeLinkCandidate("https://www.facebook.com/dinnerwithdana/posts/1")).toBe(false);
+    expect(isRecipeLinkCandidate("https://www.amazon.com/dp/B000")).toBe(false);
+    expect(isRecipeLinkCandidate("javascript:alert(1)")).toBe(false);
   });
 });

@@ -551,7 +551,11 @@ export function useImportSession(): ImportSession {
 
     showProblem(
       request,
-      describeImportFailure(response, { kind: importKindOf(request), plan: tierNow() })
+      describeImportFailure(response, {
+        kind: importKindOf(request),
+        plan: tierNow(),
+        sourceUrl: request.kind === "url" ? request.url : null
+      })
     );
   };
 

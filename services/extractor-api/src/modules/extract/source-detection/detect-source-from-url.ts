@@ -1,4 +1,5 @@
 import { getDomainAdapter } from "./domain-adapters.js";
+import { isFacebookHostname, parseFacebookPost } from "./parse-facebook-url.js";
 import { parseYouTubeVideoId } from "./parse-youtube-video-id.js";
 import { getRegistrableDomain } from "./registrable-domain.js";
 
@@ -10,11 +11,11 @@ import type { DetectionResult } from "../types.js";
  * apart from the document-aware detection and never loads the HTML parser.
  *
  * Response contracts validate sourceType against a closed enum in clients that
- * are already installed, so new platforms map onto existing values: TikTok and
- * Instagram are "social", other video hosts "video". The adapterKey tells the
+ * are already installed, so new platforms map onto existing values: TikTok,
+ * Instagram and Facebook are "social", other video hosts "video". The adapterKey tells the
  * orchestrator which platform path to take.
  */
-const socialHosts = ["instagram.com", "instagr.am", "facebook.com", "fb.watch"];
+const socialHosts = ["instagram.com", "instagr.am"];
 const videoHosts = ["vimeo.com", "dailymotion.com", "twitch.tv"];
 const matchesHostname = (hostname: string, expected: string): boolean =>
   hostname === expected || hostname.endsWith(`.${expected}`);
@@ -22,6 +23,9 @@ const matchesHostname = (hostname: string, expected: string): boolean =>
 export const TIKTOK_ADAPTER_KEY = "tiktok";
 export const PINTEREST_ADAPTER_KEY = "pinterest";
 export const INSTAGRAM_ADAPTER_KEY = "instagram";
+export const FACEBOOK_ADAPTER_KEY = "facebook";
+
+export { isFacebookUrl } from "./parse-facebook-url.js";
 
 export const isTikTokUrl = (url: string): boolean => {
   try {
@@ -143,7 +147,19 @@ export const detectHostedMediaSourceType = (url: string): DetectionResult | null
     };
   }
 
-  if (socialHosts.some((candidate) => matchesHostname(hostname, candidate))) {
+  if (parseFacebookPost(url)) {
+    return {
+      sourceType: "social",
+      confidence: "high",
+      reasons: ["Matched a Facebook post or reel; the caption is read from its public page."],
+      adapterKey: FACEBOOK_ADAPTER_KEY
+    };
+  }
+
+  if (
+    isFacebookHostname(hostname) ||
+    socialHosts.some((candidate) => matchesHostname(hostname, candidate))
+  ) {
     return {
       sourceType: "social",
       confidence: "high",
