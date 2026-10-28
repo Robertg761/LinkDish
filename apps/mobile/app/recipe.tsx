@@ -52,11 +52,11 @@ import {
 import { ShareCard } from "../src/features/share/ShareCard";
 import { shareRecipeCardImage } from "../src/features/share/shareRecipeCard";
 import { AddRecipeIngredientsSheet } from "../src/features/shopping/AddRecipeIngredientsSheet";
+import { useReduceMotion } from "../src/hooks/useReduceMotion";
 import { useSmoothKeyboardInset } from "../src/hooks/useSmoothKeyboardInset";
 import { success, warn } from "../src/lib/haptics";
 import { EXTRACTION_ERROR_LINES, selectFlavorCopyLine } from "../src/theme/flavorCopy";
 import { pressedOpacity, pressedScale } from "../src/theme/interactions";
-import { useReduceMotion } from "../src/hooks/useReduceMotion";
 import { appColors } from "../src/theme/tokens";
 
 import type { RecipeSourceImage } from "../src/features/recipe-results/types";

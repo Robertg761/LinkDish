@@ -126,7 +126,7 @@ vi.mock("react-native-safe-area-context", () => ({
 
 vi.mock("react-native", () => ({
   AccessibilityInfo: {
-    isReduceMotionEnabled: async () => false,
+    isReduceMotionEnabled: () => Promise.resolve(false),
     addEventListener: () => ({ remove: () => undefined })
   },
   Alert: {

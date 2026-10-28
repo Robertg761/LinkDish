@@ -17,8 +17,8 @@ import {
 } from "../src/features/recipe-intake/textImport";
 import { useRecipeExtraction } from "../src/features/recipe-results/hooks/useRecipeExtraction";
 import { useSavedRecipes } from "../src/features/saved-recipes/SavedRecipesContext";
-import { EXTRACTION_ERROR_LINES, selectFlavorCopyLine } from "../src/theme/flavorCopy";
 import { useReduceMotion } from "../src/hooks/useReduceMotion";
+import { EXTRACTION_ERROR_LINES, selectFlavorCopyLine } from "../src/theme/flavorCopy";
 import { appColors, appSpacing } from "../src/theme/tokens";
 
 const EXTRACTION_LOADING_COPY = [

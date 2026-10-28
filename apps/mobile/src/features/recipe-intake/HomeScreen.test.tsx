@@ -43,7 +43,7 @@ const urlFormState = vi.hoisted(() => ({
 
 vi.mock("react-native", () => ({
   AccessibilityInfo: {
-    isReduceMotionEnabled: async () => false,
+    isReduceMotionEnabled: () => Promise.resolve(false),
     addEventListener: () => ({ remove: () => undefined })
   },
   ActivityIndicator: ({ color }: { color?: string }) =>
