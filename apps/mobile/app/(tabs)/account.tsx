@@ -469,7 +469,7 @@ const EmojiPicker = ({
                 maxLength={16}
                 onChangeText={handleCustomEmojiTextInput}
                 placeholder="Paste emoji"
-                placeholderTextColor={appColors.muted}
+                placeholderTextColor={appColors.placeholder}
                 style={styles.emojiPickerPasteInput}
                 value=""
               />
@@ -782,7 +782,7 @@ export default function AccountScreen() {
                   setProfileSavedMessage(null);
                 }}
                 placeholder="Display name"
-                placeholderTextColor={appColors.muted}
+                placeholderTextColor={appColors.placeholder}
                 style={[styles.input, styles.centeredInput]}
                 value={profileDisplayName}
               />
@@ -864,7 +864,7 @@ export default function AccountScreen() {
                 keyboardType="email-address"
                 onChangeText={setConfirmEmail}
                 placeholder="Confirm your email"
-                placeholderTextColor={appColors.muted}
+                placeholderTextColor={appColors.placeholder}
                 style={[styles.input, styles.centeredInput]}
                 value={confirmEmail}
               />
@@ -902,7 +902,7 @@ export default function AccountScreen() {
                   keyboardType="email-address"
                   onChangeText={setEmail}
                   placeholder="Email address"
-                  placeholderTextColor={appColors.muted}
+                  placeholderTextColor={appColors.placeholder}
                   style={[styles.input, styles.centeredInput]}
                   value={email}
                 />
@@ -913,7 +913,7 @@ export default function AccountScreen() {
                       maxLength={6}
                       onChangeText={setCode}
                       placeholder="6-digit code"
-                      placeholderTextColor={appColors.muted}
+                      placeholderTextColor={appColors.placeholder}
                       style={[styles.input, styles.centeredInput]}
                       value={code}
                     />
@@ -926,7 +926,7 @@ export default function AccountScreen() {
                         maxLength={40}
                         onChangeText={setSignupDisplayName}
                         placeholder="Display name"
-                        placeholderTextColor={appColors.muted}
+                        placeholderTextColor={appColors.placeholder}
                         style={[styles.input, styles.centeredInput]}
                         value={signupDisplayName}
                       />
@@ -1010,7 +1010,7 @@ export default function AccountScreen() {
               }}
               onSubmitEditing={handleJoinHousehold}
               placeholder="Invite code"
-              placeholderTextColor={appColors.muted}
+              placeholderTextColor={appColors.placeholder}
               returnKeyType="done"
               style={[styles.input, styles.centeredInput]}
               value={inviteCode}
@@ -1111,8 +1111,11 @@ const styles = StyleSheet.create({
     textAlign: "center"
   },
   container: {
+    alignSelf: "center",
+    maxWidth: 760,
+    width: "100%",
     gap: 16,
-    padding: 20,
+    padding: appSpacing.lg,
     paddingBottom: 36
   },
   householdHeader: {
@@ -1321,7 +1324,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     top: 0,
-    backgroundColor: "rgba(31, 33, 29, 0.42)"
+    backgroundColor: appColors.backdrop
   },
   joinModalBackdropTapTarget: {
     position: "absolute",

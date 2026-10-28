@@ -545,7 +545,7 @@ function HouseholdView() {
                 autoCapitalize="none"
                 onChangeText={setInviteCode}
                 placeholder="Invite code"
-                placeholderTextColor={appColors.muted}
+                placeholderTextColor={appColors.placeholder}
                 style={styles.input}
                 value={inviteCode}
               />
@@ -605,30 +605,17 @@ function HouseholdView() {
             style={styles.inviteModalBackdrop}
           />
           <AppSurface style={styles.inviteModalCard}>
-            <View style={styles.inviteModalHeader}>
-              <AppText variant="title">Invite Member</AppText>
-              <Pressable
-                accessibilityLabel="Close invite member modal"
-                accessibilityRole="button"
-                disabled={isLoading}
-                hitSlop={10}
-                onPress={closeInviteModal}
-                style={({ pressed }) => [
-                  styles.inviteModalClose,
-                  pressed && !isLoading && styles.iconButtonPressed
-                ]}
-              >
-                <MaterialCommunityIcons color={appColors.muted} name="close" size={20} />
-              </Pressable>
-            </View>
+            <AppText style={styles.inviteModalTitle} variant="title">
+              Invite Member
+            </AppText>
             <TextInput
               autoCapitalize="none"
               autoCorrect={false}
               keyboardType="email-address"
               onChangeText={setInviteEmail}
               placeholder="Member email"
-              placeholderTextColor={appColors.muted}
-              style={styles.input}
+              placeholderTextColor={appColors.placeholder}
+              style={[styles.input, styles.inviteModalInput]}
               value={inviteEmail}
             />
             {error ? (
@@ -638,15 +625,17 @@ function HouseholdView() {
             ) : null}
             <View style={styles.inviteModalActions}>
               <AppButton
-                disabled={isLoading || !inviteEmail.trim().includes("@")}
-                label={isLoading ? "Sending" : "Send invite"}
-                onPress={sendInvite}
-              />
-              <AppButton
                 disabled={isLoading}
                 label="Cancel"
                 onPress={closeInviteModal}
-                variant="ghost"
+                style={styles.inviteModalButton}
+                variant="outline"
+              />
+              <AppButton
+                disabled={isLoading || !inviteEmail.trim().includes("@")}
+                label={isLoading ? "Sending" : "Send invite"}
+                onPress={sendInvite}
+                style={styles.inviteModalButton}
               />
             </View>
           </AppSurface>
@@ -847,12 +836,21 @@ const styles = StyleSheet.create({
     width: 44
   },
   inviteModal: {
+    alignItems: "center",
     flex: 1,
     justifyContent: "center",
     padding: 20
   },
   inviteModalActions: {
-    gap: 8
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+    width: "100%"
+  },
+  inviteModalButton: {
+    flex: 1,
+    minWidth: 128,
+    paddingHorizontal: 12
   },
   inviteModalBackdrop: {
     position: "absolute",
@@ -860,25 +858,19 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     top: 0,
-    backgroundColor: "rgba(31, 33, 29, 0.28)"
+    backgroundColor: appColors.backdrop
   },
   inviteModalCard: {
-    gap: 16
+    gap: 14,
+    maxWidth: 420,
+    width: "100%"
   },
-  inviteModalClose: {
-    alignItems: "center",
-    backgroundColor: appColors.canvas,
-    borderColor: appColors.border,
-    borderRadius: 999,
-    borderWidth: 1,
-    height: 38,
-    justifyContent: "center",
-    width: 38
+  inviteModalTitle: {
+    textAlign: "center"
   },
-  inviteModalHeader: {
-    alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "space-between"
+  inviteModalInput: {
+    textAlign: "center",
+    width: "100%"
   },
   inviteModalError: {
     color: appColors.danger,
