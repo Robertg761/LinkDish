@@ -34,6 +34,7 @@ import { useAccount } from "../src/features/account/AccountContext";
 import { useOptionalUpgradeMoment } from "../src/features/billing/UpgradeMomentContext";
 import { RecipeOrganizeSection } from "../src/features/collections/RecipeOrganizeSection";
 import { requestRecipeBookBounce } from "../src/features/navigation/recipeBookBounceEvents";
+import { ExtractionAnimation } from "../src/features/recipe-intake/components/ExtractionAnimation";
 import { requestRecipeUrlReset } from "../src/features/recipe-intake/intakeResetEvents";
 import {
   usePendingImageImport,
@@ -184,6 +185,7 @@ export default function RecipeScreen() {
   const [saveLimitMessage, setSaveLimitMessage] = useState<string | null>(null);
   const [editorError, setEditorError] = useState<string | null>(null);
   const [isEditorVisible, setIsEditorVisible] = useState(false);
+  const [isInspiredConfirmationVisible, setIsInspiredConfirmationVisible] = useState(false);
   const [isEditorSaving, setIsEditorSaving] = useState(false);
   const [isShareCardSharing, setIsShareCardSharing] = useState(false);
   const [isSaveTargetModalVisible, setIsSaveTargetModalVisible] = useState(false);
@@ -845,13 +847,15 @@ export default function RecipeScreen() {
         ) : null}
 
         {extraction.state.state === "loading" ? (
-          <AppSurface style={styles.loadingCard}>
-            <ActivityIndicator color={appColors.accent} />
-            <View style={styles.statusCopy}>
-              <AppText variant="headline">
-                {extraction.state.attempt === "fallback"
-                  ? "Taking another look"
-                  : "Reading the recipe"}
+          <AppSurface style={styles.extractionLoadingCard}>
+            <ExtractionAnimation />
+            <View style={styles.extractionLoadingCopy}>
+              <AppText style={styles.extractionLoadingTitle} variant="headline">
+                {extraction.state.inspired
+                  ? "Generating your recipe"
+                  : extraction.state.attempt === "fallback"
+                    ? "Taking another look"
+                    : "Reading the recipe"}
               </AppText>
               <ExtractionLoadingCopy />
             </View>
@@ -887,32 +891,55 @@ export default function RecipeScreen() {
 
         {extraction.state.state === "failure" ? (
           <StatusCard
-            body={extraction.state.message}
+            body={
+              extraction.state.inspiredAvailable
+                ? `${extraction.state.message} Would you like a recipe based on the video?`
+                : extraction.state.message
+            }
             primaryAction={
-              extraction.state.reason === "plan_limit"
+              extraction.state.inspiredAvailable
                 ? {
-                    label: "View Plans",
-                    onPress: () => router.push("/upgrade")
+                    label: "Generate a recipe",
+                    onPress: () => setIsInspiredConfirmationVisible(true)
                   }
-                : extraction.state.allowFallback ||
-                    extraction.state.suggestedAction === "retry_fallback"
+                : extraction.state.reason === "plan_limit"
                   ? {
-                      label: "Try again with more help",
-                      onPress: extraction.retryWithFallback
+                      label: "View Plans",
+                      onPress: () => router.push("/upgrade")
                     }
-                  : extraction.state.suggestedAction === "retry_primary"
+                  : extraction.state.allowFallback ||
+                      extraction.state.suggestedAction === "retry_fallback"
                     ? {
-                        label: "Retry extraction",
-                        onPress: extraction.retryPrimary
+                        label: "Try again with more help",
+                        onPress: extraction.retryWithFallback
                       }
-                    : undefined
+                    : extraction.state.suggestedAction === "retry_primary"
+                      ? {
+                          label: "Retry extraction",
+                          onPress: extraction.retryPrimary
+                        }
+                      : undefined
             }
             secondaryAction={{
               label: "Paste another link",
               onPress: () => router.replace("/")
             }}
-            title={extractionErrorTitle}
+            title={
+              extraction.state.inspiredAvailable ? "No complete recipe found" : extractionErrorTitle
+            }
           />
+        ) : null}
+
+        {displayedRecipe?.confidence.notes.some((note) =>
+          note.startsWith("AI-created recipe inspired by the video.")
+        ) ? (
+          <AppSurface style={styles.statusCard}>
+            <AppText variant="title">Inspired by the video</AppText>
+            <AppText muted>
+              Inspired by the video. Ingredients, quantities and steps may differ from the
+              creator’s.
+            </AppText>
+          </AppSurface>
         ) : null}
 
         {displayedRecipe ? (
@@ -1090,6 +1117,30 @@ export default function RecipeScreen() {
           setDraftServings={setDraftServings}
           setDraftTitle={setDraftTitle}
           visible={isEditorVisible}
+        />
+        <AppDialog
+          actions={[
+            {
+              label: "Not now",
+              onPress: () => setIsInspiredConfirmationVisible(false),
+              variant: "outline"
+            },
+            {
+              label: "Generate recipe",
+              onPress: () => {
+                setIsInspiredConfirmationVisible(false);
+                void extraction.createInspiredRecipe();
+              }
+            }
+          ]}
+          message="We'll use what we can see and hear in the video, along with general cooking knowledge, to suggest likely ingredients, amounts and steps. The recipe may not be exact or match the creator's version."
+          onRequestClose={() => setIsInspiredConfirmationVisible(false)}
+          title="Generate a recipe from this video?"
+          visible={
+            isInspiredConfirmationVisible &&
+            extraction.state.state === "failure" &&
+            extraction.state.inspiredAvailable === true
+          }
         />
         <AppDialog
           actions={
@@ -1973,6 +2024,9 @@ const styles = StyleSheet.create({
     marginTop: 4,
     width: 40
   },
+  extractionLoadingCard: { alignItems: "center", gap: 12, paddingVertical: 30 },
+  extractionLoadingCopy: { alignItems: "center", gap: 8 },
+  extractionLoadingTitle: { textAlign: "center" },
   loadingCard: {
     alignItems: "flex-start",
     gap: 18

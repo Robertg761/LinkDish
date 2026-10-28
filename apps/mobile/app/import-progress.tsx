@@ -2,10 +2,11 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { AppButton, AppSurface, AppText } from "@linkdish/ui";
 import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Animated, StyleSheet, View } from "react-native";
+import { Animated, StyleSheet, View } from "react-native";
 
 import { trackMobileEvent } from "../src/analytics/client";
 import { useOptionalUpgradeMoment } from "../src/features/billing/UpgradeMomentContext";
+import { ExtractionAnimation } from "../src/features/recipe-intake/components/ExtractionAnimation";
 import { createPendingImageImport } from "../src/features/recipe-intake/pendingImageImports";
 import { prepareSharedImageImport } from "../src/features/recipe-intake/sharedImageImport";
 import { getSharedImportTarget } from "../src/features/recipe-intake/sharedImportTarget";
@@ -249,9 +250,7 @@ export default function ImportProgressScreen() {
         ((extraction.state.state === "loading" || extraction.state.state === "empty") &&
           sharedUrl) ? (
           <>
-            <View style={styles.iconWrap}>
-              <ActivityIndicator color={appColors.accent} />
-            </View>
+            <ExtractionAnimation />
             <View style={styles.copy}>
               <AppText style={styles.title} variant="headline">
                 Plating...

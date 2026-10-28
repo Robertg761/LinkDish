@@ -4,6 +4,8 @@ import { MAX_SHOPPING_ITEM_TEXT_LENGTH } from "./limits.js";
 
 export { MAX_SHOPPING_ITEM_TEXT_LENGTH };
 
+export const MAX_SHOPPING_RECIPE_SOURCES = 50;
+
 export const shoppingQuantityRangeSchema = z
   .object({
     min: z.number().finite().positive(),
@@ -25,6 +27,16 @@ export const shoppingItemSchema = z.object({
   unit: z.string().trim().min(1).max(40).nullable().optional(),
   recipeId: z.string().trim().min(1).max(180).nullable().optional(),
   recipeTitle: z.string().trim().min(1).max(200).nullable().optional(),
+  // Every recipe this item was added from; recipeId/recipeTitle stay the first one for older apps.
+  recipeSources: z
+    .array(
+      z.object({
+        recipeId: z.string().trim().min(1).max(180),
+        recipeTitle: z.string().trim().min(1).max(200)
+      })
+    )
+    .max(MAX_SHOPPING_RECIPE_SOURCES)
+    .optional(),
   section: z.string().trim().min(1).max(120).nullable().optional(),
   addedBy: z.string().trim().min(1),
   checked: z.boolean(),

@@ -4,12 +4,28 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect } from "expo-router";
 import React, { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable, RefreshControl, ScrollView, StyleSheet, TextInput, View } from "react-native";
+import Reanimated, {
+  cancelAnimation,
+  Easing as ReanimatedEasing,
+  FadeIn,
+  FadeOut,
+  ReduceMotion,
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withRepeat,
+  withTiming
+} from "react-native-reanimated";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AppDialog } from "../../src/components/AppDialog";
+import { useTabBarScroll } from "../../src/features/navigation/TabBarVisibility";
+import { useSavedRecipes } from "../../src/features/saved-recipes/SavedRecipesContext";
 import { useShoppingList } from "../../src/features/shopping/ShoppingListContext";
 import {
+  getShoppingIngredientKey,
   getShoppingItemDisplayText,
+  getShoppingRecipeSources,
   groupShoppingItemsByAisle,
   type MobileShoppingItem
 } from "../../src/features/shopping/store";
@@ -78,73 +94,217 @@ const buildAisleGroups = (items: MobileShoppingItem[]): ShoppingGroup[] =>
     title: group.label
   }));
 
+const DETAILS_ANIMATION_MS = 280;
+const SYNC_SPIN_MS = 1100;
+
+interface SuggestedRecipe {
+  id: string;
+  title: string;
+}
+
+const NO_SUGGESTIONS: SuggestedRecipe[] = [];
+
+/** A small spinning icon while an item's change is on its way to the household list. */
+const SyncingIndicator = () => {
+  const rotation = useSharedValue(0);
+
+  useEffect(() => {
+    rotation.value = withRepeat(
+      withTiming(360, {
+        duration: SYNC_SPIN_MS,
+        easing: ReanimatedEasing.linear,
+        reduceMotion: ReduceMotion.System
+      }),
+      -1
+    );
+    return () => cancelAnimation(rotation);
+  }, [rotation]);
+
+  const spinStyle = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${rotation.value}deg` }]
+  }));
+
+  return (
+    <Reanimated.View
+      accessibilityLabel="Syncing"
+      entering={FadeIn.duration(180)}
+      exiting={FadeOut.duration(220)}
+      style={[styles.syncIndicator, spinStyle]}
+    >
+      <MaterialCommunityIcons color={appColors.accent} name="autorenew" size={16} />
+    </Reanimated.View>
+  );
+};
+
 const ShoppingItemRow = memo(function ShoppingItemRow({
+  isSyncing,
   item,
   onDelete,
   onToggle,
-  showRecipeTitle,
-  statusLabel
+  showDivider,
+  statusLabel,
+  suggestedRecipes
 }: {
+  isSyncing: boolean;
   item: MobileShoppingItem;
   onDelete: (id: string) => void;
   onToggle: (id: string, checked: boolean) => void;
-  showRecipeTitle: boolean;
+  showDivider: boolean;
   statusLabel: string | null;
+  suggestedRecipes: SuggestedRecipe[];
 }) {
   const displayText = getShoppingItemDisplayText(item);
-  const recipeTitle = showRecipeTitle ? item.recipeTitle?.trim() : undefined;
+  const recipeSources = getShoppingRecipeSources(item);
+  const [expanded, setExpanded] = useState(false);
+  // Details stay mounted until the collapse animation finishes so they can animate out.
+  const [detailsMounted, setDetailsMounted] = useState(false);
+  const progress = useSharedValue(0);
+  const detailsHeight = useSharedValue(0);
+
+  useEffect(() => {
+    progress.value = withTiming(
+      expanded ? 1 : 0,
+      {
+        duration: DETAILS_ANIMATION_MS,
+        easing: ReanimatedEasing.inOut(ReanimatedEasing.cubic),
+        reduceMotion: ReduceMotion.System
+      },
+      (finished) => {
+        if (finished && !expanded) {
+          runOnJS(setDetailsMounted)(false);
+        }
+      }
+    );
+  }, [expanded, progress]);
+
+  const detailsStyle = useAnimatedStyle(() => ({
+    height: detailsHeight.value * progress.value,
+    opacity: progress.value
+  }));
+  const chevronStyle = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${progress.value * 180}deg` }]
+  }));
+
+  const toggleExpanded = () => {
+    if (!expanded) {
+      setDetailsMounted(true);
+    }
+    setExpanded(!expanded);
+  };
 
   return (
-    <Pressable
-      accessibilityLabel={`${item.checked ? "Remove from cart" : "Mark in cart"} ${displayText}`}
-      accessibilityRole="checkbox"
-      accessibilityState={{ checked: item.checked }}
-      onPress={() => {
-        selectionTick();
-        onToggle(item.id, !item.checked);
-      }}
-      style={({ pressed }) => [styles.itemRow, pressed && styles.pressed]}
-    >
-      <View style={[styles.itemCheck, item.checked && styles.itemCheckChecked]}>
-        {item.checked ? (
-          <MaterialCommunityIcons color={appColors.canvas} name="check" size={13} />
-        ) : null}
-      </View>
-      <View style={styles.itemCopy}>
-        <AppText
-          style={[styles.itemText, item.checked && styles.itemTextChecked]}
-          numberOfLines={2}
+    <View style={[styles.itemBlock, showDivider && styles.itemDivider]}>
+      <View style={styles.itemRow}>
+        <Pressable
+          accessibilityLabel={`${item.checked ? "Remove from cart" : "Mark in cart"} ${displayText}`}
+          accessibilityRole="checkbox"
+          accessibilityState={{ checked: item.checked }}
+          onPress={() => {
+            selectionTick();
+            onToggle(item.id, !item.checked);
+          }}
+          style={({ pressed }) => [styles.itemMain, pressed && styles.pressed]}
         >
-          {displayText}
-        </AppText>
-        {recipeTitle ? (
-          <AppText muted numberOfLines={1} style={styles.statusText}>
-            {recipeTitle}
-          </AppText>
-        ) : null}
-        {statusLabel ? (
-          <AppText muted style={styles.statusText}>
-            {statusLabel}
-          </AppText>
-        ) : null}
+          <View style={[styles.itemCheck, item.checked && styles.itemCheckChecked]}>
+            {item.checked ? (
+              <MaterialCommunityIcons color={appColors.canvas} name="check" size={13} />
+            ) : null}
+          </View>
+          <View style={styles.itemCopy}>
+            <AppText style={item.checked ? styles.itemTextChecked : undefined} numberOfLines={2}>
+              {displayText}
+            </AppText>
+            {statusLabel ? (
+              <AppText muted style={styles.statusText}>
+                {statusLabel}
+              </AppText>
+            ) : null}
+          </View>
+          {isSyncing ? <SyncingIndicator /> : null}
+        </Pressable>
+        <Pressable
+          accessibilityLabel={`${expanded ? "Hide" : "Show"} recipes for ${displayText}`}
+          accessibilityRole="button"
+          accessibilityState={{ expanded }}
+          hitSlop={6}
+          onPress={toggleExpanded}
+          style={({ pressed }) => [styles.iconButton, pressed && styles.pressed]}
+        >
+          <Reanimated.View style={chevronStyle}>
+            <MaterialCommunityIcons color={appColors.muted} name="chevron-down" size={22} />
+          </Reanimated.View>
+        </Pressable>
+        <Pressable
+          accessibilityLabel={`Delete ${displayText}`}
+          accessibilityRole="button"
+          hitSlop={10}
+          onPress={() => onDelete(item.id)}
+          style={({ pressed }) => [styles.iconButton, pressed && styles.pressed]}
+        >
+          <MaterialCommunityIcons color={appColors.muted} name="trash-can-outline" size={18} />
+        </Pressable>
       </View>
-      <Pressable
-        accessibilityLabel={`Delete ${displayText}`}
-        accessibilityRole="button"
-        hitSlop={10}
-        onPress={() => onDelete(item.id)}
-        style={({ pressed }) => [styles.deleteButton, pressed && styles.pressed]}
-      >
-        <MaterialCommunityIcons color={appColors.muted} name="trash-can-outline" size={18} />
-      </Pressable>
-    </Pressable>
+      {detailsMounted ? (
+        <Reanimated.View style={[styles.recipeDetailsClip, detailsStyle]}>
+          <View
+            onLayout={(event) => {
+              detailsHeight.value = event.nativeEvent.layout.height;
+            }}
+            style={styles.recipeDetailsMeasure}
+          >
+            <View style={styles.recipeDetails}>
+              <View style={styles.recipeSection}>
+                <AppText style={styles.recipeSectionLabel} tone="accent" variant="label">
+                  Added from
+                </AppText>
+                {recipeSources.length > 0 ? (
+                  recipeSources.map((source) => (
+                    <View key={source.recipeId} style={styles.recipeLine}>
+                      <MaterialCommunityIcons
+                        color={appColors.accent}
+                        name="book-open-page-variant-outline"
+                        size={16}
+                      />
+                      <AppText style={styles.recipeTitle}>{source.recipeTitle}</AppText>
+                    </View>
+                  ))
+                ) : (
+                  <AppText muted style={styles.recipeTitle}>
+                    Added by hand
+                  </AppText>
+                )}
+              </View>
+              {suggestedRecipes.length > 0 ? (
+                <View style={[styles.recipeSection, styles.recipeSectionDivided]}>
+                  <AppText style={styles.recipeSectionLabel} variant="label">
+                    Also in your cookbook
+                  </AppText>
+                  {suggestedRecipes.map((recipe) => (
+                    <View key={recipe.id} style={styles.recipeLine}>
+                      <MaterialCommunityIcons
+                        color={appColors.muted}
+                        name="book-outline"
+                        size={16}
+                      />
+                      <AppText muted style={styles.recipeTitle}>
+                        {recipe.title}
+                      </AppText>
+                    </View>
+                  ))}
+                </View>
+              ) : null}
+            </View>
+          </View>
+        </Reanimated.View>
+      ) : null}
+    </View>
   );
 });
 
 /**
  * Per-row sync status, kept quiet: a failed push always shows, and "On this device" only
- * shows inside a shared household list (for items added before joining). Pending pushes do
- * not flash "Syncing" under every check-off.
+ * shows inside a shared household list (for items added before joining). Pending pushes show
+ * as SyncingIndicator's small icon rather than a "Syncing" line under every check-off.
  */
 const getStatusLabel = (item: MobileShoppingItem, isSharedList: boolean): string | null => {
   if (item.sync.status === "sync_failed") {
@@ -193,6 +353,7 @@ const GroupModeToggle = ({
 );
 
 export default function ShoppingScreen() {
+  const onTabScroll = useTabBarScroll();
   const insets = useSafeAreaInsets();
   const {
     addItems,
@@ -210,9 +371,40 @@ export default function ShoppingScreen() {
   const [isCartExpanded, setIsCartExpanded] = useState(false);
   const [isClearCheckedDialogVisible, setIsClearCheckedDialogVisible] = useState(false);
   const [groupMode, setGroupMode] = useState<ShoppingGroupMode>("aisle");
+  const [isInfoDialogVisible, setIsInfoDialogVisible] = useState(false);
+  const { savedRecipes } = useSavedRecipes();
   const activeItems = useMemo(() => shoppingItems.filter((item) => !item.checked), [shoppingItems]);
   const checkedItems = useMemo(() => shoppingItems.filter((item) => item.checked), [shoppingItems]);
   const isShoppingListEmpty = activeItems.length === 0 && checkedItems.length === 0;
+  const cookbookIngredientKeys = useMemo(
+    () =>
+      savedRecipes.map((record) => ({
+        id: record.id,
+        keys: new Set(
+          record.recipe.ingredients.map((ingredient) => getShoppingIngredientKey(ingredient.text))
+        ),
+        title: record.recipe.title
+      })),
+    [savedRecipes]
+  );
+  // Other saved recipes that call for each item, besides the ones it was added from.
+  const suggestionsByItem = useMemo(() => {
+    const suggestions = new Map<string, SuggestedRecipe[]>();
+
+    for (const item of shoppingItems) {
+      const key = getShoppingIngredientKey(item.text);
+      const sourceIds = new Set(getShoppingRecipeSources(item).map((source) => source.recipeId));
+      const matches = cookbookIngredientKeys
+        .filter((recipe) => !sourceIds.has(recipe.id) && recipe.keys.has(key))
+        .map(({ id, title }) => ({ id, title }));
+
+      if (matches.length > 0) {
+        suggestions.set(item.id, matches);
+      }
+    }
+
+    return suggestions;
+  }, [cookbookIngredientKeys, shoppingItems]);
   const groups = useMemo(
     () => (groupMode === "aisle" ? buildAisleGroups(activeItems) : buildRecipeGroups(activeItems)),
     [activeItems, groupMode]
@@ -298,11 +490,15 @@ export default function ShoppingScreen() {
         <AppText style={styles.title} variant="display">
           Shopping List
         </AppText>
-        <AppText muted style={styles.subtitle}>
-          {canSyncShoppingList
-            ? "Shared with your household when you refresh."
-            : "Personal list on this device. Family sharing unlocks a shared household list."}
-        </AppText>
+        <Pressable
+          accessibilityLabel="Shopping list information"
+          accessibilityRole="button"
+          hitSlop={6}
+          onPress={() => setIsInfoDialogVisible(true)}
+          style={({ pressed }) => [styles.infoButton, pressed && styles.pressed]}
+        >
+          <MaterialCommunityIcons color={appColors.muted} name="information-outline" size={23} />
+        </Pressable>
       </View>
 
       <View style={styles.quickAdd}>
@@ -325,8 +521,10 @@ export default function ShoppingScreen() {
       </View>
 
       <ScrollView
+        onScroll={onTabScroll}
+        scrollEventThrottle={16}
         contentContainerStyle={{
-          paddingBottom: Math.max(insets.bottom, appSpacing.xl) + appSpacing.xl
+          paddingBottom: Math.max(insets.bottom, appSpacing.xl) + 100
         }}
         refreshControl={
           <RefreshControl refreshing={isRefreshingShoppingList} onRefresh={refreshShoppingList} />
@@ -361,14 +559,16 @@ export default function ShoppingScreen() {
                 )}
               </View>
               <View style={styles.itemStack}>
-                {group.items.map((item) => (
+                {group.items.map((item, index) => (
                   <ShoppingItemRow
+                    isSyncing={item.sync.status === "dirty"}
                     item={item}
                     key={item.id}
                     onDelete={deleteItem}
                     onToggle={setItemChecked}
-                    showRecipeTitle={group.kind === "aisle"}
+                    showDivider={index > 0}
                     statusLabel={getStatusLabel(item, canSyncShoppingList)}
+                    suggestedRecipes={suggestionsByItem.get(item.id) ?? NO_SUGGESTIONS}
                   />
                 ))}
               </View>
@@ -414,14 +614,16 @@ export default function ShoppingScreen() {
               </View>
               {isCartExpanded ? (
                 <View style={styles.itemStack}>
-                  {checkedItems.map((item) => (
+                  {checkedItems.map((item, index) => (
                     <ShoppingItemRow
+                      isSyncing={item.sync.status === "dirty"}
                       item={item}
                       key={item.id}
                       onDelete={deleteItem}
                       onToggle={setItemChecked}
-                      showRecipeTitle={false}
+                      showDivider={index > 0}
                       statusLabel={getStatusLabel(item, canSyncShoppingList)}
+                      suggestedRecipes={suggestionsByItem.get(item.id) ?? NO_SUGGESTIONS}
                     />
                   ))}
                 </View>
@@ -451,6 +653,17 @@ export default function ShoppingScreen() {
         onRequestClose={() => setIsClearCheckedDialogVisible(false)}
         title="Clear checked items?"
         visible={isClearCheckedDialogVisible}
+      />
+      <AppDialog
+        actions={[{ label: "Got it", onPress: () => setIsInfoDialogVisible(false) }]}
+        message={
+          canSyncShoppingList
+            ? "Your shopping list is shared with your household when you refresh."
+            : "Your shopping list is stored on this device. Family sharing unlocks a shared household list."
+        }
+        onRequestClose={() => setIsInfoDialogVisible(false)}
+        title="Shopping list"
+        visible={isInfoDialogVisible}
       />
     </SafeAreaView>
   );
@@ -496,13 +709,7 @@ const styles = StyleSheet.create({
     padding: appSpacing.lg,
     width: "100%"
   },
-  deleteButton: {
-    alignItems: "center",
-    borderRadius: 999,
-    height: 34,
-    justifyContent: "center",
-    width: 34
-  },
+
   emptyState: {
     alignItems: "center",
     gap: appSpacing.sm
@@ -537,12 +744,30 @@ const styles = StyleSheet.create({
     flex: 1
   },
   header: {
+    alignItems: "center",
     alignSelf: "center",
+    flexDirection: "row",
     gap: appSpacing.sm,
     maxWidth: 760,
     paddingHorizontal: appSpacing.lg,
     paddingTop: appSpacing.lg,
     width: "100%"
+  },
+  iconButton: {
+    alignItems: "center",
+    borderRadius: 999,
+    height: 34,
+    justifyContent: "center",
+    width: 34
+  },
+  infoButton: {
+    alignItems: "center",
+    height: 44,
+    justifyContent: "center",
+    width: 44
+  },
+  itemBlock: {
+    paddingVertical: appSpacing.sm
   },
   itemCheck: {
     alignItems: "center",
@@ -561,17 +786,25 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: 2
   },
-  itemRow: {
+  itemDivider: {
+    borderTopColor: appColors.border,
+    borderTopWidth: StyleSheet.hairlineWidth
+  },
+  itemMain: {
     alignItems: "center",
+    flex: 1,
     flexDirection: "row",
     gap: appSpacing.md,
     minHeight: 44
   },
-  itemStack: {
-    gap: 10
+  itemRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 4,
+    minHeight: 44
   },
-  itemText: {
-    flex: 1
+  itemStack: {
+    gap: 0
   },
   itemTextChecked: {
     color: appColors.muted,
@@ -609,6 +842,48 @@ const styles = StyleSheet.create({
   pressed: {
     opacity: 0.72
   },
+  recipeDetails: {
+    backgroundColor: appColors.background,
+    borderColor: appColors.border,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    gap: appSpacing.md,
+    marginLeft: 35,
+    padding: appSpacing.md
+  },
+  recipeDetailsClip: {
+    overflow: "hidden"
+  },
+  // Laid out free of the clip's animated height so onLayout reports the full content height.
+  recipeDetailsMeasure: {
+    left: 0,
+    paddingTop: appSpacing.sm,
+    position: "absolute",
+    right: 0,
+    top: 0
+  },
+  recipeLine: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: appSpacing.sm
+  },
+  recipeSection: {
+    gap: 6
+  },
+  recipeSectionDivided: {
+    borderTopColor: appColors.border,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingTop: appSpacing.md
+  },
+  recipeSectionLabel: {
+    fontSize: 11,
+    letterSpacing: 1
+  },
+  recipeTitle: {
+    flex: 1,
+    fontSize: 15,
+    lineHeight: 21
+  },
   quickAdd: {
     alignItems: "center",
     alignSelf: "center",
@@ -644,12 +919,15 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 16
   },
-  subtitle: {
-    fontSize: 15,
-    lineHeight: 22
+  syncIndicator: {
+    alignItems: "center",
+    height: 16,
+    justifyContent: "center",
+    width: 16
   },
   title: {
+    flex: 1,
     fontSize: 38,
-    lineHeight: 42
+    lineHeight: 50
   }
 });

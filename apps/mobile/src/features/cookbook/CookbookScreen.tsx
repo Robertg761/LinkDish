@@ -39,6 +39,7 @@ import { appColors, appSpacing } from "../../theme/tokens";
 import { useAccount } from "../account/AccountContext";
 import { useOptionalUpgradeMoment } from "../billing/UpgradeMomentContext";
 import { ManageCollectionsSheet } from "../collections/ManageCollectionsSheet";
+import { useTabBarScroll } from "../navigation/TabBarVisibility";
 import { buildRecipeMetaLine } from "../recipe-results/recipeMetaLine";
 import {
   collectCookbookTags,
@@ -416,6 +417,7 @@ const FilterChip = ({
 );
 
 export const CookbookScreen = () => {
+  const onTabScroll = useTabBarScroll();
   const { isSignedIn, user } = useAccount();
   const {
     canUseSharedRecipeBook,
@@ -1203,6 +1205,8 @@ export const CookbookScreen = () => {
   return (
     <View style={styles.screen}>
       <FlatList
+        onScroll={onTabScroll}
+        scrollEventThrottle={16}
         ListFooterComponent={
           <View style={[styles.content, styles.wideSection]}>
             {activeTab === "personal" ? renderPersonalFooter() : renderFamilyFooter()}
@@ -1323,7 +1327,7 @@ const styles = StyleSheet.create({
   },
   familySharingLabel: {
     fontSize: 16,
-    lineHeight: 21
+    lineHeight: 22
   },
   familySharingTitle: {
     alignItems: "center",
@@ -1456,7 +1460,7 @@ const styles = StyleSheet.create({
   recipeTitle: {
     flex: 1,
     fontSize: 16,
-    lineHeight: 21
+    lineHeight: 22
   },
   recipeTitleRow: {
     alignItems: "center",
@@ -1671,7 +1675,7 @@ const styles = StyleSheet.create({
   title: {
     color: appColors.text,
     fontSize: 42,
-    lineHeight: 50
+    lineHeight: 54
   },
   wideSection: {
     alignSelf: "center",

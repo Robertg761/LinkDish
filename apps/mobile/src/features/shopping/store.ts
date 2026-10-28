@@ -1,8 +1,10 @@
 import {
+  canonicalIngredientKey,
   formatShoppingItemText,
   getDisplayIngredientText,
   groupByShoppingCategory,
   MAX_SHOPPING_ITEM_TEXT_LENGTH,
+  MAX_SHOPPING_RECIPE_SOURCES,
   mergeShoppingItemLists,
   parseShoppingLine as parseDomainShoppingLine,
   recipeIngredientsToShoppingInputs as buildDomainShoppingInputs
@@ -116,6 +118,44 @@ const clipApiField = (
   const clipped = value == null ? "" : clipToLength(value.trim(), API_FIELD_MAX_LENGTH[field]);
   return clipped.length > 0 ? clipped : undefined;
 };
+
+export type ShoppingRecipeSource = NonNullable<ShoppingItem["recipeSources"]>[number];
+
+/**
+ * Every recipe an item was added from, first-added first. Items stored or synced before
+ * recipeSources existed only have recipeId/recipeTitle, which stand in as the one source.
+ */
+export const getShoppingRecipeSources = (
+  item: Pick<MobileShoppingItem, "recipeId" | "recipeSources" | "recipeTitle">
+): ShoppingRecipeSource[] => {
+  const sources = item.recipeSources ?? [];
+  const recipeId = item.recipeId?.trim();
+  const recipeTitle = item.recipeTitle?.trim();
+
+  if (recipeId && recipeTitle && !sources.some((source) => source.recipeId === recipeId)) {
+    return [{ recipeId, recipeTitle }, ...sources];
+  }
+
+  return sources;
+};
+
+const combineRecipeSources = (
+  existing: MobileShoppingItem,
+  incoming: MobileShoppingItem
+): ShoppingRecipeSource[] => {
+  const sources = [...getShoppingRecipeSources(existing)];
+
+  for (const source of getShoppingRecipeSources(incoming)) {
+    if (!sources.some((known) => known.recipeId === source.recipeId)) {
+      sources.push(source);
+    }
+  }
+
+  return sources.slice(0, MAX_SHOPPING_RECIPE_SOURCES);
+};
+
+/** The key two ingredient lines share when they are the same thing to buy (see merging). */
+export const getShoppingIngredientKey = (text: string): string => canonicalIngredientKey(text);
 
 const createShoppingItemId = (timestamp: string, index: number): string =>
   `shopping_${timestamp.replace(/\D/gu, "")}_${index}_${Math.random().toString(36).slice(2, 10)}`;
@@ -253,6 +293,13 @@ export const toApiShoppingItem = (item: MobileShoppingItem): ShoppingItem => {
   const recipeId = clipApiField(item.recipeId, "recipeId");
   const recipeTitle = clipApiField(item.recipeTitle, "recipeTitle");
   const section = clipApiField(item.section, "section");
+  const recipeSources = (item.recipeSources ?? [])
+    .flatMap((source) => {
+      const sourceId = clipApiField(source.recipeId, "recipeId");
+      const sourceTitle = clipApiField(source.recipeTitle, "recipeTitle");
+      return sourceId && sourceTitle ? [{ recipeId: sourceId, recipeTitle: sourceTitle }] : [];
+    })
+    .slice(0, MAX_SHOPPING_RECIPE_SOURCES);
 
   return {
     id: item.id,
@@ -261,6 +308,7 @@ export const toApiShoppingItem = (item: MobileShoppingItem): ShoppingItem => {
     ...(unit === undefined ? {} : { unit }),
     ...(recipeId === undefined ? {} : { recipeId }),
     ...(recipeTitle === undefined ? {} : { recipeTitle }),
+    ...(recipeSources.length === 0 ? {} : { recipeSources }),
     ...(section === undefined ? {} : { section }),
     addedBy: item.addedBy,
     checked: item.checked,
@@ -276,29 +324,34 @@ export const mergeShoppingItems = (
   mergeShoppingItemLists(
     existingItems,
     incomingItems,
-    (existing, incoming, merged): MobileShoppingItem => ({
-      ...existing,
-      checked: false,
-      checkedBy: null,
-      qty: merged.qty ?? null,
-      recipeId: existing.recipeId ?? incoming.recipeId,
-      recipeTitle: existing.recipeTitle ?? incoming.recipeTitle,
-      section: existing.section ?? incoming.section,
-      sync: {
-        // The merged item keeps the existing id, so it stays with that item's household.
-        ...householdOf(existing.sync.householdId ? existing : incoming),
-        status:
-          existing.sync.status === "local_only" && incoming.sync.status === "local_only"
-            ? "local_only"
-            : "dirty"
-      },
-      text: clipShoppingItemText(merged.text),
-      unit: merged.unit ?? null,
-      updatedAt:
-        new Date(incoming.updatedAt).getTime() > new Date(existing.updatedAt).getTime()
-          ? incoming.updatedAt
-          : existing.updatedAt
-    }),
+    (existing, incoming, merged): MobileShoppingItem => {
+      const recipeSources = combineRecipeSources(existing, incoming);
+
+      return {
+        ...existing,
+        checked: false,
+        checkedBy: null,
+        qty: merged.qty ?? null,
+        recipeId: existing.recipeId ?? incoming.recipeId,
+        recipeTitle: existing.recipeTitle ?? incoming.recipeTitle,
+        ...(recipeSources.length > 0 ? { recipeSources } : {}),
+        section: existing.section ?? incoming.section,
+        sync: {
+          // The merged item keeps the existing id, so it stays with that item's household.
+          ...householdOf(existing.sync.householdId ? existing : incoming),
+          status:
+            existing.sync.status === "local_only" && incoming.sync.status === "local_only"
+              ? "local_only"
+              : "dirty"
+        },
+        text: clipShoppingItemText(merged.text),
+        unit: merged.unit ?? null,
+        updatedAt:
+          new Date(incoming.updatedAt).getTime() > new Date(existing.updatedAt).getTime()
+            ? incoming.updatedAt
+            : existing.updatedAt
+      };
+    },
     SHOPPING_MERGE_OPTIONS
   );
 
@@ -328,6 +381,9 @@ export const addShoppingItemsToList = (
         ...(parsed.unit == null ? {} : { unit: parsed.unit }),
         ...(input.recipeId ? { recipeId: input.recipeId } : {}),
         ...(input.recipeTitle ? { recipeTitle: input.recipeTitle } : {}),
+        ...(input.recipeId && input.recipeTitle
+          ? { recipeSources: [{ recipeId: input.recipeId, recipeTitle: input.recipeTitle }] }
+          : {}),
         ...(input.section ? { section: input.section } : {}),
         addedBy: options.userId ?? LOCAL_SHOPPING_USER,
         checked: false,
@@ -485,6 +541,10 @@ export const applyRemoteShoppingItems = (
 
     nextById.set(remoteItem.id, {
       ...remoteItem,
+      // A list server from before recipeSources drops them; keep the ones this device knows.
+      ...(remoteItem.recipeSources == null && localItem?.recipeSources != null
+        ? { recipeSources: localItem.recipeSources }
+        : {}),
       createdAt: localItem?.createdAt ?? remoteItem.updatedAt,
       sync: {
         ...(householdId ? { householdId } : {}),

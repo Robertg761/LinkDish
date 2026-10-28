@@ -24,6 +24,7 @@ import { useAccount } from "../../src/features/account/AccountContext";
 import { useClerkSession } from "../../src/features/account/ClerkSessionContext";
 import { BackupCard } from "../../src/features/backup/BackupCard";
 import { useBilling } from "../../src/features/billing/BillingContext";
+import { useTabBarScroll } from "../../src/features/navigation/TabBarVisibility";
 import { CookbookSyncCard } from "../../src/features/saved-recipes/CookbookSyncCard";
 import { useSavedRecipes } from "../../src/features/saved-recipes/SavedRecipesContext";
 import { pressedOpacity } from "../../src/theme/interactions";
@@ -548,6 +549,7 @@ const ClerkSignInActions = ({ disabled }: { disabled: boolean }) => {
 };
 
 export default function AccountScreen() {
+  const onTabScroll = useTabBarScroll();
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{ invite?: string | string[] }>();
   const inviteParam = Array.isArray(params.invite) ? params.invite[0] : params.invite;
@@ -718,6 +720,8 @@ export default function AccountScreen() {
   return (
     <>
       <ScrollView
+        onScroll={onTabScroll}
+        scrollEventThrottle={16}
         contentContainerStyle={[
           styles.container,
           {
@@ -1109,7 +1113,7 @@ const styles = StyleSheet.create({
   householdTitle: {
     color: appColors.text,
     fontSize: 42,
-    lineHeight: 50,
+    lineHeight: 54,
     textAlign: "left"
   },
   emojiGrid: {
