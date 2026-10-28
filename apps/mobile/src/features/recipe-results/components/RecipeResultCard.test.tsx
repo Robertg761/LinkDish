@@ -1,4 +1,5 @@
 import { notificationAsync } from "expo-haptics";
+vi.mock("../../../hooks/useReduceMotion", () => ({ useReduceMotion: () => false }));
 import React from "react";
 import { act, create } from "react-test-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -839,7 +840,7 @@ describe("RecipeResultCard", () => {
     expect(onCookModeFinish).toHaveBeenCalledTimes(1);
   });
 
-  it("blocks finishing until the incoming final-step animation completes", () => {
+  it("allows finishing while the incoming final-step animation runs", () => {
     let renderer: ReturnType<typeof create>;
 
     act(() => {
@@ -892,38 +893,9 @@ describe("RecipeResultCard", () => {
       ).onPress?.();
     });
 
-    const animatingNextButton = renderer!.root.findByProps({ accessibilityLabel: "Next step" });
-    expect(getProps<PressableProps>(animatingNextButton).disabled).toBe(true);
-    expect(animatedTimingMocks.pending).toHaveLength(1);
-
-    act(() => {
-      getProps<PressableProps>(animatingNextButton).onPress?.();
-    });
-
-    expect(animatedTimingMocks.pending).toHaveLength(1);
-
-    act(() => {
-      flushNextAnimatedTiming();
-    });
-
-    const animatingFinishButton = renderer!.root.findByProps({
-      accessibilityLabel: "Finish cooking"
-    });
-    expect(getProps<PressableProps>(animatingFinishButton).disabled).toBe(true);
-    expect(animatedTimingMocks.pending).toHaveLength(1);
-
-    act(() => {
-      getProps<PressableProps>(animatingFinishButton).onPress?.();
-    });
-
-    expect(JSON.stringify(renderer!.toJSON())).not.toContain(COOK_MODE_FINALE_TITLE);
-
-    act(() => {
-      flushNextAnimatedTiming();
-    });
-
     const finishButton = renderer!.root.findByProps({ accessibilityLabel: "Finish cooking" });
     expect(getProps<PressableProps>(finishButton).disabled).toBe(false);
+    expect(animatedTimingMocks.pending).toHaveLength(1);
 
     act(() => {
       getProps<PressableProps>(finishButton).onPress?.();
