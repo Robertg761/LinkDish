@@ -21,6 +21,7 @@ import { useAccount } from "../src/features/account/AccountContext";
 import { useBilling } from "../src/features/billing/BillingContext";
 import { useOptionalUpgradeMoment } from "../src/features/billing/UpgradeMomentContext";
 import { useSavedRecipes } from "../src/features/saved-recipes/SavedRecipesContext";
+import { useReduceMotion } from "../src/hooks/useReduceMotion";
 import { pressedOpacity } from "../src/theme/interactions";
 import { appColors } from "../src/theme/tokens";
 
@@ -78,12 +79,17 @@ const RemoveMemberButton = ({
   memberName: string;
   onPress: () => void;
 }) => {
+  const reduceMotion = useReduceMotion();
   const pressProgress = useRef(new Animated.Value(1)).current;
   const opacity = pressProgress.interpolate({
     inputRange: [0.96, 1],
     outputRange: [0.72, 1]
   });
   const animatePress = (toValue: number, duration: number) => {
+    if (reduceMotion) {
+      pressProgress.setValue(toValue);
+      return;
+    }
     Animated.timing(pressProgress, {
       duration,
       easing: Easing.out(Easing.cubic),

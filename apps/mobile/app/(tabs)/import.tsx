@@ -23,6 +23,7 @@ import { UrlForm } from "../../src/features/recipe-intake/components/UrlForm";
 import { subscribeToRecipeUrlReset } from "../../src/features/recipe-intake/intakeResetEvents";
 import { createPendingImageImport } from "../../src/features/recipe-intake/pendingImageImports";
 import { createPendingTextImport } from "../../src/features/recipe-intake/textImport";
+import { useReduceMotion } from "../../src/hooks/useReduceMotion";
 import { easeInCubic, easeOutCubic } from "../../src/theme/easing";
 import { pressedOpacity } from "../../src/theme/interactions";
 import { appColors, appSpacing } from "../../src/theme/tokens";
@@ -40,6 +41,7 @@ const HERO_ENTRANCE_DURATION_MS = 340;
 const HERO_ENTRANCE_DELAYS_MS = [0, 70, 140, 240] as const;
 
 export default function HomeScreen() {
+  const reduceMotion = useReduceMotion();
   const onTabScroll = useTabBarScroll();
   const { canStartImport } = useBilling();
   const { isSignedIn } = useAccount();
@@ -58,6 +60,10 @@ export default function HomeScreen() {
   const importGate = useServerBillingGate ? { allowed: true } : canStartImport();
 
   useEffect(() => {
+    if (reduceMotion) {
+      heroEntranceValues.forEach((value) => value.setValue(1));
+      return;
+    }
     heroEntranceValues.forEach((value, index) => {
       Animated.timing(value, {
         delay: HERO_ENTRANCE_DELAYS_MS[index],
@@ -73,7 +79,7 @@ export default function HomeScreen() {
         value.stopAnimation?.();
       });
     };
-  }, [heroEntranceValues]);
+  }, [heroEntranceValues, reduceMotion]);
 
   const getHeroEntranceStyle = (index: number) => {
     const value = heroEntranceValues[index] ?? heroEntranceValues[0]!;
@@ -254,7 +260,7 @@ export default function HomeScreen() {
     setIsScanSheetVisible(false);
     Animated.timing(sheetProgress, {
       toValue: 0,
-      duration: 220,
+      duration: reduceMotion ? 0 : 220,
       easing: easeInCubic,
       useNativeDriver: true
     }).start(({ finished }) => {
@@ -268,12 +274,12 @@ export default function HomeScreen() {
     if (isScanSheetVisible) {
       Animated.timing(sheetProgress, {
         toValue: 1,
-        duration: 220,
+        duration: reduceMotion ? 0 : 220,
         easing: easeOutCubic,
         useNativeDriver: true
       }).start();
     }
-  }, [isScanSheetVisible]);
+  }, [isScanSheetVisible, reduceMotion, sheetProgress]);
 
   return (
     <View style={styles.screen}>

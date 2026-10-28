@@ -66,6 +66,7 @@ import { useSmoothKeyboardInset } from "../src/hooks/useSmoothKeyboardInset";
 import { success, warn } from "../src/lib/haptics";
 import { EXTRACTION_ERROR_LINES, selectFlavorCopyLine } from "../src/theme/flavorCopy";
 import { pressedOpacity, pressedScale } from "../src/theme/interactions";
+import { useReduceMotion } from "../src/hooks/useReduceMotion";
 import { appColors } from "../src/theme/tokens";
 
 import type { RecipeSourceImage } from "../src/features/recipe-results/types";
@@ -1316,11 +1317,16 @@ function SourceImageViewer({
 }
 
 const ExtractionLoadingCopy = () => {
+  const reduceMotion = useReduceMotion();
   const [copyIndex, setCopyIndex] = useState(0);
   const copyProgress = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     const timer = setInterval(() => {
+      if (reduceMotion) {
+        setCopyIndex((current) => (current + 1) % EXTRACTION_LOADING_COPY.length);
+        return;
+      }
       Animated.timing(copyProgress, {
         duration: EXTRACTION_COPY_SWAP_MS,
         toValue: 1,
@@ -1344,7 +1350,7 @@ const ExtractionLoadingCopy = () => {
       clearInterval(timer);
       copyProgress.stopAnimation();
     };
-  }, [copyProgress]);
+  }, [copyProgress, reduceMotion]);
 
   return (
     <Animated.View

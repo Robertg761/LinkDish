@@ -27,6 +27,7 @@ import { useBilling } from "../../src/features/billing/BillingContext";
 import { useTabBarScroll } from "../../src/features/navigation/TabBarVisibility";
 import { CookbookSyncCard } from "../../src/features/saved-recipes/CookbookSyncCard";
 import { useSavedRecipes } from "../../src/features/saved-recipes/SavedRecipesContext";
+import { useReduceMotion } from "../../src/hooks/useReduceMotion";
 import { pressedOpacity } from "../../src/theme/interactions";
 import { appColors, appSpacing } from "../../src/theme/tokens";
 
@@ -244,6 +245,7 @@ const EmojiPicker = ({
   selectedEmoji: string;
   onSelect: (emoji: string) => void;
 }) => {
+  const reduceMotion = useReduceMotion();
   const [isCustomPickerVisible, setIsCustomPickerVisible] = useState(false);
   const [activePickerSection, setActivePickerSection] =
     useState<EmojiPickerSectionLabel>(defaultEmojiPickerSection);
@@ -267,6 +269,10 @@ const EmojiPicker = ({
       return;
     }
 
+    if (reduceMotion) {
+      emojiPickerProgress.setValue(1);
+      return;
+    }
     emojiPickerProgress.setValue(0);
     Animated.timing(emojiPickerProgress, {
       duration: 160,
@@ -274,13 +280,17 @@ const EmojiPicker = ({
       toValue: 1,
       useNativeDriver: true
     }).start();
-  }, [emojiPickerProgress, isCustomPickerVisible]);
+  }, [emojiPickerProgress, isCustomPickerVisible, reduceMotion]);
 
   const showCustomPicker = () => {
     setIsCustomPickerVisible(true);
   };
 
   const hideCustomPicker = () => {
+    if (reduceMotion) {
+      setIsCustomPickerVisible(false);
+      return;
+    }
     Animated.timing(emojiPickerProgress, {
       duration: 120,
       easing: Easing.in(Easing.cubic),

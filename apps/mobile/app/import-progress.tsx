@@ -18,6 +18,7 @@ import {
 import { useRecipeExtraction } from "../src/features/recipe-results/hooks/useRecipeExtraction";
 import { useSavedRecipes } from "../src/features/saved-recipes/SavedRecipesContext";
 import { EXTRACTION_ERROR_LINES, selectFlavorCopyLine } from "../src/theme/flavorCopy";
+import { useReduceMotion } from "../src/hooks/useReduceMotion";
 import { appColors, appSpacing } from "../src/theme/tokens";
 
 const EXTRACTION_LOADING_COPY = [
@@ -35,11 +36,16 @@ const readFirstParam = (value: string | string[] | undefined): string | undefine
   Array.isArray(value) ? value[0] : value;
 
 const LoadingCopy = () => {
+  const reduceMotion = useReduceMotion();
   const [copyIndex, setCopyIndex] = useState(0);
   const copyProgress = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     const timer = setInterval(() => {
+      if (reduceMotion) {
+        setCopyIndex((current) => (current + 1) % EXTRACTION_LOADING_COPY.length);
+        return;
+      }
       Animated.timing(copyProgress, {
         duration: EXTRACTION_COPY_SWAP_MS,
         toValue: 1,
@@ -63,7 +69,7 @@ const LoadingCopy = () => {
       clearInterval(timer);
       copyProgress.stopAnimation();
     };
-  }, [copyProgress]);
+  }, [copyProgress, reduceMotion]);
 
   return (
     <Animated.View

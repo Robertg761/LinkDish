@@ -3,6 +3,7 @@ import { AppButton, AppText, AppTextField } from "@linkdish/ui";
 import { useEffect, useRef, useState } from "react";
 import { Animated, Easing, Pressable, StyleSheet, View } from "react-native";
 
+import { useReduceMotion } from "../../../hooks/useReduceMotion";
 import { pressedOpacity } from "../../../theme/interactions";
 import { appColors } from "../../../theme/tokens";
 import { INVALID_RECIPE_URL_MESSAGE, resolveRecipeUrlInput } from "../urlValidation";
@@ -26,6 +27,7 @@ export const UrlForm = ({
   submitLabel = "Extract recipe",
   onCameraPress
 }: UrlFormProps) => {
+  const reduceMotion = useReduceMotion();
   const [url, setUrl] = useState("");
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<TextInput>(null);
@@ -35,6 +37,7 @@ export const UrlForm = ({
     inputRef.current?.focus();
     inputShake.stopAnimation();
     inputShake.setValue(0);
+    if (reduceMotion) return;
     Animated.sequence([
       Animated.timing(inputShake, {
         duration: 60,
