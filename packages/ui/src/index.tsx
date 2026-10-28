@@ -402,7 +402,8 @@ const styles = StyleSheet.create({
     color: appColors.canvas,
     fontSize: 15,
     fontWeight: "700",
-    letterSpacing: 0.2
+    letterSpacing: 0.2,
+    textAlign: "center"
   },
   buttonTextGhost: {
     color: appColors.accent
