@@ -170,6 +170,23 @@ describe("fetchFacebookDocument", () => {
     expect(document).toMatchObject({ isVideo: false, captionTruncated: true });
   });
 
+  it("reports a caption longer than LinkDish keeps as cut, so a partial recipe is never imported", async () => {
+    const longCaption = `Big batch soup\n\nIngredients:\n${"1 cup broth\n".repeat(500)}\nSimmer.`;
+    const document = await fetchFacebookDocument(
+      "https://www.facebook.com/SoupClub/posts/big-batch-soup/122200000000000002/",
+      () =>
+        Promise.resolve(
+          html(
+            `<html><head><meta property="og:description" content="${longCaption}" /></head></html>`
+          )
+        ),
+      options
+    );
+
+    expect(document.text.length).toBe(5_000);
+    expect(document).toMatchObject({ captionTruncated: true });
+  });
+
   it("resolves /share/, fb.me and fb.watch links by following their redirects on Facebook", async () => {
     for (const shortUrl of [
       "https://www.facebook.com/share/r/1AbCdEfGhI/",

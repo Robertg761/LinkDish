@@ -471,7 +471,8 @@ export const fetchFacebookDocument = async (
       authorName: post.authorName,
       thumbnailUrl: post.thumbnailUrl,
       isVideo,
-      captionTruncated: post.truncated,
+      /* A caption past LinkDish's own length cap is cut here, so it is partial too. */
+      captionTruncated: post.truncated || post.caption.length > maxCaptionChars,
       linkedUrls: post.linkedUrls
     };
   } catch (error) {
