@@ -26,7 +26,10 @@ import {
 import Reanimated, {
   Easing as ReanimatedEasing,
   FadeInDown,
-  ReduceMotion
+  ReduceMotion,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -449,6 +452,25 @@ export const CookbookScreen = () => {
   const [sortDirection, setSortDirection] = useState<CookbookSortDirection>("forward");
   const [isSortMenuOpen, setIsSortMenuOpen] = useState(false);
   const [isFamilySharingOpen, setIsFamilySharingOpen] = useState(false);
+  const familySharingProgress = useSharedValue(0);
+  const familySharingHeight = useSharedValue(0);
+  const familySharingPanelStyle = useAnimatedStyle(() => ({
+    height: familySharingHeight.value * familySharingProgress.value
+  }));
+  const familySharingContentStyle = useAnimatedStyle(() => ({
+    opacity: familySharingProgress.value,
+    transform: [{ translateY: (1 - familySharingProgress.value) * -6 }]
+  }));
+  const familySharingChevronStyle = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${familySharingProgress.value * 180}deg` }]
+  }));
+  useEffect(() => {
+    familySharingProgress.value = withTiming(isFamilySharingOpen ? 1 : 0, {
+      duration: 320,
+      easing: ReanimatedEasing.inOut(ReanimatedEasing.cubic),
+      reduceMotion: ReduceMotion.System
+    });
+  }, [familySharingProgress, isFamilySharingOpen]);
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
   const [listFilter, setListFilter] = useState<CookbookListFilter | null>(null);
   const [isManageCollectionsOpen, setIsManageCollectionsOpen] = useState(false);
@@ -938,9 +960,10 @@ export const CookbookScreen = () => {
               dismissLockedFamilyHint();
               setIsSearchFocused(true);
             }}
-            placeholder={
+            accessibilityLabel={
               activeTab === "family" ? "Search family recipes" : "Search personal recipes"
             }
+            placeholder="Search recipes"
             placeholderTextColor={appColors.placeholder}
             ref={searchInputRef}
             returnKeyType="search"
@@ -1109,6 +1132,7 @@ export const CookbookScreen = () => {
         <View style={styles.familySharing}>
           <Pressable
             accessibilityRole="button"
+            accessibilityState={{ expanded: isFamilySharingOpen }}
             onPress={() => setIsFamilySharingOpen((current) => !current)}
             style={({ pressed }) => [styles.familySharingHeader, pressed && styles.rowPressed]}
           >
@@ -1122,36 +1146,48 @@ export const CookbookScreen = () => {
                 Family sharing
               </AppText>
             </View>
-            <MaterialCommunityIcons
-              color={appColors.muted}
-              name={isFamilySharingOpen ? "chevron-up" : "chevron-down"}
-              size={20}
-            />
+            <Reanimated.View style={familySharingChevronStyle}>
+              <MaterialCommunityIcons color={appColors.muted} name="chevron-down" size={20} />
+            </Reanimated.View>
           </Pressable>
 
-          {isFamilySharingOpen ? (
-            <View style={styles.shareModeRow}>
-              {(["none", "selected", "all"] as const).map((mode) => (
-                <Pressable
-                  key={mode}
-                  onPress={() => {
-                    void setShareMode(mode);
-                  }}
-                  style={({ pressed }) => [
-                    styles.shareModeButton,
-                    shareMode === mode && styles.shareModeButtonActive,
-                    pressed && styles.pressed
-                  ]}
-                >
-                  <AppText
-                    style={[styles.shareModeText, shareMode === mode && styles.shareModeTextActive]}
+          <Reanimated.View style={[styles.familySharingPanel, familySharingPanelStyle]}>
+            <Reanimated.View
+              accessibilityElementsHidden={!isFamilySharingOpen}
+              importantForAccessibility={isFamilySharingOpen ? "auto" : "no-hide-descendants"}
+              onLayout={(event) => {
+                familySharingHeight.value = event.nativeEvent.layout.height;
+              }}
+              pointerEvents={isFamilySharingOpen ? "auto" : "none"}
+              style={[styles.familySharingPanelContent, familySharingContentStyle]}
+              testID="family-sharing-panel"
+            >
+              <View style={styles.shareModeRow}>
+                {(["none", "selected", "all"] as const).map((mode) => (
+                  <Pressable
+                    key={mode}
+                    onPress={() => {
+                      void setShareMode(mode);
+                    }}
+                    style={({ pressed }) => [
+                      styles.shareModeButton,
+                      shareMode === mode && styles.shareModeButtonActive,
+                      pressed && styles.pressed
+                    ]}
                   >
-                    {mode === "none" ? "Share none" : mode === "all" ? "Share all" : "Selected"}
-                  </AppText>
-                </Pressable>
-              ))}
-            </View>
-          ) : null}
+                    <AppText
+                      style={[
+                        styles.shareModeText,
+                        shareMode === mode && styles.shareModeTextActive
+                      ]}
+                    >
+                      {mode === "none" ? "Share none" : mode === "all" ? "Share all" : "Selected"}
+                    </AppText>
+                  </Pressable>
+                ))}
+              </View>
+            </Reanimated.View>
+          </Reanimated.View>
         </View>
       ) : null}
 
@@ -1328,6 +1364,16 @@ const styles = StyleSheet.create({
   familySharingLabel: {
     fontSize: 16,
     lineHeight: 22
+  },
+  familySharingPanel: {
+    overflow: "hidden"
+  },
+  familySharingPanelContent: {
+    left: 0,
+    paddingTop: appSpacing.sm,
+    position: "absolute",
+    right: 0,
+    top: 0
   },
   familySharingTitle: {
     alignItems: "center",

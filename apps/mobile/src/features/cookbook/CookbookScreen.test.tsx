@@ -155,6 +155,7 @@ vi.mock("react-native-reanimated", () => ({
   },
   Easing: {
     cubic: vi.fn((value: number) => value),
+    inOut: vi.fn((easing: unknown) => easing),
     out: vi.fn((easing: unknown) => easing)
   },
   FadeInDown: {
@@ -168,7 +169,10 @@ vi.mock("react-native-reanimated", () => ({
   },
   ReduceMotion: {
     System: "system"
-  }
+  },
+  useAnimatedStyle: (factory: () => unknown) => factory(),
+  useSharedValue: (initial: number) => React.useRef({ value: initial }).current,
+  withTiming: (value: number) => value
 }));
 
 vi.mock("react-native-safe-area-context", () => ({
@@ -380,7 +384,9 @@ describe("CookbookScreen navigation and sharing", () => {
       renderer = create(<CookbookScreen />);
     });
 
-    expect(JSON.stringify(renderer!.toJSON())).not.toContain("Share all");
+    const panelBefore = renderer!.root.findAllByProps({ testID: "family-sharing-panel" }).at(-1);
+    expect(panelBefore?.props.importantForAccessibility).toBe("no-hide-descendants");
+    expect(panelBefore?.props.pointerEvents).toBe("none");
 
     const sharingText = renderer!.root.findByProps({ children: "Family sharing" });
     let sharingButton = sharingText.parent;
@@ -393,6 +399,10 @@ describe("CookbookScreen navigation and sharing", () => {
     act(() => {
       sharingButtonProps?.onPress?.();
     });
+
+    const panelAfter = renderer!.root.findAllByProps({ testID: "family-sharing-panel" }).at(-1);
+    expect(panelAfter?.props.importantForAccessibility).toBe("auto");
+    expect(panelAfter?.props.pointerEvents).toBe("auto");
 
     const shareAllText = renderer!.root.findByProps({ children: "Share all" });
     let shareAllButton = shareAllText.parent;
