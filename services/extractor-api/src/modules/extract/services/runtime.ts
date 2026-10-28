@@ -21,6 +21,7 @@ import type * as InstagramFetcher from "../fetchers/fetch-instagram-document.js"
 import type * as TikTokFetcher from "../fetchers/fetch-tiktok-document.js";
 import type * as TikTokVideoFetcher from "../fetchers/fetch-tiktok-video.js";
 import type * as YouTubeFetcher from "../fetchers/fetch-youtube-document.js";
+import type * as PublicFetch from "../fetchers/public-fetch.js";
 import type {
   BrowserFetcher,
   ExtractorRuntime,
@@ -40,6 +41,7 @@ let sharedRuntime: ExtractorRuntime | null = null;
  * never fetch (cache hits, billing denials, unsupported links) skip them.
  */
 let htmlFetcherModule: Promise<typeof HtmlFetcher> | null = null;
+let publicFetchModule: Promise<typeof PublicFetch> | null = null;
 let browserEscalationModule: Promise<typeof BrowserEscalation> | null = null;
 let youTubeFetcherModule: Promise<typeof YouTubeFetcher> | null = null;
 let tikTokFetcherModule: Promise<typeof TikTokFetcher> | null = null;
@@ -50,6 +52,11 @@ let facebookFetcherModule: Promise<typeof FacebookFetcher> | null = null;
 const loadHtmlFetcher = () => {
   htmlFetcherModule ??= import("../fetchers/fetch-html-document.js");
   return htmlFetcherModule;
+};
+
+const loadPublicFetch = () => {
+  publicFetchModule ??= import("../fetchers/public-fetch.js");
+  return publicFetchModule;
 };
 
 const loadBrowserEscalation = () => {
@@ -168,8 +175,11 @@ export const createDefaultExtractorRuntime = (): ExtractorRuntime => {
       const blockSignalPatterns = getBlockSignalPatterns(url);
 
       try {
-        const { fetchHtmlDocument } = await loadHtmlFetcher();
-        const httpResult = await fetchHtmlDocument(url, fetchImplementation, {
+        const [{ fetchHtmlDocument }, { publicOnlyFetch }] = await Promise.all([
+          loadHtmlFetcher(),
+          loadPublicFetch()
+        ]);
+        const httpResult = await fetchHtmlDocument(url, publicOnlyFetch, {
           timeoutMs: deadline
             ? deadline.budgetMs(extractorApiEnv.FETCH_HTTP_TIMEOUT_MS)
             : extractorApiEnv.FETCH_HTTP_TIMEOUT_MS,

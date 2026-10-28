@@ -3,6 +3,6 @@
 apps/mobile/config/production-public-env.json:generic-api-key:2
 apps/mobile/eas.json:generic-api-key:12
 apps/mobile/eas.json:generic-api-key:27
-apps/web/.env.example:generic-api-key:5
+apps/web/.env.example:generic-api-key:6
 apps/web/src/auth/auth-storage.test.ts:generic-api-key:20
 apps/web/src/auth/auth-storage.test.ts:generic-api-key:28
