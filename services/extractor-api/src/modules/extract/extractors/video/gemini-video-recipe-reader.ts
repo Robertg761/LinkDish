@@ -2,6 +2,7 @@ import { FallbackProviderError } from "../../fallback/errors.js";
 
 import {
   buildVideoRecipePrompt,
+  buildInspiredVideoRecipePrompt,
   videoRecipeJsonSchema,
   videoRecipePayloadSchema
 } from "./video-recipe-payload.js";
@@ -21,6 +22,7 @@ export type VideoRecipeSource =
 export interface VideoRecipeReadInput {
   source: VideoRecipeSource;
   context: VideoRecipeContext;
+  inspired?: boolean;
   deadline?: RequestDeadline | undefined;
 }
 
@@ -256,7 +258,14 @@ class GeminiVideoRecipeReader implements VideoRecipeReader {
           body: JSON.stringify({
             contents: [
               {
-                parts: [videoPart, { text: buildVideoRecipePrompt(input.context) }]
+                parts: [
+                  videoPart,
+                  {
+                    text: input.inspired
+                      ? buildInspiredVideoRecipePrompt(input.context)
+                      : buildVideoRecipePrompt(input.context)
+                  }
+                ]
               }
             ],
             generationConfig: {

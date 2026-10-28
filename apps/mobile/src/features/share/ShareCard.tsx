@@ -116,7 +116,7 @@ const styles = StyleSheet.create({
   title: {
     color: appColors.text,
     fontSize: 31,
-    lineHeight: 36
+    lineHeight: 42
   },
   titleBlock: {
     marginTop: 28,

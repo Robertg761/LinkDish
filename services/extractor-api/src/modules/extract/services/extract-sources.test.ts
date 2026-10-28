@@ -1254,6 +1254,115 @@ describe("the video recipe reader", () => {
       })
     );
 
+  it("offers an inspired recipe only when the video was read without a complete recipe", async () => {
+    const videoRecipeReader = reader(() =>
+      Promise.resolve(videoPayload({ recipeInVideo: false, ingredients: [], steps: [] }))
+    );
+    const runtime = createRuntime({ fetchYouTubeDocument: shortDocument(null), videoRecipeReader });
+    const { response } = await extractRecipe({ url: shortUrl, attempt: "primary" }, runtime);
+    expect(response).toMatchObject({
+      status: "failure",
+      reason: "parse_failed",
+      inspiredAvailable: true,
+      userMessage: "LinkDish could not find a complete recipe in the video or its available text."
+    });
+  });
+
+  it("creates an explicitly labeled recipe only on the user's request", async () => {
+    const videoRecipeReader = reader();
+    const runtime = createRuntime({ fetchYouTubeDocument: shortDocument(null), videoRecipeReader });
+    const { response, logContext } = await extractRecipe(
+      { url: shortUrl, attempt: "primary", inspired: true },
+      runtime
+    );
+    expect(videoRecipeReader.read).toHaveBeenCalledWith(
+      expect.objectContaining({ inspired: true })
+    );
+    expect(logContext.cacheStatus).toBe("bypass");
+    expect(response).toMatchObject({
+      status: "success",
+      recipe: {
+        title: "Garlic Butter Noodles",
+        confidence: { notes: [expect.stringContaining("AI-created recipe inspired by the video")] }
+      },
+      extraction: { warnings: [expect.stringContaining("AI-created recipe")] }
+    });
+  });
+
+  describe("from a pin that links to a video", () => {
+    const pinUrl = "https://www.pinterest.com/pin/123456789/";
+    const pinTo = (link: string) =>
+      vi.fn((url: string) =>
+        Promise.resolve(
+          htmlResult(
+            url,
+            url === pinUrl || url === "https://pin.it/abc123"
+              ? `<html><head><meta property="og:see_also" content="${link}"></head><body>A pin</body></html>`
+              : recipeJsonLd,
+            url === "https://pin.it/abc123" ? pinUrl : url
+          )
+        )
+      );
+
+    it.each([pinUrl, "https://pin.it/abc123"])(
+      "offers and creates one through the pin's link (%s)",
+      async (url) => {
+        const runtime = (videoRecipeReader: ReturnType<typeof reader>) =>
+          createRuntime({
+            fetchHtmlDocument: pinTo(shortUrl),
+            fetchYouTubeDocument: shortDocument(null),
+            videoRecipeReader
+          });
+        const noRecipe = reader(() =>
+          Promise.resolve(videoPayload({ recipeInVideo: false, ingredients: [], steps: [] }))
+        );
+
+        const offered = await extractRecipe({ url, attempt: "primary" }, runtime(noRecipe));
+        expect(offered.response).toMatchObject({ status: "failure", inspiredAvailable: true });
+
+        const created = reader();
+        const { response } = await extractRecipe(
+          { url, attempt: "primary", inspired: true },
+          runtime(created)
+        );
+        expect(created.read).toHaveBeenCalledWith(expect.objectContaining({ inspired: true }));
+        expect(response).toMatchObject({
+          status: "success",
+          recipe: { title: "Garlic Butter Noodles" }
+        });
+      }
+    );
+
+    it("refuses when the pin links to a web page instead", async () => {
+      const videoRecipeReader = reader();
+      const { response } = await extractRecipe(
+        { url: pinUrl, attempt: "primary", inspired: true },
+        createRuntime({
+          fetchHtmlDocument: pinTo("https://fixtures.linkdish.test/recipe-jsonld"),
+          videoRecipeReader
+        })
+      );
+
+      expect(videoRecipeReader.read).not.toHaveBeenCalled();
+      expect(response).toMatchObject({
+        status: "failure",
+        userMessage: "An inspired recipe can only be created from a supported YouTube video."
+      });
+    });
+  });
+
+  it("does not fabricate a recipe when no food is identified", async () => {
+    const videoRecipeReader = reader(() =>
+      Promise.resolve(videoPayload({ recipeInVideo: false, ingredients: [], steps: [] }))
+    );
+    const runtime = createRuntime({ fetchYouTubeDocument: shortDocument(null), videoRecipeReader });
+    const { response } = await extractRecipe(
+      { url: shortUrl, attempt: "primary", inspired: true },
+      runtime
+    );
+    expect(response).toMatchObject({ status: "failure", reason: "parse_failed" });
+  });
+
   it("passes a YouTube Short with no written recipe to the reader by URL", async () => {
     const videoRecipeReader = reader();
     const runtime = createRuntime({

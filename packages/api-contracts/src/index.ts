@@ -77,6 +77,7 @@ const measureImageExtractPayloadChars = (payload: unknown): number => {
 
 const extractRecipeUrlRequestSchema = z.object({
   url: httpUrlSchema,
+  inspired: z.literal(true).optional(),
   attempt: z.enum(["primary", "fallback"]).default("primary"),
   correlationId: extractionCorrelationIdSchema.optional()
 });
@@ -231,6 +232,7 @@ export const extractRecipeFailureSchema = z.object({
     "plan_limit"
   ]),
   userMessage: z.string().min(1),
+  inspiredAvailable: z.boolean().optional(),
   recovery: recoverySchema.optional(),
   quota: quotaStatusSchema.optional()
 });

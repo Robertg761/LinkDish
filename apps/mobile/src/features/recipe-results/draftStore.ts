@@ -100,12 +100,40 @@ const readDraftRecipeExtractions = async (): Promise<DraftRecipeExtractionRecord
   return drafts;
 };
 
+const getYouTubeVideoId = (value: string): string | null => {
+  try {
+    const url = new URL(value);
+    const host = url.hostname.toLowerCase().replace(/^www\./u, "");
+    const parts = url.pathname.split("/").filter(Boolean);
+    const id =
+      host === "youtu.be"
+        ? parts[0]
+        : host === "youtube.com" || host === "m.youtube.com"
+          ? parts[0] === "shorts" || parts[0] === "embed"
+            ? parts[1]
+            : url.searchParams.get("v")
+          : null;
+    return id && /^[A-Za-z0-9_-]{11}$/u.test(id) ? id : null;
+  } catch {
+    return null;
+  }
+};
+
 export const getDraftRecipeExtraction = async (
   url: string
 ): Promise<SavedRecipeRecord | undefined> => {
   const drafts = await readDraftRecipeExtractions();
+  const videoId = getYouTubeVideoId(url);
   return drafts.find(
-    (entry) => entry.requestedUrl === url || entry.savedRecipe.recipe.sourceUrl === url
+    (entry) =>
+      entry.requestedUrl === url ||
+      entry.savedRecipe.recipe.sourceUrl === url ||
+      (videoId !== null &&
+        entry.savedRecipe.recipe.confidence.notes.some((note) =>
+          note.startsWith("AI-created recipe inspired by the video.")
+        ) &&
+        (getYouTubeVideoId(entry.requestedUrl) === videoId ||
+          getYouTubeVideoId(entry.savedRecipe.recipe.sourceUrl) === videoId))
   )?.savedRecipe;
 };
 

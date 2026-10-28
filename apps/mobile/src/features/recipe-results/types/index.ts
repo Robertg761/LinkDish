@@ -15,7 +15,7 @@ export interface RecipeSourceImage {
 
 export type ExtractionUiState =
   | { state: "empty" }
-  | { state: "loading"; attempt: "primary" | "fallback" }
+  | { state: "loading"; attempt: "primary" | "fallback"; inspired?: boolean }
   | {
       state: "success";
       recipe: Recipe;
@@ -38,6 +38,7 @@ export type ExtractionUiState =
       reason: string;
       message: string;
       allowFallback: boolean;
+      inspiredAvailable?: boolean | undefined;
       quota?: QuotaStatus | undefined;
       suggestedAction: "retry_primary" | "retry_fallback" | "try_another_url" | "try_again_later";
     };
