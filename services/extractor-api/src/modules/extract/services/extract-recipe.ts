@@ -1556,7 +1556,7 @@ const extractFromUrl = async (
     };
   }
 
-  if (request.inspired && initialDetection.sourceType !== "youtube") {
+  const rejectInspired = (detection: DetectionResult): ExtractionResult => {
     const response = noRecipeInTextResponse(
       "An inspired recipe can only be created from a supported YouTube video."
     );
@@ -1564,7 +1564,7 @@ const extractFromUrl = async (
       response,
       logContext: makeLogContext({
         hostname,
-        detection: initialDetection,
+        detection,
         attempt: request.attempt,
         response,
         strategy: "none",
@@ -1573,6 +1573,16 @@ const extractFromUrl = async (
         browserAttempted: false
       })
     };
+  };
+
+  /*
+   * Inspired recipes come from YouTube videos only. A pin (or a pin.it link, which only shows it
+   * is a pin once it lands) may link to one, so those wait until the pin's link is known.
+   */
+  const mayBePinterestPin = isPinterestPinUrl(request.url) || hostname.toLowerCase() === "pin.it";
+
+  if (request.inspired && initialDetection.sourceType !== "youtube" && !mayBePinterestPin) {
+    return rejectInspired(initialDetection);
   }
 
   if (isSupportedSocialSource(initialDetection, runtime)) {
@@ -1637,6 +1647,10 @@ const extractFromUrl = async (
     const outboundRequest: ExtractRecipeUrlRequest = { ...request, url: pinOutboundUrl };
     const outboundDetection = detectSourceTypeFromUrl(pinOutboundUrl);
 
+    if (request.inspired && outboundDetection.sourceType !== "youtube") {
+      return rejectInspired(outboundDetection);
+    }
+
     if (isSupportedSocialSource(outboundDetection, runtime)) {
       return extractFromSocialCaption(outboundRequest, context, hostname, outboundDetection);
     }
@@ -1653,9 +1667,10 @@ const extractFromUrl = async (
     }
 
     /* The pin's recipe page may already be cached from a direct import. */
-    const cached = isCacheLookupEnabled(context, outboundDetection)
-      ? await readCachedExtraction(context, pinOutboundUrl)
-      : null;
+    const cached =
+      !request.inspired && isCacheLookupEnabled(context, outboundDetection)
+        ? await readCachedExtraction(context, pinOutboundUrl)
+        : null;
 
     if (cached) {
       return buildCacheHitResult(outboundRequest, cached, runtime, hostname);
@@ -1666,6 +1681,8 @@ const extractFromUrl = async (
     } catch (error) {
       return fetchFailureResult(error, outboundDetection);
     }
+  } else if (request.inspired && initialDetection.sourceType !== "youtube") {
+    return rejectInspired(fetchedSource.detection);
   }
 
   const { sourceDocument, fetchMode, detection } = fetchedSource;
