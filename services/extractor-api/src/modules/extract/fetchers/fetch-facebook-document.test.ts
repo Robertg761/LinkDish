@@ -100,6 +100,24 @@ describe("readFacebookPost", () => {
     expect(post?.caption).toBe("Easy oats\n\n1 cup oats\n1 cup milk\n\nSimmer.");
   });
 
+  it("drops the view and reaction counts Facebook puts in front of a video's title", () => {
+    const caption =
+      "Easy oats\n\nIngredients:\n1 cup rolled oats\n1 cup milk\n1 tbsp honey\nPinch of salt\n\nSimmer the oats in the milk for 5 minutes, then stir in the honey.";
+    const post = readFacebookPost(
+      `<html><head><meta property="og:type" content="video.other" /><meta property="og:title" content="1.2M views · 20K reactions | ${caption} | Dinner with Dana" /><meta property="og:description" content="Easy oats\n\nIngredients:\n1 cup rolled oats..." /></head></html>`
+    );
+
+    expect(post).toMatchObject({ caption, authorName: "Dinner with Dana", truncated: false });
+  });
+
+  it("never takes the view and reaction counts alone for the caption", () => {
+    const post = readFacebookPost(
+      '<html><head><meta property="og:title" content="12,345 views · 1.2K reactions | Dinner with Dana" /><meta property="og:description" content="Oats" /></head></html>'
+    );
+
+    expect(post).toMatchObject({ caption: "Oats", authorName: "Dinner with Dana" });
+  });
+
   it("does not take a short caption that happens to end in dots for a cut one", () => {
     const post = readFacebookPost(
       '<html><head><meta property="og:description" content="Dinner tonight..." /></head></html>'
