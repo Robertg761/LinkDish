@@ -1,3 +1,8 @@
 {
-  "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_live_Y2xlcmsubGlua2Rpc2guY2Ek"
+  "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_live_Y2xlcmsubGlua2Rpc2guY2Ek",
+  "EXPO_PUBLIC_CLERK_GOOGLE_WEB_CLIENT_ID": "657605042373-ijo6hnh1p2puufi8622279i1ulk8mkst.apps.googleusercontent.com",
+  "EXPO_PUBLIC_CLERK_GOOGLE_IOS_CLIENT_ID": "657605042373-fmju96338ddhndib9pch6opk2no9cjj2.apps.googleusercontent.com",
+  "EXPO_PUBLIC_CLERK_GOOGLE_IOS_URL_SCHEME": "com.googleusercontent.apps.657605042373-fmju96338ddhndib9pch6opk2no9cjj2",
+  "EXPO_PUBLIC_REVENUECAT_IOS_API_KEY": "appl_KCvJLeuGBHxIqWQhcXroHkXRgFF",
+  "EXPO_PUBLIC_API_BASE_URL": "https://api.linkdish.ca"
 }

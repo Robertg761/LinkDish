@@ -19,11 +19,14 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AppDialog } from "../../src/components/AppDialog";
+import { AppLegalLinks } from "../../src/components/AppLegalLinks";
 import { mobileEnv } from "../../src/config/env";
 import { useAccount } from "../../src/features/account/AccountContext";
 import { useClerkSession } from "../../src/features/account/ClerkSessionContext";
+import { activateClerkSignIn } from "../../src/features/account/completeClerkSignIn";
 import { useBilling } from "../../src/features/billing/BillingContext";
 import { useSavedRecipes } from "../../src/features/saved-recipes/SavedRecipesContext";
+import { logAuthWarning } from "../../src/lib/authLogging";
 import { pressedOpacity } from "../../src/theme/interactions";
 import { appColors, appSpacing } from "../../src/theme/tokens";
 
@@ -474,6 +477,8 @@ const ClerkSignInActions = ({ disabled }: { disabled: boolean }) => {
   const { startAppleAuthenticationFlow } = useSignInWithApple();
   const { startGoogleAuthenticationFlow } = useSignInWithGoogle();
   const [signInErrorVisible, setSignInErrorVisible] = useState(false);
+  const [isSigningIn, setIsSigningIn] = useState(false);
+  const signInInProgress = useRef(false);
 
   const completeClerkSignIn = async (
     startFlow: () => Promise<{
@@ -481,17 +486,16 @@ const ClerkSignInActions = ({ disabled }: { disabled: boolean }) => {
       setActive?: (params: { session: string }) => Promise<void>;
     }>
   ) => {
+    if (signInInProgress.current) return;
+    signInInProgress.current = true;
+    setIsSigningIn(true);
     try {
       if (clerkSession.isSignedIn) {
         await refreshAccount();
         return;
       }
 
-      const { createdSessionId, setActive } = await startFlow();
-
-      if (createdSessionId && setActive) {
-        await setActive({ session: createdSessionId });
-      }
+      if (!(await activateClerkSignIn(await startFlow()))) return;
 
       await refreshAccount();
     } catch (error) {
@@ -500,15 +504,18 @@ const ClerkSignInActions = ({ disabled }: { disabled: boolean }) => {
           await refreshAccount();
           return;
         } catch (refreshError) {
-          console.warn(
+          logAuthWarning(
             "Failed to refresh LinkDish account for active Clerk session.",
             refreshError
           );
         }
       }
 
-      console.warn("Clerk sign-in failed.", error);
+      logAuthWarning("Clerk sign-in failed.", error);
       setSignInErrorVisible(true);
+    } finally {
+      signInInProgress.current = false;
+      setIsSigningIn(false);
     }
   };
 
@@ -516,13 +523,13 @@ const ClerkSignInActions = ({ disabled }: { disabled: boolean }) => {
     <>
       <View style={styles.actions}>
         <AppButton
-          disabled={disabled}
+          disabled={disabled || isSigningIn}
           label="Continue with Google"
           onPress={() => completeClerkSignIn(() => startGoogleAuthenticationFlow())}
         />
         {isAppleSignInEnabled && Platform.OS === "ios" ? (
           <AppButton
-            disabled={disabled}
+            disabled={disabled || isSigningIn}
             label="Continue with Apple"
             onPress={() => completeClerkSignIn(() => startAppleAuthenticationFlow())}
             variant="outline"
@@ -836,7 +843,8 @@ export default function AccountScreen() {
               <AppText muted style={styles.centeredText}>
                 Deleting your account removes server-side account, household, and shared Family
                 recipe records that belong to the account. Recipes saved on this device stay on this
-                device.
+                device. Deleting your account does not cancel a store subscription. Manage or cancel
+                it separately in your App Store or Google Play account settings.
               </AppText>
               <TextInput
                 autoCapitalize="none"
@@ -957,6 +965,7 @@ export default function AccountScreen() {
             ) : null}
           </>
         )}
+        <AppLegalLinks />
       </ScrollView>
       <Modal
         animationType="fade"

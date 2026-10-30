@@ -594,7 +594,7 @@ export const RecipeResultCard = ({
     <Reanimated.View
       entering={FadeInDown.duration(RESULT_CARD_ENTER_DURATION_MS)
         .easing(Easing.out(Easing.cubic))
-        .withInitialValues({ opacity: 0, transform: [{ translateY: 8 }, { scale: 0.985 }] })
+        .withInitialValues({ opacity: 0, transform: [{ translateY: 8 }] })
         .reduceMotion(ReduceMotion.System)}
       style={styles.container}
     >

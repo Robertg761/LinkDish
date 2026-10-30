@@ -1,9 +1,10 @@
 import { AppButton, AppChip, AppSurface, AppText } from "@linkdish/ui";
 import { router } from "expo-router";
 import { useEffect } from "react";
-import { ScrollView, StyleSheet, View } from "react-native";
+import { Platform, ScrollView, StyleSheet, View } from "react-native";
 
 import { trackMobileEvent } from "../src/analytics/client";
+import { AppLegalLinks } from "../src/components/AppLegalLinks";
 import { mobileEnv } from "../src/config/env";
 import { useAccount } from "../src/features/account/AccountContext";
 import { useBilling } from "../src/features/billing/BillingContext";
@@ -238,6 +239,15 @@ export default function UpgradeScreen() {
           </AppText>
         ) : null}
       </AppSurface>
+
+      {Platform.OS === "ios" ? (
+        <AppText muted>
+          Subscriptions are charged to your Apple Account and renew automatically unless canceled at
+          least 24 hours before the current period ends. Manage or cancel subscriptions in your App
+          Store account settings. One-time lifetime purchases do not renew.
+        </AppText>
+      ) : null}
+      <AppLegalLinks />
 
       <View style={styles.footerActions}>
         <AppButton label="Back to recipes" onPress={() => router.back()} variant="secondary" />

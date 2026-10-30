@@ -119,7 +119,7 @@ const withAndroidUnrestrictedOrientation: ConfigPlugin = (config) =>
   });
 
 const appVersion = getEnvValue("LINKDISH_APP_VERSION") ?? "2.0.6";
-const iosBuildNumber = getEnvValue("LINKDISH_IOS_BUILD_NUMBER") ?? "29";
+const iosBuildNumber = getEnvValue("LINKDISH_IOS_BUILD_NUMBER") ?? "33";
 const androidVersionCode = Number.parseInt(
   getEnvValue("LINKDISH_ANDROID_VERSION_CODE") ?? "30",
   10
@@ -170,6 +170,7 @@ const androidConfig = {
 const config: ExpoConfig = {
   name: "LinkDish",
   slug: "linkdish",
+  owner: "linkdish",
   scheme: "linkdish",
   version: appVersion,
   runtimeVersion: {
@@ -180,7 +181,7 @@ const config: ExpoConfig = {
   icon: "./assets/icon.png",
   plugins: [
     "expo-router",
-    "expo-secure-store",
+    ["expo-secure-store", { faceIDPermission: false }],
     "expo-sharing",
     "expo-status-bar",
     [
@@ -196,7 +197,7 @@ const config: ExpoConfig = {
       "expo-image-picker",
       {
         cameraPermission: "LinkDish uses your camera to scan recipes from paper or cookbooks.",
-        microphonePermission: "LinkDish does not use the microphone.",
+        microphonePermission: false,
         photosPermission: "LinkDish uses selected photos to scan saved recipe images."
       }
     ],

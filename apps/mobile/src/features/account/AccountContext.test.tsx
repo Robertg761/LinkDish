@@ -938,12 +938,16 @@ describe("AccountContext", () => {
       await flushAsyncWork();
     });
 
+    clerkSessionState.isSignedIn = true;
+    clerkSessionState.signOut.mockResolvedValue(undefined);
+
     await act(async () => {
       await latestAccount?.logout();
       await flushAsyncWork();
     });
 
     expect(logout).toHaveBeenCalled();
+    expect(clerkSessionState.signOut).toHaveBeenCalled();
     expect(mocks.deleteItemAsync).toHaveBeenCalledWith("linkdish.account.sessionToken");
     expect(latestAccount?.user).toBeNull();
     expect(latestAccount?.sessionToken).toBeNull();
