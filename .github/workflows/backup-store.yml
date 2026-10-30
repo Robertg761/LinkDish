@@ -64,6 +64,45 @@ jobs:
           # Already gzipped before encryption.
           compression-level: 0
 
+      - name: Close backup failure issue
+        if: success()
+        continue-on-error: true
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const title = "Account data backup failing";
+            const label = "data-backup";
+            const runUrl = `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`;
+
+            try {
+              const { data: issues } = await github.rest.issues.listForRepo({
+                owner,
+                repo,
+                state: "open",
+                labels: label,
+                per_page: 100
+              });
+
+              for (const issue of issues.filter((candidate) => candidate.title === title)) {
+                await github.rest.issues.createComment({
+                  owner,
+                  repo,
+                  issue_number: issue.number,
+                  body: `Account data backup succeeded again: ${runUrl}`
+                });
+                await github.rest.issues.update({
+                  owner,
+                  repo,
+                  issue_number: issue.number,
+                  state: "closed",
+                  state_reason: "completed"
+                });
+              }
+            } catch (error) {
+              core.warning(`Could not close backup failure issue: ${error.message}`);
+            }
+
       - name: Report backup failure
         if: failure()
         continue-on-error: true
