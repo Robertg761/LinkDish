@@ -37,8 +37,10 @@ import type { DetectionResult } from "../types.js";
  * pointers leave video titles.
  * 2026-10-26.1: Instagram posts are read from their caption; a Pinterest pin linking to one
  * used to be rejected as unsupported.
+ * 2026-10-29.1: view, reaction and like counts no longer become ingredients; an older entry
+ * for a Facebook video may list "1.2M views · 20K reactions" as one.
  */
-export const EXTRACTOR_CACHE_VERSION = "2026-10-26.1";
+export const EXTRACTOR_CACHE_VERSION = "2026-10-29.1";
 
 const cacheKeyPrefix = "linkdish:extract-cache:v1";
 

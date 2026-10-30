@@ -126,9 +126,20 @@ const isGenericText = (text: string): boolean => {
   return genericTitles.has(lower) || (lower.length < 400 && genericPagePattern.test(lower));
 };
 
-/* Facebook sometimes leads a description with the counts: "1.2K views · 56 reactions | caption". */
-const engagementPrefixPattern =
-  /^[\d.,]+[KkMm]?\s+(?:views?|reactions?|likes?|comments?|shares?|plays?)\b[^|\n]*\|\s*/u;
+/* "1.2K views", "56 reactions", "12,345 plays". */
+const engagementCount = String.raw`[\d.,]+\s?[KkMmBb]?\s+(?:views?|reactions?|likes?|comments?|shares?|plays?)\b`;
+
+/*
+ * Facebook sometimes leads a description or a video's title with the counts:
+ * "1.2K views · 56 reactions | caption".
+ */
+const engagementPrefixPattern = new RegExp(`^${engagementCount}[^|\\n]*\\|\\s*`, "iu");
+
+/* A title that is only the counts and the page name leaves the counts where the caption would be. */
+const engagementOnlyPattern = new RegExp(
+  `^${engagementCount}(?:\\s*[·•,]\\s*${engagementCount})*$`,
+  "iu"
+);
 
 const stripEngagementPrefix = (text: string): string => {
   let result = text;
@@ -254,7 +265,7 @@ export const readFacebookPost = (html: string): FacebookPost | null => {
     const withPage = title.match(titleWithPagePattern);
 
     if (withPage?.[1] && withPage[2]) {
-      candidates.push(withPage[1]);
+      candidates.push(stripEngagementPrefix(withPage[1]));
       pageNames.push(withPage[2].trim());
     } else if (!title.includes("\n") && title.length <= 100) {
       pageNames.push(title);
@@ -274,7 +285,10 @@ export const readFacebookPost = (html: string): FacebookPost | null => {
 
   const caption = candidates
     .map(cleanCaption)
-    .filter((candidate) => candidate.length > 0 && !isGenericText(candidate))
+    .filter(
+      (candidate) =>
+        candidate.length > 0 && !isGenericText(candidate) && !engagementOnlyPattern.test(candidate)
+    )
     .sort((left, right) => right.length - left.length)[0];
 
   if (!caption) {
