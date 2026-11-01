@@ -21,18 +21,15 @@ import { useBilling } from "../../src/features/billing/BillingContext";
 import { UrlForm } from "../../src/features/recipe-intake/components/UrlForm";
 import { subscribeToRecipeUrlReset } from "../../src/features/recipe-intake/intakeResetEvents";
 import { createPendingImageImport } from "../../src/features/recipe-intake/pendingImageImports";
+import { preparePickedImages } from "../../src/features/recipe-intake/preparePickedImages";
 import { pressedOpacity } from "../../src/theme/interactions";
 import { appColors, appSpacing } from "../../src/theme/tokens";
 
 import type { ExtractRecipeImage } from "@linkdish/api-contracts";
 
 const MAX_IMAGE_IMPORTS = 4;
-const MAX_IMAGE_DATA_URL_LENGTH = 4_500_000;
-const MAX_IMAGE_IMPORT_PAYLOAD_LENGTH = 8_000_000;
-const PAYLOAD_SIZE_CHECK_SOURCE_URL =
-  "https://linkdish.app/image-imports/image-0000000000000-00000000";
-const IMAGE_TOO_LARGE_MESSAGE =
-  "That image was too large or could not be read. Try a clearer photo.";
+const IMAGE_PREPARATION_ERROR_MESSAGE =
+  "Those photos could not be prepared for import. Try fewer photos or a smaller image.";
 const HERO_ENTRANCE_DURATION_MS = 340;
 const HERO_ENTRANCE_DELAYS_MS = [0, 70, 140, 240] as const;
 
@@ -45,6 +42,9 @@ export default function HomeScreen() {
   const [urlResetSignal, setUrlResetSignal] = useState(0);
   const [isScanSheetVisible, setIsScanSheetVisible] = useState(false);
   const [isScanSheetRendered, setIsScanSheetRendered] = useState(false);
+  const pendingScanSource = React.useRef<"camera" | "library" | null>(null);
+  const isClosingScanSheet = React.useRef(false);
+  const imageImportInProgress = React.useRef(false);
   const sheetProgress = React.useRef(new Animated.Value(0)).current;
   const heroEntranceValues = React.useRef(
     HERO_ENTRANCE_DELAYS_MS.map(() => new Animated.Value(0))
@@ -120,47 +120,8 @@ export default function HomeScreen() {
     });
   };
 
-  const getImageImportsFromAssets = (
-    assets: ImagePicker.ImagePickerAsset[]
-  ): ExtractRecipeImage[] => {
-    const imageImports = assets
-      .slice(0, MAX_IMAGE_IMPORTS)
-      .map((asset) => {
-        const base64 = asset.base64?.trim();
-        const mimeType =
-          asset.mimeType === "image/png" || asset.mimeType === "image/webp"
-            ? asset.mimeType
-            : "image/jpeg";
-
-        if (!base64) {
-          return null;
-        }
-
-        const dataUrl = `data:${mimeType};base64,${base64}`;
-
-        if (dataUrl.length > MAX_IMAGE_DATA_URL_LENGTH) {
-          return null;
-        }
-
-        return {
-          dataUrl,
-          mimeType
-        };
-      })
-      .filter((image): image is ExtractRecipeImage => image !== null);
-
-    return imageImports;
-  };
-
-  const isImageImportPayloadTooLarge = (images: ExtractRecipeImage[]) =>
-    JSON.stringify({
-      images,
-      sourceUrl: PAYLOAD_SIZE_CHECK_SOURCE_URL,
-      attempt: "fallback"
-    }).length > MAX_IMAGE_IMPORT_PAYLOAD_LENGTH;
-
   const startImageImport = async (source: "camera" | "library") => {
-    if (isStartingImageImport) {
+    if (imageImportInProgress.current) {
       return;
     }
 
@@ -170,6 +131,7 @@ export default function HomeScreen() {
     }
 
     setImageScanError(null);
+    imageImportInProgress.current = true;
     setIsStartingImageImport(true);
 
     try {
@@ -190,13 +152,13 @@ export default function HomeScreen() {
       const result =
         source === "camera"
           ? await ImagePicker.launchCameraAsync({
-              base64: true,
+              base64: false,
               mediaTypes: ["images"],
               quality: 0.72
             })
           : await ImagePicker.launchImageLibraryAsync({
               allowsMultipleSelection: true,
-              base64: true,
+              base64: false,
               mediaTypes: ["images"],
               orderedSelection: true,
               quality: 0.72,
@@ -207,28 +169,35 @@ export default function HomeScreen() {
         return;
       }
 
-      const images = getImageImportsFromAssets(result.assets);
-
-      if (images.length === 0 || isImageImportPayloadTooLarge(images)) {
-        setImageScanError(IMAGE_TOO_LARGE_MESSAGE);
+      let images: ExtractRecipeImage[];
+      try {
+        images = await preparePickedImages(result.assets);
+      } catch {
+        setImageScanError(IMAGE_PREPARATION_ERROR_MESSAGE);
         return;
       }
 
       routeToImageImport(images);
     } catch (error) {
-      console.warn("Failed to start image recipe import.", error);
+      if (process.env.NODE_ENV !== "production") {
+        console.warn("Failed to start image recipe import.", error);
+      }
       setImageScanError("LinkDish could not open image scanning. Try again.");
     } finally {
+      imageImportInProgress.current = false;
       setIsStartingImageImport(false);
     }
   };
 
   const handleCameraPress = () => {
+    if (imageImportInProgress.current || isClosingScanSheet.current) return;
     setIsScanSheetRendered(true);
     setIsScanSheetVisible(true);
   };
 
   const closeScanSheet = () => {
+    if (isClosingScanSheet.current) return;
+    isClosingScanSheet.current = true;
     setIsScanSheetVisible(false);
     Animated.timing(sheetProgress, {
       toValue: 0,
@@ -241,6 +210,19 @@ export default function HomeScreen() {
       }
     });
   };
+
+  const handleScanSheetDismissed = () => {
+    isClosingScanSheet.current = false;
+    const source = pendingScanSource.current;
+    pendingScanSource.current = null;
+    if (source) void startImageImport(source);
+  };
+
+  useEffect(() => {
+    // iOS must wait for native dismissal, not just the JS closing animation.
+    // Android removes the dialog when visible becomes false and has no onDismiss callback.
+    if (Platform.OS !== "ios" && !isScanSheetRendered) handleScanSheetDismissed();
+  }, [isScanSheetRendered]);
 
   useEffect(() => {
     if (isScanSheetVisible) {
@@ -290,7 +272,7 @@ export default function HomeScreen() {
 
           <Animated.View style={[styles.formContainer, getHeroEntranceStyle(3)]}>
             <UrlForm
-              disabled={false}
+              disabled={isStartingImageImport}
               helperText={
                 !useServerBillingGate && !importGate.allowed ? importGate.message : undefined
               }
@@ -312,8 +294,11 @@ export default function HomeScreen() {
       <ScanOptionsSheet
         visible={isScanSheetRendered}
         onClose={closeScanSheet}
+        onDismiss={handleScanSheetDismissed}
         onSelectOption={(option) => {
-          void startImageImport(option);
+          if (isClosingScanSheet.current || imageImportInProgress.current) return;
+          pendingScanSource.current = option;
+          closeScanSheet();
         }}
         progress={sheetProgress}
       />
@@ -324,6 +309,7 @@ export default function HomeScreen() {
 interface ScanOptionsSheetProps {
   visible: boolean;
   onClose: () => void;
+  onDismiss: () => void;
   onSelectOption: (option: "camera" | "library") => void;
   progress: Animated.Value;
 }
@@ -331,6 +317,7 @@ interface ScanOptionsSheetProps {
 const ScanOptionsSheet = ({
   visible,
   onClose,
+  onDismiss,
   onSelectOption,
   progress
 }: ScanOptionsSheetProps) => {
@@ -357,7 +344,13 @@ const ScanOptionsSheet = ({
   });
 
   return (
-    <Modal transparent visible={visible} animationType="none" onRequestClose={onClose}>
+    <Modal
+      transparent
+      visible={visible}
+      animationType="none"
+      onRequestClose={onClose}
+      onDismiss={onDismiss}
+    >
       <Pressable style={styles.backdropPressable} onPress={onClose}>
         <Animated.View
           style={[
@@ -392,7 +385,6 @@ const ScanOptionsSheet = ({
               <Pressable
                 style={({ pressed }) => [styles.sheetRow, pressed && styles.sheetRowPressed]}
                 onPress={() => {
-                  onClose();
                   onSelectOption("camera");
                 }}
               >
@@ -416,7 +408,6 @@ const ScanOptionsSheet = ({
               <Pressable
                 style={({ pressed }) => [styles.sheetRow, pressed && styles.sheetRowPressed]}
                 onPress={() => {
-                  onClose();
                   onSelectOption("library");
                 }}
               >

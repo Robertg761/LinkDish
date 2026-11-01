@@ -119,7 +119,7 @@ const withAndroidUnrestrictedOrientation: ConfigPlugin = (config) =>
   });
 
 const appVersion = getEnvValue("LINKDISH_APP_VERSION") ?? "2.0.6";
-const iosBuildNumber = getEnvValue("LINKDISH_IOS_BUILD_NUMBER") ?? "33";
+const iosBuildNumber = getEnvValue("LINKDISH_IOS_BUILD_NUMBER") ?? "34";
 const androidVersionCode = Number.parseInt(
   getEnvValue("LINKDISH_ANDROID_VERSION_CODE") ?? "30",
   10

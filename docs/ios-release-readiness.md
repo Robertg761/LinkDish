@@ -1,9 +1,9 @@
-# iOS release readiness — 2026-10-30
+# iOS release readiness — 2026-10-31
 
 ## Current production configuration
 
 - Expo project: `@linkdish/linkdish`, ID `a2c1318c-39e0-45a3-a114-1f5e88288af1`.
-- Bundle ID: `com.linkdish.app`; version `2.0.6`; next build `33`, synchronized in Expo config, native Info.plist, and Xcode project.
+- Bundle ID: `com.linkdish.app`; version `2.0.6`; next build `34`, synchronized in Expo config, native Info.plist, and Xcode project.
 - EAS profile: `testflight`, production environment, store distribution, Release configuration, no development client.
 - API: `https://api.linkdish.ca`. Live `/auth/config` returns `clerk_beta`, `clerkEnabled: true`, `emailCodeEnabled: true`; `/auth/session` is reachable.
 - `apps/mobile/config/production-public-env.json` is the source for the production API, Clerk publishable key, Google client identifiers/callback scheme, and RevenueCat iOS public SDK key. No server credentials belong in this file.
@@ -12,6 +12,14 @@
 - Local `.env.local` matches the production API/public credentials, disables mocks, and enables the Apple sign-in button. Restart Metro after changing local environment variables.
 - Apple sign-in is now enabled in the production Clerk public configuration, the release app, and the native entitlement. Provider setup still needs an actual device sign-in test.
 - Mocks, household simulation, and local subscription previews are disabled for release.
+
+## Photo import fixes for build 34
+
+- Wait for the iOS scan-options modal's native dismissal before opening the camera or photo library. Repeated taps and duplicate dismissal callbacks cannot launch overlapping pickers. Android retains its separate dismissal path.
+- Read picker file URIs instead of allocating full-resolution base64 in the picker. Convert selected photos/screenshots to JPEG, bound the longest edge to 2,400 pixels, and retry with smaller dimensions/compression if needed. Process selected photos sequentially and retain page order; never silently drop an oversized page.
+- Keep the combined image payload below 4 MB with metadata headroom. The Vercel deployment's [4.5 MB request limit](https://vercel.com/docs/functions/limitations) is lower than the shared API contract's 8-million-character limit.
+- Regression coverage includes native dismissal ordering, repeated taps, cancellation/retry, denied camera permission, Android behavior, portrait/landscape resizing, multi-photo budgets, and temporary-file cleanup. All 328 mobile tests passed; the targeted 15 tests passed again after tightening the deployment budget. TypeScript and targeted ESLint pass.
+- Physical-device validation is still required for selecting a library photo, cancelling and retrying, taking a high-resolution photo, and importing up to four pages. No new EAS build was started for this fix.
 
 ## Verification on this configuration
 
@@ -24,7 +32,7 @@
 
 ## Remaining release work
 
-1. Generate a fresh production build (next build 33) for device validation. Apple provider enablement is confirmed; no Clerk or Apple credentials were changed by this check.
+1. Generate a fresh production build (next build 34) for device validation. Apple provider enablement is confirmed; no Clerk or Apple credentials were changed by this check.
 2. On a physical device, verify Google and Apple sign-in, cancellation, persistence after relaunch, sign-out/relaunch, and account deletion. This custom UI does not collect additional signup fields or MFA; the Clerk configuration must be compatible or those flows need implementation.
 3. Verify the RevenueCat key belongs to the intended iOS app, App Store products, Plus/Family entitlements, sandbox purchase, and restore. Key presence and embedding are verified; billing behavior is not.
 4. Confirm the App Store Connect app/team record, standard versus custom EULA, privacy disclosures, screenshots, support/privacy URLs, and review access. The existing native privacy manifest requires a full SDK/backend data inventory before public submission.
