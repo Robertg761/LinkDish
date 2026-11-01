@@ -1,20 +1,14 @@
 import { isAbortError } from "../deadline.js";
-import { isSourceUrlRejection, validatePublicSourceUrl } from "../source-url-safety.js";
+import { validatePublicSourceUrl } from "../source-url-safety.js";
 
+import { downloadSocialVideo } from "./download-social-video.js";
 import { SocialFetchError } from "./errors.js";
 import {
-  discardBody,
   fetchTikTokEmbedVideoData,
   readTikTokEmbedMedia,
   readTikTokVideoId
 } from "./fetch-tiktok-document.js";
-import {
-  browserLikeHeaders,
-  createTimeoutSignal,
-  getContentTypeEssence,
-  readLimitedResponseBytes,
-  ResponseBodyTooLargeError
-} from "./shared.js";
+import { createTimeoutSignal, ResponseBodyTooLargeError } from "./shared.js";
 
 import type { ValidateSourceUrl } from "../source-url-safety.js";
 import type { TikTokVideoLocator } from "../types.js";
@@ -48,7 +42,6 @@ export interface FetchTikTokVideoOptions {
 
 const tiktokMediaHostPattern =
   /(?:^|\.)(?:tiktok\.com|tiktokcdn\.com|tiktokcdn-us\.com|tiktokcdn-eu\.com|tiktokv\.com|tiktokv\.us|tiktokv\.eu|byteoversea\.com|ibytedtos\.com|muscdn\.com)$/u;
-const maxMediaRedirects = 3;
 
 const isTikTokMediaUrl = (url: string): boolean => {
   try {
@@ -57,72 +50,6 @@ const isTikTokMediaUrl = (url: string): boolean => {
   } catch {
     return false;
   }
-};
-
-const assertSafeMediaUrl = async (url: string, validateUrl: ValidateSourceUrl): Promise<void> => {
-  if (!isTikTokMediaUrl(url)) {
-    throw new SocialFetchError("TikTok video link pointed outside TikTok.", "blocked");
-  }
-
-  const safety = await validateUrl(url);
-
-  if (isSourceUrlRejection(safety)) {
-    throw new SocialFetchError(`Refused unsafe TikTok video URL: ${safety.reason}`, "blocked");
-  }
-};
-
-const downloadMedia = async (
-  mediaUrl: string,
-  fetchImplementation: typeof fetch,
-  validateUrl: ValidateSourceUrl,
-  maxBytes: number,
-  signal: AbortSignal
-): Promise<{ bytes: Uint8Array<ArrayBuffer>; mimeType: string }> => {
-  let current = mediaUrl;
-
-  for (let hop = 0; hop <= maxMediaRedirects; hop += 1) {
-    await assertSafeMediaUrl(current, validateUrl);
-
-    const response = await fetchImplementation(current, {
-      headers: {
-        accept: "video/mp4,video/*;q=0.9,*/*;q=0.5",
-        "user-agent": browserLikeHeaders["user-agent"],
-        referer: "https://www.tiktok.com/"
-      },
-      redirect: "manual",
-      signal
-    });
-    const location = response.headers.get("location");
-
-    if (response.status >= 300 && response.status < 400 && location) {
-      discardBody(response);
-      current = new URL(location, current).toString();
-      continue;
-    }
-
-    if (!response.ok) {
-      discardBody(response);
-      throw new SocialFetchError(
-        `TikTok video download failed with ${response.status}.`,
-        response.status === 403 || response.status === 429 ? "blocked" : "unreachable",
-        response.status
-      );
-    }
-
-    const mimeType = getContentTypeEssence(response.headers.get("content-type")) || "video/mp4";
-
-    if (!mimeType.startsWith("video/")) {
-      discardBody(response);
-      throw new SocialFetchError(
-        "TikTok video link did not return a video.",
-        "unsupported_content_type"
-      );
-    }
-
-    return { bytes: await readLimitedResponseBytes(response, maxBytes), mimeType };
-  }
-
-  throw new SocialFetchError("TikTok video redirected too many times.", "blocked");
 };
 
 export const fetchTikTokVideo = async (
@@ -159,13 +86,15 @@ export const fetchTikTokVideo = async (
       throw new SocialFetchError("That TikTok video is too long to read.", "too_large");
     }
 
-    const media = await downloadMedia(
-      mediaUrl,
+    const media = await downloadSocialVideo(mediaUrl, {
+      platform: "TikTok",
+      isMediaUrl: isTikTokMediaUrl,
+      referer: "https://www.tiktok.com/",
       fetchImplementation,
       validateUrl,
-      options.maxBytes,
-      timeout.signal
-    );
+      maxBytes: options.maxBytes,
+      signal: timeout.signal
+    });
 
     return { ...media, durationSeconds };
   } catch (error) {

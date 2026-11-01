@@ -1891,3 +1891,340 @@ describe("the video recipe reader", () => {
     expect(response).toMatchObject({ status: "failure", reason: "parse_failed" });
   });
 });
+
+describe("a Facebook reel whose recipe is in the comments", () => {
+  const reelUrl = "https://www.facebook.com/fedbysab/videos/recipe-in-comments/1105272202246497/";
+  const caption = "🚨 Recipe in Comments ⭐️ Pull Apart Buffalo Chicken Quesadilla Ring 🧀 🌶️";
+  const facebookVideo = {
+    videoId: "1105272202246497",
+    mediaUrl: "https://video-ord5-2.xx.fbcdn.net/o1/v/t2/f2/m86/reel-sd.mp4",
+    durationSeconds: 24
+  };
+  const reelDocument = (overrides: Partial<TextSourceDocument> = {}): TextSourceDocument => ({
+    kind: "text",
+    url: reelUrl,
+    origin: "facebook",
+    text: caption,
+    title: null,
+    authorName: "fedbysab.com",
+    thumbnailUrl: "https://scontent.xx.fbcdn.net/v/t15/cover.jpg",
+    isVideo: true,
+    captionTruncated: false,
+    linkedUrls: [],
+    facebookVideo,
+    ...overrides
+  });
+
+  const site = "https://fedbysab.com";
+  const recipePage = (name: string, description: string, ingredients: string[], steps: string[]) =>
+    `<!doctype html><html><head><title>${name} - fed by sab</title>
+    <script type="application/ld+json">${JSON.stringify({
+      "@context": "https://schema.org",
+      "@type": "Recipe",
+      name,
+      description,
+      recipeIngredient: ingredients,
+      recipeInstructions: steps.map((text) => ({ "@type": "HowToStep", text })),
+      recipeYield: "8"
+    })}</script></head><body><h1>${name}</h1></body></html>`;
+  /* fedbysab.com's two quesadilla rings: the reel is the buffalo one, the search ranks the taco one first. */
+  const pages: Record<string, string> = {
+    [`${site}/blooming-chicken-quesadilla-ring/`]: recipePage(
+      "Blooming Chicken Quesadilla Ring",
+      "Flour tortillas rolled with chicken quesadilla filling and shaped into a pull apart ring.",
+      ["12 medium flour tortillas", "3 cups cooked chicken", "1 1/2 tbsp taco seasoning"],
+      [
+        "Mix the chicken with the taco seasoning.",
+        "Arrange the cones in a ring and bake for 20 minutes."
+      ]
+    ),
+    [`${site}/buffalo-chicken-blooming-quesadilla/`]: recipePage(
+      "Buffalo Chicken Blooming Quesadilla",
+      "Flour tortillas rolled with buffalo chicken filling and shaped into a pull apart ring.",
+      [
+        "12 flour tortillas",
+        "4 cups cooked chicken",
+        "8 ounces cream cheese",
+        "1/4 cup Buffalo sauce"
+      ],
+      [
+        "Mix the chicken, cream cheese and buffalo sauce.",
+        "Arrange the cones in a ring and bake for 20 minutes."
+      ]
+    ),
+    [`${site}/buffalo-chicken-pasta-salad/`]: recipePage(
+      "Buffalo Chicken Pasta Salad",
+      "A creamy buffalo chicken pasta salad.",
+      ["1 lb pasta", "2 cups chicken", "1/3 cup buffalo sauce"],
+      ["Boil the pasta.", "Toss everything together."]
+    )
+  };
+  const searchResults = [
+    { title: "Blooming Chicken Quesadilla Ring", url: `${site}/blooming-chicken-quesadilla-ring/` },
+    { title: "Pizza Dip Ring", url: `${site}/pizza-dip-ring/` },
+    { title: "Buffalo Chicken Pasta Salad", url: `${site}/buffalo-chicken-pasta-salad/` },
+    {
+      title: "Buffalo Chicken Blooming Quesadilla",
+      url: `${site}/buffalo-chicken-blooming-quesadilla/`
+    }
+  ];
+  const fetchSitePage = () =>
+    vi.fn((url: string) => Promise.resolve(htmlResult(url, pages[url] ?? articleWeak)));
+
+  const videoReader = () => ({
+    available: true,
+    model: "gemini-test",
+    read: vi.fn<VideoRecipeReader["read"]>(() =>
+      Promise.resolve({
+        recipeInVideo: true,
+        notRecipeReason: null,
+        title: "Pull Apart Buffalo Chicken Quesadilla Ring",
+        servings: null,
+        prepTimeMinutes: null,
+        cookTimeMinutes: null,
+        ingredients: [
+          {
+            item: "shredded chicken",
+            amount: null,
+            section: null,
+            source: "visual",
+            quote: "shredded chicken in a bowl"
+          },
+          {
+            item: "buffalo sauce",
+            amount: null,
+            section: null,
+            source: "visual",
+            quote: "orange sauce poured on the chicken"
+          },
+          {
+            item: "flour tortillas",
+            amount: null,
+            section: null,
+            source: "visual",
+            quote: "tortillas cut in half"
+          }
+        ],
+        steps: [
+          {
+            text: "Mix the chicken with the buffalo sauce and cheese.",
+            source: "visual",
+            quote: "mixing the filling"
+          },
+          {
+            text: "Roll the filling into tortilla cones and arrange them in a ring.",
+            source: "visual",
+            quote: "cones arranged in a ring"
+          }
+        ]
+      })
+    )
+  });
+  const downloadVideo = () =>
+    vi.fn<NonNullable<ExtractorRuntime["fetchFacebookVideo"]>>(() =>
+      Promise.resolve({
+        bytes: new Uint8Array([1, 2, 3]),
+        mimeType: "video/mp4",
+        durationSeconds: 24
+      })
+    );
+
+  it("finds the recipe on the creator's site, picking the one whose recipe matches the caption", async () => {
+    const searchCreatorSite = vi.fn(() => Promise.resolve(searchResults));
+    const fetchHtmlDocument = fetchSitePage();
+    const fetchFacebookVideo = downloadVideo();
+
+    const { response } = await extractRecipe(
+      { url: "https://www.facebook.com/share/r/1HGYsgcsQk/", attempt: "primary" },
+      createRuntime({
+        fetchSocialDocument: () => Promise.resolve(reelDocument()),
+        searchCreatorSite,
+        fetchHtmlDocument,
+        fetchFacebookVideo,
+        videoRecipeReader: videoReader()
+      })
+    );
+
+    expect(searchCreatorSite).toHaveBeenCalledTimes(1);
+    expect(searchCreatorSite).toHaveBeenCalledWith(
+      "fedbysab.com",
+      "Pull Apart Buffalo Chicken Quesadilla Ring",
+      expect.anything()
+    );
+    expect(fetchHtmlDocument.mock.calls.map(([url]) => url).sort()).toEqual([
+      `${site}/blooming-chicken-quesadilla-ring/`,
+      `${site}/buffalo-chicken-blooming-quesadilla/`,
+      `${site}/buffalo-chicken-pasta-salad/`
+    ]);
+    expect(fetchFacebookVideo).not.toHaveBeenCalled();
+    expect(response).toMatchObject({
+      status: "success",
+      recipe: {
+        title: "Buffalo Chicken Blooming Quesadilla",
+        sourceUrl: `${site}/buffalo-chicken-blooming-quesadilla/`,
+        videoUrl: reelUrl
+      }
+    });
+  });
+
+  it("retries a long dish name with its last words when the site finds nothing", async () => {
+    const searchCreatorSite = vi
+      .fn<NonNullable<ExtractorRuntime["searchCreatorSite"]>>()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce(searchResults);
+
+    const { response } = await extractRecipe(
+      { url: reelUrl, attempt: "primary" },
+      createRuntime({
+        fetchSocialDocument: () => Promise.resolve(reelDocument()),
+        searchCreatorSite,
+        fetchHtmlDocument: fetchSitePage()
+      })
+    );
+
+    expect(searchCreatorSite.mock.calls.map(([, query]) => query)).toEqual([
+      "Pull Apart Buffalo Chicken Quesadilla Ring",
+      "Chicken Quesadilla Ring"
+    ]);
+    expect(response).toMatchObject({
+      status: "success",
+      recipe: { title: "Buffalo Chicken Blooming Quesadilla" }
+    });
+  });
+
+  it("watches the reel when the creator's site has no clear match", async () => {
+    for (const results of [
+      [],
+      /* Only the taco version: its recipe covers too little of the caption. */
+      [searchResults[0]!, searchResults[2]!]
+    ]) {
+      const fetchFacebookVideo = downloadVideo();
+      const videoRecipeReader = videoReader();
+
+      const { response, logContext } = await extractRecipe(
+        { url: reelUrl, attempt: "primary" },
+        createRuntime({
+          fetchSocialDocument: () => Promise.resolve(reelDocument()),
+          searchCreatorSite: () => Promise.resolve(results),
+          fetchHtmlDocument: fetchSitePage(),
+          fetchFacebookVideo,
+          videoRecipeReader
+        })
+      );
+
+      expect(fetchFacebookVideo).toHaveBeenCalledWith(facebookVideo, expect.anything());
+      expect(videoRecipeReader.read.mock.calls[0]?.[0]).toMatchObject({
+        source: { kind: "file", mimeType: "video/mp4" },
+        context: { platform: "facebook", caption, authorName: "fedbysab.com" }
+      });
+      expect(response).toMatchObject({
+        status: "success",
+        recipe: {
+          title: "Pull Apart Buffalo Chicken Quesadilla Ring",
+          sourceUrl: reelUrl,
+          videoUrl: reelUrl,
+          siteName: "Facebook"
+        }
+      });
+      expect(logContext).toMatchObject({ videoRead: "read" });
+    }
+  });
+
+  it("watches the reel of a page that has no site of its own", async () => {
+    const searchCreatorSite = vi.fn(() => Promise.resolve(searchResults));
+    const fetchFacebookVideo = downloadVideo();
+
+    const { response } = await extractRecipe(
+      { url: reelUrl, attempt: "primary" },
+      createRuntime({
+        fetchSocialDocument: () => Promise.resolve(reelDocument({ authorName: "Fed by Sab" })),
+        searchCreatorSite,
+        fetchFacebookVideo,
+        videoRecipeReader: videoReader()
+      })
+    );
+
+    expect(searchCreatorSite).not.toHaveBeenCalled();
+    expect(fetchFacebookVideo).toHaveBeenCalledTimes(1);
+    expect(response.status).toBe("success");
+  });
+
+  it("says the recipe is in the comments when neither the site nor the video gives one", async () => {
+    const { response, logContext } = await extractRecipe(
+      { url: reelUrl, attempt: "primary" },
+      createRuntime({
+        fetchSocialDocument: () => Promise.resolve(reelDocument()),
+        searchCreatorSite: () => Promise.reject(new Error("site down")),
+        fetchFacebookVideo: downloadVideo(),
+        videoRecipeReader: { available: false, model: null, read: () => Promise.resolve(null) }
+      })
+    );
+
+    expect(response).toMatchObject({
+      status: "failure",
+      reason: "parse_failed",
+      userMessage:
+        "That post's recipe is in its comments, which Facebook only shows to people who are signed in. Paste the recipe text or import a screenshot of the comment instead."
+    });
+    expect(logContext).not.toHaveProperty("videoRead");
+  });
+
+  it("neither searches nor watches when the caption is the whole recipe", async () => {
+    const searchCreatorSite = vi.fn(() => Promise.resolve(searchResults));
+    const fetchFacebookVideo = downloadVideo();
+    const fullRecipe = [
+      "Buffalo chicken quesadilla ring",
+      "Ingredients:",
+      "4 cups shredded chicken",
+      "1/4 cup buffalo sauce",
+      "12 flour tortillas",
+      "Method:",
+      "1. Mix the chicken and sauce.",
+      "2. Roll into tortillas, arrange in a ring and bake for 20 minutes."
+    ].join("\n");
+
+    const { response } = await extractRecipe(
+      { url: reelUrl, attempt: "primary" },
+      createRuntime({
+        fetchSocialDocument: () => Promise.resolve(reelDocument({ text: fullRecipe })),
+        searchCreatorSite,
+        fetchFacebookVideo,
+        videoRecipeReader: videoReader()
+      })
+    );
+
+    expect(searchCreatorSite).not.toHaveBeenCalled();
+    expect(fetchFacebookVideo).not.toHaveBeenCalled();
+    expect(response).toMatchObject({ status: "success", recipe: { sourceUrl: reelUrl } });
+  });
+
+  it("looks a cut caption's dish up on the site, but never watches its video", async () => {
+    const cut = `Pull Apart Buffalo Chicken Quesadilla Ring 🧀\nIngredients:\n4 cups shredded chicken\n1/4 cup buffalo sa...`;
+    const fetchFacebookVideo = downloadVideo();
+    const runtime = (searchCreatorSite: NonNullable<ExtractorRuntime["searchCreatorSite"]>) =>
+      createRuntime({
+        fetchSocialDocument: () =>
+          Promise.resolve(reelDocument({ text: cut, captionTruncated: true })),
+        searchCreatorSite,
+        fetchHtmlDocument: fetchSitePage(),
+        fetchFacebookVideo,
+        videoRecipeReader: videoReader()
+      });
+
+    const found = await extractRecipe(
+      { url: reelUrl, attempt: "primary" },
+      runtime(() => Promise.resolve(searchResults))
+    );
+    const notFound = await extractRecipe(
+      { url: reelUrl, attempt: "primary" },
+      runtime(() => Promise.resolve([]))
+    );
+
+    expect(found.response).toMatchObject({
+      status: "success",
+      recipe: { title: "Buffalo Chicken Blooming Quesadilla" }
+    });
+    expect(notFound.response).toMatchObject({ status: "failure", reason: "source_blocked" });
+    expect(fetchFacebookVideo).not.toHaveBeenCalled();
+  });
+});

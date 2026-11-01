@@ -3,7 +3,12 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 
 import { SocialFetchError } from "./errors";
-import { fetchFacebookDocument, readFacebookPost } from "./fetch-facebook-document";
+import {
+  fetchFacebookDocument,
+  readFacebookPost,
+  readFacebookVideo,
+  readFacebookVideoId
+} from "./fetch-facebook-document";
 import { browserLikeHeaders, identifyingFetchHeaders } from "./shared";
 
 const fixture = (name: string) =>
@@ -335,5 +340,112 @@ describe("fetchFacebookDocument", () => {
         timeoutMs: 20
       })
     ).rejects.toMatchObject({ reason: "timeout" });
+  });
+});
+
+describe("the reel's video file", () => {
+  const efg = (durationSeconds: number) =>
+    Buffer.from(
+      JSON.stringify({ vencode_tag: "progressive", duration_s: durationSeconds })
+    ).toString("base64");
+  const mp4 = (name: string, durationSeconds: number) =>
+    `https://video-ord5-2.xx.fbcdn.net/o1/v/t2/f2/m86/${name}.mp4?_nc_cat=1&efg=${efg(durationSeconds)}`;
+  /* Player data the way Facebook embeds it: JSON with escaped slashes, the next reels included. */
+  const player = (id: string, name: string, durationSeconds: number) =>
+    JSON.stringify({
+      dash_manifest_url: `https://www.facebook.com/dash_mpd_debug.mpd?v=${id}`,
+      browser_native_sd_url: mp4(`${name}-sd`, durationSeconds),
+      browser_native_hd_url: mp4(`${name}-hd`, durationSeconds),
+      id
+    }).replace(/\//gu, "\\/");
+  const withPlayers = (...players: string[]) =>
+    reel.replace(
+      "</body>",
+      `<script type="application/json">{"require":[${players.join(",")}]}</script></body>`
+    );
+
+  it("takes the SD file of the video the post's URL names, not the next reels in the feed", () => {
+    const page = withPlayers(
+      player("700000000000009", "other", 30),
+      player("900000000000001", "this", 24)
+    );
+
+    expect(readFacebookVideo(page, "900000000000001")).toEqual({
+      videoId: "900000000000001",
+      mediaUrl: mp4("this-sd", 24),
+      durationSeconds: 24
+    });
+    expect(readFacebookVideo(page, "123450000000000")).toBeNull();
+    expect(readFacebookVideo(page, null)).toBeNull();
+    expect(
+      readFacebookVideo(withPlayers(player("900000000000001", "only", 24)), null)
+    ).toMatchObject({ videoId: "900000000000001" });
+  });
+
+  it("ignores links off Facebook's CDN", () => {
+    const page = withPlayers(player("900000000000001", "this", 24)).replace(
+      /video-ord5-2\.xx\.fbcdn\.net/gu,
+      "evil.example"
+    );
+
+    expect(readFacebookVideo(page, "900000000000001")).toBeNull();
+  });
+
+  it("reads the video id from reel, video and watch URLs", () => {
+    expect(readFacebookVideoId("https://www.facebook.com/reel/1105272202246497/")).toBe(
+      "1105272202246497"
+    );
+    expect(
+      readFacebookVideoId(
+        "https://www.facebook.com/fedbysab/videos/-recipe-in-comments/1105272202246497/"
+      )
+    ).toBe("1105272202246497");
+    expect(readFacebookVideoId("https://www.facebook.com/watch/?v=1105272202246497")).toBe(
+      "1105272202246497"
+    );
+    expect(readFacebookVideoId("https://www.facebook.com/page/posts/123/")).toBeNull();
+    expect(readFacebookVideoId(null)).toBeNull();
+  });
+
+  it("puts the reel's video on the document after following a share link", async () => {
+    const page = withPlayers(
+      player("700000000000009", "other", 30),
+      player("900000000000001", "this", 24)
+    );
+    const fetchImplementation = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(redirect(`${reelUrl}?rdid=abc`))
+      .mockResolvedValueOnce(html(page));
+
+    const document = await fetchFacebookDocument(
+      "https://www.facebook.com/share/r/1HGYsgcsQk/",
+      fetchImplementation,
+      options
+    );
+
+    expect(document.facebookVideo).toEqual({
+      videoId: "900000000000001",
+      mediaUrl: mp4("this-sd", 24),
+      durationSeconds: 24
+    });
+  });
+
+  it("puts no video on a post without one", async () => {
+    const document = await fetchFacebookDocument(
+      "https://www.facebook.com/WeeknightPastaClub/posts/creamy-garlic-parmesan-pasta/122200000000000001/",
+      () =>
+        Promise.resolve(
+          html(
+            truncatedPost.replace(
+              "</body>",
+              `<script>${player("122200000000000001", "x", 5)}</script></body>`
+            )
+          )
+        ),
+      options
+    );
+
+    expect(document.isVideo).toBe(false);
+    expect(document.facebookVideo).toBeUndefined();
   });
 });

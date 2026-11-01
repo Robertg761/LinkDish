@@ -22,7 +22,7 @@ import {
 } from "./shared.js";
 
 import type { ValidateSourceUrl } from "../source-url-safety.js";
-import type { TextSourceDocument } from "../types.js";
+import type { FacebookVideoLocator, TextSourceDocument } from "../types.js";
 
 /*
  * A public Facebook post or reel answers a plain request with its Open Graph tags: the page name,
@@ -319,6 +319,96 @@ export const readFacebookPost = (html: string): FacebookPost | null => {
   };
 };
 
+/*
+ * The video file behind a reel, for the video recipe reader. A logged-out page carries each
+ * video's player data: progressive MP4 links on Facebook's CDN (browser_native_sd_url and _hd_url),
+ * followed by the video's id. A reel page also carries the next reels in the feed, so the file is
+ * only taken for the id the post's own URL names (or, when the URL names none, when the page has
+ * a single video). The SD file is enough to read and much smaller. Each link's efg parameter is
+ * base64 JSON whose duration_s says how long the video is.
+ */
+const playerUrlPattern = /"browser_native_(sd|hd)_url":"((?:[^"\\]|\\.)*)"/gu;
+const playerIdPattern = /"id":"(\d{5,25})"/u;
+const playerIdWindowChars = 3_000;
+
+const fbcdnHostPattern = /(?:^|\.)(?:fbcdn\.net)$/iu;
+
+export const isFacebookMediaUrl = (url: string): boolean => {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "https:" && fbcdnHostPattern.test(parsed.hostname);
+  } catch {
+    return false;
+  }
+};
+
+/** The numeric video id a Facebook reel, video or watch URL names, else null. */
+export const readFacebookVideoId = (url: string | null): string | null => {
+  if (!url) {
+    return null;
+  }
+
+  try {
+    const parsed = new URL(url);
+    const fromPath = parsed.pathname.match(/\/(?:reels?|videos)\/(?:[^/]+\/)?(\d{5,25})\/?$/iu);
+
+    return fromPath?.[1] ?? parsed.searchParams.get("v")?.match(/^\d{5,25}$/u)?.[0] ?? null;
+  } catch {
+    return null;
+  }
+};
+
+const readEfgDuration = (mediaUrl: string): number | null => {
+  try {
+    const efg = new URL(mediaUrl).searchParams.get("efg");
+    const decoded: unknown = efg ? JSON.parse(Buffer.from(efg, "base64").toString("utf8")) : null;
+    const duration = readRecord(decoded)?.duration_s;
+
+    return typeof duration === "number" && Number.isFinite(duration) && duration > 0
+      ? duration
+      : null;
+  } catch {
+    return null;
+  }
+};
+
+export const readFacebookVideo = (
+  html: string,
+  videoId: string | null
+): FacebookVideoLocator | null => {
+  const videos = new Map<string, { sd?: string; hd?: string }>();
+
+  for (const match of html.matchAll(playerUrlPattern)) {
+    let mediaUrl: string;
+
+    try {
+      mediaUrl = JSON.parse(`"${match[2] ?? ""}"`) as string;
+    } catch {
+      continue;
+    }
+
+    const end = (match.index ?? 0) + match[0].length;
+    const id = html.slice(end, end + playerIdWindowChars).match(playerIdPattern)?.[1];
+
+    if (!id || !isFacebookMediaUrl(mediaUrl) || mediaUrl.length > 4_096) {
+      continue;
+    }
+
+    const entry = videos.get(id) ?? {};
+    const quality = match[1] === "hd" ? "hd" : "sd";
+    entry[quality] ??= mediaUrl;
+    videos.set(id, entry);
+  }
+
+  const chosenId = videoId ?? (videos.size === 1 ? [...videos.keys()][0] : undefined);
+  const chosen = chosenId ? videos.get(chosenId) : undefined;
+  const mediaUrl = chosen?.sd ?? chosen?.hd;
+
+  return chosenId && mediaUrl
+    ? { videoId: chosenId, mediaUrl, durationSeconds: readEfgDuration(mediaUrl) }
+    : null;
+};
+
 /* Facebook sends logged-out visitors, rate-limited clients and unusual traffic to these. */
 const isWallPath = (pathname: string): boolean =>
   /^\/(?:login|checkpoint|recover|two_step_verification|privacy\/consent|cookie\/consent|consent|ajax\/)/iu.test(
@@ -474,6 +564,14 @@ export const fetchFacebookDocument = async (
     const fallbackUrl =
       pageLink?.kind === "post" ? pageLink.url : link.kind === "post" ? link.url : page.finalUrl;
     const isVideo = post.isVideo ?? (pageLink?.kind === "post" ? pageLink.isVideo : false);
+    const facebookVideo = isVideo
+      ? readFacebookVideo(
+          page.html,
+          readFacebookVideoId(page.finalUrl) ??
+            readFacebookVideoId(post.canonicalUrl) ??
+            readFacebookVideoId(link.kind === "post" ? link.url : null)
+        )
+      : null;
 
     return {
       kind: "text",
@@ -487,7 +585,8 @@ export const fetchFacebookDocument = async (
       isVideo,
       /* A caption past LinkDish's own length cap is cut here, so it is partial too. */
       captionTruncated: post.truncated || post.caption.length > maxCaptionChars,
-      linkedUrls: post.linkedUrls
+      linkedUrls: post.linkedUrls,
+      ...(facebookVideo ? { facebookVideo } : {})
     };
   } catch (error) {
     if (error instanceof SocialFetchError) {
