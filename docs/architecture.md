@@ -253,11 +253,25 @@ platforms map onto them and are told apart internally by the detection `adapterK
   Captions go through the same text parser as TikTok and Instagram (a video's ingredients-only
   caption keeps the video step), nothing is cached, and no Facebook login or cookie is ever
   used. Facebook pages that are not a post (profiles, groups, events) are unsupported.
+  Comments are only shown to signed-in people, so a "Recipe in comments" post is read two
+  other ways when its caption (cut or not) has no recipe and no link yields one. First the
+  creator's site: when the page name is a bare domain (`fedbysab.com`), the dish named in the
+  caption is searched for there (`fetchers/search-creator-site.ts`: WordPress's search API,
+  then its `/?s=` page; every hop validated and kept on that site), the three best-titled
+  results are read like linked pages, and one is kept only when its whole recipe (title,
+  description, ingredients, steps) holds every dish word of the caption and no other result
+  does as well (`creator-site/match-creator-recipe.ts`), because a creator's other version of
+  the dish (the taco ring for the buffalo ring) differs by a single word. Then the video: the
+  logged-out page carries the reel's own progressive MP4 on `fbcdn.net` (the page also carries
+  the next reels in the feed, so it is matched by video id), which goes to the video reader
+  below. A cut caption is never sent to the video reader. When nothing works and the caption
+  mentions the comments, the failure says so and points at paste-text or a screenshot.
 - **Video reader** (`extractors/video/`, behind `VIDEO_RECIPE_READER_ENABLED` and
-  `GEMINI_API_KEY`): when a TikTok caption has no recipe or only the ingredients, or a
+  `GEMINI_API_KEY`): when a TikTok or Facebook video's caption has no recipe or only the
+  ingredients (and, for Facebook, the creator's site has none either), or a
   YouTube video's description, creator comments and linked pages have none, Gemini
   (`VIDEO_RECIPE_MODEL`) watches the video. TikToks are downloaded from the embed page's
-  MP4 (larger than 14 MB through the Files API, deleted after the read); YouTube is passed
+  MP4 and Facebook videos from the post page's `fbcdn.net` MP4 (larger than 14 MB through the Files API, deleted after the read); YouTube is passed
   by URL, only for Shorts and videos of known length up to `VIDEO_RECIPE_MAX_SECONDS`.
   Every ingredient comes back with its evidence (words heard, text shown, a caption line),
   and `build-video-recipe-candidate.ts` drops an ingredient its quote doesn't name and an
