@@ -3,6 +3,7 @@ import type { RequestDeadline } from "./deadline.js";
 import type { VideoRecipeReader } from "./extractors/video/gemini-video-recipe-reader.js";
 import type { VideoReadAllowance } from "./extractors/video/video-read-allowance.js";
 import type { TikTokVideoFile } from "./fetchers/fetch-tiktok-video.js";
+import type { CreatorSiteSearchResult } from "./fetchers/search-creator-site.js";
 import type { ValidateSourceUrl } from "./source-url-safety.js";
 import type {
   ExtractRecipeImage,
@@ -84,12 +85,21 @@ export interface TextSourceDocument {
   linkedUrls?: string[] | undefined;
   /** For a TikTok, what the caption fetch learned about the video, for the video reader. */
   tiktokVideo?: TikTokVideoLocator | undefined;
+  /** For a Facebook video or reel, its MP4 on Facebook's CDN, for the video reader. */
+  facebookVideo?: FacebookVideoLocator | undefined;
 }
 
 /** Which TikTok video a post is, and, when the caption fetch read the embed page, its MP4. */
 export interface TikTokVideoLocator {
   videoId: string;
   mediaUrl: string | null;
+  durationSeconds: number | null;
+}
+
+/** Which Facebook video a post is and the MP4 link its public page gives a logged-out visitor. */
+export interface FacebookVideoLocator {
+  videoId: string;
+  mediaUrl: string;
   durationSeconds: number | null;
 }
 
@@ -225,13 +235,27 @@ export interface ExtractorRuntime {
    * as unsupported.
    */
   fetchSocialDocument?: (url: string, options?: SourceFetchOptions) => Promise<TextSourceDocument>;
-  /** Downloads a TikTok post's video for the video recipe reader. */
+  /** Downloads a TikTok post's video for the video recipe reader (Facebook: fetchFacebookVideo). */
   fetchSocialVideo?: (
     videoUrl: string,
     options?: SourceFetchOptions & { locator?: TikTokVideoLocator | undefined }
   ) => Promise<TikTokVideoFile>;
+  /** Downloads a Facebook video or reel's MP4 (from its locator) for the video recipe reader. */
+  fetchFacebookVideo?: (
+    locator: FacebookVideoLocator,
+    options?: SourceFetchOptions
+  ) => Promise<TikTokVideoFile>;
   /**
-   * Gemini watching a TikTok or YouTube video whose caption, description and linked pages hold no
+   * Searches a creator's own site (a bare domain such as "fedbysab.com") for a dish, for posts
+   * whose recipe is not in the caption. Runtimes without it skip the lookup.
+   */
+  searchCreatorSite?: (
+    domain: string,
+    query: string,
+    options?: SourceFetchOptions
+  ) => Promise<CreatorSiteSearchResult[]>;
+  /**
+   * Gemini watching a TikTok, Facebook or YouTube video whose caption, description and linked pages hold no
    * written recipe. Absent, or unavailable, while VIDEO_RECIPE_READER_ENABLED is off.
    */
   videoRecipeReader?: VideoRecipeReader;

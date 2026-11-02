@@ -16,15 +16,18 @@ import {
 
 import type * as BrowserEscalation from "./browser-escalation.js";
 import type * as FacebookFetcher from "../fetchers/fetch-facebook-document.js";
+import type * as FacebookVideoFetcher from "../fetchers/fetch-facebook-video.js";
 import type * as HtmlFetcher from "../fetchers/fetch-html-document.js";
 import type * as InstagramFetcher from "../fetchers/fetch-instagram-document.js";
 import type * as TikTokFetcher from "../fetchers/fetch-tiktok-document.js";
 import type * as TikTokVideoFetcher from "../fetchers/fetch-tiktok-video.js";
 import type * as YouTubeFetcher from "../fetchers/fetch-youtube-document.js";
 import type * as PublicFetch from "../fetchers/public-fetch.js";
+import type * as CreatorSiteSearch from "../fetchers/search-creator-site.js";
 import type {
   BrowserFetcher,
   ExtractorRuntime,
+  FacebookVideoLocator,
   FetchResult,
   RecipeTextCleaner,
   SourceFetchOptions,
@@ -48,6 +51,8 @@ let tikTokFetcherModule: Promise<typeof TikTokFetcher> | null = null;
 let tikTokVideoFetcherModule: Promise<typeof TikTokVideoFetcher> | null = null;
 let instagramFetcherModule: Promise<typeof InstagramFetcher> | null = null;
 let facebookFetcherModule: Promise<typeof FacebookFetcher> | null = null;
+let facebookVideoFetcherModule: Promise<typeof FacebookVideoFetcher> | null = null;
+let creatorSiteSearchModule: Promise<typeof CreatorSiteSearch> | null = null;
 
 const loadHtmlFetcher = () => {
   htmlFetcherModule ??= import("../fetchers/fetch-html-document.js");
@@ -79,14 +84,27 @@ const loadFacebookFetcher = () => {
   return facebookFetcherModule;
 };
 
+const loadFacebookVideoFetcher = () => {
+  facebookVideoFetcherModule ??= import("../fetchers/fetch-facebook-video.js");
+  return facebookVideoFetcherModule;
+};
+
+const loadCreatorSiteSearch = () => {
+  creatorSiteSearchModule ??= import("../fetchers/search-creator-site.js");
+  return creatorSiteSearchModule;
+};
+
+/* A creator's site search gets this long at most; its result pages are fetched after it. */
+const creatorSiteSearchMaxMs = 5_000;
+
 const loadTikTokVideoFetcher = () => {
   tikTokVideoFetcherModule ??= import("../fetchers/fetch-tiktok-video.js");
   return tikTokVideoFetcherModule;
 };
 
-/* A TikTok video download gets this long at most; Gemini needs most of the request after it. */
+/* A social video download gets this long at most; Gemini needs most of the request after it. */
 const tikTokVideoDownloadMaxMs = 10_000;
-/* Larger videos go to Gemini through its Files API; this caps what is held in memory. */
+/* Larger videos go to Gemini through its Files API; this caps what is held in memory (TikTok and Facebook). */
 const tikTokVideoMaxBytes = 60 * 1024 * 1024;
 
 const loadYouTubeFetcher = () => {
@@ -297,6 +315,36 @@ export const createDefaultExtractorRuntime = (): ExtractorRuntime => {
         ...(deadline ? { signal: deadline.signal } : {}),
         validateUrl: validatePublicSourceUrl,
         locator: options?.locator
+      });
+    },
+    fetchFacebookVideo: async (locator: FacebookVideoLocator, options?: SourceFetchOptions) => {
+      const deadline = options?.deadline;
+      const [{ fetchFacebookVideo }, { publicOnlyFetch }] = await Promise.all([
+        loadFacebookVideoFetcher(),
+        loadPublicFetch()
+      ]);
+
+      return fetchFacebookVideo(locator, publicOnlyFetch, {
+        timeoutMs: deadline
+          ? deadline.budgetMs(tikTokVideoDownloadMaxMs)
+          : tikTokVideoDownloadMaxMs,
+        maxBytes: tikTokVideoMaxBytes,
+        maxSeconds: extractorApiEnv.VIDEO_RECIPE_MAX_SECONDS,
+        ...(deadline ? { signal: deadline.signal } : {}),
+        validateUrl: validatePublicSourceUrl
+      });
+    },
+    searchCreatorSite: async (domain: string, query: string, options?: SourceFetchOptions) => {
+      const deadline = options?.deadline;
+      const [{ searchCreatorSite }, { publicOnlyFetch }] = await Promise.all([
+        loadCreatorSiteSearch(),
+        loadPublicFetch()
+      ]);
+
+      return searchCreatorSite(domain, query, publicOnlyFetch, {
+        timeoutMs: deadline ? deadline.budgetMs(creatorSiteSearchMaxMs) : creatorSiteSearchMaxMs,
+        ...(deadline ? { signal: deadline.signal } : {}),
+        validateUrl: validatePublicSourceUrl
       });
     },
     videoRecipeReader: createGeminiVideoRecipeReader({

@@ -113,8 +113,8 @@ export const videoRecipeJsonSchema = {
 } as const;
 
 export interface VideoRecipeContext {
-  platform: "tiktok" | "youtube";
-  /** The TikTok caption or the YouTube description, as posted. */
+  platform: "tiktok" | "facebook" | "youtube";
+  /** The TikTok or Facebook caption or the YouTube description, as posted. */
   caption: string | null;
   title: string | null;
   authorName: string | null;
@@ -122,9 +122,15 @@ export interface VideoRecipeContext {
 
 const maxContextChars = 4_000;
 
+const videoPlatformNames: Record<VideoRecipeContext["platform"], string> = {
+  tiktok: "TikTok",
+  facebook: "Facebook",
+  youtube: "YouTube"
+};
+
 export const buildVideoRecipePrompt = (context: VideoRecipeContext): string =>
   [
-    `Watch this ${context.platform === "tiktok" ? "TikTok" : "YouTube"} video from start to finish, listening to everything said and reading all on-screen text, and write down the recipe it teaches.`,
+    `Watch this ${videoPlatformNames[context.platform]} video from start to finish, listening to everything said and reading all on-screen text, and write down the recipe it teaches.`,
     "Rules:",
     "- Report only what the video itself says, shows as text, or plainly shows being done, plus what the creator's caption below states. Never add ingredients, amounts, temperatures or times from general cooking knowledge, even when the dish usually has them.",
     "- amount: copy the amount exactly as it is said or shown. When the video gives no amount for an ingredient, amount is null. Never estimate one from what you see.",

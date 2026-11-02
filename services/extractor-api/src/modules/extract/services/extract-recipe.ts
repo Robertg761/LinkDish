@@ -64,6 +64,7 @@ import type {
   ExtractionCandidate,
   ExtractionLogContext,
   ExtractorRuntime,
+  FacebookVideoLocator,
   HtmlSourceDocument,
   NormalizedExtraction,
   SourceDocument,
@@ -176,6 +177,11 @@ const socialPlatformName = (detection: DetectionResult): "Facebook" | "Instagram
 /* Facebook blocks anonymous readers often; the way out is always the paste-text or screenshot import. */
 const FACEBOOK_BLOCKED_MESSAGE =
   "Facebook blocked LinkDish from reading that post. Paste the recipe text or import a screenshot of the post instead.";
+const FACEBOOK_RECIPE_IN_COMMENTS_MESSAGE =
+  "That post's recipe is in its comments, which Facebook only shows to people who are signed in. Paste the recipe text or import a screenshot of the comment instead.";
+/* "Recipe in comments", "recipe in the first comment", "comment for the recipe". */
+const recipeInCommentsPattern =
+  /\brecipes?\b[^.\n]{0,25}\bcomments?\b|\bcomments?\b[^.\n]{0,25}\brecipes?\b/iu;
 const FACEBOOK_TRUNCATED_MESSAGE =
   "Facebook only shares part of that post's text with other apps, so LinkDish can't read the whole recipe. Paste the full recipe text or import a screenshot of the post instead.";
 
@@ -939,6 +945,7 @@ type VideoReadRequest = {
   inspired?: boolean;
 } & (
   | { platform: "tiktok"; locator: TikTokVideoLocator | undefined }
+  | { platform: "facebook"; locator: FacebookVideoLocator }
   | { platform: "youtube"; watchUrl: string; durationSeconds: number | null; isShort: boolean }
 );
 
@@ -947,7 +954,7 @@ type VideoReadResult =
   | { outcome: Exclude<VideoReadOutcome, "read">; response: null };
 
 /*
- * The last resort for a TikTok or YouTube link with no written recipe: Gemini watches the video
+ * The last resort for a TikTok, Facebook or YouTube link with no written recipe: Gemini watches the video
  * and the reading is kept only as far as its own quotes support it (build-video-recipe-candidate).
  * Returns no response when the reader is off or the video yields no recipe, so the caller's own
  * answer stands. Longer YouTube videos, and ones whose length is unknown (other than Shorts), are
@@ -999,14 +1006,15 @@ const readRecipeFromVideo = async (request: VideoReadRequest): Promise<VideoRead
     source = { kind: "youtube", url: request.watchUrl };
   } else {
     try {
-      if (!runtime.fetchSocialVideo) {
+      const video =
+        request.platform === "facebook"
+          ? await runtime.fetchFacebookVideo?.(request.locator, { deadline })
+          : await runtime.fetchSocialVideo?.(request.url, { deadline, locator: request.locator });
+
+      if (!video) {
         return null;
       }
 
-      const video = await runtime.fetchSocialVideo(request.url, {
-        deadline,
-        locator: request.locator
-      });
       source = { kind: "file", bytes: video.bytes, mimeType: video.mimeType };
     } catch (error) {
       if (error instanceof ExtractionCancelledError) {
@@ -1194,13 +1202,16 @@ const runTextExtraction = async ({
   document,
   detection,
   hostname,
-  attempt
+  attempt,
+  noRecipeMessage
 }: {
   context: ExtractionContext;
   document: TextSourceDocument;
   detection: DetectionResult;
   hostname: string;
   attempt: "primary" | "fallback";
+  /** What to tell the person when the text holds no recipe, instead of the default. */
+  noRecipeMessage?: string | undefined;
 }): Promise<ExtractionResult> => {
   const { runtime } = context;
   /* Instagram captions come from a browser render; TikTok's oEmbed and pasted text do not. */
@@ -1275,13 +1286,14 @@ const runTextExtraction = async ({
 
   if (!normalized) {
     const response = noRecipeInTextResponse(
-      document.origin === "tiktok"
-        ? "That video's caption doesn't include a written recipe. Try the recipe's website instead."
-        : document.origin === "instagram" || document.origin === "facebook"
-          ? "That post's caption doesn't include a written recipe. Try the recipe's website instead."
-          : looksLikeRecipeText(document.text)
-            ? 'LinkDish couldn\'t tell the ingredients from the steps. Put the ingredients under an "Ingredients" heading and the steps under a "Method" heading, then try again.'
-            : "That text doesn't look like a recipe yet. Include the ingredients and the steps."
+      noRecipeMessage ??
+        (document.origin === "tiktok"
+          ? "That video's caption doesn't include a written recipe. Try the recipe's website instead."
+          : document.origin === "instagram" || document.origin === "facebook"
+            ? "That post's caption doesn't include a written recipe. Try the recipe's website instead."
+            : looksLikeRecipeText(document.text)
+              ? 'LinkDish couldn\'t tell the ingredients from the steps. Put the ingredients under an "Ingredients" heading and the steps under a "Method" heading, then try again.'
+              : "That text doesn't look like a recipe yet. Include the ingredients and the steps.")
     );
 
     return {
@@ -1344,12 +1356,15 @@ const extractFromFacebookCaption = async (
   const { findRecipeLinksInText, isRecipeLinkCandidate } = await loadYouTubeExtractorModule();
   const captionLinks = findRecipeLinksInText(readableText);
 
+  /* A cut caption, none, or only a video's ingredients: the recipe is somewhere else. */
+  const captionLacksRecipe = !textExtraction || textExtraction.methodInVideo;
+
   /*
    * A link the caption itself points at ("Full recipe: https://...") is tried first, even when
    * the caption parses: the linked page has the whole recipe. Links the page shares are only
    * tried when the caption has no full recipe of its own.
    */
-  if (captionLinks.length > 0 || !textExtraction || textExtraction.methodInVideo) {
+  if (captionLinks.length > 0 || captionLacksRecipe) {
     const links = [
       ...new Set([...captionLinks, ...(document.linkedUrls ?? []).filter(isRecipeLinkCandidate)])
     ].slice(0, maxFacebookRecipeLinks);
@@ -1367,6 +1382,69 @@ const extractFromFacebookCaption = async (
     if (linked) {
       return linked;
     }
+  }
+
+  /* "Recipe in comments": the comments are for signed-in people, but the creator's site is not. */
+  const fromCreatorSite = captionLacksRecipe
+    ? await extractFromCreatorSite(request, context, hostname, document, readableText)
+    : null;
+
+  if (fromCreatorSite) {
+    return fromCreatorSite;
+  }
+
+  /*
+   * Last, the video itself: Facebook gives a logged-out visitor the reel's MP4, and Gemini
+   * watches it (when the video reader is on). Not for a cut caption, whose full text has the
+   * amounts the video may not show; that one is pasted instead.
+   */
+  const videoRead =
+    !document.captionTruncated && captionLacksRecipe && document.facebookVideo
+      ? await readRecipeFromVideo({
+          context,
+          detection,
+          url: document.url,
+          platform: "facebook",
+          locator: document.facebookVideo,
+          videoContext: {
+            platform: "facebook",
+            caption: document.text || null,
+            title: document.title,
+            authorName: document.authorName
+          },
+          fallbackTitle: document.authorName
+            ? `Facebook recipe from ${document.authorName}`
+            : "Facebook recipe",
+          recipe: {
+            sourceUrl: document.url,
+            image: document.thumbnailUrl ? { url: document.thumbnailUrl, source: "og" } : null,
+            siteName: "Facebook",
+            videoUrl: document.url,
+            ...(document.authorName ? { author: document.authorName } : {})
+          }
+        })
+      : null;
+  const videoLog = videoRead ? { videoRead: videoRead.outcome } : {};
+
+  if (videoRead?.response) {
+    const response = videoRead.response;
+
+    return {
+      response,
+      logContext: {
+        ...makeLogContext({
+          hostname,
+          detection,
+          attempt: request.attempt,
+          response,
+          strategy: response.extraction.strategy,
+          fetchMode: "http",
+          fallbackProvider: runtime.fallbackExtractor.providerName,
+          browserAttempted: false
+        }),
+        ...videoLog
+      }
+    };
   }
 
   if (document.captionTruncated) {
@@ -1396,13 +1474,18 @@ const extractFromFacebookCaption = async (
     };
   }
 
-  return runTextExtraction({
+  const result = await runTextExtraction({
     context,
     document,
     detection,
     hostname,
-    attempt: request.attempt
+    attempt: request.attempt,
+    noRecipeMessage: recipeInCommentsPattern.test(document.text)
+      ? FACEBOOK_RECIPE_IN_COMMENTS_MESSAGE
+      : undefined
   });
+
+  return { ...result, logContext: { ...result.logContext, ...videoLog } };
 };
 
 /*
@@ -1539,79 +1622,207 @@ const extractFromLinkedRecipePages = async (
       return null;
     }
 
-    const linkDetection = detectSourceTypeFromUrl(link);
+    const linked = await extractLinkedRecipePage(request, context, hostname, link, videoUrl);
 
-    if (linkDetection.sourceType !== "recipe-webpage" && linkDetection.sourceType !== "article") {
-      continue;
+    if (linked) {
+      return linked;
     }
-
-    if (isSourceUrlRejection(await context.runtime.validateSourceUrl(link))) {
-      continue;
-    }
-
-    let fetched: FetchedSource;
-
-    try {
-      fetched = await fetchSourceDocument(link, linkDetection, context);
-    } catch (error) {
-      if (error instanceof ExtractionCancelledError) {
-        throw error;
-      }
-
-      continue;
-    }
-
-    if (await detectFetchedDocumentFailure(link, fetched.sourceDocument)) {
-      continue;
-    }
-
-    const linkRequest: ExtractRecipeUrlRequest = { ...request, url: link };
-    const candidate = await runDeterministicExtraction(
-      fetched.sourceDocument,
-      fetched.detection,
-      fetched.fetchMode
-    );
-    const decision = decidePrimaryOutcome(
-      linkRequest,
-      fetched.detection,
-      fetched.fetchMode,
-      candidate
-    );
-
-    if (decision.kind !== "success") {
-      continue;
-    }
-
-    /* Not cached: the linked page's own cache entry should not carry this video. */
-    const response = extractRecipeResponseSchema.parse(
-      asApiResponse({
-        ...decision,
-        result: {
-          ...decision.result,
-          recipe: {
-            ...decision.result.recipe,
-            ...(videoUrl ? { videoUrl: decision.result.recipe.videoUrl ?? videoUrl } : {})
-          }
-        }
-      })
-    );
-
-    return {
-      response,
-      logContext: makeLogContext({
-        hostname,
-        detection: fetched.detection,
-        attempt: request.attempt,
-        response,
-        strategy: decision.result.strategy,
-        fetchMode: decision.result.fetchMode,
-        fallbackProvider: context.runtime.fallbackExtractor.providerName,
-        ...getDocumentLogFields(fetched.sourceDocument, fetched.fetchMode)
-      })
-    };
   }
 
   return null;
+};
+
+/**
+ * One linked page's recipe, validated like a user URL and read without the LLM; null when the
+ * link is unsafe, is not an ordinary web page, cannot be fetched or yields no recipe.
+ */
+const extractLinkedRecipePage = async (
+  request: ExtractRecipeUrlRequest,
+  context: ExtractionContext,
+  hostname: string,
+  link: string,
+  videoUrl: string | null
+): Promise<ExtractionResult | null> => {
+  const linkDetection = detectSourceTypeFromUrl(link);
+
+  if (linkDetection.sourceType !== "recipe-webpage" && linkDetection.sourceType !== "article") {
+    return null;
+  }
+
+  if (isSourceUrlRejection(await context.runtime.validateSourceUrl(link))) {
+    return null;
+  }
+
+  let fetched: FetchedSource;
+
+  try {
+    fetched = await fetchSourceDocument(link, linkDetection, context);
+  } catch (error) {
+    if (error instanceof ExtractionCancelledError) {
+      throw error;
+    }
+
+    return null;
+  }
+
+  if (await detectFetchedDocumentFailure(link, fetched.sourceDocument)) {
+    return null;
+  }
+
+  const linkRequest: ExtractRecipeUrlRequest = { ...request, url: link };
+  const candidate = await runDeterministicExtraction(
+    fetched.sourceDocument,
+    fetched.detection,
+    fetched.fetchMode
+  );
+  const decision = decidePrimaryOutcome(
+    linkRequest,
+    fetched.detection,
+    fetched.fetchMode,
+    candidate
+  );
+
+  if (decision.kind !== "success") {
+    return null;
+  }
+
+  /* Not cached: the linked page's own cache entry should not carry this video. */
+  const response = extractRecipeResponseSchema.parse(
+    asApiResponse({
+      ...decision,
+      result: {
+        ...decision.result,
+        recipe: {
+          ...decision.result.recipe,
+          ...(videoUrl ? { videoUrl: decision.result.recipe.videoUrl ?? videoUrl } : {})
+        }
+      }
+    })
+  );
+
+  return {
+    response,
+    logContext: makeLogContext({
+      hostname,
+      detection: fetched.detection,
+      attempt: request.attempt,
+      response,
+      strategy: decision.result.strategy,
+      fetchMode: decision.result.fetchMode,
+      fallbackProvider: context.runtime.fallbackExtractor.providerName,
+      ...getDocumentLogFields(fetched.sourceDocument, fetched.fetchMode)
+    })
+  };
+};
+
+/* The creator-site lookup (a search, then up to three pages) is only started with this much time left. */
+const minimumCreatorSiteBudgetMs = 8_000;
+const maxCreatorSiteCandidates = 3;
+/* A query this long that finds nothing is retried with its last words, which usually name the dish. */
+const creatorSiteRetryWords = 3;
+
+const loadCreatorSiteMatcher = () => import("../creator-site/match-creator-recipe.js");
+
+/**
+ * A post that names a dish but carries no recipe ("Recipe in comments"), from a page named after
+ * its creator's site ("fedbysab.com"): the dish is searched for on that site, the best-titled
+ * results are read like linked pages, and the one whose whole recipe matches the caption clearly
+ * best is returned (see match-creator-recipe.ts). Null when there is no site, no confident match,
+ * or too little time.
+ */
+const extractFromCreatorSite = async (
+  request: ExtractRecipeUrlRequest,
+  context: ExtractionContext,
+  hostname: string,
+  document: TextSourceDocument,
+  caption: string
+): Promise<ExtractionResult | null> => {
+  const { runtime, deadline } = context;
+  const searchCreatorSite = runtime.searchCreatorSite;
+
+  if (!searchCreatorSite || deadline.remainingMs() < minimumCreatorSiteBudgetMs) {
+    return null;
+  }
+
+  const { pickMatchingRecipe, readCreatorSiteDomain, readDishQuery, scoreCandidateTitle } =
+    await loadCreatorSiteMatcher();
+  const domain = readCreatorSiteDomain(document.authorName);
+  const query = readDishQuery(caption);
+
+  if (!domain || !query) {
+    return null;
+  }
+
+  const startedAt = Date.now();
+  const logLookup = (outcome: string, detail: Record<string, unknown> = {}) => {
+    console.info(
+      JSON.stringify({
+        event: "creator_site_lookup",
+        domain,
+        query,
+        outcome,
+        latencyMs: Date.now() - startedAt,
+        ...detail
+      })
+    );
+  };
+
+  const queryWords = query.split(" ");
+  const queries =
+    queryWords.length > creatorSiteRetryWords
+      ? [query, queryWords.slice(-creatorSiteRetryWords).join(" ")]
+      : [query];
+  let results: { title: string; url: string }[] = [];
+
+  try {
+    for (const searchQuery of queries) {
+      results = await searchCreatorSite(domain, searchQuery, { deadline });
+
+      if (results.length > 0) {
+        break;
+      }
+    }
+  } catch (error) {
+    if (error instanceof ExtractionCancelledError) {
+      throw error;
+    }
+
+    logLookup("search_failed", { message: error instanceof Error ? error.message : "unknown" });
+    return null;
+  }
+
+  const candidates = results
+    .map((result, rank) => ({ ...result, rank, score: scoreCandidateTitle(query, result.title) }))
+    .filter((candidate) => candidate.score > 0)
+    .sort((left, right) => right.score - left.score || left.rank - right.rank)
+    .slice(0, maxCreatorSiteCandidates);
+
+  if (candidates.length === 0) {
+    logLookup("no_candidates", { resultCount: results.length });
+    return null;
+  }
+
+  const videoUrl = document.isVideo ? document.url : null;
+  const extracted = await Promise.all(
+    candidates.map((candidate) =>
+      extractLinkedRecipePage(request, context, hostname, candidate.url, videoUrl)
+    )
+  );
+  const matchIndex = pickMatchingRecipe(
+    query,
+    extracted.map((result) =>
+      result?.response.status === "success" ? result.response.recipe : null
+    )
+  );
+  const match = matchIndex === null ? null : (extracted[matchIndex] ?? null);
+
+  logLookup(match ? "matched" : "no_match", {
+    resultCount: results.length,
+    candidates: candidates.map((candidate) => candidate.url),
+    ...(match ? { matchedUrl: candidates[matchIndex ?? 0]?.url } : {})
+  });
+
+  return match;
 };
 
 const extractFromUrl = async (
