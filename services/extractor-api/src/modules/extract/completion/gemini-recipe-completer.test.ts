@@ -5,6 +5,7 @@ import {
   applyRecipeCompletion,
   buildRecipeCompletionPrompt,
   createGeminiRecipeCompleter,
+  keepsIngredientIdentity,
   type RecipeCompletionPayload
 } from "./gemini-recipe-completer";
 
@@ -134,10 +135,55 @@ describe("applyRecipeCompletion", () => {
     }
   });
 
+  it("keeps an ingredient whose amount came from the source exactly as the source gave it", () => {
+    const recipe: Recipe = {
+      ...montageRecipe(),
+      ingredients: [
+        { text: "2 cups flour", section: null },
+        { text: "butter", section: null }
+      ],
+      completion: { status: "missing_amounts", ingredients: ["butter"] }
+    };
+    const completed = applyRecipeCompletion(
+      recipe,
+      answer({
+        ingredients: [
+          { text: "8 cups flour", section: null, added: false },
+          { text: "4 tbsp butter, softened", section: null, added: false },
+          { text: "1 tsp salt", section: null, added: true }
+        ]
+      }),
+      now
+    );
+
+    expect(completed?.ingredients.map((ingredient) => ingredient.text)).toEqual([
+      "2 cups flour",
+      "4 tbsp butter, softened",
+      "1 tsp salt"
+    ]);
+    expect(completed?.completion?.ingredients).toEqual(["butter"]);
+  });
+
   it("refuses an answer that is not a valid recipe", () => {
     expect(
       applyRecipeCompletion(montageRecipe(), answer({ steps: [{ text: "   " }] }), now)
     ).toBeNull();
+  });
+});
+
+describe("keepsIngredientIdentity", () => {
+  it("accepts the creator's ingredient with an amount, even reworded or prepared", () => {
+    expect(keepsIngredientIdentity("cheddar cheese", "8 oz sharp cheddar cheese, shredded")).toBe(
+      true
+    );
+    expect(keepsIngredientIdentity("carrots, shredded", "1 cup grated carrots")).toBe(true);
+    expect(keepsIngredientIdentity("tomatoes", "2 large tomato, diced")).toBe(true);
+  });
+
+  it("refuses a different ingredient that only shares a word", () => {
+    expect(keepsIngredientIdentity("cheddar cheese", "8 oz cream cheese")).toBe(false);
+    expect(keepsIngredientIdentity("almond milk", "2 cups whole milk")).toBe(false);
+    expect(keepsIngredientIdentity("chicken broth", "2 cups vegetable broth")).toBe(false);
   });
 });
 
@@ -148,6 +194,9 @@ describe("buildRecipeCompletionPrompt", () => {
     expect(prompt).toContain("Keep every ingredient in the list, in the same order");
     expect(prompt).toContain('"title":"Broccoli Cheddar Soup"');
     expect(prompt).toContain('"steps":["Soften the carrots in butter."');
+    expect(prompt).toContain(
+      '"missingAmounts":["butter","carrots, shredded","broccoli","milk","cheddar cheese"]'
+    );
   });
 });
 

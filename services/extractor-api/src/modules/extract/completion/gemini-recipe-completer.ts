@@ -84,12 +84,79 @@ const completionJsonSchema = {
   }
 } as const;
 
+/* Leads with a quantity: "2 cups", "1/2 tsp", "½ lb". */
+const leadingAmountPattern = /^\s*(?:\d|[½¼¾⅓⅔⅛⅜⅝⅞])/u;
+
+/*
+ * Whether the source left this ingredient without an amount, so AI may give it one. The video
+ * reader lists those in `completion.ingredients`; a recipe without that list counts every
+ * ingredient that doesn't start with a quantity. Every other ingredient keeps its source text.
+ */
+const lacksAmount = (recipe: Recipe, text: string): boolean =>
+  recipe.completion?.status === "missing_amounts" && recipe.completion.ingredients.length > 0
+    ? recipe.completion.ingredients.includes(text)
+    : !leadingAmountPattern.test(text);
+
+/* Preparation and size words AI may reword ("shredded" for "grated"); every other word stays. */
+const rewordableWords = new Set([
+  "and",
+  "for",
+  "the",
+  "with",
+  "fresh",
+  "large",
+  "small",
+  "medium",
+  "chopped",
+  "diced",
+  "minced",
+  "sliced",
+  "shredded",
+  "grated",
+  "crushed",
+  "peeled",
+  "optional",
+  "taste",
+  "divided",
+  "softened",
+  "melted",
+  "cooked"
+]);
+
+const stemWord = (word: string): string =>
+  word.length > 4 ? word.replace(/(?:es|s)$/u, "") : word;
+
+const identityWords = (text: string): string[] =>
+  (
+    text
+      .toLowerCase()
+      .normalize("NFKD")
+      .match(/\p{L}+/gu) ?? []
+  )
+    .filter((word) => word.length >= 3 && !rewordableWords.has(word))
+    .map(stemWord);
+
+/**
+ * Whether `completed` is still the creator's ingredient: every word that names it ("cheddar"
+ * and "cheese" in "cheddar cheese") is still there, so "cream cheese" or "whole milk" for
+ * "almond milk" is a substitution, not the same ingredient with an amount.
+ */
+export const keepsIngredientIdentity = (original: string, completed: string): boolean => {
+  const completedWords = new Set(identityWords(completed));
+  const originalWords = identityWords(original);
+
+  return originalWords.length > 0
+    ? originalWords.every((word) => completedWords.has(word))
+    : isItemNamedIn(original, completed);
+};
+
 export const buildRecipeCompletionPrompt = (recipe: Recipe): string =>
   [
     "This recipe was written down from a cooking video or post that shows how the dish is made but leaves out amounts and some details.",
     "Complete it so someone can cook it, using general cooking knowledge and typical recipes for this dish.",
     "Rules:",
-    "- Keep every ingredient in the list, in the same order, and give each a realistic amount (e.g. '2 cups', '1 tbsp', '3 cloves'). Keep the creator's wording for the ingredient itself.",
+    "- Keep every ingredient in the list, in the same order, and keep the creator's wording for the ingredient itself.",
+    "- Give each ingredient listed under missingAmounts a realistic amount (e.g. '2 cups', '1 tbsp', '3 cloves'). Copy every other ingredient exactly as written: its amount came from the source.",
     "- Add an ingredient only when a step plainly needs it and the list lacks it (such as salt, oil or the stock a step pours in), mark it added, and put it where it is first used.",
     "- Keep the creator's steps and their order. Make each one precise enough to follow: amounts, heat level, times and temperatures where they matter. Add a step only when one is plainly missing (such as preheating the oven).",
     "- Give servings, prep time and cook time for the amounts you chose.",
@@ -106,6 +173,9 @@ export const buildRecipeCompletionPrompt = (recipe: Recipe): string =>
         text: ingredient.text,
         section: ingredient.section ?? null
       })),
+      missingAmounts: recipe.ingredients
+        .filter((ingredient) => lacksAmount(recipe, ingredient.text))
+        .map((ingredient) => ingredient.text),
       steps: recipe.steps.map((step) => step.text)
     })
   ].join("\n");
@@ -130,16 +200,26 @@ export const applyRecipeCompletion = (
   }
 
   for (let index = 0; index < kept.length; index += 1) {
-    if (!isItemNamedIn(recipe.ingredients[index]?.text ?? "", kept[index]?.text ?? "")) {
+    if (!keepsIngredientIdentity(recipe.ingredients[index]?.text ?? "", kept[index]?.text ?? "")) {
       return null;
     }
   }
 
+  /* An ingredient whose amount came from the source keeps its source text, whatever AI wrote. */
+  let keptIndex = 0;
   const ingredients = payload.ingredients
-    .map((ingredient) => ({
-      text: tidy(ingredient.text),
-      section: tidy(ingredient.section) || null
-    }))
+    .map((ingredient) => {
+      if (ingredient.added) {
+        return { text: tidy(ingredient.text), section: tidy(ingredient.section) || null };
+      }
+
+      const original = recipe.ingredients[keptIndex];
+      keptIndex += 1;
+
+      return original && !lacksAmount(recipe, original.text)
+        ? { text: original.text, section: original.section ?? null }
+        : { text: tidy(ingredient.text), section: tidy(ingredient.section) || null };
+    })
     .filter((ingredient) => ingredient.text.length > 0);
   const steps = payload.steps
     .map((step) => tidy(step.text))
