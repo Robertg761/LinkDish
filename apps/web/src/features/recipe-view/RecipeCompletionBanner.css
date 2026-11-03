@@ -1,0 +1,42 @@
+.recipe-completion-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 20px;
+  background: var(--color-surface-subtle);
+  box-shadow: none;
+}
+
+.recipe-completion-banner p {
+  margin: 0;
+  color: var(--color-ink-muted);
+  font-size: var(--text-small);
+}
+
+.recipe-completion-banner .recipe-section-title {
+  margin: 0 0 4px;
+  font-size: 1.125rem;
+}
+
+.recipe-completion-banner-text {
+  flex: 1 1 280px;
+  min-width: 0;
+}
+
+.recipe-completion-banner-action {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.recipe-completion-banner-hint {
+  color: var(--color-ink-muted);
+  font-size: var(--text-small);
+}
+
+.recipe-completion-banner--filled {
+  flex-wrap: nowrap;
+  justify-content: flex-start;
+}

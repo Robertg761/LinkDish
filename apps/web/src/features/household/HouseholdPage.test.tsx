@@ -15,6 +15,7 @@ import type { HouseholdDetails } from "@linkdish/api-contracts";
 const apiMocks = vi.hoisted(() => ({
   acceptHouseholdInvite: vi.fn(),
   cancelHouseholdInvite: vi.fn(),
+  completeRecipe: vi.fn(),
   createHousehold: vi.fn(),
   createHouseholdInvite: vi.fn(),
   getHousehold: vi.fn(),

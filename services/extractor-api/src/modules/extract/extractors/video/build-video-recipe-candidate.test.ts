@@ -175,6 +175,74 @@ describe("isItemNamedIn", () => {
 });
 
 describe("buildVideoRecipeCandidate", () => {
+  it("keeps a silent montage's recipe and flags the missing amounts for the apps", () => {
+    const { candidate } = buildVideoRecipeCandidate(
+      payload({
+        title: "Broccoli Cheddar Soup",
+        ingredients: [
+          {
+            item: "carrots, shredded",
+            amount: null,
+            section: null,
+            source: "visual",
+            quote: "shredded carrots poured into the pot"
+          },
+          {
+            item: "broccoli",
+            amount: null,
+            section: null,
+            source: "visual",
+            quote: "broccoli florets being chopped"
+          },
+          {
+            item: "cheddar cheese",
+            amount: null,
+            section: null,
+            source: "visual",
+            quote: "shredded cheddar stirred in"
+          }
+        ],
+        steps: [
+          {
+            text: "Soften the carrots in butter.",
+            source: "visual",
+            quote: "carrots cooking in the pot"
+          },
+          {
+            text: "Stir in the broccoli, then the milk.",
+            source: "visual",
+            quote: "milk poured over the broccoli"
+          },
+          { text: "Melt in the cheddar.", source: "visual", quote: "cheese melting into the soup" }
+        ]
+      }),
+      options
+    );
+
+    expect(candidate?.recipe).toMatchObject({
+      title: "Broccoli Cheddar Soup",
+      ingredients: [
+        { text: "carrots, shredded" },
+        { text: "broccoli" },
+        { text: "cheddar cheese" }
+      ],
+      completion: {
+        status: "missing_amounts",
+        ingredients: ["carrots, shredded", "broccoli", "cheddar cheese"]
+      }
+    });
+    expect(candidate?.recipe.steps).toHaveLength(3);
+    expect(candidate?.warnings).toEqual([
+      "The video doesn't give amounts for: carrots, shredded, broccoli, cheddar cheese."
+    ]);
+  });
+
+  it("flags nothing when every amount is stated", () => {
+    expect(
+      buildVideoRecipeCandidate(payload(), options).candidate?.recipe.completion
+    ).toBeUndefined();
+  });
+
   it("builds a recipe from evidence-backed ingredients and steps", () => {
     const { candidate, rejections } = buildVideoRecipeCandidate(payload(), options);
 

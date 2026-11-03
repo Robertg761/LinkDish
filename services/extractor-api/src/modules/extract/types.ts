@@ -1,4 +1,5 @@
 import type { ExtractionResultCache } from "./cache/extraction-cache.js";
+import type { RecipeCompleter } from "./completion/gemini-recipe-completer.js";
 import type { RequestDeadline } from "./deadline.js";
 import type { VideoRecipeReader } from "./extractors/video/gemini-video-recipe-reader.js";
 import type { VideoReadAllowance } from "./extractors/video/video-read-allowance.js";
@@ -259,6 +260,11 @@ export interface ExtractorRuntime {
    * written recipe. Absent, or unavailable, while VIDEO_RECIPE_READER_ENABLED is off.
    */
   videoRecipeReader?: VideoRecipeReader;
+  /**
+   * Gemini filling a saved recipe's gaps (amounts a video never stated) when the person asks,
+   * through POST /recipes/complete. Absent or unavailable without GEMINI_API_KEY.
+   */
+  recipeCompleter?: RecipeCompleter;
   /** The daily cap on video reads. Runtimes without it do not cap them. */
   videoReadAllowance?: VideoReadAllowance;
   fallbackExtractor: FallbackRecipeExtractor;

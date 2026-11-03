@@ -1,4 +1,8 @@
-import { extractRecipeAnyRequestSchema } from "../../../../../../packages/api-contracts/src/index.js";
+import {
+  completeRecipeRequestSchema,
+  extractRecipeAnyRequestSchema
+} from "../../../../../../packages/api-contracts/src/index.js";
+import { runCompleteRecipePipeline } from "../services/complete-recipe-pipeline.js";
 import { runExtractRequestPipeline } from "../services/extract-request-pipeline.js";
 
 import type { ExtractorRuntime } from "../types.js";
@@ -54,6 +58,39 @@ export const registerExtractRoute = (app: FastifyInstance, runtime?: ExtractorRu
       return reply.status(500).send({
         message: "Unexpected extractor error."
       });
+    }
+  });
+
+  /* AI fills a saved recipe's gaps on the person's request (see complete-recipe-pipeline.ts). */
+  app.post("/recipes/complete", async (request, reply) => {
+    const startedAt = Date.now();
+    const parsedPayload = completeRecipeRequestSchema.safeParse(request.body);
+
+    if (!parsedPayload.success) {
+      return reply.status(400).send({
+        message: "Invalid recipe completion request.",
+        issues: parsedPayload.error.issues
+      });
+    }
+
+    try {
+      const response = await runCompleteRecipePipeline({
+        payload: parsedPayload.data,
+        headers: request.headers,
+        identity: { remoteAddress: request.ip },
+        startedAt,
+        ...(runtime ? { runtime } : {}),
+        logger: {
+          info: (entry) => request.log.info(entry),
+          warn: (entry) => request.log.warn(entry)
+        }
+      });
+
+      return reply.status(200).send(response);
+    } catch (error) {
+      request.log.error(error);
+
+      return reply.status(500).send({ message: "Unexpected extractor error." });
     }
   });
 };

@@ -102,6 +102,8 @@ const parsedExtractorApiEnv = readEnv(
       .default("false")
       .transform((value) => value === true || value === "true"),
     VIDEO_RECIPE_MODEL: trimmedString().default("gemini-3.8-flash"),
+    /* Gemini model that fills a saved recipe's gaps when the person asks (POST /recipes/complete). */
+    RECIPE_COMPLETION_MODEL: trimmedString().default("gemini-3.8-flash"),
     /* Longer videos are not sent: they cost more and cannot be read inside the request deadline. */
     VIDEO_RECIPE_MAX_SECONDS: z.coerce.number().int().positive().default(240),
     VIDEO_RECIPE_TIMEOUT_MS: z.coerce.number().int().positive().default(40_000),

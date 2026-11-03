@@ -321,6 +321,7 @@ const buildSharedRecipe = (index: number, id = `shared_recipe_${index}`): Shared
 const createMockClient = (): ExtractorApiClient => ({
   acceptHouseholdInvite: vi.fn(),
   cancelHouseholdInvite: vi.fn(),
+  completeRecipe: vi.fn(),
   createHousehold: vi.fn(),
   createHouseholdInvite: vi.fn(),
   createWebBillingCheckout: vi.fn(),

@@ -117,6 +117,16 @@ const normalizeMetadata = (candidate: ExtractionCandidate["recipe"]): Partial<Re
     metadata.videoUrl = candidate.videoUrl;
   }
 
+  if (candidate.completion) {
+    metadata.completion = {
+      ...candidate.completion,
+      ingredients: candidate.completion.ingredients
+        .map((ingredient) => clip(decodeText(ingredient), MAX_RECIPE_INGREDIENT_TEXT_LENGTH))
+        .filter((ingredient) => ingredient.length > 0)
+        .slice(0, MAX_RECIPE_INGREDIENT_COUNT)
+    };
+  }
+
   return metadata;
 };
 

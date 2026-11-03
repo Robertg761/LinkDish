@@ -1,6 +1,7 @@
 import { extractorApiEnv } from "../../../config/env.js";
 import { getSharedManagedFallbackExtractor } from "../../admin/model-control.js";
 import { createExtractionResultCache } from "../cache/extraction-cache.js";
+import { createGeminiRecipeCompleter } from "../completion/gemini-recipe-completer.js";
 import { ExtractionCancelledError } from "../deadline.js";
 import { createGeminiVideoRecipeReader } from "../extractors/video/gemini-video-recipe-reader.js";
 import { createDailyVideoReadAllowance } from "../extractors/video/video-read-allowance.js";
@@ -353,6 +354,11 @@ export const createDefaultExtractorRuntime = (): ExtractorRuntime => {
       model: extractorApiEnv.VIDEO_RECIPE_MODEL,
       fetchImplementation,
       timeoutMs: extractorApiEnv.VIDEO_RECIPE_TIMEOUT_MS
+    }),
+    recipeCompleter: createGeminiRecipeCompleter({
+      apiKey: extractorApiEnv.GEMINI_API_KEY,
+      model: extractorApiEnv.RECIPE_COMPLETION_MODEL,
+      fetchImplementation
     }),
     videoReadAllowance: createDailyVideoReadAllowance({
       dailyLimit: extractorApiEnv.VIDEO_RECIPE_DAILY_READ_LIMIT

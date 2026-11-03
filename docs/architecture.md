@@ -285,6 +285,20 @@ platforms map onto them and are told apart internally by the detection `adapterK
   as `limit_unavailable`. Each read logs a
   `video_recipe_read` line, and the outcome is stored as `videoRead` in the extraction
   analytics `properties`.
+  A video that shows a dish being made but never says how much of anything goes in (a silent
+  or music-only montage) is still a recipe: its ingredients are kept bare (source `visual`,
+  no amount) and its steps come from what is done on screen. The recipe then carries
+  `completion: { status: "missing_amounts", ingredients }` (`recipe-domain`), which the apps
+  show as a "missing amounts" notice.
+- **Filling the gaps with AI** (`POST /recipes/complete`, `extract/completion/` and
+  `services/complete-recipe-pipeline.ts`; on Vercel it is rewritten to `api/extract.ts?path=complete`
+  to stay under the function cap): on the person's request ("Fill in with AI" on a saved recipe
+  with missing amounts), Gemini (`RECIPE_COMPLETION_MODEL`) estimates the amounts, servings and
+  times and makes the steps precise. Every one of the creator's ingredients must come back, in
+  order, still named (anything added is marked `added`); an answer that drops or swaps one is
+  refused. The completed recipe has `completion.status: "ai_filled"` and a note saying its
+  amounts are AI estimates, and the apps keep labelling it so. It is metered like a photo scan
+  (an import and a strong extraction), reserved before the call and given back if it fails.
 
 ### Pasted text import
 

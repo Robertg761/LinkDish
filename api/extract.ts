@@ -1,7 +1,11 @@
 import { waitUntil } from "@vercel/functions";
 
-import { extractRecipeAnyRequestSchema } from "../packages/api-contracts/src/index.js";
+import {
+  completeRecipeRequestSchema,
+  extractRecipeAnyRequestSchema
+} from "../packages/api-contracts/src/index.js";
 import { corsJson, corsPreflight } from "../services/extractor-api/src/http/vercel-cors.js";
+import { runCompleteRecipePipeline } from "../services/extractor-api/src/modules/extract/services/complete-recipe-pipeline.js";
 import { runExtractRequestPipeline } from "../services/extractor-api/src/modules/extract/services/extract-request-pipeline.js";
 import {
   checkExtractRateLimit,
@@ -49,6 +53,32 @@ export async function POST(request: Request) {
           status: 429
         }
       );
+    }
+
+    /*
+     * POST /recipes/complete is rewritten here (vercel.json) with ?path=complete, which keeps the
+     * project under its function cap: AI fills a saved recipe's gaps on the person's request.
+     */
+    if (new URL(request.url).searchParams.get("path") === "complete") {
+      const parsedCompletion = completeRecipeRequestSchema.safeParse(await request.json());
+
+      if (!parsedCompletion.success) {
+        return corsJson(
+          request,
+          { message: "Invalid recipe completion request.", issues: parsedCompletion.error.issues },
+          { status: 400 }
+        );
+      }
+
+      const completion = await runCompleteRecipePipeline({
+        payload: parsedCompletion.data,
+        headers: request.headers,
+        identity: requestIdentity,
+        startedAt,
+        logger: structuredLogger
+      });
+
+      return corsJson(request, completion, { status: 200 });
     }
 
     /*
