@@ -1,5 +1,5 @@
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import { recipeSourceLabel } from "@linkdish/recipe-domain";
+import { getRecipeCompletionChanges, recipeSourceLabel } from "@linkdish/recipe-domain";
 import { AppButton, AppSurface, AppText } from "@linkdish/ui";
 import { Stack, router, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
@@ -179,6 +179,11 @@ export default function RecipeScreen() {
   const [isEditorVisible, setIsEditorVisible] = useState(false);
   const [isInspiredConfirmationVisible, setIsInspiredConfirmationVisible] = useState(false);
   const recipeCompletion = useRecipeCompletion();
+  /* The record getters of the latest render, for the fill that finishes after an await. */
+  const latestRecipeLookupRef = useRef({ getSavedRecipeById, getSharedRecipeById });
+  useEffect(() => {
+    latestRecipeLookupRef.current = { getSavedRecipeById, getSharedRecipeById };
+  }, [getSavedRecipeById, getSharedRecipeById]);
   /** Why filling the recipe's missing amounts with AI didn't work, shown on its card. */
   const [completionMessage, setCompletionMessage] = useState<string | null>(null);
   const [isEditorSaving, setIsEditorSaving] = useState(false);
@@ -479,15 +484,36 @@ export default function RecipeScreen() {
       return;
     }
 
+    /*
+     * Only the fields the completion owns go into the recipe as it is now: a title or note
+     * edited while AI was answering is kept (this closure's copy is from before the request).
+     */
+    const changes = getRecipeCompletionChanges(result.recipe);
+    const latest = latestRecipeLookupRef.current;
+
     if (isSharedRecipeRoute && routeSharedRecipe) {
-      if (!(await updateSharedRecipe(routeSharedRecipe.id, { recipe: result.recipe }))) {
+      const latestShared = latest.getSharedRecipeById(routeSharedRecipe.id)?.recipe;
+
+      if (
+        !(await updateSharedRecipe(routeSharedRecipe.id, {
+          recipe: { ...(latestShared ?? editableRecipe.recipe), ...changes }
+        }))
+      ) {
         setCompletionMessage("This shared recipe could not be saved. Try again.");
       }
 
       return;
     }
 
-    if (!updateRecipe(editableRecipe.id, { notes: editableRecipe.notes, recipe: result.recipe })) {
+    const latestSaved = latest.getSavedRecipeById(editableRecipe.id);
+
+    if (
+      !latestSaved ||
+      !updateRecipe(latestSaved.id, {
+        notes: latestSaved.notes,
+        recipe: { ...latestSaved.recipe, ...changes }
+      })
+    ) {
       setCompletionMessage("This saved recipe is no longer available.");
     }
   };

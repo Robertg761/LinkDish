@@ -1,4 +1,4 @@
-import { recipeToPlainText } from "@linkdish/recipe-domain";
+import { getRecipeCompletionChanges, recipeToPlainText } from "@linkdish/recipe-domain";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 
@@ -461,6 +461,11 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
   const [busy, setBusy] = useState<"delete" | "duplicate" | "sync" | "share-card" | null>(null);
   /** AI is filling the recipe's missing amounts (see handleFillWithAi). */
   const [filling, setFilling] = useState(false);
+  /* The recipe as of the latest render, for a fill that finishes after an edit. */
+  const latestRecipeRef = useRef(recipe);
+  useEffect(() => {
+    latestRecipeRef.current = recipe;
+  }, [recipe]);
   // The sheet goes by its account's household: another account signing in or out never sees it,
   // not even for a render (this screen stays up for a cookbook recipe), and it is closed for good.
   const shoppingSheet = shopping?.account === account ? shopping : null;
@@ -936,21 +941,15 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
         return;
       }
 
-      const completed = response.recipe;
-      const changes = {
-        ingredients: completed.ingredients,
-        steps: completed.steps,
-        servings: completed.servings,
-        prepTimeMinutes: completed.prepTimeMinutes,
-        cookTimeMinutes: completed.cookTimeMinutes,
-        confidence: completed.confidence,
-        completion: completed.completion ?? null
-      };
+      /* Only the completion's fields: an edit saved while AI was answering is kept. */
+      const changes = getRecipeCompletionChanges(response.recipe);
       const filledMessage = "Filled in with AI. Check the amounts before you cook.";
 
       if (shared && props.kind === "shared") {
         const updated = await asAccount(filledFor, () =>
-          apiClient.updateSharedRecipe(shared.id, { recipe: { ...before, ...changes } })
+          apiClient.updateSharedRecipe(shared.id, {
+            recipe: { ...latestRecipeRef.current, ...changes }
+          })
         );
 
         if (isCurrentAccount(filledFor)) {
@@ -972,15 +971,7 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
           label: "Undo",
           onClick: () =>
             void updateSavedRecipe(record.id, {
-              recipe: {
-                ingredients: before.ingredients,
-                steps: before.steps,
-                servings: before.servings,
-                prepTimeMinutes: before.prepTimeMinutes,
-                cookTimeMinutes: before.cookTimeMinutes,
-                confidence: before.confidence,
-                completion: before.completion ?? null
-              }
+              recipe: getRecipeCompletionChanges(before)
             }).catch(() => undefined)
         },
         icon: "check-circle",

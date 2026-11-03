@@ -147,6 +147,28 @@ export const recipeCompletionSchema = z.object({
   filledAt: z.string().datetime().nullable().optional()
 });
 
+/**
+ * The fields an AI completion changes, to merge into the latest copy of a saved recipe (so a
+ * title or note edited while it was running is kept).
+ */
+export const getRecipeCompletionChanges = (completed: {
+  ingredients: { text: string; section?: string | null | undefined }[];
+  steps: { index: number; text: string }[];
+  servings: string | null;
+  prepTimeMinutes: number | null;
+  cookTimeMinutes: number | null;
+  confidence: z.infer<typeof recipeConfidenceSchema>;
+  completion?: z.infer<typeof recipeCompletionSchema> | null | undefined;
+}) => ({
+  ingredients: completed.ingredients,
+  steps: completed.steps,
+  servings: completed.servings,
+  prepTimeMinutes: completed.prepTimeMinutes,
+  cookTimeMinutes: completed.cookTimeMinutes,
+  confidence: completed.confidence,
+  completion: completed.completion ?? null
+});
+
 const recipeNutritionValueSchema = z
   .string()
   .min(1)

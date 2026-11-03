@@ -84,19 +84,6 @@ const completionJsonSchema = {
   }
 } as const;
 
-/* Leads with a quantity: "2 cups", "1/2 tsp", "½ lb". */
-const leadingAmountPattern = /^\s*(?:\d|[½¼¾⅓⅔⅛⅜⅝⅞])/u;
-
-/*
- * Whether the source left this ingredient without an amount, so AI may give it one. The video
- * reader lists those in `completion.ingredients`; a recipe without that list counts every
- * ingredient that doesn't start with a quantity. Every other ingredient keeps its source text.
- */
-const lacksAmount = (recipe: Recipe, text: string): boolean =>
-  recipe.completion?.status === "missing_amounts" && recipe.completion.ingredients.length > 0
-    ? recipe.completion.ingredients.includes(text)
-    : !leadingAmountPattern.test(text);
-
 /*
  * An amount a cook can use: a quantity ("2 cups", "½ tsp", "a pinch", "one can") or a measure
  * that is no number ("salt, to taste", "a handful of basil").
@@ -105,6 +92,16 @@ const usableAmountPattern =
   /^\s*(?:\d|[½¼¾⅓⅔⅛⅜⅝⅞]|(?:a|an|one|two|three|four|five|six|half|a few|several)\s|(?:pinch|dash|splash|handful)\b)|\bto taste\b/iu;
 
 export const hasUsableAmount = (text: string): boolean => usableAmountPattern.test(text);
+
+/*
+ * Whether this ingredient has no amount, so AI may give it one: the video reader listed it in
+ * `completion.ingredients`, or its current text has no usable amount (the person may have edited
+ * "broccoli" to "broccoli florets" since). Every other ingredient keeps its source text.
+ */
+const lacksAmount = (recipe: Recipe, text: string): boolean =>
+  (recipe.completion?.status === "missing_amounts" &&
+    recipe.completion.ingredients.includes(text)) ||
+  !hasUsableAmount(text);
 
 /* Preparation and size words AI may reword ("shredded" for "grated"); every other word stays. */
 const rewordableWords = new Set([

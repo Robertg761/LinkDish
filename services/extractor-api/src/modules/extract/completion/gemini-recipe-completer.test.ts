@@ -177,6 +177,34 @@ describe("applyRecipeCompletion", () => {
     ).toBeNull();
   });
 
+  it("still fills an ingredient the person edited since the import", () => {
+    const recipe: Recipe = {
+      ...montageRecipe(),
+      ingredients: [
+        { text: "2 cups milk", section: null },
+        { text: "broccoli florets", section: null }
+      ],
+      completion: { status: "missing_amounts", ingredients: ["broccoli"] }
+    };
+    const withAnswer = (text: string) =>
+      applyRecipeCompletion(
+        recipe,
+        answer({
+          ingredients: [
+            { text: "2 cups milk", section: null, added: false },
+            { text, section: null, added: false }
+          ]
+        }),
+        now
+      );
+
+    expect(buildRecipeCompletionPrompt(recipe)).toContain('"missingAmounts":["broccoli florets"]');
+    expect(withAnswer("broccoli florets")).toBeNull();
+    expect(withAnswer("3 cups broccoli florets")?.ingredients[1]?.text).toBe(
+      "3 cups broccoli florets"
+    );
+  });
+
   it("refuses an answer that is not a valid recipe", () => {
     expect(
       applyRecipeCompletion(montageRecipe(), answer({ steps: [{ text: "   " }] }), now)
