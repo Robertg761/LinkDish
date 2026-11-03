@@ -21,6 +21,9 @@ const importLibrary = async (
   }
 
   for (const [key, value] of Object.entries({
+    // Local auth settings must not turn a library storage test into an auth-config test.
+    AUTH_MODE: "legacy_email_code",
+    HOUSEHOLDS_ENABLED: "false",
     LIBRARY_SYNC_ENABLED: "true",
     NODE_ENV: "test",
     UPSTASH_REDIS_REST_TOKEN: "",

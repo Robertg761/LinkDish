@@ -1,0 +1,136 @@
+# iOS release readiness
+
+## SDK 58 merge reconciliation — 2026-11-03
+
+The `ios_build` merge with `origin/main` (`38b2cfd`) retains the production API,
+Clerk/Google/Apple and RevenueCat configuration, TestFlight environment safeguards,
+photo compression and picker dismissal fixes, auth cancellation/sign-out safeguards,
+and subscription/legal disclosures. It also incorporates main's cookbook sync,
+backups, text imports, meal planning, navigation and Android changes.
+
+The merged app uses main's Expo SDK 58, React Native 0.88.0, React 19.3 and Clerk 4
+stack, including the separate Google sign-in plugin. Version 2.2.2 / iOS build 35 is
+consistent across Expo, Info.plist, the updates runtime and Xcode. The bundle remains
+`com.linkdish.app`, Expo owner `@linkdish`, Apple team `73UT6LC439`, and iOS minimum
+17.0. Apple sign-in and the signing team are now explicit in Expo config so a
+prebuild retains them. The SDK 58 scene lifecycle handles URL/auth callbacks.
+
+### Native dependency decision
+
+Keep `ios/Podfile.lock` tracked. Main's SDK-upgrade commit `a53685c` explicitly
+removed the lockfile, workspace and privacy manifest only because it could not run
+CocoaPods without a Mac. This repository tracks the native projects and EAS builds
+them, so pinning native dependencies makes subsequent builds reproducible.
+
+`pnpm-lock.yaml` was regenerated from the reconciled manifests using pnpm 10.8.0,
+and a frozen install passed. CocoaPods regenerated the SDK 58 lockfile, project
+integration, workspace and aggregated privacy manifest. The lockfile matches the
+installed Pods manifest. The obsolete Clerk 3 Swift package resolution stays
+deleted: the new dependency graph no longer references that Swift package.
+
+### Validation
+
+- Repository ESLint and TypeScript checks passed.
+- All 2,995 workspace tests passed across the package, API, mobile and web suites,
+  including 459 mobile tests. The initial parallel run hit a one-second lazy-dialog
+  timeout in `CommandPalette.test.tsx`; the focused test and all 1,234 web tests
+  passed on rerun with two workers. No web product behavior was changed for this.
+- All 98 Vercel handler tests, four TestFlight environment tests, site validation,
+  web production build and bundle-size budgets passed.
+- The library-service test now isolates auth flags from local `.env` configuration;
+  its production-storage assertion no longer depends on developer auth credentials.
+- Production iOS/Hermes export and its API/Clerk/RevenueCat/secret-marker assertions
+  passed. Live API/Clerk release preflight passed.
+- Expo introspection and native plist checks agree on the production identity,
+  version/build, Apple entitlement and camera/photo permissions, with no microphone
+  or Face ID permission. The regenerated privacy manifest retains the existing
+  required-reason API declarations.
+- An unsigned arm64 **Release** build succeeded with Xcode 26.6 and production
+  environment variables. The built `.app` was checked for version 2.2.2 (35), iOS
+  17+, scene lifecycle, privacy manifest and production API/Clerk/RevenueCat values.
+- Web browser checks: 11 of 12 passed. The mobile viewport shopping-list test
+  (`apps/web/e2e/plan-and-shop.e2e.ts:39`) failed on both the initial run and a
+  two-worker rerun: after checking one item and immediately reloading, the page
+  shows `12 to buy` instead of `11 to buy`. This persistence issue remains open;
+  the web application and tests are unchanged from `origin/main`. The trace and
+  screenshot are in the ignored `apps/web/test-results/` directory.
+
+Expo's online dependency check recommends newer SDK 58 patch releases, including
+React Native 0.88.1. The merge keeps main's dependency versions rather than adding
+another SDK patch upgrade; the native build and JS export above validate this
+resolved set. Metro also emitted an upstream Sentry/Expo Router internal-export
+warning, but completed the export and native bundle successfully.
+
+This verifies the merge, not App Store release approval. Signing/distribution and
+real-device auth, purchases, restore and recipe-flow regression tests on this new
+SDK 58 build remain necessary before uploading it. No commit, push, backend change,
+cloud environment update, submission or merge abort was performed.
+
+The following sections retain the earlier October 31 readiness snapshot; their
+version/build and test counts describe that older candidate.
+
+## Earlier production configuration (2026-10-31)
+
+- Expo project: `@linkdish/linkdish`, ID `a2c1318c-39e0-45a3-a114-1f5e88288af1`.
+- Bundle ID: `com.linkdish.app`; version `2.0.6`; next build `34`, synchronized in Expo config, native Info.plist, and Xcode project.
+- EAS profile: `testflight`, production environment, store distribution, Release configuration, no development client.
+- API: `https://api.linkdish.ca`. Live `/auth/config` returns `clerk_beta`, `clerkEnabled: true`, `emailCodeEnabled: true`; `/auth/session` is reachable.
+- `apps/mobile/config/production-public-env.json` is the source for the production API, Clerk publishable key, Google client identifiers/callback scheme, and RevenueCat iOS public SDK key. No server credentials belong in this file.
+- All six values were synchronized to the EAS production project environment and read back successfully. The native Google callback scheme matches. Production Clerk's Google web client also matches.
+- TestFlight no longer overrides these values with staging/development settings. Local export loads the JSON directly; cloud builds use EAS variables and reject any mismatch with the JSON during post-install.
+- Local `.env.local` matches the production API/public credentials, disables mocks, and enables the Apple sign-in button. Restart Metro after changing local environment variables.
+- Apple sign-in is now enabled in the production Clerk public configuration, the release app, and the native entitlement. Provider setup still needs an actual device sign-in test.
+- Mocks, household simulation, and local subscription previews are disabled for release.
+
+## Photo import fixes for build 34
+
+- Wait for the iOS scan-options modal's native dismissal before opening the camera or photo library. Repeated taps and duplicate dismissal callbacks cannot launch overlapping pickers. Android retains its separate dismissal path.
+- Read picker file URIs instead of allocating full-resolution base64 in the picker. Convert selected photos/screenshots to JPEG, bound the longest edge to 2,400 pixels, and retry with smaller dimensions/compression if needed. Process selected photos sequentially and retain page order; never silently drop an oversized page.
+- Keep the combined image payload below 4 MB with metadata headroom. The Vercel deployment's [4.5 MB request limit](https://vercel.com/docs/functions/limitations) is lower than the shared API contract's 8-million-character limit.
+- Regression coverage includes native dismissal ordering, repeated taps, cancellation/retry, denied camera permission, Android behavior, portrait/landscape resizing, multi-photo budgets, and temporary-file cleanup. All 328 mobile tests passed; the targeted 15 tests passed again after tightening the deployment budget. TypeScript and targeted ESLint pass.
+- Physical-device validation is still required for selecting a library photo, cancelling and retrying, taking a high-resolution photo, and importing up to four pages. No new EAS build was started for this fix.
+
+## Verification on this configuration
+
+- Four release-environment regression tests pass: local environment precedence, conflicting profile rejection, missing/stale EAS values, and prevention of server credentials in the public file.
+- Mobile TypeScript and all 317 mobile tests pass. Release scripts pass Node syntax checks and Prettier; these scripts are excluded from the repository's ESLint configuration.
+- Offline release preflight passes locally and with the variables read back from EAS production.
+- A clean iOS/Hermes export succeeds. The resulting bundle contains the exact production API, Clerk publishable key, and RevenueCat iOS SDK key. No staging URL, checked debug controls, or detected server-credential patterns remain.
+- An initial cached export retained older staging values. The export command now clears Metro's cache and checks the actual resulting bundle. The build command also clears the EAS build cache.
+- Live release preflight now passes: production API/session availability, production Google client match, and Apple provider enabled. This is not proof of live Google/Apple sign-in, purchases, or session persistence; those require device testing.
+
+## Remaining release work
+
+1. Generate a fresh production build (next build 34) for device validation. Apple provider enablement is confirmed; no Clerk or Apple credentials were changed by this check.
+2. On a physical device, verify Google and Apple sign-in, cancellation, persistence after relaunch, sign-out/relaunch, and account deletion. This custom UI does not collect additional signup fields or MFA; the Clerk configuration must be compatible or those flows need implementation.
+3. Verify the RevenueCat key belongs to the intended iOS app, App Store products, Plus/Family entitlements, sandbox purchase, and restore. Key presence and embedding are verified; billing behavior is not.
+4. Confirm the App Store Connect app/team record, standard versus custom EULA, privacy disclosures, screenshots, support/privacy URLs, and review access. The existing native privacy manifest requires a full SDK/backend data inventory before public submission.
+
+No deployed backend changes, new signed production build, App Store submission, or tester distribution were performed during this configuration update. A new build is required to install these production settings.
+
+## Commands from the repository root
+
+```sh
+corepack pnpm --filter @linkdish/mobile test:ios:release-env
+corepack pnpm --filter @linkdish/mobile sync:ios:release-env
+corepack pnpm --filter @linkdish/mobile export:ios:testflight
+corepack pnpm --filter @linkdish/mobile check:ios:release
+```
+
+Edit `production-public-env.json` for future production public-value changes, then run the sync command. Do not reintroduce copies in `eas.json`. Local development uses `.env.local` separately. The sync command updates only public project variables in EAS production and never prints their values. The six synchronized public variables are plaintext because they are intentionally embedded in the app, not server secrets.
+
+The live preflight passes. To generate the production candidate:
+
+```sh
+corepack pnpm --filter @linkdish/mobile build:ios:testflight
+```
+
+This command checks live configuration, synchronizes public values to EAS, and builds with a cleared cache. It does not submit to App Store Connect. EAS post-install also rejects stale cloud values. Increment the build number in `app.config.ts`, `ios/LinkDish/Info.plist`, and the Xcode project's `CURRENT_PROJECT_VERSION` before each later candidate; dynamic Expo config does not support the local EAS auto-increment used here.
+
+## Previously verified staging build
+
+[EAS build 32](https://expo.dev/accounts/linkdish/projects/linkdish/builds/757869e4-72b7-471c-ab78-315b80a504aa), version 2.0.6, finished successfully and passed local deep/strict signature verification. It uses staging and development Clerk and remains unchanged; it is not the new production configuration. It was signed for Apple team `73UT6LC439`, with TestFlight/Apple sign-in entitlements and `get-task-allow=false`, requiring iOS 17. Only camera/photo permissions remain. Builds 30 and 31 are superseded.
+
+The preceding app preparation passed full repository validation (2,575 tests, lint, TypeScript, and site checks), 20/20 Expo Doctor checks, and CocoaPods synchronization. This included 317 mobile tests with mocked services and a successful live staging recipe import. Earlier fixes covered sign-in cancellation/session activation, sign-out revocation, sensitive auth logging, and privacy/support/subscription disclosures.
+
+The runtime is Expo SDK 57, React Native 0.86.3, Hermes 250829098.0.17, Reanimated 4.5.1, and Worklets 0.10.1, resolving the SDK 56 Hermes memory regression described in [Expo's SDK 57 release notes](https://expo.dev/changelog/sdk-57). Android shares these dependencies and needs its own native rebuild/regression check before its next release.

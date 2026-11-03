@@ -28,7 +28,13 @@
     "submit:android:internal": "npx eas-cli submit --platform android --profile internal",
     "submit:android:production": "npx eas-cli submit --platform android --profile production",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "check:ios:release": "node scripts/check-ios-release.mjs",
+    "export:ios:testflight": "node scripts/with-testflight-env.mjs expo export --clear --platform ios --output-dir dist-ios-testflight && node scripts/assert-ios-release-export.mjs",
+    "build:ios:testflight": "node scripts/check-ios-release.mjs && node scripts/sync-ios-release-env.mjs && npx eas-cli build --platform ios --profile testflight --clear-cache",
+    "eas-build-post-install": "node scripts/eas-post-install.mjs",
+    "sync:ios:release-env": "node scripts/sync-ios-release-env.mjs",
+    "test:ios:release-env": "node --test scripts/test-testflight-env.mjs"
   },
   "dependencies": {
     "@clerk/expo": "^4.14.4",

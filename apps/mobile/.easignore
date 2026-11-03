@@ -19,3 +19,8 @@ ios/build
 *.p12
 *.key
 *.mobileprovision
+
+ios/Pods
+ios/.xcode.env.local
+
+dist-ios-testflight/

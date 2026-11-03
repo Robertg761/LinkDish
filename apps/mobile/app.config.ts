@@ -188,6 +188,7 @@ const androidConfig = {
 const config: ExpoConfig = {
   name: "LinkDish",
   slug: "linkdish",
+  owner: "linkdish",
   scheme: "linkdish",
   version: appVersion,
   runtimeVersion: {
@@ -198,7 +199,7 @@ const config: ExpoConfig = {
   icon: "./assets/icon.png",
   plugins: [
     "expo-router",
-    "expo-secure-store",
+    ["expo-secure-store", { faceIDPermission: false }],
     "expo-sharing",
     "expo-status-bar",
     [
@@ -215,7 +216,7 @@ const config: ExpoConfig = {
       "expo-image-picker",
       {
         cameraPermission: "LinkDish uses your camera to scan recipes from paper or cookbooks.",
-        microphonePermission: "LinkDish does not use the microphone.",
+        microphonePermission: false,
         photosPermission: "LinkDish uses selected photos to scan saved recipe images."
       }
     ],
@@ -234,9 +235,11 @@ const config: ExpoConfig = {
   },
   android: androidConfig,
   ios: {
+    appleTeamId: "73UT6LC439",
     bundleIdentifier: applicationId,
     buildNumber: iosBuildNumber,
     supportsTablet: false,
+    usesAppleSignIn: true,
     config: {
       usesNonExemptEncryption: false
     }

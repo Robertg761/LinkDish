@@ -2,6 +2,10 @@ import React from "react";
 import { act, create } from "react-test-renderer";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const modalState = vi.hoisted(() => ({ onDismiss: undefined as (() => void) | undefined }));
+const platformState = vi.hoisted(() => ({ OS: "ios" }));
+const prepareImagesMock = vi.hoisted(() => vi.fn());
+
 const accountState = vi.hoisted(() => ({
   isSignedIn: false,
   sessionToken: null as string | null
@@ -82,14 +86,11 @@ vi.mock("react-native", () => ({
   },
   KeyboardAvoidingView: ({ children }: { children: React.ReactNode }) =>
     React.createElement("keyboard-avoiding-view", null, children),
-  Modal: (props: { visible?: boolean; children?: React.ReactNode }) => {
-    console.log("Modal props.visible:", props.visible);
-    console.log("Modal has children:", !!props.children);
+  Modal: (props: { visible?: boolean; children?: React.ReactNode; onDismiss?: () => void }) => {
+    modalState.onDismiss = props.onDismiss;
     return props.visible ? React.createElement("modal", null, props.children) : null;
   },
-  Platform: {
-    OS: "ios"
-  },
+  Platform: platformState,
   Pressable: ({ children, ...props }: { children: React.ReactNode }) =>
     React.createElement("pressable", props, children),
   ScrollView: ({ children }: { children: React.ReactNode }) =>
@@ -141,6 +142,7 @@ vi.mock("expo-router", () => ({
 }));
 
 vi.mock("expo-image-picker", () => imagePickerMocks);
+vi.mock("./preparePickedImages", () => ({ preparePickedImages: prepareImagesMock }));
 
 vi.mock("../account/AccountContext", () => ({
   useAccount: () => accountState
@@ -213,6 +215,12 @@ const flushAsyncWork = async () => {
 
 describe("HomeScreen import gate", () => {
   beforeEach(() => {
+    platformState.OS = "ios";
+    modalState.onDismiss = undefined;
+    prepareImagesMock.mockReset();
+    prepareImagesMock.mockResolvedValue([
+      { dataUrl: "data:image/jpeg;base64,abc123", mimeType: "image/jpeg" }
+    ]);
     accountState.isSignedIn = false;
     accountState.sessionToken = null;
     billingState.canStartImport.mockReset();
@@ -312,129 +320,155 @@ describe("HomeScreen import gate", () => {
     });
   });
 
-  it("routes a camera scan to the recipe screen with a pending image import", async () => {
-    billingState.canStartImport.mockReturnValue({
-      allowed: true
-    });
-    billingState.remainingImports = 3;
-
+  const openScanSheet = async () => {
+    billingState.canStartImport.mockReturnValue({ allowed: true });
     let renderer: ReturnType<typeof create>;
-
     await act(async () => {
       renderer = create(<HomeScreen />);
       await flushAsyncWork();
     });
-
-    const urlFormProps = urlFormState.props as unknown as { onCameraPress?: () => void };
     act(() => {
-      urlFormProps.onCameraPress?.();
+      (urlFormState.props as unknown as { onCameraPress: () => void }).onCameraPress();
     });
+    return renderer!;
+  };
 
-    const appTexts = renderer!.root.findAll((node) => (node.type as unknown) === "AppText");
-    const takePhotoTextNode = appTexts.find((node) => {
-      const text = String(
-        Array.isArray(node.props.children) ? node.props.children.join("") : node.props.children
-      );
-      return text.trim().toLowerCase() === "take photo";
-    });
-    let takePhotoParent = takePhotoTextNode?.parent;
-    while (takePhotoParent && (takePhotoParent.type as unknown) !== "pressable") {
-      takePhotoParent = takePhotoParent.parent;
-    }
-    const takePhotoButton = takePhotoParent;
+  const findOption = (renderer: ReturnType<typeof create>, label: string) => {
+    const text = renderer.root
+      .findAll((node) => (node.type as unknown) === "AppText")
+      .find((node) => node.props.children === label);
+    let button = text?.parent;
+    while (button && (button.type as unknown) !== "pressable") button = button.parent;
+    if (!button) throw new Error(`Missing scan option: ${label}`);
+    return button.props.onPress as () => void;
+  };
 
-    if (!takePhotoButton) {
-      console.log("TAKE PHOTO BUTTON NOT FOUND. TREE:", JSON.stringify(renderer!.toJSON()));
-    } else {
-      console.log("takePhotoButton props:", Object.keys(takePhotoButton.props));
-    }
-
+  const dismissSheet = async () => {
     await act(async () => {
-      const onPress = (takePhotoButton?.props as { onPress?: () => void })?.onPress;
-      if (onPress) onPress();
+      modalState.onDismiss?.();
       await flushAsyncWork();
     });
+  };
 
-    expect(imagePickerMocks.requestCameraPermissionsAsync).toHaveBeenCalled();
-    expect(imagePickerMocks.launchCameraAsync).toHaveBeenCalledWith(
-      expect.objectContaining({
-        base64: true,
-        mediaTypes: ["images"]
-      })
-    );
-    const pushedRoute = routerMocks.push.mock.calls.at(-1)?.[0] as
-      | {
-          params?: {
-            imageImportId?: unknown;
-            url?: unknown;
-          };
-          pathname?: unknown;
+  it.each([
+    ["Take Photo", "camera"],
+    ["Choose from Gallery", "library"]
+  ] as const)(
+    "waits for native dismissal before opening %s, then routes the prepared images",
+    async (label, source) => {
+      const renderer = await openScanSheet();
+      const press = findOption(renderer, label);
+      await act(async () => {
+        press();
+        press();
+        await flushAsyncWork();
+      });
+      expect(imagePickerMocks.launchCameraAsync).not.toHaveBeenCalled();
+      expect(imagePickerMocks.launchImageLibraryAsync).not.toHaveBeenCalled();
+      expect(imagePickerMocks.requestCameraPermissionsAsync).not.toHaveBeenCalled();
+      expect(routerMocks.push).not.toHaveBeenCalled();
+
+      await dismissSheet();
+      await dismissSheet(); // Duplicate native callbacks must not open another picker.
+      const launch =
+        source === "camera"
+          ? imagePickerMocks.launchCameraAsync
+          : imagePickerMocks.launchImageLibraryAsync;
+      expect(launch).toHaveBeenCalledTimes(1);
+      expect(launch).toHaveBeenCalledWith(
+        expect.objectContaining({ base64: false, mediaTypes: ["images"] })
+      );
+      expect(prepareImagesMock).toHaveBeenCalledTimes(1);
+      expect(routerMocks.push).toHaveBeenCalledTimes(1);
+      expect(routerMocks.push).toHaveBeenCalledWith({
+        pathname: "/recipe",
+        params: {
+          imageImportId: expect.any(String) as unknown,
+          url: expect.stringMatching(/^https:\/\/linkdish\.app\/image-imports\/image-/u) as unknown
         }
-      | undefined;
-    expect(pushedRoute?.pathname).toBe("/recipe");
-    expect(typeof pushedRoute?.params?.imageImportId).toBe("string");
-    expect(pushedRoute?.params?.url).toEqual(
-      expect.stringMatching(/^https:\/\/linkdish\.app\/image-imports\/image-/u)
+      });
+      act(() => renderer.unmount());
+    }
+  );
+
+  it("shows preparation errors without routing a partial selection", async () => {
+    prepareImagesMock.mockRejectedValueOnce(new Error("Too large"));
+    const renderer = await openScanSheet();
+    await act(async () => {
+      findOption(renderer, "Choose from Gallery")();
+      await flushAsyncWork();
+    });
+    await dismissSheet();
+    expect(routerMocks.push).not.toHaveBeenCalled();
+    expect(JSON.stringify(renderer.toJSON())).toContain(
+      "Those photos could not be prepared for import."
     );
+    expect(urlFormState.props?.disabled).toBe(false);
+    act(() => renderer.unmount());
   });
 
-  it("rejects image selections that exceed the aggregate payload limit", async () => {
-    billingState.canStartImport.mockReturnValue({
-      allowed: true
-    });
-    imagePickerMocks.launchImageLibraryAsync.mockResolvedValueOnce({
-      canceled: false,
-      assets: [
-        {
-          base64: "a".repeat(4_100_000),
-          mimeType: "image/jpeg"
-        },
-        {
-          base64: "a".repeat(4_100_000),
-          mimeType: "image/jpeg"
-        }
-      ]
-    });
-
-    let renderer: ReturnType<typeof create>;
-
+  it("does not launch the camera when permission is denied", async () => {
+    imagePickerMocks.requestCameraPermissionsAsync.mockResolvedValueOnce({ granted: false });
+    const renderer = await openScanSheet();
     await act(async () => {
-      renderer = create(<HomeScreen />);
+      findOption(renderer, "Take Photo")();
       await flushAsyncWork();
     });
-
-    const urlFormProps = urlFormState.props as unknown as { onCameraPress?: () => void };
-    act(() => {
-      urlFormProps.onCameraPress?.();
-    });
-
-    const appTexts = renderer!.root.findAll((node) => (node.type as unknown) === "AppText");
-    const choosePhotosTextNode = appTexts.find((node) => {
-      const text = String(
-        Array.isArray(node.props.children) ? node.props.children.join("") : node.props.children
-      );
-      return text.trim().toLowerCase() === "choose from gallery";
-    });
-    let choosePhotosParent = choosePhotosTextNode?.parent;
-    while (choosePhotosParent && (choosePhotosParent.type as unknown) !== "pressable") {
-      choosePhotosParent = choosePhotosParent.parent;
-    }
-    const choosePhotosButton = choosePhotosParent;
-
-    if (!choosePhotosButton) {
-      console.log("CHOOSE PHOTOS BUTTON NOT FOUND. TREE:", JSON.stringify(renderer!.toJSON()));
-    }
-
-    await act(async () => {
-      const onPress = (choosePhotosButton?.props as { onPress?: () => void })?.onPress;
-      if (onPress) onPress();
-      await flushAsyncWork();
-    });
-
+    await dismissSheet();
+    expect(imagePickerMocks.launchCameraAsync).not.toHaveBeenCalled();
     expect(routerMocks.push).not.toHaveBeenCalled();
-    expect(JSON.stringify(renderer!.toJSON())).toContain(
-      "That image was too large or could not be read. Try a clearer photo."
-    );
+    expect(JSON.stringify(renderer.toJSON())).toContain("Camera access is needed");
+    act(() => renderer.unmount());
+  });
+
+  it("allows retry after cancelling the library picker", async () => {
+    imagePickerMocks.launchImageLibraryAsync.mockResolvedValueOnce({
+      canceled: true,
+      assets: null
+    });
+    const renderer = await openScanSheet();
+    await act(async () => {
+      findOption(renderer, "Choose from Gallery")();
+      await flushAsyncWork();
+    });
+    await dismissSheet();
+    expect(prepareImagesMock).not.toHaveBeenCalled();
+    expect(routerMocks.push).not.toHaveBeenCalled();
+    act(() => {
+      (urlFormState.props as unknown as { onCameraPress: () => void }).onCameraPress();
+    });
+    await act(async () => {
+      findOption(renderer, "Choose from Gallery")();
+      await flushAsyncWork();
+    });
+    await dismissSheet();
+    expect(imagePickerMocks.launchImageLibraryAsync).toHaveBeenCalledTimes(2);
+    expect(routerMocks.push).toHaveBeenCalledTimes(1);
+    act(() => renderer.unmount());
+  });
+
+  it("launches on Android after closing the sheet without requiring an iOS dismissal event", async () => {
+    platformState.OS = "android";
+    const renderer = await openScanSheet();
+    await act(async () => {
+      findOption(renderer, "Choose from Gallery")();
+      await flushAsyncWork();
+    });
+    expect(imagePickerMocks.launchImageLibraryAsync).toHaveBeenCalledTimes(1);
+    expect(routerMocks.push).toHaveBeenCalledTimes(1);
+    act(() => renderer.unmount());
+  });
+
+  it("does not open a picker when the scan sheet is cancelled", async () => {
+    const renderer = await openScanSheet();
+    await act(async () => {
+      findOption(renderer, "Cancel")();
+      await flushAsyncWork();
+    });
+    await dismissSheet();
+    expect(imagePickerMocks.launchImageLibraryAsync).not.toHaveBeenCalled();
+    expect(imagePickerMocks.launchCameraAsync).not.toHaveBeenCalled();
+    act(() => renderer.unmount());
   });
 
   it("opens the paste-text sheet and imports pasted text on the recipe screen", async () => {

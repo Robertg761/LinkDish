@@ -13,6 +13,7 @@ import React, {
 } from "react";
 
 import { mobileEnv } from "../../config/env";
+import { logAuthWarning } from "../../lib/authLogging";
 import { unlinkMobileLibrary } from "../saved-recipes/librarySync";
 
 import { AccountChangedError } from "./account-changed-error";
@@ -186,7 +187,7 @@ export const AccountProvider = ({ children }: PropsWithChildren) => {
         isFromServer: true
       };
     } catch (error) {
-      console.warn("Failed to load LinkDish auth config.", error);
+      logAuthWarning("Failed to load LinkDish auth config.", error);
       return {
         config: authConfigRef.current,
         isFromServer: false
@@ -271,7 +272,7 @@ export const AccountProvider = ({ children }: PropsWithChildren) => {
           allowClerkSignOut: nextAuthConfig.isFromServer
         });
       } catch (error) {
-        console.warn("Failed to hydrate LinkDish account.", error);
+        logAuthWarning("Failed to hydrate LinkDish account.", error);
 
         if (isMounted) {
           setAccountError(getAccountErrorMessage(error));
@@ -306,7 +307,7 @@ export const AccountProvider = ({ children }: PropsWithChildren) => {
         return;
       }
 
-      console.warn("Failed to load the LinkDish account for the new session.", error);
+      logAuthWarning("Failed to load the LinkDish account for the new session.", error);
       setAccountError(getAccountErrorMessage(error));
       setUser(null);
     });
@@ -375,14 +376,15 @@ export const AccountProvider = ({ children }: PropsWithChildren) => {
         setIsAccountBusy(true);
 
         try {
-          if (sessionToken) {
-            await createClient(sessionToken).logout();
-          }
-          if (clerkSession.isSignedIn) {
-            await clerkSession.signOut();
-          }
+          // Attempt both revocations even when one service is unavailable.
+          const results = await Promise.allSettled([
+            sessionToken ? createClient(sessionToken).logout() : Promise.resolve(),
+            clerkSession.isSignedIn ? clerkSession.signOut() : Promise.resolve()
+          ]);
+          const failed = results.find((result) => result.status === "rejected");
+          if (failed?.status === "rejected") throw failed.reason;
         } catch (error) {
-          console.warn("Failed to clear LinkDish server session during sign-out.", error);
+          logAuthWarning("Failed to clear LinkDish server session during sign-out.", error);
           setAccountError(getAccountErrorMessage(error));
         } finally {
           preferLegacySessionRef.current = false;
