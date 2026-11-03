@@ -629,7 +629,11 @@ export const buildVideoRecipeCandidate = (
         servings: tidy(payload.servings) || null,
         prepTimeMinutes: payload.prepTimeMinutes,
         cookTimeMinutes: payload.cookTimeMinutes,
-        nutrition: null
+        nutrition: null,
+        /* The apps offer to fill these gaps with AI; the recipe itself never guesses them. */
+        ...(withoutAmounts.length > 0
+          ? { completion: { status: "missing_amounts" as const, ingredients: withoutAmounts } }
+          : {})
       },
       strategy: "llm-fallback",
       evidence: ["Read the recipe from the video's speech, on-screen text and caption."],

@@ -1,5 +1,6 @@
 import type { MobileExtractionRequest } from "../services/extraction-request";
 import type { ExtractRecipeResponse } from "@linkdish/api-contracts";
+import type { Recipe } from "@linkdish/recipe-domain";
 
 const buildSuccessResponse = (
   url: string,
@@ -165,3 +166,30 @@ export const buildMockExtractionResponse = (
 
   return buildSuccessResponse(url);
 };
+
+/* Demo builds (mock API): "fills" each bare ingredient with a placeholder amount. */
+export const buildMockCompletionResponse = (recipe: Recipe): ExtractRecipeResponse => ({
+  status: "success",
+  recipe: {
+    ...recipe,
+    ingredients: recipe.ingredients.map((ingredient) =>
+      /^\d/u.test(ingredient.text)
+        ? ingredient
+        : { ...ingredient, text: `1 cup ${ingredient.text}` }
+    ),
+    completion: {
+      status: "ai_filled",
+      ingredients: recipe.completion?.ingredients ?? [],
+      filledAt: new Date().toISOString()
+    }
+  },
+  extraction: {
+    sourceType: recipe.sourceType,
+    strategy: "llm-fallback",
+    confidenceScore: recipe.confidence.score,
+    missingFields: recipe.confidence.missingFields,
+    warnings: [],
+    fetchMode: "http",
+    provenance: ["llm"]
+  }
+});

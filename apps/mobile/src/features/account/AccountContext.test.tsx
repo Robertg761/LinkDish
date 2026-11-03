@@ -66,6 +66,7 @@ const createMockClient = (
   ({
     acceptHouseholdInvite: vi.fn(),
     cancelHouseholdInvite: vi.fn(),
+    completeRecipe: vi.fn(),
     createHousehold: vi.fn(),
     createHouseholdInvite: vi.fn(),
     createWebBillingCheckout: vi.fn(),

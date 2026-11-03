@@ -33,7 +33,7 @@
       ]
     },
     {
-      "source": "/:apiRoot(api|account|admin|analytics|auth|billing|extract|health|household|image|ios-waitlist|library|support-ticket|webhooks)/:apiPath*",
+      "source": "/:apiRoot(api|account|admin|analytics|auth|billing|extract|health|household|image|ios-waitlist|library|recipes|support-ticket|webhooks)/:apiPath*",
       "headers": [
         {
           "key": "Content-Security-Policy",
@@ -169,6 +169,10 @@
     {
       "source": "/extract",
       "destination": "/api/extract"
+    },
+    {
+      "source": "/recipes/complete",
+      "destination": "/api/extract?path=complete"
     },
     {
       "source": "/analytics/events",

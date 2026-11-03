@@ -46,6 +46,7 @@ import {
   updateDraftStep as updateDraftStepById,
   type DraftStep
 } from "../src/features/recipe-results/draftSteps";
+import { useRecipeCompletion } from "../src/features/recipe-results/hooks/useRecipeCompletion";
 import { useRecipeExtraction } from "../src/features/recipe-results/hooks/useRecipeExtraction";
 import { useSavedRecipes } from "../src/features/saved-recipes/SavedRecipesContext";
 import {
@@ -177,6 +178,9 @@ export default function RecipeScreen() {
   const [editorError, setEditorError] = useState<string | null>(null);
   const [isEditorVisible, setIsEditorVisible] = useState(false);
   const [isInspiredConfirmationVisible, setIsInspiredConfirmationVisible] = useState(false);
+  const recipeCompletion = useRecipeCompletion();
+  /** Why filling the recipe's missing amounts with AI didn't work, shown on its card. */
+  const [completionMessage, setCompletionMessage] = useState<string | null>(null);
   const [isEditorSaving, setIsEditorSaving] = useState(false);
   const [isShareCardSharing, setIsShareCardSharing] = useState(false);
   const [isSaveTargetModalVisible, setIsSaveTargetModalVisible] = useState(false);
@@ -456,6 +460,41 @@ export default function RecipeScreen() {
       setIsEditorSaving(false);
     }
   };
+
+  /*
+   * A recipe read from a video that never said how much of anything to use: AI estimates the
+   * amounts and fills out the steps, and the result replaces the saved recipe's ingredients and
+   * method (the person's notes are kept).
+   */
+  const fillMissingAmountsWithAi = async () => {
+    if (!editableRecipe || recipeCompletion.isFilling) {
+      return;
+    }
+
+    setCompletionMessage(null);
+    const result = await recipeCompletion.fill(editableRecipe.recipe);
+
+    if (result.status === "failed") {
+      setCompletionMessage(result.message);
+      return;
+    }
+
+    if (isSharedRecipeRoute && routeSharedRecipe) {
+      if (!(await updateSharedRecipe(routeSharedRecipe.id, { recipe: result.recipe }))) {
+        setCompletionMessage("This shared recipe could not be saved. Try again.");
+      }
+
+      return;
+    }
+
+    if (!updateRecipe(editableRecipe.id, { notes: editableRecipe.notes, recipe: result.recipe })) {
+      setCompletionMessage("This saved recipe is no longer available.");
+    }
+  };
+  const canFillMissingAmounts =
+    extraction.state.state === "success" &&
+    editableRecipe != null &&
+    (isSharedRecipeRoute ? canEditSharedRecipe : !isCurrentStarterRecipe);
 
   const addDraftStep = () => {
     setDraftSteps((current) => appendDraftStep(current));
@@ -898,6 +937,35 @@ export default function RecipeScreen() {
             <AppText muted>
               Inspired by the video. Ingredients, quantities and steps may differ from the
               creator’s.
+            </AppText>
+          </AppSurface>
+        ) : null}
+
+        {displayedRecipe?.completion?.status === "missing_amounts" ? (
+          <StatusCard
+            body={
+              completionMessage ??
+              (canFillMissingAmounts
+                ? "The video shows how it’s made but doesn’t say how much of each ingredient to use. AI can suggest amounts and fuller steps (uses one AI import)."
+                : "The video shows how it’s made but doesn’t say how much of each ingredient to use. Save the recipe to fill in the amounts with AI.")
+            }
+            primaryAction={
+              canFillMissingAmounts
+                ? {
+                    label: recipeCompletion.isFilling ? "Filling in…" : "Fill in with AI",
+                    onPress: fillMissingAmountsWithAi
+                  }
+                : undefined
+            }
+            title="This recipe is missing amounts"
+          />
+        ) : null}
+
+        {displayedRecipe?.completion?.status === "ai_filled" ? (
+          <AppSurface style={styles.statusCard}>
+            <AppText variant="title">Amounts estimated by AI</AppText>
+            <AppText muted>
+              The original video didn’t give them, so check them before you cook.
             </AppText>
           </AppSurface>
         ) : null}

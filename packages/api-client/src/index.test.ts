@@ -111,6 +111,33 @@ describe("error responses", () => {
     expect((error as ExtractorApiError).statusCode).toBe(500);
   });
 
+  it("posts a saved recipe to /recipes/complete and returns the completed recipe", async () => {
+    const completed = {
+      ...successEnvelope,
+      recipe: {
+        ...successEnvelope.recipe,
+        completion: {
+          status: "ai_filled",
+          ingredients: ["onion"],
+          filledAt: "2026-11-03T12:00:00.000Z"
+        }
+      }
+    };
+    const fetchImplementation = createFetchMock(() => jsonResponse(completed));
+    const client = createExtractorApiClient({
+      baseUrl: "https://api.test",
+      fetchImplementation: fetchImplementation
+    });
+
+    const response = await client.completeRecipe({ recipe: successEnvelope.recipe as never });
+    const { input, init } = firstCall(fetchImplementation);
+
+    expect(input).toBe("https://api.test/recipes/complete");
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(init?.body as string)).toMatchObject({ recipe: { title: "Soup" } });
+    expect(response.status === "success" && response.recipe.completion?.status).toBe("ai_filled");
+  });
+
   it("still returns 200 envelopes that match the contract", async () => {
     const fetchImplementation = createFetchMock(() => jsonResponse(successEnvelope));
     const client = createExtractorApiClient({

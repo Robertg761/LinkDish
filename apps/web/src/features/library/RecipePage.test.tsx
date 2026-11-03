@@ -50,6 +50,7 @@ const pwa = vi.hoisted(() => ({ updateSW: vi.fn() }));
 vi.mock("virtual:pwa-register", () => ({ registerSW: () => pwa.updateSW }));
 
 const apiMocks = vi.hoisted(() => ({
+  completeRecipe: vi.fn(),
   createSharedRecipe: vi.fn(),
   deleteSharedRecipe: vi.fn(),
   getHousehold: vi.fn(),
@@ -221,6 +222,128 @@ beforeEach(() => {
 afterEach(async () => {
   await flushCookSessionWrites();
   vi.restoreAllMocks();
+});
+
+describe("RecipePage missing amounts", () => {
+  const montage: Recipe = {
+    ...baseRecipe,
+    title: "Broccoli Cheddar Soup",
+    ingredients: [{ text: "broccoli" }, { text: "cheddar cheese" }],
+    steps: [{ index: 1, text: "Simmer the broccoli, then melt in the cheese." }],
+    servings: null,
+    prepTimeMinutes: null,
+    cookTimeMinutes: null,
+    completion: { status: "missing_amounts", ingredients: ["broccoli", "cheddar cheese"] }
+  };
+  const filled: Recipe = {
+    ...montage,
+    ingredients: [{ text: "3 cups broccoli florets" }, { text: "8 oz cheddar cheese, shredded" }],
+    steps: [
+      { index: 1, text: "Simmer the broccoli in the broth for 15 minutes." },
+      { index: 2, text: "Take off the heat and stir in the cheddar until melted." }
+    ],
+    servings: "4",
+    completion: {
+      status: "ai_filled",
+      ingredients: ["broccoli", "cheddar cheese"],
+      filledAt: "2026-11-03T12:00:00.000Z"
+    }
+  };
+  const missingWarning = "The video doesn't give amounts for: broccoli, cheddar cheese.";
+  const montageRecord = () =>
+    savedRecipe({
+      recipe: montage,
+      extraction: {
+        fetchMode: "http",
+        provenance: ["llm"],
+        strategy: "llm-fallback",
+        warnings: [missingWarning]
+      }
+    });
+
+  it("says the amounts are missing and fills them in with AI, with an Undo", async () => {
+    apiMocks.completeRecipe.mockResolvedValue({
+      status: "success",
+      recipe: filled,
+      extraction: {
+        sourceType: "social",
+        strategy: "llm-fallback",
+        confidenceScore: 0.6,
+        missingFields: [],
+        warnings: [],
+        fetchMode: "http",
+        provenance: ["llm"]
+      }
+    });
+    await seed([montageRecord()]);
+    renderAt("/recipes/recipe_local");
+
+    const banner = await screen.findByRole("region", { name: "Missing amounts" });
+    expect(within(banner).getByText(/broccoli, cheddar cheese/u)).toBeInTheDocument();
+    // The banner says it; the warning list doesn't repeat it.
+    expect(screen.queryByText(missingWarning)).not.toBeInTheDocument();
+
+    fireEvent.click(within(banner).getByRole("button", { name: "Fill in with AI" }));
+
+    await waitFor(() =>
+      expect(stored("recipe_local")?.recipe.completion?.status).toBe("ai_filled")
+    );
+    expect(apiMocks.completeRecipe).toHaveBeenCalledWith({ recipe: montage });
+    expect(stored("recipe_local")?.recipe.ingredients).toEqual(filled.ingredients);
+    expect(await screen.findByText(/broccoli florets/u)).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Amounts estimated by AI" })).toBeInTheDocument();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Undo" }));
+    await waitFor(() =>
+      expect(stored("recipe_local")?.recipe.completion?.status).toBe("missing_amounts")
+    );
+    expect(stored("recipe_local")?.recipe.ingredients).toEqual(montage.ingredients);
+  });
+
+  it("opens the upgrade sheet when the plan's imports are used up, and keeps the recipe", async () => {
+    upgradeMocks.requestUpgradeSheet.mockReturnValue(true);
+    apiMocks.completeRecipe.mockResolvedValue({
+      status: "failure",
+      reason: "plan_limit",
+      userMessage: "You've used your free imports."
+    });
+    await seed([montageRecord()]);
+    renderAt("/recipes/recipe_local");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Fill in with AI" }));
+
+    await waitFor(() =>
+      expect(upgradeMocks.requestUpgradeSheet).toHaveBeenCalledWith("import_limit")
+    );
+    expect(stored("recipe_local")?.recipe.completion?.status).toBe("missing_amounts");
+  });
+
+  it("shows the API's message when AI can't fill it in", async () => {
+    apiMocks.completeRecipe.mockResolvedValue({
+      status: "failure",
+      reason: "fallback_failed",
+      userMessage: "LinkDish couldn't fill in this recipe just now. Please try again in a moment."
+    });
+    await seed([montageRecord()]);
+    renderAt("/recipes/recipe_local");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Fill in with AI" }));
+
+    expect(
+      await screen.findByText(
+        "LinkDish couldn't fill in this recipe just now. Please try again in a moment."
+      )
+    ).toBeInTheDocument();
+    expect(stored("recipe_local")?.recipe.ingredients).toEqual(montage.ingredients);
+  });
+
+  it("shows nothing for a recipe with every amount", async () => {
+    await seed([savedRecipe()]);
+    renderAt("/recipes/recipe_local");
+    await screen.findByRole("heading", { level: 1, name: "Weeknight Chili" });
+
+    expect(screen.queryByRole("region", { name: "Missing amounts" })).not.toBeInTheDocument();
+  });
 });
 
 describe("RecipePage saved route", () => {

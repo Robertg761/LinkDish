@@ -243,6 +243,20 @@ export const extractRecipeResponseSchema = z.discriminatedUnion("status", [
   extractRecipeFailureSchema
 ]);
 
+/*
+ * POST /recipes/complete: AI fills the gaps in a saved recipe (amounts a video never stated,
+ * vaguer steps). The answer has the same shape as /extract's, so clients reuse its success,
+ * quota and failure handling; the completed recipe's `completion.status` is "ai_filled".
+ */
+export const completeRecipeRequestSchema = z.object({
+  recipe: recipeSchema,
+  correlationId: extractionCorrelationIdSchema.optional()
+});
+
+export const completeRecipeResponseSchema = extractRecipeResponseSchema;
+
+export type CompleteRecipeRequest = z.infer<typeof completeRecipeRequestSchema>;
+export type CompleteRecipeResponse = z.infer<typeof completeRecipeResponseSchema>;
 export type ExtractRecipeRequest = z.infer<typeof extractRecipeRequestSchema>;
 export type ExtractRecipeTextRequest = z.infer<typeof extractRecipeTextRequestSchema>;
 export type ExtractRecipeTextRequestInput = z.input<typeof extractRecipeTextRequestSchema>;

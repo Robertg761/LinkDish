@@ -7,6 +7,8 @@ import {
   authSessionResponseSchema,
   billingUsageResponseSchema,
   cancelInviteRequestSchema,
+  completeRecipeRequestSchema,
+  completeRecipeResponseSchema,
   createWebBillingCheckoutRequestSchema,
   createHouseholdResponseSchema,
   createInviteRequestSchema,
@@ -49,6 +51,8 @@ import {
   type AuthSessionResponse,
   type BillingUsageResponse,
   type CancelInviteRequest,
+  type CompleteRecipeRequest,
+  type CompleteRecipeResponse,
   type CreateWebBillingCheckoutRequest,
   type CreateHouseholdResponse,
   type CreateInviteRequest,
@@ -170,6 +174,15 @@ export interface ExtractorApiClient {
     input: CancelInviteRequest,
     options?: RequestOptionsArgument
   ): Promise<HouseholdMutationResponse>;
+  /**
+   * AI fills a saved recipe's gaps (amounts a video never stated) on the person's request. Metered
+   * like a photo scan; the answer has /extract's shape, and its recipe's completion status is
+   * "ai_filled".
+   */
+  completeRecipe(
+    input: CompleteRecipeRequest,
+    options?: RequestOptionsArgument
+  ): Promise<CompleteRecipeResponse>;
   createWebBillingCheckout(
     input: CreateWebBillingCheckoutRequest,
     options?: RequestOptionsArgument
@@ -615,6 +628,15 @@ export const createExtractorApiClient = (
       return requestJson(`/household/recipes/${encodeURIComponent(id)}`, {
         method: "DELETE",
         responseSchema: deleteSharedRecipeResponseSchema,
+        signal: callOptions?.signal
+      });
+    },
+    async completeRecipe(input, callOptions) {
+      return requestJson("/recipes/complete", {
+        body: validateInput(completeRecipeRequestSchema, input),
+        method: "POST",
+        responseSchema: completeRecipeResponseSchema,
+        timeoutMs: extractTimeoutMs,
         signal: callOptions?.signal
       });
     },

@@ -2,11 +2,12 @@ import { ExtractorApiError, createExtractorApiClient } from "@linkdish/api-clien
 
 import { getMobileAnalyticsHeaders, trackMobileEvent } from "../analytics/client";
 import { mobileEnv } from "../config/env";
-import { buildMockExtractionResponse } from "../mocks/extraction";
+import { buildMockCompletionResponse, buildMockExtractionResponse } from "../mocks/extraction";
 
 import { isTextExtractionRequest, type MobileExtractionRequest } from "./extraction-request";
 
-import type { ExtractRecipeResponse } from "@linkdish/api-contracts";
+import type { CompleteRecipeResponse, ExtractRecipeResponse } from "@linkdish/api-contracts";
+import type { Recipe } from "@linkdish/recipe-domain";
 
 export type { MobileExtractionRequest, TextExtractionRequest } from "./extraction-request";
 
@@ -63,6 +64,42 @@ interface ExtractRecipeOptions {
   billingClientId?: string | null;
 }
 
+/* A call that counts against the person's allowance names who they are to billing. */
+const getBillingClient = (options: ExtractRecipeOptions | undefined) =>
+  options?.billingClientId || options?.authToken
+    ? createExtractorApiClient({
+        baseUrl: mobileEnv.apiBaseUrl,
+        getHeaders: async () => {
+          const analyticsHeaders = await getMobileAnalyticsHeaders();
+
+          return {
+            ...analyticsHeaders,
+            ...(options.authToken ? { authorization: `Bearer ${options.authToken}` } : {}),
+            "x-linkdish-billing-provider": "revenuecat",
+            "x-linkdish-client-id":
+              options.billingClientId ??
+              analyticsHeaders["x-linkdish-client-id"] ??
+              (await getMobileAnalyticsHeaders())["x-linkdish-client-id"]!
+          };
+        }
+      })
+    : apiClient;
+
+/**
+ * Asks AI to fill a saved recipe's gaps (amounts a video never stated). Metered like a photo
+ * scan; the answer has /extract's shape.
+ */
+export const completeRecipe = async (
+  recipe: Recipe,
+  options?: ExtractRecipeOptions
+): Promise<CompleteRecipeResponse> => {
+  if (mobileEnv.useMockApi) {
+    return buildMockCompletionResponse(recipe);
+  }
+
+  return runExtractorRequestWithRetry(() => getBillingClient(options).completeRecipe({ recipe }));
+};
+
 export function extractRecipe(
   url: string,
   attempt?: "primary" | "fallback",
@@ -88,25 +125,7 @@ export async function extractRecipe(
     return buildMockExtractionResponse(request);
   }
 
-  const client =
-    options?.billingClientId || options?.authToken
-      ? createExtractorApiClient({
-          baseUrl: mobileEnv.apiBaseUrl,
-          getHeaders: async () => {
-            const analyticsHeaders = await getMobileAnalyticsHeaders();
-
-            return {
-              ...analyticsHeaders,
-              ...(options.authToken ? { authorization: `Bearer ${options.authToken}` } : {}),
-              "x-linkdish-billing-provider": "revenuecat",
-              "x-linkdish-client-id":
-                options.billingClientId ??
-                analyticsHeaders["x-linkdish-client-id"] ??
-                (await getMobileAnalyticsHeaders())["x-linkdish-client-id"]!
-            };
-          }
-        })
-      : apiClient;
+  const client = getBillingClient(options);
 
   trackMobileEvent({
     eventName: "android_extract_submitted",
