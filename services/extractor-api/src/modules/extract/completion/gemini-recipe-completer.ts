@@ -97,6 +97,15 @@ const lacksAmount = (recipe: Recipe, text: string): boolean =>
     ? recipe.completion.ingredients.includes(text)
     : !leadingAmountPattern.test(text);
 
+/*
+ * An amount a cook can use: a quantity ("2 cups", "½ tsp", "a pinch", "one can") or a measure
+ * that is no number ("salt, to taste", "a handful of basil").
+ */
+const usableAmountPattern =
+  /^\s*(?:\d|[½¼¾⅓⅔⅛⅜⅝⅞]|(?:a|an|one|two|three|four|five|six|half|a few|several)\s|(?:pinch|dash|splash|handful)\b)|\bto taste\b/iu;
+
+export const hasUsableAmount = (text: string): boolean => usableAmountPattern.test(text);
+
 /* Preparation and size words AI may reword ("shredded" for "grated"); every other word stays. */
 const rewordableWords = new Set([
   "and",
@@ -184,8 +193,9 @@ const tidy = (value: string | null | undefined): string =>
   (value ?? "").replace(/\s+/gu, " ").trim();
 
 /**
- * The completed recipe, or null when the answer drops or reorders one of the creator's
- * ingredients, or does not make a valid recipe.
+ * The completed recipe, or null when the answer drops, swaps or reorders one of the creator's
+ * ingredients, leaves an ingredient that had no amount still without one, or does not make a
+ * valid recipe. Null is a failed completion, so the person's allowance is given back.
  */
 export const applyRecipeCompletion = (
   recipe: Recipe,
@@ -201,6 +211,15 @@ export const applyRecipeCompletion = (
 
   for (let index = 0; index < kept.length; index += 1) {
     if (!keepsIngredientIdentity(recipe.ingredients[index]?.text ?? "", kept[index]?.text ?? "")) {
+      return null;
+    }
+  }
+
+  /* The point of the answer: every ingredient that had no amount now has one. */
+  for (let index = 0; index < kept.length; index += 1) {
+    const original = recipe.ingredients[index]?.text ?? "";
+
+    if (lacksAmount(recipe, original) && !hasUsableAmount(kept[index]?.text ?? "")) {
       return null;
     }
   }

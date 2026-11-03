@@ -5,6 +5,7 @@ import {
   applyRecipeCompletion,
   buildRecipeCompletionPrompt,
   createGeminiRecipeCompleter,
+  hasUsableAmount,
   keepsIngredientIdentity,
   type RecipeCompletionPayload
 } from "./gemini-recipe-completer";
@@ -164,10 +165,44 @@ describe("applyRecipeCompletion", () => {
     expect(completed?.completion?.ingredients).toEqual(["butter"]);
   });
 
+  it("refuses an answer that leaves a missing amount missing", () => {
+    const unfilled = answer().ingredients.map((ingredient) =>
+      ingredient.text === "8 oz sharp cheddar cheese, shredded"
+        ? { ...ingredient, text: "cheddar cheese" }
+        : ingredient
+    );
+
+    expect(
+      applyRecipeCompletion(montageRecipe(), answer({ ingredients: unfilled }), now)
+    ).toBeNull();
+  });
+
   it("refuses an answer that is not a valid recipe", () => {
     expect(
       applyRecipeCompletion(montageRecipe(), answer({ steps: [{ text: "   " }] }), now)
     ).toBeNull();
+  });
+});
+
+describe("hasUsableAmount", () => {
+  it("accepts quantities and measures without a number", () => {
+    for (const text of [
+      "2 cups milk",
+      "½ tsp salt",
+      "1/2 lb ground beef",
+      "a pinch of nutmeg",
+      "one can black beans",
+      "salt and pepper, to taste",
+      "handful of basil"
+    ]) {
+      expect(hasUsableAmount(text)).toBe(true);
+    }
+  });
+
+  it("refuses a bare ingredient", () => {
+    for (const text of ["broccoli", "cheddar cheese", "almonds, sliced"]) {
+      expect(hasUsableAmount(text)).toBe(false);
+    }
   });
 });
 
