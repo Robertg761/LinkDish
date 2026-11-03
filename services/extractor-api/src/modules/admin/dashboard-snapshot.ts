@@ -5,6 +5,8 @@ import { getSharedExtractorRuntime } from "../extract/services/runtime.js";
 import { countStoreKeys } from "../storage/upstash-store.js";
 import { getIosWaitlistSnapshot } from "../waitlist/ios-waitlist-service.js";
 
+import { getAdminAuthMode, getAdminCredentialConfig } from "./admin-access.js";
+import { listAdminAuditEvents } from "./admin-audit.js";
 import { getAdminEnvironmentProfile, parseAdminEnvironmentName } from "./environment-profiles.js";
 import { getAdminMetricsSnapshot } from "./metrics.js";
 import { getAdminCatalogWithModel, isManagedFallbackExtractor } from "./model-control.js";
@@ -291,6 +293,17 @@ const getAdminIosWaitlistSnapshot = async () => {
   }
 };
 
+const getAdminAuditSnapshot = async () => {
+  try {
+    return { entries: await listAdminAuditEvents(50), error: null };
+  } catch (error) {
+    return {
+      entries: [],
+      error: error instanceof Error ? error.message : "Unable to load the admin audit log."
+    };
+  }
+};
+
 const getAdminAccountsSnapshot = async () => {
   try {
     return {
@@ -360,9 +373,21 @@ export const getAdminDashboardSnapshot = async (
     "LLM spend uses documented model rates and estimated token counts until provider billing APIs are connected."
   ];
 
-  if (!extractorApiEnv.ADMIN_DASHBOARD_TOKEN) {
-    notes.push("Set ADMIN_DASHBOARD_TOKEN before exposing /admin outside localhost.");
+  const adminCredentials = getAdminCredentialConfig();
+
+  if (adminCredentials.credentials.length === 0) {
+    notes.push("Set ADMIN_DASHBOARD_TOKENS before exposing /admin outside localhost.");
   }
+
+  if (
+    adminCredentials.credentials.some((credential) => credential.source === "ADMIN_DASHBOARD_TOKEN")
+  ) {
+    notes.push(
+      'ADMIN_DASHBOARD_TOKEN is one shared token, so its actions are logged as "admin". Give each person a token in ADMIN_DASHBOARD_TOKENS (name:token), then remove it.'
+    );
+  }
+
+  notes.push(...adminCredentials.issues);
 
   if (selectedEnvironment !== environmentProfile.runtimeEnvironment) {
     notes.push(
@@ -373,6 +398,7 @@ export const getAdminDashboardSnapshot = async (
   const iosWaitlist = await getAdminIosWaitlistSnapshot();
   const durableAnalytics = await getAnalyticsDashboardSummary();
   const accounts = await getAdminAccountsSnapshot();
+  const adminAudit = await getAdminAuditSnapshot();
 
   return {
     generatedAt: new Date().toISOString(),
@@ -393,10 +419,12 @@ export const getAdminDashboardSnapshot = async (
     },
     security: {
       enabled: extractorApiEnv.ADMIN_DASHBOARD_ENABLED,
-      authMode: extractorApiEnv.ADMIN_DASHBOARD_TOKEN
-        ? "ADMIN_DASHBOARD_TOKEN"
-        : "Localhost only until ADMIN_DASHBOARD_TOKEN is set"
+      authMode: getAdminAuthMode(),
+      authFailureLimitMax: extractorApiEnv.ADMIN_AUTH_FAILURE_LIMIT_MAX,
+      authFailureLimitWindowMs: extractorApiEnv.ADMIN_AUTH_FAILURE_LIMIT_WINDOW_MS,
+      auditRetentionDays: extractorApiEnv.ADMIN_AUDIT_RETENTION_DAYS
     },
+    adminAudit,
     billing: environmentProfile.billing,
     plans: environmentProfile.plans,
     llm: {

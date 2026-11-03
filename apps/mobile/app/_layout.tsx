@@ -8,11 +8,13 @@ import { useEffect, type ReactNode } from "react";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { installMobileErrorTracking, trackMobileAppOpened } from "../src/analytics/client";
+import { installCrashReporting } from "../src/analytics/crash-reporting";
 import { AccountProvider } from "../src/features/account/AccountContext";
 import { ClerkSessionBridge } from "../src/features/account/ClerkSessionBridge";
 import { NoClerkSessionProvider } from "../src/features/account/ClerkSessionContext";
 import { BillingProvider } from "../src/features/billing/BillingContext";
 import { UpgradeMomentProvider } from "../src/features/billing/UpgradeMomentContext";
+import { MealPlanProvider } from "../src/features/meal-plan/MealPlanContext";
 import { FirstRunOnboardingGate } from "../src/features/onboarding/FirstRunOnboardingGate";
 import { SavedRecipesProvider } from "../src/features/saved-recipes/SavedRecipesContext";
 import { ShoppingListProvider } from "../src/features/shopping/ShoppingListContext";
@@ -21,6 +23,9 @@ import { appColors } from "../src/theme/tokens";
 const readPublicEnv = (value: unknown): string => (typeof value === "string" ? value : "");
 const clerkPublishableKey = readPublicEnv(process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY);
 const clerkTokenCacheProps = tokenCache ? { tokenCache } : {};
+
+// Before anything renders, so a crash during startup is still reported.
+installCrashReporting();
 
 void SplashScreen.preventAutoHideAsync().catch(() => undefined);
 
@@ -72,60 +77,62 @@ export default function RootLayout() {
           <BillingProvider>
             <UpgradeMomentProvider>
               <SavedRecipesProvider>
-                <ShoppingListProvider>
-                  <SafeAreaProvider>
-                    <StatusBar style="dark" />
-                    <Stack
-                      screenOptions={{
-                        contentStyle: {
-                          backgroundColor: appColors.background
-                        },
-                        headerShadowVisible: false,
-                        headerStyle: {
-                          backgroundColor: appColors.background
-                        },
-                        headerTintColor: appColors.text,
-                        headerTitleStyle: {
-                          color: appColors.text,
-                          fontSize: 17,
-                          fontWeight: "600"
-                        }
-                      }}
-                    >
-                      <Stack.Screen
-                        name="(tabs)"
-                        options={{
-                          headerShown: false
+                <MealPlanProvider>
+                  <ShoppingListProvider>
+                    <SafeAreaProvider>
+                      <StatusBar style="dark" />
+                      <Stack
+                        screenOptions={{
+                          contentStyle: {
+                            backgroundColor: appColors.background
+                          },
+                          headerShadowVisible: false,
+                          headerStyle: {
+                            backgroundColor: appColors.background
+                          },
+                          headerTintColor: appColors.text,
+                          headerTitleStyle: {
+                            color: appColors.text,
+                            fontSize: 17,
+                            fontWeight: "600"
+                          }
                         }}
-                      />
-                      <Stack.Screen
-                        name="recipe"
-                        options={{
-                          title: "Recipe"
-                        }}
-                      />
-                      <Stack.Screen
-                        name="import-progress"
-                        options={{
-                          title: "Importing recipe"
-                        }}
-                      />
-                      <Stack.Screen
-                        name="upgrade"
-                        options={{
-                          title: "LinkDish Plans"
-                        }}
-                      />
-                      <Stack.Screen
-                        name="household"
-                        options={{
-                          title: "Household"
-                        }}
-                      />
-                    </Stack>
-                    <FirstRunOnboardingGate />
-                  </SafeAreaProvider>
-                </ShoppingListProvider>
+                      >
+                        <Stack.Screen
+                          name="(tabs)"
+                          options={{
+                            headerShown: false
+                          }}
+                        />
+                        <Stack.Screen
+                          name="recipe"
+                          options={{
+                            title: "Recipe"
+                          }}
+                        />
+                        <Stack.Screen
+                          name="import-progress"
+                          options={{
+                            title: "Importing recipe"
+                          }}
+                        />
+                        <Stack.Screen
+                          name="upgrade"
+                          options={{
+                            title: "LinkDish Plans"
+                          }}
+                        />
+                        <Stack.Screen
+                          name="household"
+                          options={{
+                            title: "Household"
+                          }}
+                        />
+                      </Stack>
+                      <FirstRunOnboardingGate />
+                    </SafeAreaProvider>
+                  </ShoppingListProvider>
+                </MealPlanProvider>
               </SavedRecipesProvider>
             </UpgradeMomentProvider>
           </BillingProvider>

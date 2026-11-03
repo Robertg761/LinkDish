@@ -939,6 +939,68 @@ describe("household-service", () => {
     await expect(auth.getUserByEmail("standalone@example.com")).resolves.toBeNull();
   });
 
+  it("deletes the account's analytics with the account", async () => {
+    stubRevenueCatFamily(() => true);
+    const { auth, households } = await importHouseholdModules({ ANALYTICS_ENABLED: "true" });
+    const analytics = await import("../analytics/analytics-store.js");
+    const { hashAnalyticsUserId } = await import("../analytics/analytics-privacy.js");
+    const user = await createUser(auth, "counted@example.com");
+
+    await analytics.writeAnalyticsEvents([
+      {
+        accountUserHash: hashAnalyticsUserId(user.id),
+        eventName: "web_app_loaded",
+        platform: "web_app",
+        properties: {}
+      },
+      {
+        accountUserHash: hashAnalyticsUserId("someone-else"),
+        eventName: "web_app_loaded",
+        platform: "web_app",
+        properties: {}
+      }
+    ]);
+
+    await households.deleteAccountAndHouseholdAccess(user, user.email);
+
+    await expect(analytics.getAnalyticsDashboardSummary()).resolves.toMatchObject({
+      totals: { events: 1 }
+    });
+  });
+
+  it("deletes the account's cloud cookbook with the account", async () => {
+    stubRevenueCatFamily(() => true);
+    const { auth, households } = await importHouseholdModules({ LIBRARY_SYNC_ENABLED: "true" });
+    const library = await import("../library/library-service.js");
+    const user = await createUser(auth, "cook@example.com");
+    const recipe = buildSharedRecipeInput();
+
+    const pushed = await library.pushLibraryChanges(user.id, [
+      {
+        id: "recipe_1",
+        kind: "recipe",
+        recipe: {
+          createdAt: "2026-10-26T10:00:00.000Z",
+          fetchMode: recipe.fetchMode,
+          provenance: recipe.provenance,
+          recipe: recipe.recipe,
+          strategy: recipe.strategy,
+          warnings: []
+        },
+        updatedAt: "2026-10-26T10:00:00.000Z"
+      }
+    ]);
+    expect(pushed.accepted).toEqual([{ id: "recipe_1", kind: "recipe" }]);
+
+    await households.deleteAccountAndHouseholdAccess(user, user.email);
+
+    await expect(library.pullLibraryChanges(user.id, "0")).resolves.toEqual({
+      changes: [],
+      cursor: "0",
+      hasMore: false
+    });
+  });
+
   it("dissolves a household and pending invites when the owner deletes their account", async () => {
     stubRevenueCatFamily(() => true);
     const { auth, households } = await importHouseholdModules();

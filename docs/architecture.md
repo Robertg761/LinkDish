@@ -80,8 +80,41 @@ size` checks the budgets after a build (entry ≤ 115 KB gzip, landing JS ≤
 - The Cookbook renders with a FlatList; saved-recipes and shopping state are split into
   state and action contexts, and AsyncStorage writes go through a debounced writer that
   flushes when the app goes to the background.
+- The Android cookbook is stored one AsyncStorage value per recipe
+  (`linkdish.cookbook.v2.recipe:<id>`) plus an ordered index (`linkdish.cookbook.v2.index`), in
+  `cookbookStorage.ts`. A write stores only the recipes that changed, together with the index in
+  one `multiSet` (one SQLite transaction), then deletes removed recipes' values; values the index
+  doesn't list are cleaned up on launch. Builds up to 2.0.x kept the whole cookbook in one value
+  (`linkdish.savedRecipes`), which got slow to rewrite and can't be read back on Android past
+  about 2 MB. It is moved over on the first launch and deleted only once the copy is written; if
+  the move fails, that launch keeps writing the old value and the next one retries. Inlined scan photos
+  are written to files before the move, so the moved copy points at them. An old value (or one
+  recipe's value) that can't be read is never deleted, and sync stays off while it is unread so
+  it isn't taken for a deletion; an old value that can't be understood is backed up to
+  `linkdish.savedRecipes.corrupt.v1` first, as before. Android's
+  AsyncStorage database cap is raised from 6 MB to 64 MB (`AsyncStorage_db_size_in_MB`, set in
+  `android/gradle.properties` and by `app.config.ts` on prebuild).
 - Search, shopping aggregation (aisle grouping, clean fractions), US/metric conversion and
   servings/time formatting come from `@linkdish/recipe-domain`, the same code the web uses.
+- Tabs: Cookbook, Add, Plan, Shopping and Household. The Add tab imports a link, photos or
+  pasted text; text (or shared text with no link) is held in memory under a route key
+  (`https://linkdish.app/text-imports/android-<id>`, never sent) while `/recipe` extracts it
+  with `extractRecipeFromText`.
+- Collections and tags work as on the web. Collections are stored under
+  `linkdish.collections.v1`; a recipe's tags and collection ids ride on the record as
+  `libraryExtras` and sync with the cookbook. The Cookbook filters by favorites, collection and
+  tag, and search matches tags and collection names.
+- The meal planner (`src/features/meal-plan`) keeps the plan on the device under
+  `linkdish.mealPlan.v1`, as the web keeps it local: a week view, meals from the cookbook or
+  notes, and "Shop for the week", which scales each planned recipe to its servings and merges the
+  lines with `mergeShoppingInputs`. Recipe pages have an "Add to meal plan" row.
+- Backups (`src/features/backup`, on the Household screen) write and read the shared
+  LinkDish backup format, including the web app's `linkdishWeb` extras (collection emoji and
+  order, extraction details, meal-plan timestamps), so a backup moves between Android and the
+  web either way. The file is saved through the share sheet and picked with expo-file-system's
+  picker. Restoring only adds, with the web's rules: existing recipes (same id, or same link and
+  title) are kept but join the backup's collections, new ones respect the free limit, starters
+  come back outside it, and the cookbook is written at once.
 
 ## Backend
 
@@ -93,11 +126,27 @@ size` checks the budgets after a build (entry ≤ 115 KB gzip, landing JS ≤
 - HTML fetching now prefers browser-like HTTP requests and can optionally escalate to Playwright browser rendering when a site is blocked or JS-heavy.
 - Source detection now uses fetched HTML hints in addition to URL heuristics.
 - Success responses include `fetchMode` and extraction provenance metadata.
-- Links, YouTube videos, TikTok captions and pasted text are read by rules only; no LLM is
-  called for them, whatever `attempt` says. Photo scans are the one import read by an LLM,
-  behind a provider interface that is optional at runtime. The backend controls whether
-  Gemini, OpenAI, or no provider is active.
+- Links, YouTube videos, TikTok captions and pasted text are read by rules only, whatever
+  `attempt` says. Photo scans are read by an LLM, behind a provider interface that is
+  optional at runtime; the backend controls whether Gemini, OpenAI, or no provider is
+  active. The one other LLM call is the video reader (below), the last resort for a TikTok
+  or YouTube link with no written recipe.
 - The root `api/extract.ts` Vercel handler is an adapter into the full extractor runtime. Production routing lives in the root `vercel.json`.
+- Accounts, sessions, sign-in identities, Family households and synced libraries live only in
+  Upstash. The **Account Data Backup** workflow copies them every night into an encrypted
+  GitHub Actions artifact kept 90 days; caches, locks, rate limits and one-time codes are left
+  out. Which keys count as account data is listed in
+  `modules/storage/store-key-families.ts`, and a test fails on any `linkdish:` key segment that
+  is not listed there. `pnpm --filter @linkdish/extractor-api backup:store` makes the key pair,
+  inspects a backup and restores it (a dry run unless `--confirm`; only missing keys unless
+  `--overwrite`). A synced library is read as one unit (feed, items, live sets and revision
+  counter from the same moment) and restored whole under the library service's own lock, so a
+  restore never leaves pulls resetting or skipping changes. With `--overwrite` the backup's items
+  replace the live ones, items added since the backup are kept, and the merged library is
+  renumbered above both the live and the backed-up counter, so every device pulls it again as new
+  changes. Accounts deleted since the backup (or while it was read) stay deleted: a restore leaves
+  out their keys and what they shared with a household, checking under the lock account deletion
+  takes. An email lookup comes back only while its account still has that address.
 
 ### Sources
 
@@ -154,16 +203,102 @@ platforms map onto them and are told apart internally by the detection `adapterK
   (`og:see_also`, else `"link"` in the pin's app state), when it is a valid recipe
   `sourceUrl` (http(s), at most 2048 characters), is validated with the same SSRF
   checks and extracted instead, through the same path a direct link to it takes: YouTube
-  through the transcript path, TikTok through its caption, and other social or video
-  sites are rejected as `unsupported_source` before anything is fetched. The recipe's
-  `sourceUrl` is that page, and the result is cached under its URL, so a later direct
-  import of the same recipe hits the cache.
+  through the transcript path, TikTok and Instagram posts through their caption, and other
+  social or video sites are rejected as `unsupported_source` before anything is fetched. The
+  recipe's `sourceUrl` is that page, and the result is cached under its URL, so a later
+  direct import of the same recipe hits the cache.
 - **TikTok**: the caption is read through the public oEmbed endpoint
   (`fetchers/fetch-tiktok-document.ts`; short links are resolved hop by hop, TikTok hosts
   only, each hop SSRF-validated, with the request deadline and a byte cap) and parsed by
   the text parser on the first attempt. An ingredients-only caption keeps the video step,
-  as YouTube does. Captions without a recipe fail with `parse_failed`. Instagram and
-  Facebook stay unsupported.
+  as YouTube does. Captions without a recipe fail with `parse_failed`.
+- **Instagram** posts, reels and IGTV links (`/p/`, `/reel/`, `/reels/`, `/tv/`, also under a
+  profile path, and instagr.am): Instagram answers plain server requests for a post or its
+  embed page with a logged-out shell and no caption, and Meta's oEmbed API stopped returning
+  captions in November 2025. The post's public embed page
+  (`instagram.com/p/<code>/embed/captioned/`) is rendered by the browser fetcher instead
+  (`fetchers/fetch-instagram-document.ts`; the render waits for billing like every browser
+  render, and its budget comes from the request deadline). The caption, author, cover image
+  and whether it is a video are read from the post's record in the page state
+  (`contextJSON` or a bare `edge_media_to_caption`), then the classic `.Caption` markup, then
+  the rendered text between the like count and the comments link. The invisible separators
+  (U+2063, U+2800) creators put on lines to keep blank lines are dropped, and the caption goes
+  through the same text parser as TikTok. A reel's ingredients-only caption keeps the video step; a
+  photo post's does not, and reels never go to the video reader. A login redirect or a page
+  with no post fails as `source_blocked`, a removed or private post as `parse_failed`.
+  Instagram links that are not a post (profiles, stories, `/share/` redirect links) stay
+  unsupported.
+- **Facebook** public posts, photos, videos and reels (`/<page>/posts/<id>`, `permalink.php`,
+  `story.php`, `/photo`, `/watch?v=`, `/videos/`, `/reel/<id>`, groups' `/posts/` and
+  `/permalink/`, `/share/p|r|v/<token>`, `fb.watch`, `fb.me`, `fb.com`, and the `m.`,
+  `mbasic.`, `web.` and `touch.` hosts; `source-detection/parse-facebook-url.ts`). A
+  `l.facebook.com`/`lm.facebook.com` link wrapper is unwrapped to its `u=` target before
+  anything else, so a wrapped recipe site is imported as that site (same URL safety checks) and
+  a wrapped Facebook post takes this path. The fetcher (`fetchers/fetch-facebook-document.ts`)
+  is a plain request, no browser: always to `www.facebook.com` (`m.` and friends redirect to a
+  login page), with the honest LinkDishBot user-agent (Facebook answers a spoofed desktop
+  browser with HTTP 400; LinkDish never poses as Facebook's own crawler or a search engine),
+  redirects followed by hand with every hop validated and kept on Facebook. The caption is the
+  longest of og:description, the meta and Twitter descriptions, JSON-LD, and, for videos and
+  reels, the caption in og:title (`<caption> | <page>`) and the oEmbed link's title, which
+  Facebook does not cut. Facebook cuts og:description at about 200 characters with `...`; when
+  that is all there is (typically a photo or text post) the document is flagged
+  `captionTruncated`, and half a recipe is never imported: LinkDish follows a recipe link in
+  the caption or in the page's `l.php` link-outs (same safety checks and linked-page path as a
+  YouTube description's "Full recipe:" link), and without one fails as `source_blocked` saying
+  Facebook only shares part of the post. A login, checkpoint or consent redirect, HTTP
+  400/401/403/429, or a generic page with no post content (the front page's og tags) also
+  fails as `source_blocked` ("Facebook blocked LinkDish from reading that post. Paste the
+  recipe text or import a screenshot of the post instead."); a removed post is `parse_failed`.
+  Captions go through the same text parser as TikTok and Instagram (a video's ingredients-only
+  caption keeps the video step), nothing is cached, and no Facebook login or cookie is ever
+  used. Facebook pages that are not a post (profiles, groups, events) are unsupported.
+  Comments are only shown to signed-in people, so a "Recipe in comments" post is read two
+  other ways when its caption (cut or not) has no recipe and no link yields one. First the
+  creator's site: when the page name is a bare domain (`fedbysab.com`), the dish named in the
+  caption is searched for there (`fetchers/search-creator-site.ts`: WordPress's search API,
+  then its `/?s=` page; every hop validated and kept on that site), the three best-titled
+  results are read like linked pages, and one is kept only when its whole recipe (title,
+  description, ingredients, steps) holds every dish word of the caption and no other result
+  does as well (`creator-site/match-creator-recipe.ts`), because a creator's other version of
+  the dish (the taco ring for the buffalo ring) differs by a single word. Then the video: the
+  logged-out page carries the reel's own progressive MP4 on `fbcdn.net` (the page also carries
+  the next reels in the feed, so it is matched by video id), which goes to the video reader
+  below. A cut caption is never sent to the video reader. When nothing works and the caption
+  mentions the comments, the failure says so and points at paste-text or a screenshot.
+- **Video reader** (`extractors/video/`, behind `VIDEO_RECIPE_READER_ENABLED` and
+  `GEMINI_API_KEY`): when a TikTok or Facebook video's caption has no recipe or only the
+  ingredients (and, for Facebook, the creator's site has none either), or a
+  YouTube video's description, creator comments and linked pages have none, Gemini
+  (`VIDEO_RECIPE_MODEL`) watches the video. TikToks are downloaded from the embed page's
+  MP4 and Facebook videos from the post page's `fbcdn.net` MP4 (larger than 14 MB through the Files API, deleted after the read); YouTube is passed
+  by URL, only for Shorts and videos of known length up to `VIDEO_RECIPE_MAX_SECONDS`.
+  Every ingredient comes back with its evidence (words heard, text shown, a caption line),
+  and `build-video-recipe-candidate.ts` drops an ingredient its quote doesn't name and an
+  amount its quote doesn't state ("a tablespoon" needs one tablespoon, not "a teaspoon",
+  "half a tablespoon" or "a few tablespoons"); the gaps become a warning. Results use the `llm-fallback` strategy and `llm`
+  provenance, are metered as plain imports and are never cached. Reads need 15 s of
+  request time left (10 s after a TikTok download) and are capped at
+  `VIDEO_RECIPE_DAILY_READ_LIMIT` Gemini calls per UTC day, counted just before each call
+  (one Upstash counter across instances, per instance without Upstash). Past the cap the
+  outcome is `skipped_daily_limit`; when the counter can't be checked the read is skipped
+  as `limit_unavailable`. Each read logs a
+  `video_recipe_read` line, and the outcome is stored as `videoRead` in the extraction
+  analytics `properties`.
+  A video that shows a dish being made but never says how much of anything goes in (a silent
+  or music-only montage) is still a recipe: its ingredients are kept bare (source `visual`,
+  no amount) and its steps come from what is done on screen. The recipe then carries
+  `completion: { status: "missing_amounts", ingredients }` (`recipe-domain`), which the apps
+  show as a "missing amounts" notice.
+- **Filling the gaps with AI** (`POST /recipes/complete`, `extract/completion/` and
+  `services/complete-recipe-pipeline.ts`; on Vercel it is rewritten to `api/extract.ts?path=complete`
+  to stay under the function cap): on the person's request ("Fill in with AI" on a saved recipe
+  with missing amounts), Gemini (`RECIPE_COMPLETION_MODEL`) estimates the amounts, servings and
+  times and makes the steps precise. Every one of the creator's ingredients must come back, in
+  order, still named (anything added is marked `added`); an answer that drops or swaps one is
+  refused. The completed recipe has `completion.status: "ai_filled"` and a note saying its
+  amounts are AI estimates, and the apps keep labelling it so. It is metered like a photo scan
+  (an import and a strong extraction), reserved before the call and given back if it fails.
 
 ### Pasted text import
 
@@ -209,10 +344,144 @@ parses `extractRecipeAnyRequestSchema`.
   counted; the rest are written. The response is `{ accepted, dropped }` (`dropped` is an
   optional, additive field). Only a malformed envelope is a 400.
 - Postgres stores `event_name` as free text, so new names need no migration.
+
+### Analytics storage
+
+- The Postgres schema is versioned in
+  `services/extractor-api/src/modules/analytics/analytics-migrations.ts`, tracked in
+  `analytics_schema_migrations`. The API applies pending migrations on first use in each process
+  (one transaction under an advisory lock, so concurrent cold starts apply each once); when the
+  database is current that is a version read and no DDL. `pnpm --filter @linkdish/extractor-api
+  analytics:migrate` applies them by hand. Never edit a shipped migration; add the next one.
+  Migration 1 is the schema the API used to create on every cold start, still guarded by
+  `if not exists`, so databases created that way adopt it. Migration 3 adds the error alert
+  fingerprint index and checkpoint table; the alert job also applies pending migrations itself.
+- **Retention is off by default: analytics are kept indefinitely.** Vercel Cron calls
+  `GET /admin/cron/analytics-retention` daily (root `vercel.json` `crons`; it is folded into
+  `api/admin.ts` for the 12-function limit). It authenticates with `CRON_SECRET` only, not the
+  dashboard token, and returns 503 until that is set. It deletes nothing unless a retention is
+  set: with `ANALYTICS_RETENTION_DAYS`, raw rows (`analytics_events`, `extraction_analytics`,
+  `error_analytics`) older than that are deleted in batches by `received_at`, because
+  `occurred_at` is client-supplied; with `ANALYTICS_ROLLUP_RETENTION_DAYS`, rollups and store
+  metrics older than that go. A run stops after about 40 seconds and the next one carries on.
+  Setting either one is a permanent deletion of older rows, and the privacy pages should then
+  state the period.
+- **Account deletion** deletes every raw analytics row carrying the account's hashed id before
+  anything else is removed, so an analytics database failure fails the deletion while it can
+  still be retried. Rows recorded before sign-in carry only an anonymous id and expire with
+  retention. Purge and account deletion run whenever `ANALYTICS_DATABASE_URL` is set, even with
+  `ANALYTICS_ENABLED` off.
 - **Deploy order**: event names are a closed enum in `packages/api-contracts`. Deploy the
   API before shipping clients that send new names. Older APIs rejected whole batches with
   unknown names; the current one drops only those events, but they are still lost until
   the API knows them.
+
+### Error alerts and crash reports
+
+- Web and Android send `client_error` analytics events, which the API also writes to the
+  `error_analytics` table (fingerprint = platform, route and the first 120 characters of the
+  message).
+- The **Error Alerts** workflow (`.github/workflows/error-alerts.yml`, hourly at :17) runs
+  `pnpm --filter @linkdish/extractor-api alerts:errors` against that table. Each run checks the
+  errors received (by `received_at`) since the last run that finished, kept in the one-row
+  `error_alert_checkpoints` table, so a late or skipped GitHub cron run neither drops errors nor
+  reports them twice. The first run, or a run after the checkpoint is lost, checks the last 60
+  minutes; catch-up is capped at 24 hours. It alerts on any fatal error; on at least 25 errors
+  (scaled up for a window longer than 60 minutes); or on a new error, first seen in the last 24
+  hours with none in the 7 days before, in the run where its count over those 24 hours reaches
+  3. Each alerting run sends one email (Resend) and/or one Slack or Discord webhook message, so
+  a spike that continues alerts again every hour. A run that cannot deliver its alert fails and
+  leaves the checkpoint where it was, so the next run reports those errors again.
+- Error messages come from clients, so the webhook message cannot ping anyone or render links
+  (Discord `allowed_mentions: { parse: [] }`, Slack text escaped). Sends time out after 10
+  seconds.
+- The repository and its Actions logs are public: the job prints counts only. Error messages
+  go only to the email and webhook channels.
+- Setup, in GitHub repository settings: secrets `ANALYTICS_DATABASE_URL` (the API's analytics
+  database; `ANALYTICS_DATABASE_CA_CERT` too if the API uses one), `RESEND_API_KEY`,
+  `ERROR_ALERT_EMAIL_TO` (comma-separated) and/or `ERROR_ALERT_WEBHOOK_URL`; variable
+  `ERROR_ALERT_EMAIL_FROM` (a sender on the Resend-verified domain). Optional variables
+  `ERROR_ALERT_MIN_ERRORS`, `ERROR_ALERT_WINDOW_MINUTES` and `ERROR_ALERT_NEW_ERROR_MIN_COUNT`
+  change the thresholds. Without the database secret the job does nothing; if a rule fires
+  and no channel is configured, the run fails.
+- Android crash reports go to Sentry (`@sentry/react-native`), started in `app/_layout.tsx`
+  only on Android and only when the build sets `EXPO_PUBLIC_SENTRY_DSN`
+  (`EXPO_PUBLIC_SENTRY_ENVIRONMENT` is optional). The privacy policy covers Android only, so
+  iOS needs a policy update before it is turned on there. It catches native crashes, ANRs and
+  fatal JS errors, which the `client_error` event usually loses because the process dies before
+  it is sent. It sends no default PII and no performance traces, drops console breadcrumbs, and
+  strips query strings from URLs in breadcrumbs, error messages and the request URL. Sentry's
+  own alert rules notify about new crash issues.
+- Release builds upload JS source maps to Sentry only when the EAS build has
+  `SENTRY_AUTH_TOKEN`, `SENTRY_ORG` and `SENTRY_PROJECT`; `plugins/withSentrySourceMapUpload.js`
+  and the checked-in `android/app/build.gradle` apply `sentry.gradle` behind that check, so
+  builds without the token are unchanged. iOS source maps are not wired yet.
+
+### Personal library sync
+
+A signed-in account's own cookbook (recipes with their notes, favorites, tags, collection
+membership, rating, cook log and preferred servings, plus collections) is kept in the account so it
+follows the account between devices. Household recipes and the household shopping list keep their
+own routes. Scan photos, starter recipes, the meal plan and cook-mode sessions are not part of it.
+
+- `GET /library/changes?since=<cursor>` returns the account's items written after the cursor
+  ("0" for everything), oldest first, at most 100 items or about 2 MB per page, with the next
+  `cursor` and `hasMore`. A cursor past anything the account has written (a lost or reset store)
+  answers from the start with `reset: true`, so the device sends everything it holds again.
+- `POST /library/changes` takes 1 to 25 changes. Each is a recipe, a collection or a tombstone
+  (`deleted: true`, no payload) with the `updatedAt` of the device that changed it, and
+  `baseUpdatedAt`: the cloud copy the device merged it with (null for an item it never saw). A
+  change is stored when it is at least as new as the stored copy and was merged with that copy;
+  otherwise the stored copy comes back in `newer` for the device to merge, so a device never
+  overwrites a change it hasn't seen (two devices syncing at once, or clocks that disagree). Invalid changes and new items past the limits (5,000 recipes,
+  200 collections; 120,000 characters per item) are `rejected` one by one and the rest are stored.
+- Storage (`modules/library/library-service.ts`) is Upstash, per LinkDish user id:
+  `linkdish:library:v1:item:<user>:<kind>:<id>` holds the newest copy and the revision it was
+  written at, the `changes` sorted set scores each item by that revision (the feed a pull reads),
+  a `rev` counter hands out revisions, and `live` sets count live items against the limits. Writes
+  for one account run under a 30 s lock, so revisions commit in order and a pull never skips one.
+  Tombstones are kept so devices that were offline for months still learn about deletions.
+- `LIBRARY_SYNC_ENABLED` (off by default) switches the routes on; off, they answer 404 and clients
+  keep working locally. In production the routes refuse to run without Upstash (503) rather than
+  keep cookbooks in process memory. Deleting the account deletes every library key.
+- On Vercel the routes are served by the `api/household` function (`/library/*` rewrites to
+  `api/household?path=library/...`, see `api/_lib/library-routes.ts`): the Hobby plan allows 12
+  functions per deployment, and `api/vercel-config.test.ts` keeps the count within it.
+
+On a device, sync is one shared engine (`packages/recipe-domain/src/library-sync.ts`) driven by
+each app:
+
+- A device remembers, per item, a fingerprint of the copy the cloud last had (its "base"). An item
+  whose local fingerprint differs from its base changed on the device; a pulled copy that differs
+  changed elsewhere. Fields are fingerprinted in groups (content, notes, favorite, tags,
+  collections, rating, cooking, servings, ...), so edits to different groups on two devices both
+  survive; when both changed one group the device merging keeps its own, except tags, collection
+  membership and the cook log, which combine. Apps keep their own write paths: nothing records
+  changes as they happen, a run compares.
+- A run pulls and merges every page, then pushes what still differs from its base (deletions as
+  tombstones), stamping uploads later than the cloud copy they replace. A merged write is applied
+  only while the item still is what it was merged with; an item that keeps changing meanwhile
+  keeps the pulled change as `pending` for the next run and sends nothing over it. A change the API
+  turns away is held (not sent again) until the item changes. `packages/api-client/src/
+library-sync.ts` validates each change before sending, so one bad item never fails a batch.
+- A device's cookbook is linked to one account: the first to sign in on it (merging the two). It
+  keeps the cookbook when that account signs out. Another account that signs in doesn't sync it;
+  it can replace it with its own cookbook. Deleting the account unlinks the device; its recipes
+  stay. Starter recipes, scans and when a recipe was last opened stay on the device.
+- Web (`apps/web/src/features/cloud-sync`): the link and bases live in the `librarySync` store
+  (IndexedDB v5), so they change with the recipes they describe; runs are serialized across tabs
+  with Web Locks and start after local changes (4 s), on focus, on coming online, every 5 minutes,
+  and on sign-in. The module loads after the first screen settles, and only once someone signs in.
+  The Account page shows its state, and the switch for another account's cookbook.
+- Android (`apps/mobile/src/features/saved-recipes/librarySync.ts`, `CookbookSyncContext.tsx`):
+  the link and bases live under `linkdish.librarySync.v1` in AsyncStorage and collections under
+  `linkdish.collections.v1` (collections an older build kept in the sync state move there on the
+  next run); tags, collection membership, rating, cook log and preferred servings ride along on
+  each record as `libraryExtras`.
+  Merged changes are written to the stored cookbook before the bases that describe them. Runs
+  start after changes (4 s), when the app comes to the foreground, every 5 minutes while open, and
+  on sign-in; never while the stored cookbook couldn't be read. The Household screen shows its
+  state and the switch.
 
 ### `/extract` request path and performance
 
@@ -287,6 +556,43 @@ Performance pieces in `services/extractor-api/src/modules/extract`:
 - `GET /auth/config` lets mobile discover whether Clerk sign-in and email-code fallback should be visible without requiring a signed-in session.
 - Google sign-in is supported through Clerk. Apple sign-in is intentionally hidden until an Apple Developer account and production Apple credentials exist.
 
+### Admin dashboard
+
+`/admin` (rewritten to `api/admin` on Vercel, `registerAdminDashboardRoutes` on Fastify) is
+protected by named tokens rather than a Clerk session. Both adapters go through
+`authorizeAdminAccess` in `modules/admin/admin-access.ts`:
+
+- **Named tokens.** `ADMIN_DASHBOARD_TOKENS` holds one `name:token` pair per person,
+  comma separated (lowercase names; tokens from `openssl rand -hex 32`). The browser
+  prompt takes the name as the username and the token as the password; scripts send
+  `Authorization: Bearer <token>` or `x-admin-dashboard-token`. Revoking one person means
+  deleting their pair. The older shared `ADMIN_DASHBOARD_TOKEN` still works as the user
+  `admin`, and the dashboard's Notes ask for it to be replaced. Malformed, duplicate or
+  shared entries are skipped and reported in Notes instead of failing API startup. With no
+  tokens, Fastify admits loopback callers only and Vercel refuses with 403.
+- **Lockout.** Each presented-but-wrong token atomically increments a per-network counter
+  in Upstash (`linkdish:admin:auth-failures:v1:<hashed IP>`), so a concurrent burst cannot
+  slip under the limit. After `ADMIN_AUTH_FAILURE_LIMIT_MAX`
+  (10) failures within `ADMIN_AUTH_FAILURE_LIMIT_WINDOW_MS` (15 minutes) that network gets
+  429 even with a valid token until the window ends (the lockout is per network, so
+  someone sharing the admin's IP can trigger it). A request with no credential (the
+  browser's first hit before its prompt) is not counted. The limiter fails open if
+  Upstash is unreachable, so an outage does not lock the owner out; the token check
+  still runs.
+- **Cross-site writes.** Browsers replay cached Basic credentials, so POST/PUT/DELETE are
+  refused when `Sec-Fetch-Site` is anything but `same-origin`/`none`, and POST/PUT must
+  send `application/json` (which forces a CORS preflight the admin routes never answer).
+- **Audit log.** Failed sign-ins, lockouts, account lookups, plan grants (including dry
+  runs) and model changes/resets are appended to the `linkdish:admin:audit:v1` sorted set
+  (sign-in failures and lockouts to `linkdish:admin:audit:v1:auth`, so a flood of them
+  cannot trim real actions out) with the admin's name, IP, outcome and details (never the
+  presented token). Each set is trimmed to `ADMIN_AUDIT_RETENTION_DAYS` (180) and 2,000
+  entries, each network adds at most the lockout limit of failure entries per window, and
+  everything is mirrored to the function log
+  as `[admin-audit]` lines. The dashboard shows the newest 50 under Admin Activity. Plan
+  grants also keep their own `linkdish:admin:billing-grant:*` record, now with
+  `grantedBy: admin-api:<name>`.
+
 ## Extraction Fallback Contract
 
 Production extraction is expected to follow this ladder:
@@ -328,4 +634,21 @@ If production `/extract` skips the browser fetch, it is a deployment regression 
 - `pnpm validate` runs lint, every typecheck, all package tests, the Vercel handler tests
   and the site check. The web bundle budget (`pnpm --filter @linkdish/web size`) needs a
   build first, so it is not part of `validate`.
+- `pnpm test:e2e:web` runs the web app's key flows (import, cookbook, shopping list, meal
+  plan) in Playwright against a production build with the API mocked
+  (`apps/web/e2e/README.md`). CI runs it as the `e2e-web` job; it is not part of `validate`
+  because it needs a build and a browser.
 - The live canary manifest is intentionally separate from PR-blocking CI so real-world regressions can be measured without making the pipeline flaky.
+- API deploys (`deploy-api.yml`) are gated on it instead: the workflow deploys with
+  `--prod --skip-domain`, runs the health check and the live canary against that deployment's
+  own `*.vercel.app` URL, and only then runs `vercel promote`. After promoting it confirms through
+  the Vercel API that api.linkdish.ca points at the new deployment before the final health check.
+  A failing check leaves api.linkdish.ca on the previous deployment, and the run summary names the
+  staged URL so it can be promoted by hand when the failure is a third-party site rather than the
+  change (only if no later run has promoted a newer one). A failure after promotion gets a
+  `vercel rollback` hint instead. The workflow only runs from `main`, and it is the only way the
+  API deploys: root `vercel.json` sets `git.deploymentEnabled: false`, because Vercel's Git
+  integration otherwise put every push to `main` on api.linkdish.ca before the checks ran, built a
+  preview for every PR push, and used up the Hobby plan's 100 deployments a day. This relies
+  on the API project having no Vercel Deployment Protection; turning it on would need a bypass
+  header in both check scripts.

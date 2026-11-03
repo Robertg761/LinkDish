@@ -116,6 +116,7 @@ export const preloadApiClient = (): Promise<void> =>
 const API_METHODS = [
   "acceptHouseholdInvite",
   "cancelHouseholdInvite",
+  "completeRecipe",
   "createHousehold",
   "createHouseholdInvite",
   "createSharedRecipe",
@@ -135,6 +136,8 @@ const API_METHODS = [
   "getWebBillingAvailability",
   "leaveHousehold",
   "logout",
+  "pullLibraryChanges",
+  "pushLibraryChanges",
   "removeHouseholdMember",
   "requestLoginCode",
   "sendAnalyticsEvents",

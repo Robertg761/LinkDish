@@ -1,13 +1,15 @@
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { AppButton, AppText, AppTextField } from "@linkdish/ui";
 import { useEffect, useRef, useState } from "react";
-import { Animated, Easing, Pressable, StyleSheet, View } from "react-native";
+import { Animated, Pressable, StyleSheet, View } from "react-native";
 
+import { useReduceMotion } from "../../../hooks/useReduceMotion";
+import { easeInOutCubic, easeOutCubic } from "../../../theme/easing";
 import { pressedOpacity } from "../../../theme/interactions";
 import { appColors } from "../../../theme/tokens";
 import { INVALID_RECIPE_URL_MESSAGE, resolveRecipeUrlInput } from "../urlValidation";
 
-import type { TextInput } from "react-native";
+import type { TextInputInstance } from "react-native";
 
 interface UrlFormProps {
   disabled?: boolean;
@@ -26,37 +28,39 @@ export const UrlForm = ({
   submitLabel = "Extract recipe",
   onCameraPress
 }: UrlFormProps) => {
+  const reduceMotion = useReduceMotion();
   const [url, setUrl] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const inputRef = useRef<TextInput>(null);
+  const inputRef = useRef<TextInputInstance>(null);
   const inputShake = useRef(new Animated.Value(0)).current;
 
   const nudgeInput = () => {
     inputRef.current?.focus();
     inputShake.stopAnimation();
     inputShake.setValue(0);
+    if (reduceMotion) return;
     Animated.sequence([
       Animated.timing(inputShake, {
         duration: 60,
-        easing: Easing.out(Easing.cubic),
+        easing: easeOutCubic,
         toValue: 1,
         useNativeDriver: true
       }),
       Animated.timing(inputShake, {
         duration: 60,
-        easing: Easing.inOut(Easing.cubic),
+        easing: easeInOutCubic,
         toValue: -1,
         useNativeDriver: true
       }),
       Animated.timing(inputShake, {
         duration: 60,
-        easing: Easing.inOut(Easing.cubic),
+        easing: easeInOutCubic,
         toValue: 1,
         useNativeDriver: true
       }),
       Animated.timing(inputShake, {
         duration: 60,
-        easing: Easing.out(Easing.cubic),
+        easing: easeOutCubic,
         toValue: 0,
         useNativeDriver: true
       })

@@ -262,6 +262,7 @@ describe("HouseholdScreen billing gate", () => {
     apiMocks.createExtractorApiClient.mockReturnValue({
       acceptHouseholdInvite: apiMocks.acceptHouseholdInvite,
       cancelHouseholdInvite: vi.fn(),
+      completeRecipe: vi.fn(),
       createHousehold: apiMocks.createHousehold,
       createHouseholdInvite: apiMocks.createHouseholdInvite,
       getHousehold: apiMocks.getHousehold,

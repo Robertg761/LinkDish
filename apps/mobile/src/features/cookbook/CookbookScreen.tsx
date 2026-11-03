@@ -15,17 +15,22 @@ import {
   FlatList,
   Image,
   Pressable,
+  ScrollView,
   StyleSheet,
   TextInput,
   View,
   type ListRenderItem,
   type StyleProp,
+  type TextInputInstance,
   type ViewStyle
 } from "react-native";
 import Reanimated, {
   Easing as ReanimatedEasing,
   FadeInDown,
-  ReduceMotion
+  ReduceMotion,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -37,7 +42,16 @@ import { pressedOpacity, pressedScale } from "../../theme/interactions";
 import { appColors, appSpacing } from "../../theme/tokens";
 import { useAccount } from "../account/AccountContext";
 import { useOptionalUpgradeMoment } from "../billing/UpgradeMomentContext";
+import { ManageCollectionsSheet } from "../collections/ManageCollectionsSheet";
+import { useTabBarScroll } from "../navigation/TabBarVisibility";
 import { buildRecipeMetaLine } from "../recipe-results/recipeMetaLine";
+import {
+  collectCookbookTags,
+  countRecipesByCollection,
+  formatCollectionLabel,
+  getRecipeCollectionIds,
+  recipeHasTag
+} from "../saved-recipes/collections";
 import { useSavedRecipes } from "../saved-recipes/SavedRecipesContext";
 import {
   buildSavedRecipeSearchIndex,
@@ -62,6 +76,8 @@ import type { Recipe } from "@linkdish/recipe-domain";
 import type { ComponentProps } from "react";
 
 type CookbookTab = "personal" | "family";
+/** One collection or one tag narrows the personal list (with or without favorites). */
+type CookbookListFilter = { kind: "collection"; id: string } | { kind: "tag"; label: string };
 type PendingConfirmation = {
   cancelLabel: string;
   confirmLabel: string;
@@ -81,6 +97,8 @@ const ROW_STAGGER_CAP = 8;
 const COOKBOOK_SORT_STORAGE_KEY = "linkdish.cookbook.sort.v1";
 const COOKBOOK_SORT_DIRECTION_STORAGE_KEY = "linkdish.cookbook.sort-direction.v1";
 const LOCKED_FAMILY_HINT_MS = 4000;
+/** The most used tags get a filter chip; search finds the rest. */
+const MAX_TAG_FILTERS = 12;
 /** The controls cell (index 1 after the title header) stays pinned while the list scrolls. */
 const STICKY_CONTROLS_INDICES = [1];
 const CONTROLS_ITEM: CookbookListItem = { key: "controls", kind: "controls" };
@@ -354,12 +372,62 @@ const SharedRecipeRow = memo(function SharedRecipeRow({
   );
 });
 
+const isSameListFilter = (left: CookbookListFilter, right: CookbookListFilter): boolean =>
+  left.kind === "collection"
+    ? right.kind === "collection" && left.id === right.id
+    : right.kind === "tag" && left.label.toLowerCase() === right.label.toLowerCase();
+
+const FilterChip = ({
+  accessibilityLabel,
+  icon,
+  label,
+  onPress,
+  selected,
+  testID
+}: {
+  accessibilityLabel: string;
+  icon?: ComponentProps<typeof MaterialCommunityIcons>["name"];
+  label: string;
+  onPress: () => void;
+  selected: boolean;
+  testID?: string;
+}) => (
+  <Pressable
+    accessibilityLabel={accessibilityLabel}
+    accessibilityRole="button"
+    accessibilityState={{ selected }}
+    onPress={onPress}
+    style={({ pressed }) => [
+      styles.filterChip,
+      selected && styles.filterChipSelected,
+      pressed && styles.pressed
+    ]}
+    testID={testID}
+  >
+    {icon ? (
+      <MaterialCommunityIcons
+        color={selected ? appColors.onAccent : appColors.accent}
+        name={icon}
+        size={15}
+      />
+    ) : null}
+    <AppText
+      numberOfLines={1}
+      style={[styles.filterChipText, selected && styles.filterChipTextActive]}
+    >
+      {label}
+    </AppText>
+  </Pressable>
+);
+
 export const CookbookScreen = () => {
+  const onTabScroll = useTabBarScroll();
   const { isSignedIn, user } = useAccount();
   const {
     canUseSharedRecipeBook,
     cloneRecipe,
     cloneSharedRecipe,
+    collections,
     deleteSharedRecipe,
     hasLoadedSavedRecipes,
     hasLoadedSharedRecipes,
@@ -375,7 +443,7 @@ export const CookbookScreen = () => {
   } = useSavedRecipes();
   const { showUpgradeMoment } = useOptionalUpgradeMoment();
   const insets = useSafeAreaInsets();
-  const searchInputRef = useRef<TextInput>(null);
+  const searchInputRef = useRef<TextInputInstance>(null);
   const lockedFamilyHintTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sortPreferencesChangedRef = useRef(false);
   const [activeTab, setActiveTab] = useState<CookbookTab>("personal");
@@ -385,7 +453,28 @@ export const CookbookScreen = () => {
   const [sortDirection, setSortDirection] = useState<CookbookSortDirection>("forward");
   const [isSortMenuOpen, setIsSortMenuOpen] = useState(false);
   const [isFamilySharingOpen, setIsFamilySharingOpen] = useState(false);
+  const familySharingProgress = useSharedValue(0);
+  const familySharingHeight = useSharedValue(0);
+  const familySharingPanelStyle = useAnimatedStyle(() => ({
+    height: familySharingHeight.value * familySharingProgress.value
+  }));
+  const familySharingContentStyle = useAnimatedStyle(() => ({
+    opacity: familySharingProgress.value,
+    transform: [{ translateY: (1 - familySharingProgress.value) * -6 }]
+  }));
+  const familySharingChevronStyle = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${familySharingProgress.value * 180}deg` }]
+  }));
+  useEffect(() => {
+    familySharingProgress.value = withTiming(isFamilySharingOpen ? 1 : 0, {
+      duration: 320,
+      easing: ReanimatedEasing.inOut(ReanimatedEasing.cubic),
+      reduceMotion: ReduceMotion.System
+    });
+  }, [familySharingProgress, isFamilySharingOpen]);
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
+  const [listFilter, setListFilter] = useState<CookbookListFilter | null>(null);
+  const [isManageCollectionsOpen, setIsManageCollectionsOpen] = useState(false);
   const [lockedFamilyHintVisible, setLockedFamilyHintVisible] = useState(false);
   const [pendingConfirmation, setPendingConfirmation] = useState<{
     account: string | null;
@@ -422,11 +511,38 @@ export const CookbookScreen = () => {
     () => savedRecipes.filter((entry) => entry.favorite === true).length,
     [savedRecipes]
   );
+  const collectionCounts = useMemo(() => countRecipesByCollection(savedRecipes), [savedRecipes]);
+  const tagFilters = useMemo(
+    () => collectCookbookTags(savedRecipes).slice(0, MAX_TAG_FILTERS),
+    [savedRecipes]
+  );
+  // A filter on a collection that was deleted, or a tag no recipe has any more, falls away.
+  const activeListFilter = useMemo(
+    () =>
+      activeTab !== "personal" || !listFilter
+        ? null
+        : listFilter.kind === "collection"
+          ? collections.some((collection) => collection.id === listFilter.id)
+            ? listFilter
+            : null
+          : savedRecipes.some((entry) => recipeHasTag(entry, listFilter.label))
+            ? listFilter
+            : null,
+    [activeTab, collections, listFilter, savedRecipes]
+  );
+  const activeCollection =
+    activeListFilter?.kind === "collection"
+      ? collections.find((collection) => collection.id === activeListFilter.id)
+      : undefined;
+  const collectionNames = useMemo(
+    () => new Map(collections.map((collection) => [collection.id, collection.name])),
+    [collections]
+  );
 
   // The search index is built once per library change, and only while a search is active.
   const savedSearchIndex = useMemo(
-    () => (hasQuery ? buildSavedRecipeSearchIndex(savedRecipes) : null),
-    [hasQuery, savedRecipes]
+    () => (hasQuery ? buildSavedRecipeSearchIndex(savedRecipes, collectionNames) : null),
+    [collectionNames, hasQuery, savedRecipes]
   );
   const sharedSearchIndex = useMemo(
     () => (hasQuery ? buildSharedRecipeSearchIndex(sharedRecipes) : null),
@@ -436,15 +552,21 @@ export const CookbookScreen = () => {
     const matches = savedSearchIndex
       ? savedSearchIndex.search(deferredQuery).map((result) => result.record)
       : savedRecipes;
-    const visible = isFavoritesFilterOn
-      ? matches.filter((entry) => entry.favorite === true)
-      : matches;
+    const visible = matches.filter(
+      (entry) =>
+        (!isFavoritesFilterOn || entry.favorite === true) &&
+        (!activeListFilter ||
+          (activeListFilter.kind === "collection"
+            ? getRecipeCollectionIds(entry).includes(activeListFilter.id)
+            : recipeHasTag(entry, activeListFilter.label)))
+    );
 
     return sortCookbookRecords(visible, activeSort, sortDirection, {
       getSavedAt: (entry) => entry.savedAt,
       getTimesCooked: (entry) => entry.timesCooked ?? 0
     });
   }, [
+    activeListFilter,
     activeSort,
     deferredQuery,
     isFavoritesFilterOn,
@@ -563,6 +685,13 @@ export const CookbookScreen = () => {
     selectionTick();
     dismissLockedFamilyHint();
     setShowFavoritesOnly((current) => !current);
+  };
+
+  const selectListFilter = (filter: CookbookListFilter) => {
+    selectionTick();
+    dismissLockedFamilyHint();
+    // Tapping the active filter again clears it.
+    setListFilter((current) => (current && isSameListFilter(current, filter) ? null : filter));
   };
 
   const openImport = useCallback(() => {
@@ -731,6 +860,21 @@ export const CookbookScreen = () => {
       return null;
     }
 
+    if (activeListFilter && !hasQuery) {
+      const label =
+        activeListFilter.kind === "collection"
+          ? `“${activeCollection ? formatCollectionLabel(activeCollection) : "this collection"}”`
+          : `tagged “${activeListFilter.label}”`;
+
+      return renderListMessage(
+        isFavoritesFilterOn
+          ? `No favorites ${activeListFilter.kind === "collection" ? "in " : ""}${label}.`
+          : activeListFilter.kind === "collection"
+            ? `Nothing in ${label} yet. Add recipes to it from a recipe's page.`
+            : `No recipes ${label}.`
+      );
+    }
+
     if (isFavoritesFilterOn && !hasQuery) {
       return renderListMessage(
         favoriteCount === 0
@@ -817,9 +961,10 @@ export const CookbookScreen = () => {
               dismissLockedFamilyHint();
               setIsSearchFocused(true);
             }}
-            placeholder={
+            accessibilityLabel={
               activeTab === "family" ? "Search family recipes" : "Search personal recipes"
             }
+            placeholder="Search recipes"
             placeholderTextColor={appColors.placeholder}
             ref={searchInputRef}
             returnKeyType="search"
@@ -903,7 +1048,13 @@ export const CookbookScreen = () => {
       </View>
 
       {activeTab === "personal" ? (
-        <View style={styles.filterRow}>
+        <ScrollView
+          contentContainerStyle={styles.filterRow}
+          horizontal
+          keyboardShouldPersistTaps="handled"
+          showsHorizontalScrollIndicator={false}
+          style={styles.filterScroll}
+        >
           <Pressable
             accessibilityLabel="Show favorites only"
             accessibilityRole="button"
@@ -927,7 +1078,51 @@ export const CookbookScreen = () => {
               {favoriteCount > 0 ? `Favorites · ${favoriteCount}` : "Favorites"}
             </AppText>
           </Pressable>
-        </View>
+
+          {collections.map((collection) => {
+            const selected =
+              activeListFilter?.kind === "collection" && activeListFilter.id === collection.id;
+
+            return (
+              <FilterChip
+                accessibilityLabel={`Show the ${collection.name} collection`}
+                key={`collection:${collection.id}`}
+                label={`${formatCollectionLabel(collection)} · ${collectionCounts.get(collection.id) ?? 0}`}
+                onPress={() => selectListFilter({ id: collection.id, kind: "collection" })}
+                selected={selected}
+              />
+            );
+          })}
+
+          {tagFilters.map((tag) => {
+            const selected =
+              activeListFilter?.kind === "tag" &&
+              activeListFilter.label.toLowerCase() === tag.label.toLowerCase();
+
+            return (
+              <FilterChip
+                accessibilityLabel={`Show recipes tagged ${tag.label}`}
+                icon="tag-outline"
+                key={`tag:${tag.label.toLowerCase()}`}
+                label={tag.label}
+                onPress={() => selectListFilter({ kind: "tag", label: tag.label })}
+                selected={selected}
+              />
+            );
+          })}
+
+          <FilterChip
+            accessibilityLabel="Manage collections"
+            icon="folder-cog-outline"
+            label={collections.length > 0 ? "Manage" : "New collection"}
+            onPress={() => {
+              dismissLockedFamilyHint();
+              setIsManageCollectionsOpen(true);
+            }}
+            selected={false}
+            testID="cookbook-manage-collections"
+          />
+        </ScrollView>
       ) : null}
     </View>
   );
@@ -938,6 +1133,7 @@ export const CookbookScreen = () => {
         <View style={styles.familySharing}>
           <Pressable
             accessibilityRole="button"
+            accessibilityState={{ expanded: isFamilySharingOpen }}
             onPress={() => setIsFamilySharingOpen((current) => !current)}
             style={({ pressed }) => [styles.familySharingHeader, pressed && styles.rowPressed]}
           >
@@ -951,36 +1147,48 @@ export const CookbookScreen = () => {
                 Family sharing
               </AppText>
             </View>
-            <MaterialCommunityIcons
-              color={appColors.muted}
-              name={isFamilySharingOpen ? "chevron-up" : "chevron-down"}
-              size={20}
-            />
+            <Reanimated.View style={familySharingChevronStyle}>
+              <MaterialCommunityIcons color={appColors.muted} name="chevron-down" size={20} />
+            </Reanimated.View>
           </Pressable>
 
-          {isFamilySharingOpen ? (
-            <View style={styles.shareModeRow}>
-              {(["none", "selected", "all"] as const).map((mode) => (
-                <Pressable
-                  key={mode}
-                  onPress={() => {
-                    void setShareMode(mode);
-                  }}
-                  style={({ pressed }) => [
-                    styles.shareModeButton,
-                    shareMode === mode && styles.shareModeButtonActive,
-                    pressed && styles.pressed
-                  ]}
-                >
-                  <AppText
-                    style={[styles.shareModeText, shareMode === mode && styles.shareModeTextActive]}
+          <Reanimated.View style={[styles.familySharingPanel, familySharingPanelStyle]}>
+            <Reanimated.View
+              accessibilityElementsHidden={!isFamilySharingOpen}
+              importantForAccessibility={isFamilySharingOpen ? "auto" : "no-hide-descendants"}
+              onLayout={(event) => {
+                familySharingHeight.value = event.nativeEvent.layout.height;
+              }}
+              pointerEvents={isFamilySharingOpen ? "auto" : "none"}
+              style={[styles.familySharingPanelContent, familySharingContentStyle]}
+              testID="family-sharing-panel"
+            >
+              <View style={styles.shareModeRow}>
+                {(["none", "selected", "all"] as const).map((mode) => (
+                  <Pressable
+                    key={mode}
+                    onPress={() => {
+                      void setShareMode(mode);
+                    }}
+                    style={({ pressed }) => [
+                      styles.shareModeButton,
+                      shareMode === mode && styles.shareModeButtonActive,
+                      pressed && styles.pressed
+                    ]}
                   >
-                    {mode === "none" ? "Share none" : mode === "all" ? "Share all" : "Selected"}
-                  </AppText>
-                </Pressable>
-              ))}
-            </View>
-          ) : null}
+                    <AppText
+                      style={[
+                        styles.shareModeText,
+                        shareMode === mode && styles.shareModeTextActive
+                      ]}
+                    >
+                      {mode === "none" ? "Share none" : mode === "all" ? "Share all" : "Selected"}
+                    </AppText>
+                  </Pressable>
+                ))}
+              </View>
+            </Reanimated.View>
+          </Reanimated.View>
         </View>
       ) : null}
 
@@ -1034,6 +1242,8 @@ export const CookbookScreen = () => {
   return (
     <View style={styles.screen}>
       <FlatList
+        onScroll={onTabScroll}
+        scrollEventThrottle={16}
         ListFooterComponent={
           <View style={[styles.content, styles.wideSection]}>
             {activeTab === "personal" ? renderPersonalFooter() : renderFamilyFooter()}
@@ -1064,6 +1274,17 @@ export const CookbookScreen = () => {
         stickyHeaderIndices={STICKY_CONTROLS_INDICES}
         windowSize={9}
       />
+      {isManageCollectionsOpen ? (
+        <ManageCollectionsSheet
+          onClose={() => setIsManageCollectionsOpen(false)}
+          onDeleted={(id) =>
+            setListFilter((current) =>
+              current?.kind === "collection" && current.id === id ? null : current
+            )
+          }
+          visible
+        />
+      ) : null}
       <AppDialog
         actions={
           shownConfirmation
@@ -1143,7 +1364,17 @@ const styles = StyleSheet.create({
   },
   familySharingLabel: {
     fontSize: 16,
-    lineHeight: 21
+    lineHeight: 22
+  },
+  familySharingPanel: {
+    overflow: "hidden"
+  },
+  familySharingPanelContent: {
+    left: 0,
+    paddingTop: appSpacing.sm,
+    position: "absolute",
+    right: 0,
+    top: 0
   },
   familySharingTitle: {
     alignItems: "center",
@@ -1166,6 +1397,10 @@ const styles = StyleSheet.create({
     backgroundColor: appColors.tomato,
     borderColor: appColors.tomato
   },
+  filterChipSelected: {
+    backgroundColor: appColors.accent,
+    borderColor: appColors.accent
+  },
   filterChipText: {
     color: appColors.text,
     fontSize: 13,
@@ -1177,7 +1412,10 @@ const styles = StyleSheet.create({
   },
   filterRow: {
     flexDirection: "row",
-    gap: appSpacing.sm,
+    gap: appSpacing.sm
+  },
+  filterScroll: {
+    flexGrow: 0,
     marginTop: appSpacing.md
   },
   header: {
@@ -1269,7 +1507,7 @@ const styles = StyleSheet.create({
   recipeTitle: {
     flex: 1,
     fontSize: 16,
-    lineHeight: 21
+    lineHeight: 22
   },
   recipeTitleRow: {
     alignItems: "center",
@@ -1484,7 +1722,7 @@ const styles = StyleSheet.create({
   title: {
     color: appColors.text,
     fontSize: 42,
-    lineHeight: 50
+    lineHeight: 54
   },
   wideSection: {
     alignSelf: "center",

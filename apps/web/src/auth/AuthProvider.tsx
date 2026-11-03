@@ -722,6 +722,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Sent only as the account being deleted, never as one Clerk switches to meanwhile.
       await asAccount(deleting ?? null, () => apiClient.deleteAccount({ confirmEmail: email }));
 
+      if (deleting) {
+        // Its cloud cookbook went with it: this browser's cookbook stops syncing with it (and
+        // stays here).
+        await import("../features/cloud-sync/library-sync")
+          .then(({ forgetDeletedAccountLibrary }) => forgetDeletedAccountLibrary(deleting))
+          .catch((error: unknown) => {
+            console.warn(
+              "Couldn't unlink this browser's cookbook from the deleted account.",
+              error
+            );
+          });
+      }
+
       // Another account signed in (or out) while the deletion was on its way: signing out now
       // would sign out that account, not the deleted one.
       if (userRef.current?.id !== deleting) {

@@ -21,9 +21,14 @@ apps/mobile/.expo
 .artifacts
 .vercel
 .env*.local
+apps/web/dist-e2e
+apps/web/test-results
+apps/web/playwright-report
 
 # Private and generated working material
 .tmp_*
+*.ldbak
+linkdish-backup-private.pem
 home_screen*.png
 store-shots/
 apps/mobile/store-assets/

@@ -191,6 +191,27 @@ describe("parseRecipeText", () => {
     expect(parsed.steps).toEqual([]);
   });
 
+  it("drops a video's view, reaction and like counts", () => {
+    const parsed = parseRecipeText(
+      [
+        "1.2M views · 20K reactions",
+        "Garlic butter noodles",
+        "Ingredients:",
+        "200g spaghetti",
+        "3 tbsp butter",
+        "12,345 views",
+        "4 cloves garlic",
+        "345 likes, 12 comments, 3 shares"
+      ].join("\n")
+    );
+
+    expect(parsed.ingredients.map((ingredient) => ingredient.text)).toEqual([
+      "200g spaghetti",
+      "3 tbsp butter",
+      "4 cloves garlic"
+    ]);
+  });
+
   it("reads an ingredient list with section names and notes, and stops at the sign-off", () => {
     const parsed = parseRecipeText(
       [

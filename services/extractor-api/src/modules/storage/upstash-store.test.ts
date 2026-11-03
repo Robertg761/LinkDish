@@ -7,6 +7,7 @@ import {
   countStoreKeys,
   deleteStoreKeys,
   getStoreString,
+  runStoreTransaction,
   setStoreString,
   setStoreStringUnlessBlocked
 } from "./upstash-store.js";
@@ -34,6 +35,51 @@ describe("countStoreKeys", () => {
 
     expect(await countStoreKeys("linkdish-test:dotXkey:*")).toBe(0);
     expect(await countStoreKeys("linkdish-test:dot.key:*")).toBe(1);
+  });
+});
+
+describe("memory store commands used by library sync", () => {
+  it("increments by a step, counts set members and reads a sorted set by score", async () => {
+    const results = await runStoreTransaction([
+      ["INCRBY", "linkdish-test:rev:v1:a", "3"],
+      ["INCRBY", "linkdish-test:rev:v1:a", "2"],
+      ["SADD", "linkdish-test:live:v1:a", "x", "y"],
+      ["SCARD", "linkdish-test:live:v1:a"],
+      ["SCARD", "linkdish-test:live:v1:missing"],
+      ["ZADD", "linkdish-test:feed:v1:a", "1", "one", "2", "two", "3", "three", "4", "four"],
+      ["ZRANGEBYSCORE", "linkdish-test:feed:v1:a", "(1", "+inf", "WITHSCORES", "LIMIT", "0", "2"],
+      ["ZRANGEBYSCORE", "linkdish-test:feed:v1:a", "3", "4"],
+      ["ZRANGEBYSCORE", "linkdish-test:feed:v1:missing", "(0", "+inf"]
+    ]);
+
+    expect(results.map((result) => result.result)).toEqual([
+      3,
+      5,
+      2,
+      2,
+      0,
+      4,
+      ["two", "2", "three", "3"],
+      ["three", "four"],
+      []
+    ]);
+  });
+});
+
+describe("memory ZREMRANGEBYRANK", () => {
+  it("trims only beyond the kept size, matching Redis rank semantics", async () => {
+    const key = "linkdish-test:zremrangebyrank";
+    await runStoreTransaction(
+      Array.from({ length: 5 }, (_, index) => ["ZADD", key, String(index), `m${index}`])
+    );
+
+    const [underCap] = await runStoreTransaction([["ZREMRANGEBYRANK", key, "0", "-7"]]);
+    expect(underCap?.result).toBe(0);
+
+    const [overCap] = await runStoreTransaction([["ZREMRANGEBYRANK", key, "0", "-4"]]);
+    const [remaining] = await runStoreTransaction([["ZRANGE", key, "0", "-1"]]);
+    expect(overCap?.result).toBe(2);
+    expect(remaining?.result).toEqual(["m2", "m3", "m4"]);
   });
 });
 

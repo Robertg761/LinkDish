@@ -389,7 +389,7 @@ describe("AccountPage account deletion", () => {
     openDeleteForm();
 
     const section = screen.getByRole("region", { name: "Delete your account?" });
-    expect(section).toHaveTextContent("Recipes saved in this browser stay on this device.");
+    expect(section).toHaveTextContent("The recipes saved in this browser stay on this device.");
     expect(section).toHaveTextContent("doesn't cancel a subscription");
     expect(screen.getByRole("button", { name: /delete account/i })).toBeDisabled();
     expect(authMocks.deleteAccount).not.toHaveBeenCalled();

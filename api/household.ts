@@ -30,12 +30,22 @@ import {
   upsertSharedRecipeForUser
 } from "../services/extractor-api/src/modules/households/household-service.js";
 
+import { getLibrary, postLibrary } from "./_lib/library-routes.js";
+
 export const config = {
   maxDuration: 30
 };
 
 const getPath = (request: Request): string =>
   (new URL(request.url).searchParams.get("path") ?? "").replace(/^\/+|\/+$/gu, "");
+
+/*
+ * The account's own cookbook (`/library/...`) is served from this function too: the Hobby plan
+ * allows 12 functions per deployment.
+ */
+const LIBRARY_PREFIX = "library/";
+const libraryPath = (path: string): string | null =>
+  path.startsWith(LIBRARY_PREFIX) ? path.slice(LIBRARY_PREFIX.length) : null;
 
 const jsonError = (request: Request, message: string, status: number): Response =>
   corsJson(
@@ -102,6 +112,12 @@ export function OPTIONS(request: Request) {
 }
 
 export async function GET(request: Request) {
+  const library = libraryPath(getPath(request));
+
+  if (library !== null) {
+    return getLibrary(request, library);
+  }
+
   if (!extractorApiEnv.HOUSEHOLDS_ENABLED) {
     return jsonError(request, "LinkDish households are not enabled.", 404);
   }
@@ -129,6 +145,12 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const library = libraryPath(getPath(request));
+
+  if (library !== null) {
+    return postLibrary(request, library);
+  }
+
   if (!extractorApiEnv.HOUSEHOLDS_ENABLED) {
     return jsonError(request, "LinkDish households are not enabled.", 404);
   }

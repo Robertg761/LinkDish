@@ -73,6 +73,25 @@ const deleteCalls = (fetchMock: ReturnType<typeof geminiFetch>) =>
     .map(([input]) => requestedUrl(input));
 
 describe("the Gemini video recipe reader", () => {
+  it("uses the creation prompt only when an inspired recipe is requested", async () => {
+    const fetchMock = geminiFetch(() =>
+      json({ candidates: [{ content: { parts: [{ text: JSON.stringify(answer) }] } }] })
+    );
+    const source = { kind: "youtube" as const, url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ" };
+    await readerWith(fetchMock).read({ source, context });
+    await readerWith(fetchMock).read({ source, context, inspired: true });
+    const calls = fetchMock.mock.calls.filter(([input]) =>
+      requestedUrl(input).endsWith(":generateContent")
+    );
+    const first = calls[0]?.[1]?.body;
+    const second = calls[1]?.[1]?.body;
+    expect(typeof first).toBe("string");
+    expect(typeof second).toBe("string");
+    expect(first).toContain("Never add ingredients");
+    expect(second).toContain("create a practical recipe inspired by that food");
+    expect(second).toContain("not a transcription");
+  });
+
   it("deletes an uploaded video once Gemini has read it", async () => {
     const fetchMock = geminiFetch(() =>
       json({ candidates: [{ content: { parts: [{ text: JSON.stringify(answer) }] } }] })

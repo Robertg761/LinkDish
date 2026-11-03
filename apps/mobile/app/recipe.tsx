@@ -1,9 +1,9 @@
 import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { getRecipeCompletionChanges, recipeSourceLabel } from "@linkdish/recipe-domain";
 import { AppButton, AppSurface, AppText } from "@linkdish/ui";
 import { Stack, router, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
 import {
-  AccessibilityInfo,
   ActivityIndicator,
   Animated,
   Image,
@@ -15,25 +15,24 @@ import {
   StyleSheet,
   TextInput,
   View,
-  useWindowDimensions
+  type ScrollViewInstance,
+  type TextInputInstance,
+  type ViewInstance
 } from "react-native";
-import Reanimated, {
-  Easing as ReanimatedEasing,
-  runOnJS,
-  useAnimatedStyle,
-  useSharedValue,
-  withTiming
-} from "react-native-reanimated";
-import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { captureRef } from "react-native-view-shot";
 
 import { trackMobileEvent } from "../src/analytics/client";
 import { AppDialog } from "../src/components/AppDialog";
 import { useAccount } from "../src/features/account/AccountContext";
 import { useOptionalUpgradeMoment } from "../src/features/billing/UpgradeMomentContext";
-import { requestRecipeBookBounce } from "../src/features/navigation/recipeBookBounceEvents";
+import { RecipeOrganizeSection } from "../src/features/collections/RecipeOrganizeSection";
+import { ExtractionAnimation } from "../src/features/recipe-intake/components/ExtractionAnimation";
 import { requestRecipeUrlReset } from "../src/features/recipe-intake/intakeResetEvents";
-import { usePendingImageImport } from "../src/features/recipe-intake/usePendingImageImport";
+import {
+  usePendingImageImport,
+  usePendingTextImport
+} from "../src/features/recipe-intake/usePendingImageImport";
 import { RecipeFavoriteButton } from "../src/features/recipe-results/components/RecipeFavoriteButton";
 import {
   RecipeResultCard,
@@ -47,6 +46,7 @@ import {
   updateDraftStep as updateDraftStepById,
   type DraftStep
 } from "../src/features/recipe-results/draftSteps";
+import { useRecipeCompletion } from "../src/features/recipe-results/hooks/useRecipeCompletion";
 import { useRecipeExtraction } from "../src/features/recipe-results/hooks/useRecipeExtraction";
 import { useSavedRecipes } from "../src/features/saved-recipes/SavedRecipesContext";
 import {
@@ -56,6 +56,7 @@ import {
 import { ShareCard } from "../src/features/share/ShareCard";
 import { shareRecipeCardImage } from "../src/features/share/shareRecipeCard";
 import { AddRecipeIngredientsSheet } from "../src/features/shopping/AddRecipeIngredientsSheet";
+import { useReduceMotion } from "../src/hooks/useReduceMotion";
 import { useSmoothKeyboardInset } from "../src/hooks/useSmoothKeyboardInset";
 import { success, warn } from "../src/lib/haptics";
 import { EXTRACTION_ERROR_LINES, selectFlavorCopyLine } from "../src/theme/flavorCopy";
@@ -75,7 +76,6 @@ export const EXTRACTION_LOADING_COPY = [
 
 const EXTRACTION_COPY_INTERVAL_MS = 1800;
 const EXTRACTION_COPY_SWAP_MS = 250;
-const SAVE_TOSS_DURATION_MS = 350;
 
 const truncateShoppingRecipeId = (value: string): string =>
   value.length <= 180 ? value : `recipe:${value.slice(0, 173)}`;
@@ -138,23 +138,16 @@ const getSourceLabel = (sourceUrl: string | undefined) => {
     return "No source provided";
   }
 
-  if (sourceUrl.includes("linkdish.app/image-imports/")) {
-    return "Scanned image";
-  }
-
-  try {
-    return new URL(sourceUrl).hostname.replace(/^www\./u, "");
-  } catch {
-    return sourceUrl;
-  }
+  return recipeSourceLabel(sourceUrl);
 };
 
 export default function RecipeScreen() {
-  const { edit, imageImportId, savedId, sharedId, url } = useLocalSearchParams<{
+  const { edit, imageImportId, savedId, sharedId, textImportId, url } = useLocalSearchParams<{
     edit?: string;
     imageImportId?: string;
     savedId?: string;
     sharedId?: string;
+    textImportId?: string;
     url?: string;
   }>();
   const { user } = useAccount();
@@ -181,11 +174,18 @@ export default function RecipeScreen() {
     updateRecipe
   } = useSavedRecipes();
   const { showUpgradeMoment } = useOptionalUpgradeMoment();
-  const insets = useSafeAreaInsets();
-  const { width: windowWidth } = useWindowDimensions();
   const [saveLimitMessage, setSaveLimitMessage] = useState<string | null>(null);
   const [editorError, setEditorError] = useState<string | null>(null);
   const [isEditorVisible, setIsEditorVisible] = useState(false);
+  const [isInspiredConfirmationVisible, setIsInspiredConfirmationVisible] = useState(false);
+  const recipeCompletion = useRecipeCompletion();
+  /* The record getters of the latest render, for the fill that finishes after an await. */
+  const latestRecipeLookupRef = useRef({ getSavedRecipeById, getSharedRecipeById });
+  useEffect(() => {
+    latestRecipeLookupRef.current = { getSavedRecipeById, getSharedRecipeById };
+  }, [getSavedRecipeById, getSharedRecipeById]);
+  /** Why filling the recipe's missing amounts with AI didn't work, shown on its card. */
+  const [completionMessage, setCompletionMessage] = useState<string | null>(null);
   const [isEditorSaving, setIsEditorSaving] = useState(false);
   const [isShareCardSharing, setIsShareCardSharing] = useState(false);
   const [isSaveTargetModalVisible, setIsSaveTargetModalVisible] = useState(false);
@@ -199,8 +199,6 @@ export default function RecipeScreen() {
     title: string;
   } | null>(null);
   const [isSaveTargetSaving, setIsSaveTargetSaving] = useState(false);
-  const [isSaveTossVisible, setIsSaveTossVisible] = useState(false);
-  const [saveTossKey, setSaveTossKey] = useState(0);
   const [isSourceImageViewerVisible, setIsSourceImageViewerVisible] = useState(false);
   const [shoppingSheetConfig, setShoppingSheetConfig] =
     useState<RecipeShoppingActionContext | null>(null);
@@ -209,7 +207,7 @@ export default function RecipeScreen() {
   const [draftIngredients, setDraftIngredients] = useState("");
   const [draftSteps, setDraftSteps] = useState<DraftStep[]>([]);
   const [draftNotes, setDraftNotes] = useState("");
-  const shareCardRef = useRef<View>(null);
+  const shareCardRef = useRef<ViewInstance>(null);
   const extractionErrorTitle = useMemo(() => selectFlavorCopyLine(EXTRACTION_ERROR_LINES), []);
   const routeSavedRecipe = savedId
     ? getSavedRecipeById(savedId)
@@ -223,6 +221,8 @@ export default function RecipeScreen() {
   );
   const { pendingImport: pendingImageImport, status: imageImportStatus } =
     usePendingImageImport(imageImportId);
+  const { pendingImport: pendingTextImport, status: textImportStatus } =
+    usePendingTextImport(textImportId);
 
   const extractionSource = useMemo(() => {
     if (savedId || sharedId) {
@@ -241,8 +241,21 @@ export default function RecipeScreen() {
       };
     }
 
+    if (textImportId) {
+      if (!pendingTextImport) {
+        return undefined;
+      }
+
+      return {
+        attempt: "primary" as const,
+        routeUrl: pendingTextImport.sourceUrl,
+        sourceUrl: pendingTextImport.captionSourceUrl,
+        text: pendingTextImport.text
+      };
+    }
+
     return url;
-  }, [imageImportId, pendingImageImport, savedId, sharedId, url]);
+  }, [imageImportId, pendingImageImport, pendingTextImport, savedId, sharedId, textImportId, url]);
   const extraction = useRecipeExtraction(
     extractionSource,
     routeSharedRecipeRecord ?? routeSavedRecipe
@@ -330,35 +343,6 @@ export default function RecipeScreen() {
       }
     });
   }, [currentSavedRecipe, displayedRecipe, savedId, sharedId]);
-
-  const finishSaveSuccessFeedback = useCallback(() => {
-    // The tab bar is hidden under this screen; the Cookbook tab icon bounces once it is back
-    // in view (see recipeBookBounceEvents).
-    requestRecipeBookBounce();
-    success();
-  }, []);
-
-  const playSaveSuccessFeedback = useCallback(() => {
-    void AccessibilityInfo.isReduceMotionEnabled()
-      .then((isReduceMotionEnabled) => {
-        if (isReduceMotionEnabled) {
-          finishSaveSuccessFeedback();
-          return;
-        }
-
-        setSaveTossKey((current) => current + 1);
-        setIsSaveTossVisible(true);
-      })
-      .catch(() => {
-        setSaveTossKey((current) => current + 1);
-        setIsSaveTossVisible(true);
-      });
-  }, [finishSaveSuccessFeedback]);
-
-  const handleSaveTossComplete = useCallback(() => {
-    setIsSaveTossVisible(false);
-    finishSaveSuccessFeedback();
-  }, [finishSaveSuccessFeedback]);
 
   useEffect(() => {
     const previousState = previousExtractionHapticStateRef.current;
@@ -482,6 +466,62 @@ export default function RecipeScreen() {
     }
   };
 
+  /*
+   * A recipe read from a video that never said how much of anything to use: AI estimates the
+   * amounts and fills out the steps, and the result replaces the saved recipe's ingredients and
+   * method (the person's notes are kept).
+   */
+  const fillMissingAmountsWithAi = async () => {
+    if (!editableRecipe || recipeCompletion.isFilling) {
+      return;
+    }
+
+    setCompletionMessage(null);
+    const result = await recipeCompletion.fill(editableRecipe.recipe);
+
+    if (result.status === "failed") {
+      setCompletionMessage(result.message);
+      return;
+    }
+
+    /*
+     * Only the fields the completion owns go into the recipe as it is now: a title or note
+     * edited while AI was answering is kept (this closure's copy is from before the request).
+     */
+    const changes = getRecipeCompletionChanges(result.recipe);
+    const latest = latestRecipeLookupRef.current;
+
+    if (isSharedRecipeRoute && routeSharedRecipe) {
+      const latestShared = latest.getSharedRecipeById(routeSharedRecipe.id)?.recipe;
+
+      if (
+        !(await updateSharedRecipe(routeSharedRecipe.id, {
+          recipe: { ...(latestShared ?? editableRecipe.recipe), ...changes }
+        }))
+      ) {
+        setCompletionMessage("This shared recipe could not be saved. Try again.");
+      }
+
+      return;
+    }
+
+    const latestSaved = latest.getSavedRecipeById(editableRecipe.id);
+
+    if (
+      !latestSaved ||
+      !updateRecipe(latestSaved.id, {
+        notes: latestSaved.notes,
+        recipe: { ...latestSaved.recipe, ...changes }
+      })
+    ) {
+      setCompletionMessage("This saved recipe is no longer available.");
+    }
+  };
+  const canFillMissingAmounts =
+    extraction.state.state === "success" &&
+    editableRecipe != null &&
+    (isSharedRecipeRoute ? canEditSharedRecipe : !isCurrentStarterRecipe);
+
   const addDraftStep = () => {
     setDraftSteps((current) => appendDraftStep(current));
   };
@@ -522,9 +562,9 @@ export default function RecipeScreen() {
           return;
         }
 
-        setSaveLimitMessage(result.message ?? null);
+        setSaveLimitMessage(result.message ?? "Recipe saved.");
         setIsSaveTargetModalVisible(false);
-        playSaveSuccessFeedback();
+        success();
         return;
       }
 
@@ -552,13 +592,13 @@ export default function RecipeScreen() {
         return;
       }
 
-      setSaveLimitMessage(result.message ?? null);
+      setSaveLimitMessage(result.message ?? "Recipe saved.");
 
       if (isSaveTargetAction) {
         setIsSaveTargetModalVisible(false);
       }
 
-      playSaveSuccessFeedback();
+      success();
     } finally {
       if (isSaveTargetAction) {
         setIsSaveTargetSaving(false);
@@ -795,7 +835,10 @@ export default function RecipeScreen() {
           />
         ) : null}
 
-        {extraction.state.state === "empty" && !isSharedRecipeRequest && !imageImportId ? (
+        {extraction.state.state === "empty" &&
+        !isSharedRecipeRequest &&
+        !imageImportId &&
+        !textImportId ? (
           <StatusCard
             body="Head back and paste a recipe source to keep going."
             primaryAction={{
@@ -817,14 +860,27 @@ export default function RecipeScreen() {
           />
         ) : null}
 
+        {extraction.state.state === "empty" && textImportStatus === "missing" ? (
+          <StatusCard
+            body="LinkDish closed before it could read the text you pasted. Paste it again to pick up where you left off."
+            primaryAction={{
+              label: "Paste again",
+              onPress: () => router.replace("/import")
+            }}
+            title="Your recipe text needs another look"
+          />
+        ) : null}
+
         {extraction.state.state === "loading" ? (
-          <AppSurface style={styles.loadingCard}>
-            <ActivityIndicator color={appColors.accent} />
-            <View style={styles.statusCopy}>
-              <AppText variant="headline">
-                {extraction.state.attempt === "fallback"
-                  ? "Taking another look"
-                  : "Reading the recipe"}
+          <AppSurface style={styles.extractionLoadingCard}>
+            <ExtractionAnimation />
+            <View style={styles.extractionLoadingCopy}>
+              <AppText style={styles.extractionLoadingTitle} variant="headline">
+                {extraction.state.inspired
+                  ? "Generating your recipe"
+                  : extraction.state.attempt === "fallback"
+                    ? "Taking another look"
+                    : "Reading the recipe"}
               </AppText>
               <ExtractionLoadingCopy />
             </View>
@@ -860,32 +916,84 @@ export default function RecipeScreen() {
 
         {extraction.state.state === "failure" ? (
           <StatusCard
-            body={extraction.state.message}
+            body={
+              extraction.state.inspiredAvailable
+                ? `${extraction.state.message} Would you like a recipe based on the video?`
+                : extraction.state.message
+            }
             primaryAction={
-              extraction.state.reason === "plan_limit"
+              extraction.state.inspiredAvailable
                 ? {
-                    label: "View Plans",
-                    onPress: () => router.push("/upgrade")
+                    label: "Generate a recipe",
+                    onPress: () => setIsInspiredConfirmationVisible(true)
                   }
-                : extraction.state.allowFallback ||
-                    extraction.state.suggestedAction === "retry_fallback"
+                : extraction.state.reason === "plan_limit"
                   ? {
-                      label: "Try again with more help",
-                      onPress: extraction.retryWithFallback
+                      label: "View Plans",
+                      onPress: () => router.push("/upgrade")
                     }
-                  : extraction.state.suggestedAction === "retry_primary"
+                  : extraction.state.allowFallback ||
+                      extraction.state.suggestedAction === "retry_fallback"
                     ? {
-                        label: "Retry extraction",
-                        onPress: extraction.retryPrimary
+                        label: "Try again with more help",
+                        onPress: extraction.retryWithFallback
                       }
-                    : undefined
+                    : extraction.state.suggestedAction === "retry_primary"
+                      ? {
+                          label: "Retry extraction",
+                          onPress: extraction.retryPrimary
+                        }
+                      : undefined
             }
             secondaryAction={{
               label: "Paste another link",
               onPress: () => router.replace("/")
             }}
-            title={extractionErrorTitle}
+            title={
+              extraction.state.inspiredAvailable ? "No complete recipe found" : extractionErrorTitle
+            }
           />
+        ) : null}
+
+        {displayedRecipe?.confidence.notes.some((note) =>
+          note.startsWith("AI-created recipe inspired by the video.")
+        ) ? (
+          <AppSurface style={styles.statusCard}>
+            <AppText variant="title">Inspired by the video</AppText>
+            <AppText muted>
+              Inspired by the video. Ingredients, quantities and steps may differ from the
+              creator’s.
+            </AppText>
+          </AppSurface>
+        ) : null}
+
+        {displayedRecipe?.completion?.status === "missing_amounts" ? (
+          <StatusCard
+            body={
+              completionMessage ??
+              (canFillMissingAmounts
+                ? "The video shows how it’s made but doesn’t say how much of each ingredient to use. AI can suggest amounts and fuller steps (uses one AI import)."
+                : "The video shows how it’s made but doesn’t say how much of each ingredient to use. Save the recipe to fill in the amounts with AI.")
+            }
+            primaryAction={
+              canFillMissingAmounts
+                ? {
+                    label: recipeCompletion.isFilling ? "Filling in…" : "Fill in with AI",
+                    onPress: fillMissingAmountsWithAi
+                  }
+                : undefined
+            }
+            title="This recipe is missing amounts"
+          />
+        ) : null}
+
+        {displayedRecipe?.completion?.status === "ai_filled" ? (
+          <AppSurface style={styles.statusCard}>
+            <AppText variant="title">Amounts estimated by AI</AppText>
+            <AppText muted>
+              The original video didn’t give them, so check them before you cook.
+            </AppText>
+          </AppSurface>
         ) : null}
 
         {displayedRecipe ? (
@@ -992,6 +1100,10 @@ export default function RecipeScreen() {
                     ) : null}
                   </View>
 
+                  {currentSavedRecipe && !isSharedRecipeRoute ? (
+                    <RecipeOrganizeSection record={currentSavedRecipe} />
+                  ) : null}
+
                   {saveLimitMessage || (!isCurrentRecipeSaved && !currentSaveGate.allowed) ? (
                     <AppText muted style={styles.saveMessage}>
                       {saveLimitMessage ?? currentSaveGate.message}
@@ -1061,6 +1173,30 @@ export default function RecipeScreen() {
           visible={isEditorVisible}
         />
         <AppDialog
+          actions={[
+            {
+              label: "Not now",
+              onPress: () => setIsInspiredConfirmationVisible(false),
+              variant: "outline"
+            },
+            {
+              label: "Generate recipe",
+              onPress: () => {
+                setIsInspiredConfirmationVisible(false);
+                void extraction.createInspiredRecipe();
+              }
+            }
+          ]}
+          message="We'll use what we can see and hear in the video, along with general cooking knowledge, to suggest likely ingredients, amounts and steps. The recipe may not be exact or match the creator's version."
+          onRequestClose={() => setIsInspiredConfirmationVisible(false)}
+          title="Generate a recipe from this video?"
+          visible={
+            isInspiredConfirmationVisible &&
+            extraction.state.state === "failure" &&
+            extraction.state.inspiredAvailable === true
+          }
+        />
+        <AppDialog
           actions={
             removeRecipeConfirmation
               ? [
@@ -1088,14 +1224,6 @@ export default function RecipeScreen() {
         />
       </ScrollView>
 
-      <SaveTossOverlay
-        animationKey={saveTossKey}
-        onComplete={handleSaveTossComplete}
-        targetTop={insets.top + 32}
-        visible={isSaveTossVisible}
-        windowWidth={windowWidth}
-      />
-
       {displayedRecipe ? (
         <View collapsable={false} pointerEvents="none" style={styles.hiddenShareCard}>
           <ShareCard ref={shareCardRef} recipe={displayedRecipe} sourceLabel={sourceLabel} />
@@ -1106,88 +1234,6 @@ export default function RecipeScreen() {
 }
 
 type IconName = ComponentProps<typeof MaterialCommunityIcons>["name"];
-
-const SaveTossOverlay = ({
-  animationKey,
-  onComplete,
-  targetTop,
-  visible,
-  windowWidth
-}: {
-  animationKey: number;
-  onComplete: () => void;
-  targetTop: number;
-  visible: boolean;
-  windowWidth: number;
-}) => {
-  const progress = useSharedValue(0);
-  const startLeft = Math.max(28, windowWidth / 2 - 58);
-  const startTop = Math.max(230, targetTop + 190);
-  const translateX = 40 - startLeft;
-  const translateY = targetTop - startTop;
-
-  useEffect(() => {
-    if (!visible) {
-      progress.value = 0;
-      return;
-    }
-
-    progress.value = 0;
-    progress.value = withTiming(
-      1,
-      {
-        duration: SAVE_TOSS_DURATION_MS,
-        easing: ReanimatedEasing.in(ReanimatedEasing.cubic)
-      },
-      (finished) => {
-        if (finished) {
-          runOnJS(onComplete)();
-        }
-      }
-    );
-  }, [animationKey, onComplete, progress, visible]);
-
-  const animatedStyle = useAnimatedStyle(() => {
-    const arcLift = Math.sin(progress.value * Math.PI) * -42;
-
-    return {
-      opacity: 1 - progress.value,
-      transform: [
-        {
-          translateX: progress.value * translateX
-        },
-        {
-          translateY: progress.value * translateY + arcLift
-        },
-        {
-          scale: 1 - progress.value * 0.85
-        }
-      ]
-    };
-  });
-
-  if (!visible) {
-    return null;
-  }
-
-  return (
-    <Reanimated.View
-      pointerEvents="none"
-      style={[
-        styles.saveTossCard,
-        {
-          left: startLeft,
-          top: startTop
-        },
-        animatedStyle
-      ]}
-    >
-      <View style={styles.saveTossCardHeader} />
-      <View style={styles.saveTossCardLine} />
-      <View style={[styles.saveTossCardLine, styles.saveTossCardLineShort]} />
-    </Reanimated.View>
-  );
-};
 
 function SourceImageViewer({
   images,
@@ -1234,11 +1280,16 @@ function SourceImageViewer({
 }
 
 const ExtractionLoadingCopy = () => {
+  const reduceMotion = useReduceMotion();
   const [copyIndex, setCopyIndex] = useState(0);
   const copyProgress = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     const timer = setInterval(() => {
+      if (reduceMotion) {
+        setCopyIndex((current) => (current + 1) % EXTRACTION_LOADING_COPY.length);
+        return;
+      }
       Animated.timing(copyProgress, {
         duration: EXTRACTION_COPY_SWAP_MS,
         toValue: 1,
@@ -1262,7 +1313,7 @@ const ExtractionLoadingCopy = () => {
       clearInterval(timer);
       copyProgress.stopAnimation();
     };
-  }, [copyProgress]);
+  }, [copyProgress, reduceMotion]);
 
   return (
     <Animated.View
@@ -1457,7 +1508,7 @@ const RecipeEditorModal = ({
   setDraftTitle: (value: string) => void;
   visible: boolean;
 }) => {
-  const scrollViewRef = useRef<ScrollView>(null);
+  const scrollViewRef = useRef<ScrollViewInstance>(null);
   const fieldLayoutsRef = useRef<Record<string, { height: number; offsetY: number }>>({});
   const focusedEditorLayoutRef = useRef<{ height: number; offsetY: number } | null>(null);
   const editorScrollYRef = useRef(0);
@@ -1646,7 +1697,7 @@ const MethodStepsEditor = ({
   const pendingFocusStepCountRef = useRef<number | null>(null);
   const pendingFocusStepIdRef = useRef<string | null>(null);
   const stepLayoutsRef = useRef<Record<string, { height: number; offsetY: number }>>({});
-  const stepInputRefs = useRef<Record<string, TextInput | null>>({});
+  const stepInputRefs = useRef<Record<string, TextInputInstance | null>>({});
 
   // Rows are keyed by id, so drop the measurements and refs of rows that are gone
   // instead of shifting every entry after a removal.
@@ -1942,6 +1993,9 @@ const styles = StyleSheet.create({
     marginTop: 4,
     width: 40
   },
+  extractionLoadingCard: { alignItems: "center", gap: 12, paddingVertical: 30 },
+  extractionLoadingCopy: { alignItems: "center", gap: 8 },
+  extractionLoadingTitle: { textAlign: "center" },
   loadingCard: {
     alignItems: "flex-start",
     gap: 18
@@ -1950,38 +2004,6 @@ const styles = StyleSheet.create({
     flexBasis: "100%",
     fontSize: 14,
     lineHeight: 20
-  },
-  saveTossCard: {
-    backgroundColor: appColors.surface,
-    borderColor: appColors.border,
-    borderRadius: 14,
-    borderWidth: 1,
-    elevation: Platform.OS === "android" ? 5 : 0,
-    gap: 8,
-    height: 74,
-    padding: 12,
-    position: "absolute",
-    shadowColor: appColors.shadow,
-    shadowOffset: { height: 8, width: 0 },
-    shadowOpacity: 0.12,
-    shadowRadius: 18,
-    width: 116,
-    zIndex: 50
-  },
-  saveTossCardHeader: {
-    backgroundColor: appColors.accentSoft,
-    borderRadius: 999,
-    height: 14,
-    width: 44
-  },
-  saveTossCardLine: {
-    backgroundColor: appColors.border,
-    borderRadius: 999,
-    height: 8,
-    width: "100%"
-  },
-  saveTossCardLineShort: {
-    width: "68%"
   },
   saveTargetBackdrop: {
     alignItems: "center",

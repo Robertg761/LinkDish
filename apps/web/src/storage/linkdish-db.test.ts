@@ -8,6 +8,7 @@ import {
   getLinkDishDbStatus,
   getLinkDishWebDb,
   IMPORT_QUEUE_STORE_NAME,
+  LIBRARY_SYNC_STORE_NAME,
   LINKDISH_WEB_DB_STORE_NAMES,
   LINKDISH_WEB_DB_VERSION,
   MEAL_PLAN_STORE_NAME,
@@ -148,7 +149,7 @@ const expectV4Stores = () => {
   });
 };
 
-describe("linkdish-db v4 schema", () => {
+describe("linkdish-db schema", () => {
   beforeEach(() => {
     fakeIdb.reset();
     resetLinkDishWebDbForTests();
@@ -162,13 +163,13 @@ describe("linkdish-db v4 schema", () => {
   it("creates every store with its indexes on a fresh install", async () => {
     await getLinkDishWebDb();
 
-    expect(LINKDISH_WEB_DB_VERSION).toBe(4);
-    expect(fakeIdb.openCalls).toEqual([{ name: "linkdish-web", version: 4 }]);
+    expect(LINKDISH_WEB_DB_VERSION).toBe(5);
+    expect(fakeIdb.openCalls).toEqual([{ name: "linkdish-web", version: 5 }]);
     expect(fakeIdb.createdStores).toEqual([...LINKDISH_WEB_DB_STORE_NAMES]);
     expectV4Stores();
     expect(fakeIdb.indexKeyPaths(SAVED_RECIPES_STORE_NAME)).toEqual(SAVED_RECIPE_V1_INDEXES);
     expect(fakeIdb.indexKeyPaths(SHOPPING_ITEMS_STORE_NAME)).toEqual(SHOPPING_V3_INDEXES);
-    expect(fakeIdb.version).toBe(4);
+    expect(fakeIdb.version).toBe(5);
   });
 
   it("upgrades v1 data: adds the new stores and moves source images out of recipes", async () => {
@@ -237,7 +238,8 @@ describe("linkdish-db v4 schema", () => {
       MEAL_PLAN_STORE_NAME,
       IMPORT_QUEUE_STORE_NAME,
       COOK_SESSIONS_STORE_NAME,
-      RECIPE_SOURCE_IMAGES_STORE_NAME
+      RECIPE_SOURCE_IMAGES_STORE_NAME,
+      LIBRARY_SYNC_STORE_NAME
     ]);
     expect(fakeIdb.records(SHOPPING_ITEMS_STORE_NAME)).toEqual([shoppingItem]);
     expect(fakeIdb.records(RECIPE_SOURCE_IMAGES_STORE_NAME)).toHaveLength(1);
@@ -276,7 +278,7 @@ describe("linkdish-db v4 schema", () => {
     // Not locked out: the schema is upgraded and every recipe (with its scans) is still there.
     expect(consoleWarn).toHaveBeenCalled();
     expect(getLinkDishDbStatus().state).toBe("ready");
-    expect(fakeIdb.version).toBe(4);
+    expect(fakeIdb.version).toBe(5);
     expectV4Stores();
     expect(fakeIdb.record(SAVED_RECIPES_STORE_NAME, "scanned")).toEqual(scanned);
     expect(fakeIdb.record(SAVED_RECIPES_STORE_NAME, "other")).toEqual(other);

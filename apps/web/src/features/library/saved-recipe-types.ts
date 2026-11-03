@@ -41,6 +41,8 @@ export interface WebSavedRecipe {
    */
   sourceImageBytes?: number | undefined;
   timesCooked?: number | undefined;
+  /** The recipe this one is a copy of (set by Duplicate, here or in the Android app). */
+  clonedFromId?: string | undefined;
   sync?: {
     status: "local_only" | "synced" | "dirty" | "sync_failed";
     sharedRecipeId?: string;
@@ -54,7 +56,10 @@ export interface WebSavedRecipe {
     lastError?: string;
   };
 
-  /* Local-only personal metadata. Never part of the household sync payload. */
+  /*
+   * Personal metadata. Never part of the household sync payload; it syncs with the account's
+   * own cookbook (see features/cloud-sync), except lastOpenedAt.
+   */
   favorite?: boolean | undefined;
   tags?: string[] | undefined;
   collectionIds?: string[] | undefined;
@@ -65,7 +70,7 @@ export interface WebSavedRecipe {
   preferredServings?: number | undefined;
 }
 
-/** Keys of {@link WebSavedRecipe} that hold local-only personal metadata. */
+/** Keys of {@link WebSavedRecipe} that hold personal metadata. */
 export type WebSavedRecipeMetadataKey =
   | "favorite"
   | "tags"

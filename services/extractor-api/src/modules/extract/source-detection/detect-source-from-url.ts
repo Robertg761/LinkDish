@@ -1,4 +1,5 @@
 import { getDomainAdapter } from "./domain-adapters.js";
+import { isFacebookHostname, parseFacebookPost } from "./parse-facebook-url.js";
 import { parseYouTubeVideoId } from "./parse-youtube-video-id.js";
 import { getRegistrableDomain } from "./registrable-domain.js";
 
@@ -10,23 +11,62 @@ import type { DetectionResult } from "../types.js";
  * apart from the document-aware detection and never loads the HTML parser.
  *
  * Response contracts validate sourceType against a closed enum in clients that
- * are already installed, so new platforms map onto existing values: TikTok and
- * Instagram are "social", other video hosts "video". The adapterKey tells the
+ * are already installed, so new platforms map onto existing values: TikTok,
+ * Instagram and Facebook are "social", other video hosts "video". The adapterKey tells the
  * orchestrator which platform path to take.
  */
-const socialHosts = ["instagram.com", "facebook.com", "fb.watch"];
+const socialHosts = ["instagram.com", "instagr.am"];
 const videoHosts = ["vimeo.com", "dailymotion.com", "twitch.tv"];
 const matchesHostname = (hostname: string, expected: string): boolean =>
   hostname === expected || hostname.endsWith(`.${expected}`);
 
 export const TIKTOK_ADAPTER_KEY = "tiktok";
 export const PINTEREST_ADAPTER_KEY = "pinterest";
+export const INSTAGRAM_ADAPTER_KEY = "instagram";
+export const FACEBOOK_ADAPTER_KEY = "facebook";
+
+export { isFacebookUrl } from "./parse-facebook-url.js";
 
 export const isTikTokUrl = (url: string): boolean => {
   try {
     return matchesHostname(new URL(url).hostname.toLowerCase(), "tiktok.com");
   } catch {
     return false;
+  }
+};
+
+const isInstagramHostname = (hostname: string): boolean =>
+  matchesHostname(hostname, "instagram.com") || matchesHostname(hostname, "instagr.am");
+
+export const isInstagramUrl = (url: string): boolean => {
+  try {
+    return isInstagramHostname(new URL(url).hostname.toLowerCase());
+  } catch {
+    return false;
+  }
+};
+
+/*
+ * A single Instagram post, reel or IGTV video: /p/<code>, /reel/<code>, /reels/<code>, /tv/<code>,
+ * also under a profile (/cook/p/<code>) as the share sheet sometimes writes them. Profiles,
+ * stories and everything else are not posts.
+ */
+export const parseInstagramPost = (url: string): { shortcode: string; isVideo: boolean } | null => {
+  try {
+    const parsedUrl = new URL(url);
+
+    if (!isInstagramHostname(parsedUrl.hostname.toLowerCase())) {
+      return null;
+    }
+
+    /* /share/reel/<token> links carry a redirect token, not the post's shortcode. */
+    const match = parsedUrl.pathname.match(
+      /^\/(?:(?!share\/)[\w.]+\/)?(p|reels?|tv)\/([A-Za-z0-9_-]{5,64})\/?$/u
+    );
+
+    return match?.[1] && match[2] ? { shortcode: match[2], isVideo: match[1] !== "p" } : null;
+  } catch {
+    return null;
   }
 };
 
@@ -98,7 +138,28 @@ export const detectHostedMediaSourceType = (url: string): DetectionResult | null
     };
   }
 
-  if (socialHosts.some((candidate) => matchesHostname(hostname, candidate))) {
+  if (parseInstagramPost(url)) {
+    return {
+      sourceType: "social",
+      confidence: "high",
+      reasons: ["Matched an Instagram post; the caption is read from its public embed page."],
+      adapterKey: INSTAGRAM_ADAPTER_KEY
+    };
+  }
+
+  if (parseFacebookPost(url)) {
+    return {
+      sourceType: "social",
+      confidence: "high",
+      reasons: ["Matched a Facebook post or reel; the caption is read from its public page."],
+      adapterKey: FACEBOOK_ADAPTER_KEY
+    };
+  }
+
+  if (
+    isFacebookHostname(hostname) ||
+    socialHosts.some((candidate) => matchesHostname(hostname, candidate))
+  ) {
     return {
       sourceType: "social",
       confidence: "high",

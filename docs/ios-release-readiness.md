@@ -1,6 +1,75 @@
-# iOS release readiness — 2026-10-31
+# iOS release readiness
 
-## Current production configuration
+## SDK 58 merge reconciliation — 2026-11-03
+
+The `ios_build` merge with `origin/main` (`38b2cfd`) retains the production API,
+Clerk/Google/Apple and RevenueCat configuration, TestFlight environment safeguards,
+photo compression and picker dismissal fixes, auth cancellation/sign-out safeguards,
+and subscription/legal disclosures. It also incorporates main's cookbook sync,
+backups, text imports, meal planning, navigation and Android changes.
+
+The merged app uses main's Expo SDK 58, React Native 0.88.0, React 19.3 and Clerk 4
+stack, including the separate Google sign-in plugin. Version 2.2.2 / iOS build 35 is
+consistent across Expo, Info.plist, the updates runtime and Xcode. The bundle remains
+`com.linkdish.app`, Expo owner `@linkdish`, Apple team `73UT6LC439`, and iOS minimum
+17.0. Apple sign-in and the signing team are now explicit in Expo config so a
+prebuild retains them. The SDK 58 scene lifecycle handles URL/auth callbacks.
+
+### Native dependency decision
+
+Keep `ios/Podfile.lock` tracked. Main's SDK-upgrade commit `a53685c` explicitly
+removed the lockfile, workspace and privacy manifest only because it could not run
+CocoaPods without a Mac. This repository tracks the native projects and EAS builds
+them, so pinning native dependencies makes subsequent builds reproducible.
+
+`pnpm-lock.yaml` was regenerated from the reconciled manifests using pnpm 10.8.0,
+and a frozen install passed. CocoaPods regenerated the SDK 58 lockfile, project
+integration, workspace and aggregated privacy manifest. The lockfile matches the
+installed Pods manifest. The obsolete Clerk 3 Swift package resolution stays
+deleted: the new dependency graph no longer references that Swift package.
+
+### Validation
+
+- Repository ESLint and TypeScript checks passed.
+- All 2,995 workspace tests passed across the package, API, mobile and web suites,
+  including 459 mobile tests. The initial parallel run hit a one-second lazy-dialog
+  timeout in `CommandPalette.test.tsx`; the focused test and all 1,234 web tests
+  passed on rerun with two workers. No web product behavior was changed for this.
+- All 98 Vercel handler tests, four TestFlight environment tests, site validation,
+  web production build and bundle-size budgets passed.
+- The library-service test now isolates auth flags from local `.env` configuration;
+  its production-storage assertion no longer depends on developer auth credentials.
+- Production iOS/Hermes export and its API/Clerk/RevenueCat/secret-marker assertions
+  passed. Live API/Clerk release preflight passed.
+- Expo introspection and native plist checks agree on the production identity,
+  version/build, Apple entitlement and camera/photo permissions, with no microphone
+  or Face ID permission. The regenerated privacy manifest retains the existing
+  required-reason API declarations.
+- An unsigned arm64 **Release** build succeeded with Xcode 26.6 and production
+  environment variables. The built `.app` was checked for version 2.2.2 (35), iOS
+  17+, scene lifecycle, privacy manifest and production API/Clerk/RevenueCat values.
+- Web browser checks: 11 of 12 passed. The mobile viewport shopping-list test
+  (`apps/web/e2e/plan-and-shop.e2e.ts:39`) failed on both the initial run and a
+  two-worker rerun: after checking one item and immediately reloading, the page
+  shows `12 to buy` instead of `11 to buy`. This persistence issue remains open;
+  the web application and tests are unchanged from `origin/main`. The trace and
+  screenshot are in the ignored `apps/web/test-results/` directory.
+
+Expo's online dependency check recommends newer SDK 58 patch releases, including
+React Native 0.88.1. The merge keeps main's dependency versions rather than adding
+another SDK patch upgrade; the native build and JS export above validate this
+resolved set. Metro also emitted an upstream Sentry/Expo Router internal-export
+warning, but completed the export and native bundle successfully.
+
+This verifies the merge, not App Store release approval. Signing/distribution and
+real-device auth, purchases, restore and recipe-flow regression tests on this new
+SDK 58 build remain necessary before uploading it. No commit, push, backend change,
+cloud environment update, submission or merge abort was performed.
+
+The following sections retain the earlier October 31 readiness snapshot; their
+version/build and test counts describe that older candidate.
+
+## Earlier production configuration (2026-10-31)
 
 - Expo project: `@linkdish/linkdish`, ID `a2c1318c-39e0-45a3-a114-1f5e88288af1`.
 - Bundle ID: `com.linkdish.app`; version `2.0.6`; next build `34`, synchronized in Expo config, native Info.plist, and Xcode project.

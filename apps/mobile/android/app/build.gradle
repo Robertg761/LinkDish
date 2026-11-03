@@ -81,11 +81,13 @@ def enableMinifyInReleaseBuilds = (findProperty('android.enableMinifyInReleaseBu
  */
 def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
 
+// Sentry: upload release JS source maps when the build has SENTRY_AUTH_TOKEN, SENTRY_ORG and
+// SENTRY_PROJECT. Without the token the build is unchanged.
+if (System.getenv("SENTRY_AUTH_TOKEN")) {
+    apply from: new File(["node", "--print", "require('path').dirname(require.resolve('@sentry/react-native/package.json'))"].execute(null, rootDir).text.trim(), "sentry.gradle")
+}
+
 android {
-    kotlinOptions {
-        // Clerk: allow reading metadata from newer Kotlin versions
-        freeCompilerArgs += ['-Xskip-metadata-version-check']
-    }
     ndkVersion rootProject.ext.ndkVersion
 
     buildToolsVersion rootProject.ext.buildToolsVersion
@@ -96,8 +98,8 @@ android {
         applicationId 'com.linkdish.app'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 30
-        versionName "2.0.6"
+        versionCode 35
+        versionName "2.2.2"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }
@@ -121,16 +123,12 @@ android {
             def enableShrinkResources = findProperty('android.enableShrinkResourcesInReleaseBuilds') ?: 'false'
             shrinkResources enableShrinkResources.toBoolean()
             minifyEnabled enableMinifyInReleaseBuilds
-            proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
+            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
             def enablePngCrunchInRelease = findProperty('android.enablePngCrunchInReleaseBuilds') ?: 'true'
             crunchPngs enablePngCrunchInRelease.toBoolean()
         }
     }
     packagingOptions {
-        // Clerk Android SDK: exclude duplicate META-INF files
-        resources {
-            excludes += ['META-INF/versions/9/OSGI-INF/MANIFEST.MF']
-        }
         jniLibs {
             def enableLegacyPackaging = findProperty('expo.useLegacyPackaging') ?: 'false'
             useLegacyPackaging enableLegacyPackaging.toBoolean()

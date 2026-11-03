@@ -1,3 +1,4 @@
+import { MAX_LIBRARY_COOK_LOG_ENTRIES } from "@linkdish/api-contracts";
 import {
   createRecipeSearchIndex,
   isLikelySameRecipe,
@@ -7,6 +8,7 @@ import {
 import type { RecipeSourceImage, SuccessfulExtractionState } from "../recipe-results/types";
 import type {
   ExtractRecipeImage,
+  LibraryRecipe,
   SharedRecipe,
   UpsertSharedRecipeRequest
 } from "@linkdish/api-contracts";
@@ -19,6 +21,16 @@ import type {
 
 export type RecipeBookShareMode = "none" | "selected" | "all";
 
+/**
+ * Synced fields this app doesn't show yet (set on the web), kept so they sync through untouched.
+ */
+export type SavedRecipeLibraryExtras = Partial<
+  Pick<
+    LibraryRecipe,
+    "collectionIds" | "cookLog" | "lastCookedAt" | "preferredServings" | "rating" | "tags"
+  >
+>;
+
 export interface SavedRecipeRecord {
   clonedFromId?: string | undefined;
   /** Hearted in the Cookbook. Added later: missing means false. */
@@ -26,6 +38,7 @@ export interface SavedRecipeRecord {
   fetchMode: SuccessfulExtractionState["fetchMode"];
   id: string;
   isStarter?: boolean | undefined;
+  libraryExtras?: SavedRecipeLibraryExtras | undefined;
   notes?: string | undefined;
   provenance: SuccessfulExtractionState["provenance"];
   recipe: SuccessfulExtractionState["recipe"];
@@ -373,6 +386,22 @@ const getCloneTitle = (savedRecipes: SavedRecipeRecord[], title: string): string
   }
 };
 
+const copyableLibraryExtras = (
+  extras: SavedRecipeLibraryExtras | undefined
+): SavedRecipeLibraryExtras | undefined => {
+  if (!extras) {
+    return undefined;
+  }
+
+  const { collectionIds, preferredServings, tags } = extras;
+  const copied: SavedRecipeLibraryExtras = {
+    ...(collectionIds?.length ? { collectionIds } : {}),
+    ...(preferredServings ? { preferredServings } : {}),
+    ...(tags?.length ? { tags } : {})
+  };
+  return Object.keys(copied).length ? copied : undefined;
+};
+
 export const cloneSavedRecipeRecord = (
   savedRecipes: SavedRecipeRecord[],
   sourceRecord: SavedRecipeRecord,
@@ -386,6 +415,8 @@ export const cloneSavedRecipeRecord = (
     favorite: undefined,
     id: createSavedRecipeId(new Date(clonedAt)),
     isStarter: undefined,
+    // A copy starts its own cooking history and rating.
+    libraryExtras: copyableLibraryExtras(sourceRecord.libraryExtras),
     notes: sourceRecord.notes,
     recipe: {
       ...recipe,
@@ -441,18 +472,34 @@ export const sharedRecipeToSavedRecipeRecord = (sharedRecipe: SharedRecipe): Sav
   warnings: sharedRecipe.warnings
 });
 
+/**
+ * Records a cook: bumps `timesCooked` and logs it in the synced cook log (as the web app does), so
+ * cooks recorded on two devices before they sync both count.
+ */
 export const incrementSavedRecipeTimesCooked = (
   savedRecipes: SavedRecipeRecord[],
-  savedRecipeId: string
+  savedRecipeId: string,
+  cookedAt: string = new Date().toISOString()
 ): SavedRecipeRecord[] =>
-  savedRecipes.map((entry) =>
-    entry.id === savedRecipeId
-      ? {
-          ...entry,
-          timesCooked: (entry.timesCooked ?? 0) + 1
-        }
-      : entry
-  );
+  savedRecipes.map((entry) => {
+    if (entry.id !== savedRecipeId) {
+      return entry;
+    }
+
+    const extras = entry.libraryExtras;
+    const lastCookedAt =
+      extras?.lastCookedAt && extras.lastCookedAt > cookedAt ? extras.lastCookedAt : cookedAt;
+
+    return {
+      ...entry,
+      libraryExtras: {
+        ...extras,
+        cookLog: [...(extras?.cookLog ?? []), { cookedAt }].slice(-MAX_LIBRARY_COOK_LOG_ENTRIES),
+        lastCookedAt
+      },
+      timesCooked: (entry.timesCooked ?? 0) + 1
+    };
+  });
 
 export const setSavedRecipeFavorite = (
   savedRecipes: SavedRecipeRecord[],
@@ -612,10 +659,14 @@ const textListOf = <T>(value: unknown, read: (entry: T) => unknown): string[] =>
  * Searchable fields for any record carrying a recipe (saved or shared). Stored cookbooks were
  * written by many app versions, so every field is read defensively.
  */
-export const recipeRecordSearchFields = (record: {
-  notes?: string | null | undefined;
-  recipe: SavedRecipeRecord["recipe"];
-}): RecipeSearchFields => {
+export const recipeRecordSearchFields = (
+  record: {
+    libraryExtras?: SavedRecipeLibraryExtras | undefined;
+    notes?: string | null | undefined;
+    recipe: SavedRecipeRecord["recipe"];
+  },
+  collectionNames?: ReadonlyMap<string, string>
+): RecipeSearchFields => {
   const recipe = record.recipe as Partial<SavedRecipeRecord["recipe"]> | undefined;
 
   return recipeSearchFields(
@@ -634,7 +685,14 @@ export const recipeRecordSearchFields = (record: {
       ),
       title: typeof recipe?.title === "string" ? recipe.title : ""
     },
-    { notes: typeof record.notes === "string" ? record.notes : null }
+    {
+      notes: typeof record.notes === "string" ? record.notes : null,
+      // Collection names count as tags, so "weeknight" finds the Weeknight collection too.
+      tags: [
+        ...textListOf<string>(record.libraryExtras?.tags, (tag) => tag),
+        ...textListOf<string>(record.libraryExtras?.collectionIds, (id) => collectionNames?.get(id))
+      ]
+    }
   );
 };
 
@@ -643,14 +701,17 @@ export const recipeRecordSearchFields = (record: {
  * memoizes it on `savedRecipes`) and query it on every keystroke.
  */
 export const buildSavedRecipeSearchIndex = (
-  savedRecipes: readonly SavedRecipeRecord[]
+  savedRecipes: readonly SavedRecipeRecord[],
+  collectionNames?: ReadonlyMap<string, string>
 ): RecipeSearchIndex<SavedRecipeRecord> =>
-  createRecipeSearchIndex(savedRecipes, recipeRecordSearchFields);
+  createRecipeSearchIndex(savedRecipes, (record) =>
+    recipeRecordSearchFields(record, collectionNames)
+  );
 
 export const buildSharedRecipeSearchIndex = (
   sharedRecipes: readonly SharedRecipe[]
 ): RecipeSearchIndex<SharedRecipe> =>
-  createRecipeSearchIndex(sharedRecipes, recipeRecordSearchFields);
+  createRecipeSearchIndex(sharedRecipes, (record) => recipeRecordSearchFields(record));
 
 /** Ranked matches; every query word must match (title > tags > ingredients > source/notes > steps). */
 export const searchSavedRecipeRecords = (
@@ -739,3 +800,7 @@ const stripUnpersistableSourceImages = (record: SavedRecipeRecord): SavedRecipeR
 
 export const serializeSavedRecipeRecords = (savedRecipes: SavedRecipeRecord[]): string =>
   JSON.stringify(savedRecipes.map(stripUnpersistableSourceImages));
+
+/** One recipe as the cookbook stores it (see cookbookStorage.ts). */
+export const serializeSavedRecipeRecord = (savedRecipe: SavedRecipeRecord): string =>
+  JSON.stringify(stripUnpersistableSourceImages(savedRecipe));

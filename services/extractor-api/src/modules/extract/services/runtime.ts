@@ -1,9 +1,12 @@
 import { extractorApiEnv } from "../../../config/env.js";
 import { getSharedManagedFallbackExtractor } from "../../admin/model-control.js";
 import { createExtractionResultCache } from "../cache/extraction-cache.js";
+import { createGeminiRecipeCompleter } from "../completion/gemini-recipe-completer.js";
 import { ExtractionCancelledError } from "../deadline.js";
 import { createGeminiVideoRecipeReader } from "../extractors/video/gemini-video-recipe-reader.js";
+import { createDailyVideoReadAllowance } from "../extractors/video/video-read-allowance.js";
 import { BrowserFetchError, HtmlFetchError } from "../fetchers/errors.js";
+import { isFacebookUrl, isInstagramUrl } from "../source-detection/detect-source-from-url.js";
 import { getDomainAdapter } from "../source-detection/domain-adapters.js";
 import { parseYouTubeVideoId } from "../source-detection/parse-youtube-video-id.js";
 import { validatePublicSourceUrl } from "../source-url-safety.js";
@@ -13,13 +16,19 @@ import {
 } from "../text-cleanup/gemini-recipe-text-cleaner.js";
 
 import type * as BrowserEscalation from "./browser-escalation.js";
+import type * as FacebookFetcher from "../fetchers/fetch-facebook-document.js";
+import type * as FacebookVideoFetcher from "../fetchers/fetch-facebook-video.js";
 import type * as HtmlFetcher from "../fetchers/fetch-html-document.js";
+import type * as InstagramFetcher from "../fetchers/fetch-instagram-document.js";
 import type * as TikTokFetcher from "../fetchers/fetch-tiktok-document.js";
 import type * as TikTokVideoFetcher from "../fetchers/fetch-tiktok-video.js";
 import type * as YouTubeFetcher from "../fetchers/fetch-youtube-document.js";
+import type * as PublicFetch from "../fetchers/public-fetch.js";
+import type * as CreatorSiteSearch from "../fetchers/search-creator-site.js";
 import type {
   BrowserFetcher,
   ExtractorRuntime,
+  FacebookVideoLocator,
   FetchResult,
   RecipeTextCleaner,
   SourceFetchOptions,
@@ -36,14 +45,24 @@ let sharedRuntime: ExtractorRuntime | null = null;
  * never fetch (cache hits, billing denials, unsupported links) skip them.
  */
 let htmlFetcherModule: Promise<typeof HtmlFetcher> | null = null;
+let publicFetchModule: Promise<typeof PublicFetch> | null = null;
 let browserEscalationModule: Promise<typeof BrowserEscalation> | null = null;
 let youTubeFetcherModule: Promise<typeof YouTubeFetcher> | null = null;
 let tikTokFetcherModule: Promise<typeof TikTokFetcher> | null = null;
 let tikTokVideoFetcherModule: Promise<typeof TikTokVideoFetcher> | null = null;
+let instagramFetcherModule: Promise<typeof InstagramFetcher> | null = null;
+let facebookFetcherModule: Promise<typeof FacebookFetcher> | null = null;
+let facebookVideoFetcherModule: Promise<typeof FacebookVideoFetcher> | null = null;
+let creatorSiteSearchModule: Promise<typeof CreatorSiteSearch> | null = null;
 
 const loadHtmlFetcher = () => {
   htmlFetcherModule ??= import("../fetchers/fetch-html-document.js");
   return htmlFetcherModule;
+};
+
+const loadPublicFetch = () => {
+  publicFetchModule ??= import("../fetchers/public-fetch.js");
+  return publicFetchModule;
 };
 
 const loadBrowserEscalation = () => {
@@ -56,14 +75,37 @@ const loadTikTokFetcher = () => {
   return tikTokFetcherModule;
 };
 
+const loadInstagramFetcher = () => {
+  instagramFetcherModule ??= import("../fetchers/fetch-instagram-document.js");
+  return instagramFetcherModule;
+};
+
+const loadFacebookFetcher = () => {
+  facebookFetcherModule ??= import("../fetchers/fetch-facebook-document.js");
+  return facebookFetcherModule;
+};
+
+const loadFacebookVideoFetcher = () => {
+  facebookVideoFetcherModule ??= import("../fetchers/fetch-facebook-video.js");
+  return facebookVideoFetcherModule;
+};
+
+const loadCreatorSiteSearch = () => {
+  creatorSiteSearchModule ??= import("../fetchers/search-creator-site.js");
+  return creatorSiteSearchModule;
+};
+
+/* A creator's site search gets this long at most; its result pages are fetched after it. */
+const creatorSiteSearchMaxMs = 5_000;
+
 const loadTikTokVideoFetcher = () => {
   tikTokVideoFetcherModule ??= import("../fetchers/fetch-tiktok-video.js");
   return tikTokVideoFetcherModule;
 };
 
-/* A TikTok video download gets this long at most; Gemini needs most of the request after it. */
+/* A social video download gets this long at most; Gemini needs most of the request after it. */
 const tikTokVideoDownloadMaxMs = 10_000;
-/* Larger videos go to Gemini through its Files API; this caps what is held in memory. */
+/* Larger videos go to Gemini through its Files API; this caps what is held in memory (TikTok and Facebook). */
 const tikTokVideoMaxBytes = 60 * 1024 * 1024;
 
 const loadYouTubeFetcher = () => {
@@ -152,8 +194,11 @@ export const createDefaultExtractorRuntime = (): ExtractorRuntime => {
       const blockSignalPatterns = getBlockSignalPatterns(url);
 
       try {
-        const { fetchHtmlDocument } = await loadHtmlFetcher();
-        const httpResult = await fetchHtmlDocument(url, fetchImplementation, {
+        const [{ fetchHtmlDocument }, { publicOnlyFetch }] = await Promise.all([
+          loadHtmlFetcher(),
+          loadPublicFetch()
+        ]);
+        const httpResult = await fetchHtmlDocument(url, publicOnlyFetch, {
           timeoutMs: deadline
             ? deadline.budgetMs(extractorApiEnv.FETCH_HTTP_TIMEOUT_MS)
             : extractorApiEnv.FETCH_HTTP_TIMEOUT_MS,
@@ -222,6 +267,29 @@ export const createDefaultExtractorRuntime = (): ExtractorRuntime => {
     },
     fetchSocialDocument: async (url: string, options?: SourceFetchOptions) => {
       const deadline = options?.deadline;
+
+      /* Instagram's caption is only on its embed page once a browser has loaded it. */
+      if (isInstagramUrl(url)) {
+        const { fetchInstagramDocument } = await loadInstagramFetcher();
+
+        return fetchInstagramDocument(url, (embedUrl) =>
+          fetchWithBrowser(embedUrl, options, undefined)
+        );
+      }
+
+      /* Facebook's public page head carries the caption; it is a plain request, no browser. */
+      if (isFacebookUrl(url)) {
+        const { fetchFacebookDocument } = await loadFacebookFetcher();
+
+        return fetchFacebookDocument(url, fetchImplementation, {
+          timeoutMs: deadline
+            ? deadline.budgetMs(extractorApiEnv.FETCH_HTTP_TIMEOUT_MS)
+            : extractorApiEnv.FETCH_HTTP_TIMEOUT_MS,
+          ...(deadline ? { signal: deadline.signal } : {}),
+          validateUrl: validatePublicSourceUrl
+        });
+      }
+
       const { fetchTikTokDocument } = await loadTikTokFetcher();
 
       return fetchTikTokDocument(url, fetchImplementation, {
@@ -250,12 +318,50 @@ export const createDefaultExtractorRuntime = (): ExtractorRuntime => {
         locator: options?.locator
       });
     },
+    fetchFacebookVideo: async (locator: FacebookVideoLocator, options?: SourceFetchOptions) => {
+      const deadline = options?.deadline;
+      const [{ fetchFacebookVideo }, { publicOnlyFetch }] = await Promise.all([
+        loadFacebookVideoFetcher(),
+        loadPublicFetch()
+      ]);
+
+      return fetchFacebookVideo(locator, publicOnlyFetch, {
+        timeoutMs: deadline
+          ? deadline.budgetMs(tikTokVideoDownloadMaxMs)
+          : tikTokVideoDownloadMaxMs,
+        maxBytes: tikTokVideoMaxBytes,
+        maxSeconds: extractorApiEnv.VIDEO_RECIPE_MAX_SECONDS,
+        ...(deadline ? { signal: deadline.signal } : {}),
+        validateUrl: validatePublicSourceUrl
+      });
+    },
+    searchCreatorSite: async (domain: string, query: string, options?: SourceFetchOptions) => {
+      const deadline = options?.deadline;
+      const [{ searchCreatorSite }, { publicOnlyFetch }] = await Promise.all([
+        loadCreatorSiteSearch(),
+        loadPublicFetch()
+      ]);
+
+      return searchCreatorSite(domain, query, publicOnlyFetch, {
+        timeoutMs: deadline ? deadline.budgetMs(creatorSiteSearchMaxMs) : creatorSiteSearchMaxMs,
+        ...(deadline ? { signal: deadline.signal } : {}),
+        validateUrl: validatePublicSourceUrl
+      });
+    },
     videoRecipeReader: createGeminiVideoRecipeReader({
       enabled: extractorApiEnv.VIDEO_RECIPE_READER_ENABLED,
       apiKey: extractorApiEnv.GEMINI_API_KEY,
       model: extractorApiEnv.VIDEO_RECIPE_MODEL,
       fetchImplementation,
       timeoutMs: extractorApiEnv.VIDEO_RECIPE_TIMEOUT_MS
+    }),
+    recipeCompleter: createGeminiRecipeCompleter({
+      apiKey: extractorApiEnv.GEMINI_API_KEY,
+      model: extractorApiEnv.RECIPE_COMPLETION_MODEL,
+      fetchImplementation
+    }),
+    videoReadAllowance: createDailyVideoReadAllowance({
+      dailyLimit: extractorApiEnv.VIDEO_RECIPE_DAILY_READ_LIMIT
     }),
     fallbackExtractor: getSharedManagedFallbackExtractor(fetchImplementation),
     recipeTextCleaner: createRecipeTextCleaner(),

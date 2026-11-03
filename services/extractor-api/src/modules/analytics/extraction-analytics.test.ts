@@ -2,11 +2,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getAuthenticatedUser: vi.fn(),
+  getUserById: vi.fn(),
   writeExtractionAnalyticsEvent: vi.fn<(event: AnalyticsExtractionEventInput) => Promise<void>>()
 }));
 
 vi.mock("../auth/auth-service.js", () => ({
-  getAuthenticatedUser: mocks.getAuthenticatedUser
+  getAuthenticatedUser: mocks.getAuthenticatedUser,
+  getUserById: mocks.getUserById
 }));
 
 vi.mock("./analytics-store.js", () => ({
@@ -92,5 +94,34 @@ describe("recordDurableExtractionAnalyticsEvent", () => {
       platform: "backend"
     });
     expect(typeof recordedEvent?.occurredAt).toBe("string");
+  });
+
+  it("links the event to a signed-in account that still exists", async () => {
+    mocks.getUserById.mockResolvedValue({ id: "user_1" });
+    mocks.writeExtractionAnalyticsEvent.mockResolvedValue(undefined);
+
+    await recordDurableExtractionAnalyticsEvent(
+      {},
+      { ...analyticsEvent, billing: { ...analyticsEvent.billing, accountUserId: "user_1" } }
+    );
+
+    expect(mocks.getUserById).toHaveBeenCalledWith("user_1");
+    expect(mocks.writeExtractionAnalyticsEvent.mock.calls[0]?.[0].accountUserHash).toMatch(
+      /^[a-f0-9]{64}$/u
+    );
+  });
+
+  it("drops the account link when the account was deleted while the extraction ran", async () => {
+    mocks.getUserById.mockResolvedValue(null);
+    mocks.writeExtractionAnalyticsEvent.mockResolvedValue(undefined);
+
+    await recordDurableExtractionAnalyticsEvent(
+      { "x-linkdish-client-id": "regular-client" },
+      { ...analyticsEvent, billing: { ...analyticsEvent.billing, accountUserId: "user_1" } }
+    );
+
+    const recordedEvent = mocks.writeExtractionAnalyticsEvent.mock.calls[0]?.[0];
+    expect(recordedEvent).toMatchObject({ anonymousId: "regular-client" });
+    expect(recordedEvent).not.toHaveProperty("accountUserHash");
   });
 });

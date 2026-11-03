@@ -7,6 +7,8 @@ import {
   authSessionResponseSchema,
   billingUsageResponseSchema,
   cancelInviteRequestSchema,
+  completeRecipeRequestSchema,
+  completeRecipeResponseSchema,
   createWebBillingCheckoutRequestSchema,
   createHouseholdResponseSchema,
   createInviteRequestSchema,
@@ -23,6 +25,9 @@ import {
   householdShoppingListResponseSchema,
   householdSummarySchema,
   logoutResponseSchema,
+  pullLibraryChangesResponseSchema,
+  pushLibraryChangesRequestSchema,
+  pushLibraryChangesResponseSchema,
   removeHouseholdMemberRequestSchema,
   requestLoginCodeRequestSchema,
   requestLoginCodeResponseSchema,
@@ -46,6 +51,8 @@ import {
   type AuthSessionResponse,
   type BillingUsageResponse,
   type CancelInviteRequest,
+  type CompleteRecipeRequest,
+  type CompleteRecipeResponse,
   type CreateWebBillingCheckoutRequest,
   type CreateHouseholdResponse,
   type CreateInviteRequest,
@@ -62,6 +69,9 @@ import {
   type HouseholdShoppingListResponse,
   type HouseholdSummary,
   type LogoutResponse,
+  type PullLibraryChangesResponse,
+  type PushLibraryChangesRequest,
+  type PushLibraryChangesResponse,
   type RemoveHouseholdMemberRequest,
   type RequestLoginCodeRequest,
   type RequestLoginCodeResponse,
@@ -164,6 +174,15 @@ export interface ExtractorApiClient {
     input: CancelInviteRequest,
     options?: RequestOptionsArgument
   ): Promise<HouseholdMutationResponse>;
+  /**
+   * AI fills a saved recipe's gaps (amounts a video never stated) on the person's request. Metered
+   * like a photo scan; the answer has /extract's shape, and its recipe's completion status is
+   * "ai_filled".
+   */
+  completeRecipe(
+    input: CompleteRecipeRequest,
+    options?: RequestOptionsArgument
+  ): Promise<CompleteRecipeResponse>;
   createWebBillingCheckout(
     input: CreateWebBillingCheckoutRequest,
     options?: RequestOptionsArgument
@@ -212,6 +231,19 @@ export interface ExtractorApiClient {
   getShoppingList(options?: RequestOptionsArgument): Promise<HouseholdShoppingListResponse>;
   leaveHousehold(options?: RequestOptionsArgument): Promise<HouseholdMutationResponse>;
   logout(options?: RequestOptionsArgument): Promise<LogoutResponse>;
+  /**
+   * The signed-in account's library changes after `since` (a cursor from an earlier pull; "0"
+   * for everything), one page at a time: pull again with the returned cursor while `hasMore`.
+   */
+  pullLibraryChanges(
+    since: string,
+    options?: RequestOptionsArgument
+  ): Promise<PullLibraryChangesResponse>;
+  /** Sends up to 25 changed library items; newer copies the API already holds come back. */
+  pushLibraryChanges(
+    input: PushLibraryChangesRequest,
+    options?: RequestOptionsArgument
+  ): Promise<PushLibraryChangesResponse>;
   removeHouseholdMember(
     input: RemoveHouseholdMemberRequest,
     options?: RequestOptionsArgument
@@ -599,6 +631,15 @@ export const createExtractorApiClient = (
         signal: callOptions?.signal
       });
     },
+    async completeRecipe(input, callOptions) {
+      return requestJson("/recipes/complete", {
+        body: validateInput(completeRecipeRequestSchema, input),
+        method: "POST",
+        responseSchema: completeRecipeResponseSchema,
+        timeoutMs: extractTimeoutMs,
+        signal: callOptions?.signal
+      });
+    },
     async extractRecipe(input, callOptions) {
       return requestJson("/extract", {
         body: validateInput(extractRecipeRequestSchema, input),
@@ -670,6 +711,20 @@ export const createExtractorApiClient = (
       return requestJson("/auth/logout", {
         method: "POST",
         responseSchema: logoutResponseSchema,
+        signal: callOptions?.signal
+      });
+    },
+    async pullLibraryChanges(since, callOptions) {
+      return requestJson(`/library/changes?since=${encodeURIComponent(since)}`, {
+        responseSchema: pullLibraryChangesResponseSchema,
+        signal: callOptions?.signal
+      });
+    },
+    async pushLibraryChanges(input, callOptions) {
+      return requestJson("/library/changes", {
+        body: validateInput(pushLibraryChangesRequestSchema, input),
+        method: "POST",
+        responseSchema: pushLibraryChangesResponseSchema,
         signal: callOptions?.signal
       });
     },

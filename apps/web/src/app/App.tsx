@@ -6,6 +6,7 @@ import { getAppRouteMeta } from "../components/app-route-meta";
 import { AppShell } from "../components/AppShell";
 import { ErrorBoundary } from "../components/ErrorBoundary";
 import { ToastProvider } from "../components/Toast";
+import { LibrarySyncHost } from "../features/cloud-sync/LibrarySyncHost";
 import { CommandCenter } from "../features/command-palette/CommandCenter";
 import { UpgradeSheetProvider } from "../features/upgrade/UpgradeSheet";
 import { formatDocumentTitle } from "../lib/use-document-title";
@@ -95,6 +96,7 @@ export const App: React.FC = () => {
         <RouteAnalytics />
         <ScrollManager />
         <RouteDocumentTitle />
+        <LibrarySyncHost />
         <ToastProvider>
           <UpgradeSheetProvider>
             <AppShell>

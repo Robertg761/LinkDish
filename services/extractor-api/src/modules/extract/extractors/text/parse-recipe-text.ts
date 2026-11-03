@@ -98,6 +98,12 @@ const sectionWordPattern =
 /* "Full recipe:", "Get the recipe here:", "Tasty Recipe:". */
 const recipeLabelPattern = /\brecipes?(?:\s+here)?\s*:?$/iu;
 const urlPattern = /https?:\/\/[^\s<>"')\]]+/giu;
+/* "1.2M views · 20K reactions", "345 likes, 12 comments": a video's counts, not an amount. */
+const engagementCount = String.raw`[\d.,]+\s?[KkMmBb]?\s+(?:views?|reactions?|likes?|comments?|shares?|plays?)\b`;
+const engagementLinePattern = new RegExp(
+  `^${engagementCount}(?:\\s*[·•,|]\\s*${engagementCount})*\\.?$`,
+  "iu"
+);
 const hashtagOnlyPattern = /^(?:[#@][\p{L}\p{N}_.]+[\s,]*)+$/u;
 const trailingHashtagsPattern = /(?:\s+[#@][\p{L}\p{N}_.]+)+\s*$/u;
 
@@ -205,6 +211,7 @@ const isNoiseLine = (rawLine: string, cleaned: string): boolean =>
   cleaned.length === 0 ||
   hashtagOnlyPattern.test(rawLine.trim()) ||
   promotionalLinePattern.test(cleaned) ||
+  engagementLinePattern.test(cleaned) ||
   /* "@Birds Eye": a tagged account. */
   /^@\p{L}/u.test(cleaned) ||
   /^\d{1,2}:\d{2}(?::\d{2})?\b/u.test(cleaned) ||

@@ -173,6 +173,6 @@ try {
     return error.message;
   })();
 
-  console.error(message);
+  console.error(`${message} [checked ${defaultBaseUrl}]`);
   process.exit(1);
 }

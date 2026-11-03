@@ -1,0 +1,16 @@
+# Extends gitleaks' default rules with allowlists for values that look like keys but are public.
+# Exact one-off findings live in .gitleaksignore instead.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "CocoaPods records a SHA-1 checksum of each public pod spec"
+paths = ['''apps/mobile/ios/Podfile\.lock''']
+
+[[allowlists]]
+description = "Clerk publishable keys are public client identifiers"
+regexes = ['''^pk_(test|live)_[A-Za-z0-9]+$''']
+
+[[allowlists]]
+description = "YouTube's public continuation token for a video's comments section (test fixture)"
+regexes = ['''^Eg0SC2NvbW1lbnRzLXNlY3Rpb24$''']

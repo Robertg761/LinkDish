@@ -9,6 +9,7 @@ nodeLinker: hoisted
 # are already present, so pnpm does not need to run them.
 ignoredBuiltDependencies:
   - "@clerk/shared"
+  - "@sentry/cli"
   - browser-tabs-lock
   - bufferutil
   - core-js

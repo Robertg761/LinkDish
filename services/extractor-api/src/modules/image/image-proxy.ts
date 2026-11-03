@@ -1,5 +1,6 @@
 import { lookup } from "node:dns/promises";
 
+import { publicOnlyFetch } from "../extract/fetchers/public-fetch.js";
 import { isPublicIpAddress, type ResolveHostname } from "../extract/source-url-safety.js";
 
 import type { FastifyInstance } from "fastify";
@@ -235,13 +236,9 @@ const readImageBody = async (response: Response): Promise<Buffer> => {
 };
 
 /*
- * Residual risk (accepted for Stage 1): the public-address check resolves DNS
- * separately from fetch(), so a rebinding attacker could answer the check with
- * a public IP and the fetch with a private one. On our serverless deployment
- * there is no reachable private network, IP-literal hosts are rejected
- * outright, and responses must pass image magic-byte sniffing, which bounds
- * the impact. Hardening path if deployment ever changes: pin the vetted
- * addresses by fetching through an undici Agent with a custom lookup.
+ * assertPublicImageUrl gives a clear rejection for private hosts, but the fetch resolves DNS
+ * again when it connects. The default fetch (publicOnlyFetch) refuses private addresses at
+ * connect time too, so a rebinding DNS server cannot swap in a private address between them.
  */
 const fetchImageBytes = async (
   sourceUrl: URL,
@@ -338,7 +335,7 @@ export const getProxiedImage = async (
   dependencies?: ImageProxyDependencies
 ): Promise<Buffer> => {
   const imageBytes = await fetchImageBytes(sourceUrl, {
-    fetchImplementation: dependencies?.fetchImplementation ?? fetch,
+    fetchImplementation: dependencies?.fetchImplementation ?? publicOnlyFetch,
     resolveHostname: dependencies?.resolveHostname ?? lookup
   });
 

@@ -21,6 +21,7 @@ import { useSavedRecipes } from "../../data/library-store";
 import { useDocumentTitle } from "../../lib/use-document-title";
 import { useMediaQuery } from "../../lib/use-media-query";
 import { getWebBillingTier, webBillingPlans, type WebBillingTier } from "../billing/web-billing";
+import { CloudSyncCard } from "../cloud-sync/CloudSyncCard";
 import { useImportUsageState } from "../extract/use-import-usage";
 import { getInitials } from "../household/use-household-summary";
 import { describeFreeQuota } from "../library/components/free-quota";
@@ -73,9 +74,9 @@ const SIGN_IN_BENEFITS: ReadonlyArray<{ icon: IconName; title: string; body: str
     title: "Cook together"
   },
   {
-    body: "Your cookbook stays on this device unless you share it with your household.",
-    icon: "shield-check",
-    title: "Private by default"
+    body: "Your cookbook syncs to your account, so it follows you between browsers and the app.",
+    icon: "cloud-upload",
+    title: "Your cookbook everywhere"
   }
 ];
 
@@ -717,7 +718,10 @@ const DeleteAccount: React.FC<{ user: AccountUser }> = ({ user }) => {
           You leave your household, and recipes you shared there are removed. If you own the
           household, it closes for everyone.
         </li>
-        <li>Recipes saved in this browser stay on this device.</li>
+        <li>
+          Your cookbook is deleted from LinkDish&apos;s servers. The recipes saved in this browser
+          stay on this device.
+        </li>
         <li>
           Deleting your account doesn&apos;t cancel a subscription. Cancel it first from{" "}
           <Link to="/pricing">Plans</Link> or the store you subscribed through.
@@ -828,6 +832,8 @@ export const AccountPage: React.FC = () => {
       </header>
 
       <PlanCardSection tier={tier} />
+
+      <CloudSyncCard />
 
       <section aria-labelledby="account-more-title" className="account-section">
         <h2 className="account-section-title" id="account-more-title">

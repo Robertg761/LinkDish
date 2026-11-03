@@ -9,6 +9,8 @@ export default tseslint.config(
       "**/node_modules/**",
       ".claude/**",
       "**/dist/**",
+      "apps/web/dist-e2e/**",
+      "apps/web/playwright-report/**",
       "**/.expo/**",
       "**/.vercel/**",
       "**/coverage/**",

@@ -125,6 +125,10 @@ vi.mock("react-native-safe-area-context", () => ({
 }));
 
 vi.mock("react-native", () => ({
+  AccessibilityInfo: {
+    isReduceMotionEnabled: () => Promise.resolve(false),
+    addEventListener: () => ({ remove: () => undefined })
+  },
   Alert: {
     alert: vi.fn()
   },
@@ -203,6 +207,14 @@ vi.mock("../billing/BillingContext", () => ({
 
 vi.mock("../saved-recipes/SavedRecipesContext", () => ({
   useSavedRecipes: () => savedRecipesMocks
+}));
+
+vi.mock("../backup/BackupCard", () => ({
+  BackupCard: () => null
+}));
+
+vi.mock("../saved-recipes/CookbookSyncCard", () => ({
+  CookbookSyncCard: () => null
 }));
 
 vi.mock("../../theme/tokens", () => ({

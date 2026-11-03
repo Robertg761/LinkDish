@@ -412,5 +412,12 @@
     "expectedMinimumOutcome": "success",
     "url": "https://www.youtube.com/watch?v=6jRjfsEN4n0",
     "expectedFinalUrlPattern": "youtube\\.com/watch\\?v=6jRjfsEN4n0"
+  },
+  {
+    "id": "facebook-reel-keto-cauliflower-frittata",
+    "kind": "facebook",
+    "expectedMinimumOutcome": "success",
+    "url": "https://www.facebook.com/reel/725554398033140",
+    "expectedFinalUrlPattern": "facebook\\.com/reel/725554398033140"
   }
 ]

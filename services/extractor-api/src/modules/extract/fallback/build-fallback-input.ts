@@ -68,7 +68,9 @@ const buildTextSourceSummary = (document: TextSourceDocument): string =>
   [
     document.origin === "tiktok"
       ? "The source is a TikTok video caption. Ignore hashtags, emoji, calls to follow or shop, and links; use only recipe content the caption actually states."
-      : "The source is recipe text the user pasted. Ignore anything that is not part of the recipe (greetings, links, sign-offs).",
+      : document.origin === "facebook"
+        ? "The source is a Facebook post caption. Ignore hashtags, emoji, calls to follow or shop, and links; use only recipe content the caption actually states."
+        : "The source is recipe text the user pasted. Ignore anything that is not part of the recipe (greetings, links, sign-offs).",
     ...(document.title ? [`Title: ${document.title}`] : []),
     ...(document.authorName ? [`Author: ${document.authorName}`] : []),
     `Text:\n${document.text}`

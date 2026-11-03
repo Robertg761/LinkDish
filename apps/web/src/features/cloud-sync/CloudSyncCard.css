@@ -1,0 +1,63 @@
+.cloud-sync {
+  gap: 10px;
+}
+
+.cloud-sync-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.cloud-sync-head h2 {
+  font-size: var(--text-title-sm);
+  line-height: var(--text-title-sm-line-height);
+}
+
+.cloud-sync-copy,
+.cloud-sync-confirm p {
+  color: var(--color-ink-muted);
+  font-size: var(--text-small);
+}
+
+.cloud-sync-status {
+  font-size: var(--text-small);
+  font-weight: 600;
+}
+
+.cloud-sync-status.is-error {
+  color: var(--color-danger);
+}
+
+.cloud-sync-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--color-danger-soft);
+  color: var(--color-on-danger-soft);
+  font-size: var(--text-small);
+}
+
+.cloud-sync-warning .icon {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.cloud-sync-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cloud-sync-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+@media (max-width: 520px) {
+  .cloud-sync-actions .btn {
+    flex: 1 1 100%;
+  }
+}

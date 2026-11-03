@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => {
     authorizeExtractionRequest: vi.fn(),
     checkExtractRateLimit: vi.fn(),
     extractRecipe: vi.fn(),
+    completeRecipe: vi.fn(),
     ipAddress: vi.fn(),
     recordDurableExtractionAnalyticsEvent: vi.fn(),
     RateLimitUnavailableError: MockRateLimitUnavailableError,
@@ -26,6 +27,12 @@ vi.mock("../services/extractor-api/src/modules/billing/enforce-billing.js", () =
 
 vi.mock("../services/extractor-api/src/modules/extract/services/extract-recipe.js", () => ({
   extractRecipe: mocks.extractRecipe
+}));
+
+vi.mock("../services/extractor-api/src/modules/extract/services/runtime.js", () => ({
+  getSharedExtractorRuntime: () => ({
+    recipeCompleter: { available: true, model: "gemini-test", complete: mocks.completeRecipe }
+  })
 }));
 
 vi.mock("../services/extractor-api/src/modules/analytics/extraction-analytics.js", () => ({
@@ -374,5 +381,68 @@ describe("Vercel extract adapter request identity", () => {
       undefined,
       expect.objectContaining({ cacheMode: "default" })
     );
+  });
+
+  it("routes the /recipes/complete rewrite to the completion pipeline, not the extractor", async () => {
+    const extractApi = await import("./extract.js");
+    const recipe = {
+      title: "Broccoli Cheddar Soup",
+      sourceUrl: "https://www.facebook.com/reel/28203918889307565/",
+      sourceType: "social",
+      ingredients: [{ text: "broccoli" }, { text: "cheddar cheese" }],
+      steps: [{ index: 1, text: "Simmer and melt in the cheese." }],
+      servings: null,
+      prepTimeMinutes: null,
+      cookTimeMinutes: null,
+      nutrition: null,
+      confidence: {
+        score: 0.6,
+        summary: "Read from the video.",
+        missingFields: [],
+        notes: [],
+        fieldProvenance: {
+          title: "llm",
+          ingredients: "llm",
+          steps: "llm",
+          servings: null,
+          prepTimeMinutes: null,
+          cookTimeMinutes: null,
+          nutrition: null
+        }
+      },
+      completion: { status: "missing_amounts", ingredients: ["broccoli", "cheddar cheese"] }
+    };
+    const completionRequest = (body: unknown) =>
+      new Request("https://api.linkdish.ca/api/extract?path=complete", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-linkdish-client-id": "free-user" },
+        body: JSON.stringify(body)
+      });
+
+    const completed = {
+      ...recipe,
+      ingredients: [{ text: "3 cups broccoli" }, { text: "8 oz cheddar cheese" }],
+      completion: {
+        status: "ai_filled",
+        ingredients: ["broccoli", "cheddar cheese"],
+        filledAt: "2026-11-03T12:00:00.000Z"
+      }
+    };
+    mocks.completeRecipe.mockResolvedValue(completed);
+
+    const invalid = await extractApi.POST(completionRequest({ recipe: { title: "" } }));
+    const response = await extractApi.POST(completionRequest({ recipe }));
+
+    expect(invalid.status).toBe(400);
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      status: "success",
+      recipe: { completion: { status: "ai_filled" } }
+    });
+    expect(mocks.checkExtractRateLimit).toHaveBeenCalledTimes(2);
+    expect(mocks.authorizeExtractionRequest).toHaveBeenCalledWith(expect.any(Headers), "fallback", {
+      remoteAddress: "unknown"
+    });
+    expect(mocks.extractRecipe).not.toHaveBeenCalled();
   });
 });

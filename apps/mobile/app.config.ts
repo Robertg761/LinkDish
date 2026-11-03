@@ -5,6 +5,7 @@ import {
   withAndroidManifest,
   withAppBuildGradle,
   withDangerousMod,
+  withGradleProperties,
   type ConfigPlugin
 } from "expo/config-plugins";
 
@@ -118,10 +119,27 @@ const withAndroidUnrestrictedOrientation: ConfigPlugin = (config) =>
     return modConfig;
   });
 
-const appVersion = getEnvValue("LINKDISH_APP_VERSION") ?? "2.0.6";
-const iosBuildNumber = getEnvValue("LINKDISH_IOS_BUILD_NUMBER") ?? "34";
+/**
+ * AsyncStorage's SQLite database on Android is capped at 6 MB by default, shared by every key
+ * (the cookbook, shopping list, sync state). Raised so large cookbooks keep saving.
+ */
+const ASYNC_STORAGE_DB_SIZE_MB = "64";
+
+const withAndroidAsyncStorageSize: ConfigPlugin = (config) =>
+  withGradleProperties(config, (modConfig) => {
+    const key = "AsyncStorage_db_size_in_MB";
+    modConfig.modResults = [
+      ...modConfig.modResults.filter((entry) => entry.type !== "property" || entry.key !== key),
+      { type: "property", key, value: ASYNC_STORAGE_DB_SIZE_MB }
+    ];
+
+    return modConfig;
+  });
+
+const appVersion = getEnvValue("LINKDISH_APP_VERSION") ?? "2.2.2";
+const iosBuildNumber = getEnvValue("LINKDISH_IOS_BUILD_NUMBER") ?? "35";
 const androidVersionCode = Number.parseInt(
-  getEnvValue("LINKDISH_ANDROID_VERSION_CODE") ?? "30",
+  getEnvValue("LINKDISH_ANDROID_VERSION_CODE") ?? "35",
   10
 );
 const applicationId = getEnvValue("LINKDISH_APPLICATION_ID") ?? "com.linkdish.app";
@@ -188,7 +206,8 @@ const config: ExpoConfig = {
       "expo-splash-screen",
       {
         backgroundColor: "#f4efe7",
-        image: "./assets/splash-wordmark.png",
+        image: "./assets/splash-wordmark-trimmed.png",
+        imageWidth: 180,
         resizeMode: "contain"
       }
     ],
@@ -207,16 +226,20 @@ const config: ExpoConfig = {
         scheme: "linkdish"
       }
     ],
-    "@clerk/expo"
+    "@clerk/expo",
+    "@clerk/expo-google-signin",
+    "./plugins/withSentrySourceMapUpload"
   ],
   experiments: {
     typedRoutes: true
   },
   android: androidConfig,
   ios: {
+    appleTeamId: "73UT6LC439",
     bundleIdentifier: applicationId,
     buildNumber: iosBuildNumber,
     supportsTablet: false,
+    usesAppleSignIn: true,
     config: {
       usesNonExemptEncryption: false
     }
@@ -238,6 +261,6 @@ const config: ExpoConfig = {
   }
 };
 
-export default withAndroidUnrestrictedOrientation(
-  withAndroidDialogTheme(withAndroidDebugIdentity(config))
+export default withAndroidAsyncStorageSize(
+  withAndroidUnrestrictedOrientation(withAndroidDialogTheme(withAndroidDebugIdentity(config)))
 );

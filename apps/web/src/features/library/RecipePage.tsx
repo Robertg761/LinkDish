@@ -1,4 +1,4 @@
-import { recipeToPlainText } from "@linkdish/recipe-domain";
+import { getRecipeCompletionChanges, recipeToPlainText } from "@linkdish/recipe-domain";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 
@@ -40,6 +40,10 @@ import { useRecipeMenuExtras } from "../recipe-view/recipe-menu-extras";
 import { useRecipeScaling } from "../recipe-view/recipe-scaling";
 import { getRecipeSourceInfo } from "../recipe-view/recipe-source";
 import { RecipeActionBar } from "../recipe-view/RecipeActionBar";
+import {
+  RecipeCompletionBanner,
+  withoutCompletionWarnings
+} from "../recipe-view/RecipeCompletionBanner";
 import { RecipeEditorSheet } from "../recipe-view/RecipeEditorSheet";
 import { RecipeView } from "../recipe-view/RecipeView";
 import { useIngredientChecks } from "../recipe-view/use-ingredient-checks";
@@ -455,6 +459,13 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
     kind: "delete-synced" | "unshare";
   } | null>(null);
   const [busy, setBusy] = useState<"delete" | "duplicate" | "sync" | "share-card" | null>(null);
+  /** AI is filling the recipe's missing amounts (see handleFillWithAi). */
+  const [filling, setFilling] = useState(false);
+  /* The recipe as of the latest render, for a fill that finishes after an edit. */
+  const latestRecipeRef = useRef(recipe);
+  useEffect(() => {
+    latestRecipeRef.current = recipe;
+  }, [recipe]);
   // The sheet goes by its account's household: another account signing in or out never sees it,
   // not even for a render (this screen stays up for a cookbook recipe), and it is closed for good.
   const shoppingSheet = shopping?.account === account ? shopping : null;
@@ -897,6 +908,89 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
     }
   };
 
+  /*
+   * A recipe read from a video that never said how much of anything to use: AI estimates the
+   * amounts and fills out the steps, and the result replaces the recipe's ingredients and method.
+   * A cookbook recipe can be put back with Undo; a Family recipe is updated for the household.
+   */
+  const handleFillWithAi = async () => {
+    if (filling) {
+      return;
+    }
+
+    const filledFor = account;
+    const before = recipe;
+    setFilling(true);
+
+    try {
+      const response = await asAccount(filledFor, () =>
+        apiClient.completeRecipe({ recipe: before })
+      );
+
+      if (!isCurrentAccount(filledFor)) {
+        return;
+      }
+
+      if (response.status !== "success") {
+        const planLimited = response.status === "failure" && response.reason === "plan_limit";
+
+        if (!(planLimited && requestUpgradeSheet("import_limit"))) {
+          showToast({ icon: "alert-circle", message: response.userMessage, tone: "danger" });
+        }
+
+        return;
+      }
+
+      /* Only the completion's fields: an edit saved while AI was answering is kept. */
+      const changes = getRecipeCompletionChanges(response.recipe);
+      const filledMessage = "Filled in with AI. Check the amounts before you cook.";
+
+      if (shared && props.kind === "shared") {
+        const updated = await asAccount(filledFor, () =>
+          apiClient.updateSharedRecipe(shared.id, {
+            recipe: { ...latestRecipeRef.current, ...changes }
+          })
+        );
+
+        if (isCurrentAccount(filledFor)) {
+          props.onSharedChange(updated.recipe);
+          showToast({ icon: "check-circle", message: filledMessage, tone: "success" });
+        }
+
+        return;
+      }
+
+      const updated = await updateSavedRecipe(record.id, { recipe: changes });
+
+      if (!updated) {
+        throw new Error("This saved recipe is no longer available.");
+      }
+
+      showToast({
+        action: {
+          label: "Undo",
+          onClick: () =>
+            void updateSavedRecipe(record.id, {
+              recipe: getRecipeCompletionChanges(before)
+            }).catch(() => undefined)
+        },
+        icon: "check-circle",
+        message: filledMessage,
+        tone: "success"
+      });
+    } catch (error) {
+      if (!isAccountChangedError(error)) {
+        showToast({
+          icon: "alert-circle",
+          message: "LinkDish couldn’t fill in this recipe just now. Please try again.",
+          tone: "danger"
+        });
+      }
+    } finally {
+      setFilling(false);
+    }
+  };
+
   const handleToggleFavorite = () => {
     void toggleFavorite(record.id).catch(() =>
       showToast({ message: "That didn’t save. Please try again.", tone: "danger" })
@@ -1066,6 +1160,13 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
       ) : null}
 
       <RecipeView
+        banner={
+          <RecipeCompletionBanner
+            completion={recipe.completion}
+            filling={filling}
+            onFill={canEdit ? () => void handleFillWithAi() : undefined}
+          />
+        }
         checks={checks}
         heroActions={
           isDesktop ? (
@@ -1099,7 +1200,7 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
         tags={record.tags}
         timerContext={timerContext}
         timesCooked={record.timesCooked}
-        warnings={record.extraction.warnings}
+        warnings={withoutCompletionWarnings(record.extraction.warnings, recipe.completion)}
       />
 
       {!isDesktop ? (

@@ -122,7 +122,7 @@
         <p class="page-lede">
           What LinkDish handles, why it is needed, where it goes, and the choices you have.
         </p>
-        <p class="page-meta">Last updated · October 20, 2026</p>
+        <p class="page-meta">Last updated · October 26, 2026</p>
       </section>
 
       <div class="legal-layout">
@@ -194,6 +194,13 @@
               error summaries.
             </li>
             <li>
+              In the Android app, crash and error reports sent to Sentry when the app crashes or
+              stops responding: the error and where in the app code it happened, recent app events,
+              the app version, and the device model and operating system version. LinkDish does not
+              attach your account details to these reports, leaves out console logs, and removes
+              query strings from web addresses in them.
+            </li>
+            <li>
               On the linkdish.ca website only, page-view statistics collected by Plausible
               Analytics: the page visited, the referring site, browser, operating system, device
               type, and country. Plausible does not set cookies and, according to its
@@ -220,8 +227,11 @@
             </li>
             <li>
               Personal saved recipes are stored on your device so you can reopen them later inside
-              the app. Free accounts can keep up to 15 personal recipes; paid plans remove that save
-              limit.
+              the app. When you're signed in, your cookbook (saved recipes with your notes,
+              favorites, tags, ratings, collections, and cook log) is also stored by LinkDish's
+              backend with your account so it stays in sync on every device where you sign in.
+              Photos you scanned to import a recipe stay on the device. Free accounts can keep up to
+              15 personal recipes on a device; paid plans remove that save limit.
             </li>
             <li>
               Shared Family recipes are stored by LinkDish's backend so active household members can
@@ -285,18 +295,20 @@
 
           <h2 id="storage">Data storage</h2>
           <p>
-            Personal recipes you save are stored locally on your device. Shared Family recipes and
+            Personal recipes you save are stored locally on your device and, when you're signed in,
+            with your account on LinkDish's backend so they sync between your devices. Shared
+            Family recipes and
             their notes are stored by LinkDish's backend for household access. Extracted recipe data
             may also pass through LinkDish's backend service in order to produce results and keep
             the service running reliably. The RevenueCat app user ID is stored on your device and
             may be stored by LinkDish's backend for quota checks and by RevenueCat for purchase and
             entitlement management. Mobile session tokens use operating-system-backed secure
             storage; the web app uses browser storage needed to keep you signed in. Server-side
-            account, session, external sign-in identity, invite, household, and shared recipe
-            records are stored by LinkDish's backend. iOS notification list records are stored by
+            account, session, external sign-in identity, synced cookbook, invite, household, and
+            shared recipe records are stored by LinkDish's backend. iOS notification list records are stored by
             LinkDish's backend. First-party analytics records are stored by LinkDish's backend using
-            anonymous or hashed identifiers. Website page-view statistics are processed and stored
-            in aggregate by Plausible Analytics.
+            anonymous or hashed identifiers. Android crash reports are processed and stored by Sentry. Website page-view statistics
+            are processed and stored in aggregate by Plausible Analytics.
           </p>
 
           <h2 id="choices">Your choices</h2>
@@ -314,9 +326,10 @@
           </p>
           <p>
             If you create a LinkDish account, you can delete it from Account in the app. Account
-            deletion removes server-side account, household, and shared Family recipe records that
-            belong to the account, but it does not cancel App Store, Google Play, or web
-            subscriptions. Local saved recipes remain on your device.
+            deletion removes server-side account, synced cookbook, household, and shared Family
+            recipe records that belong to the account, and the analytics records linked to the
+            account, but it does not cancel App Store, Google Play, or web subscriptions. Local saved
+            recipes remain on your device.
           </p>
           <p>
             If you joined the iOS notification list and want to be removed, or if you cannot access

@@ -2,16 +2,22 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { AppButton, AppSurface, AppText } from "@linkdish/ui";
 import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Animated, StyleSheet, View } from "react-native";
+import { Animated, StyleSheet, View } from "react-native";
 
 import { trackMobileEvent } from "../src/analytics/client";
 import { useOptionalUpgradeMoment } from "../src/features/billing/UpgradeMomentContext";
+import { ExtractionAnimation } from "../src/features/recipe-intake/components/ExtractionAnimation";
 import { createPendingImageImport } from "../src/features/recipe-intake/pendingImageImports";
 import { prepareSharedImageImport } from "../src/features/recipe-intake/sharedImageImport";
 import { getSharedImportTarget } from "../src/features/recipe-intake/sharedImportTarget";
 import { extractUrlFromSharedText } from "../src/features/recipe-intake/sharedText";
+import {
+  createPendingTextImport,
+  getTextInputProblem
+} from "../src/features/recipe-intake/textImport";
 import { useRecipeExtraction } from "../src/features/recipe-results/hooks/useRecipeExtraction";
 import { useSavedRecipes } from "../src/features/saved-recipes/SavedRecipesContext";
+import { useReduceMotion } from "../src/hooks/useReduceMotion";
 import { EXTRACTION_ERROR_LINES, selectFlavorCopyLine } from "../src/theme/flavorCopy";
 import { appColors, appSpacing } from "../src/theme/tokens";
 
@@ -30,11 +36,16 @@ const readFirstParam = (value: string | string[] | undefined): string | undefine
   Array.isArray(value) ? value[0] : value;
 
 const LoadingCopy = () => {
+  const reduceMotion = useReduceMotion();
   const [copyIndex, setCopyIndex] = useState(0);
   const copyProgress = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     const timer = setInterval(() => {
+      if (reduceMotion) {
+        setCopyIndex((current) => (current + 1) % EXTRACTION_LOADING_COPY.length);
+        return;
+      }
       Animated.timing(copyProgress, {
         duration: EXTRACTION_COPY_SWAP_MS,
         toValue: 1,
@@ -58,7 +69,7 @@ const LoadingCopy = () => {
       clearInterval(timer);
       copyProgress.stopAnimation();
     };
-  }, [copyProgress]);
+  }, [copyProgress, reduceMotion]);
 
   return (
     <Animated.View
@@ -102,6 +113,14 @@ export default function ImportProgressScreen() {
     const textParam = readFirstParam(params.text);
     return urlParam ?? extractUrlFromSharedText(textParam);
   }, [params.text, params.url]);
+  // Shared text with no link in it (a note, a message): read it as recipe text.
+  const sharedRecipeText = useMemo(() => {
+    const textParam = readFirstParam(params.text);
+    return !sharedUrl && !sharedImageUri && textParam && !getTextInputProblem(textParam)
+      ? textParam
+      : undefined;
+  }, [params.text, sharedImageUri, sharedUrl]);
+  const routedTextRef = useRef<string | undefined>(undefined);
   const { getSavedRecipeBySourceUrl, hasLoadedSavedRecipes } = useSavedRecipes();
   const importTarget = getSharedImportTarget({
     findSavedRecipeId: (candidateUrl) => getSavedRecipeBySourceUrl(candidateUrl)?.id,
@@ -117,6 +136,22 @@ export default function ImportProgressScreen() {
       routeOrScreen: "import-progress"
     }
   );
+
+  useEffect(() => {
+    if (!sharedRecipeText || routedTextRef.current === sharedRecipeText) {
+      return;
+    }
+
+    routedTextRef.current = sharedRecipeText;
+    const pendingImport = createPendingTextImport(sharedRecipeText);
+    router.replace({
+      pathname: "/recipe",
+      params: {
+        textImportId: pendingImport.id,
+        url: pendingImport.sourceUrl
+      }
+    });
+  }, [sharedRecipeText]);
 
   useEffect(() => {
     if (savedRecipeIdForShare) {
@@ -217,12 +252,11 @@ export default function ImportProgressScreen() {
     <View style={styles.screen}>
       <AppSurface style={styles.card}>
         {isPreparingSharedImage ||
+        sharedRecipeText ||
         ((extraction.state.state === "loading" || extraction.state.state === "empty") &&
           sharedUrl) ? (
           <>
-            <View style={styles.iconWrap}>
-              <ActivityIndicator color={appColors.accent} />
-            </View>
+            <ExtractionAnimation />
             <View style={styles.copy}>
               <AppText style={styles.title} variant="headline">
                 Plating...
@@ -234,7 +268,7 @@ export default function ImportProgressScreen() {
 
         {sharedImageError ||
         extraction.state.state === "failure" ||
-        (!sharedUrl && !sharedImageUri) ? (
+        (!sharedUrl && !sharedImageUri && !sharedRecipeText) ? (
           <>
             <View style={styles.iconWrap}>
               <MaterialCommunityIcons

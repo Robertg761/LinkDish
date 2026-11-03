@@ -493,7 +493,8 @@ export async function processImportQueueItem(
 
     const problem = describeImportFailure(response, {
       kind: item.url ? "url" : "text",
-      plan: tier
+      plan: tier,
+      sourceUrl: item.url
     });
 
     if (problem.isPlanLimit) {

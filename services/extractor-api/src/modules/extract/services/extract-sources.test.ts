@@ -568,18 +568,632 @@ describe("TikTok captions", () => {
     expect(response.status).toBe("success");
   });
 
-  it("stays unsupported for runtimes without a caption reader, and for Instagram", async () => {
+  it("stays unsupported for runtimes without a caption reader", async () => {
     const withoutReader = await extractRecipe(
       { url: tiktokUrl, attempt: "primary" },
       createRuntime()
     );
-    const instagram = await extractRecipe(
-      { url: "https://www.instagram.com/reel/abc123", attempt: "primary" },
-      createRuntime({ fetchSocialDocument: () => Promise.resolve(tiktokDocument()) })
-    );
 
     expect(withoutReader.response).toMatchObject({ reason: "unsupported_source" });
-    expect(instagram.response).toMatchObject({ reason: "unsupported_source" });
+  });
+});
+
+describe("Instagram captions", () => {
+  const reelUrl = "https://www.instagram.com/reel/DAbc123xyz/?igsh=share";
+  const postUrl = "https://www.instagram.com/reel/DAbc123xyz/";
+  const instagramDocument = (
+    text = tiktokCaption,
+    overrides: Partial<TextSourceDocument> = {}
+  ): TextSourceDocument => ({
+    kind: "text",
+    url: postUrl,
+    origin: "instagram",
+    text,
+    title: null,
+    authorName: "cookcreator",
+    thumbnailUrl: "https://scontent.cdninstagram.com/v/t51/cover.jpg",
+    isVideo: true,
+    ...overrides
+  });
+
+  it("reads a post's caption without the LLM, waiting for billing before the render", async () => {
+    const extract = vi.fn(() => Promise.resolve(llmCandidate()));
+    const fetchSocialDocument = vi.fn(async (_url: string, options?: SourceFetchOptions) => {
+      await options?.awaitAuthorized?.();
+      return instagramDocument();
+    });
+    const runtime = createRuntime({
+      fetchSocialDocument,
+      fallbackExtractor: fallbackExtractor(extract)
+    });
+
+    const { response } = await extractRecipe({ url: reelUrl, attempt: "fallback" }, runtime);
+
+    expect(fetchSocialDocument).toHaveBeenCalledWith(reelUrl, expect.anything());
+    expect(extract).not.toHaveBeenCalled();
+    expect(response).toMatchObject({
+      status: "success",
+      recipe: {
+        title: "Easy chili",
+        sourceUrl: postUrl,
+        siteName: "Instagram",
+        author: "cookcreator",
+        videoUrl: postUrl,
+        image: { url: "https://scontent.cdninstagram.com/v/t51/cover.jpg" }
+      },
+      extraction: { sourceType: "social" }
+    });
+  });
+
+  it("does not render the post when billing denies the import", async () => {
+    const fetchSocialDocument = vi.fn(async (_url: string, options?: SourceFetchOptions) => {
+      await options?.awaitAuthorized?.();
+      return instagramDocument();
+    });
+
+    await expect(
+      extractRecipe({ url: reelUrl, attempt: "primary" }, createRuntime({ fetchSocialDocument }), {
+        authorization: Promise.resolve(false)
+      })
+    ).rejects.toThrow("Billing did not authorize this extraction.");
+  });
+
+  it("keeps a reel's ingredients-only caption, but not a photo post's", async () => {
+    const ingredientsOnly = [
+      "Garlic butter noodles",
+      "Ingredients:",
+      "200 g noodles",
+      "3 tbsp butter",
+      "4 cloves garlic"
+    ].join("\n");
+    const reel = await extractRecipe(
+      { url: reelUrl, attempt: "primary" },
+      createRuntime({
+        fetchSocialDocument: () => Promise.resolve(instagramDocument(ingredientsOnly))
+      })
+    );
+    const photo = await extractRecipe(
+      { url: "https://www.instagram.com/p/DAbc123xyz/", attempt: "primary" },
+      createRuntime({
+        fetchSocialDocument: () =>
+          Promise.resolve(
+            instagramDocument(ingredientsOnly, {
+              url: "https://www.instagram.com/p/DAbc123xyz/",
+              isVideo: false
+            })
+          )
+      })
+    );
+
+    expect(reel.response).toMatchObject({
+      status: "success",
+      recipe: { steps: [{ index: 1, text: "Follow the video for the method." }] }
+    });
+    expect(photo.response).toMatchObject({
+      status: "failure",
+      reason: "parse_failed",
+      userMessage:
+        "That post's caption doesn't include a written recipe. Try the recipe's website instead."
+    });
+  });
+
+  it("explains private posts and posts Instagram would not show", async () => {
+    const removed = await extractRecipe(
+      { url: reelUrl, attempt: "primary" },
+      createRuntime({
+        fetchSocialDocument: () => Promise.reject(new SocialFetchError("removed", "not_found", 200))
+      })
+    );
+    const blocked = await extractRecipe(
+      { url: reelUrl, attempt: "primary" },
+      createRuntime({
+        fetchSocialDocument: () => Promise.reject(new SocialFetchError("login", "blocked"))
+      })
+    );
+
+    expect(removed.response).toMatchObject({
+      reason: "parse_failed",
+      userMessage: "That post is private, removed or not available to read."
+    });
+    expect(blocked.response).toMatchObject({
+      reason: "source_blocked",
+      userMessage: "Instagram did not let LinkDish read that post right now."
+    });
+  });
+
+  it("never sends a reel to the video reader", async () => {
+    const read = vi.fn<VideoRecipeReader["read"]>();
+    const fetchSocialVideo = vi.fn<NonNullable<ExtractorRuntime["fetchSocialVideo"]>>();
+    const runtime = createRuntime({
+      fetchSocialDocument: () => Promise.resolve(instagramDocument("so good 😍 #dinner")),
+      fetchSocialVideo,
+      videoRecipeReader: { available: true, model: "gemini-test", read }
+    });
+
+    const { response } = await extractRecipe({ url: reelUrl, attempt: "primary" }, runtime);
+
+    expect(response).toMatchObject({ status: "failure", reason: "parse_failed" });
+    expect(fetchSocialVideo).not.toHaveBeenCalled();
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it("rejects Instagram links that are not a post without fetching them", async () => {
+    const fetchSocialDocument = vi.fn(() => Promise.resolve(instagramDocument()));
+
+    const { response } = await extractRecipe(
+      { url: "https://www.instagram.com/cookcreator/", attempt: "primary" },
+      createRuntime({ fetchSocialDocument })
+    );
+
+    expect(response).toMatchObject({
+      reason: "unsupported_source",
+      userMessage:
+        "That Instagram link isn't a post. Share a single post or reel, or paste the recipe instead."
+    });
+    expect(fetchSocialDocument).not.toHaveBeenCalled();
+  });
+});
+
+describe("Facebook posts and reels", () => {
+  const reelPageUrl =
+    "https://www.facebook.com/dinnerwithdana/videos/lemon-chicken/900000000000001/";
+  const postPageUrl =
+    "https://www.facebook.com/WeeknightPastaClub/posts/creamy-pasta/122200000000000002/";
+  const recipeUrl = "https://fixtures.linkdish.test/recipe-jsonld";
+  const fullCaption = [
+    "Lemon garlic chicken 🍋",
+    "Ingredients:",
+    "4 chicken thighs",
+    "2 tbsp olive oil",
+    "3 cloves garlic",
+    "Method:",
+    "1. Season the chicken.",
+    "2. Sear it in the oil, add the garlic and roast for 25 minutes."
+  ].join("\n");
+  const cutCaption = `${fullCaption.slice(0, 120)}...`;
+  const facebookDocument = (
+    text = fullCaption,
+    overrides: Partial<TextSourceDocument> = {}
+  ): TextSourceDocument => ({
+    kind: "text",
+    url: reelPageUrl,
+    origin: "facebook",
+    text,
+    title: null,
+    authorName: "Dinner with Dana",
+    thumbnailUrl: "https://scontent.xx.fbcdn.net/v/t15/cover.jpg",
+    isVideo: true,
+    captionTruncated: false,
+    linkedUrls: [],
+    ...overrides
+  });
+
+  it("reads a reel's caption without the LLM, and does not cache or render it", async () => {
+    const extract = vi.fn(() => Promise.resolve(llmCandidate()));
+    const fetchSocialDocument = vi.fn(() => Promise.resolve(facebookDocument()));
+    const fetchHtmlDocument = vi.fn((url: string) =>
+      Promise.resolve(htmlResult(url, recipeJsonLd))
+    );
+    const runtime = createRuntime({
+      fetchSocialDocument,
+      fetchHtmlDocument,
+      fallbackExtractor: fallbackExtractor(extract)
+    });
+    const requestedUrl = "https://www.facebook.com/reel/900000000000001/";
+
+    const { response } = await extractRecipe({ url: requestedUrl, attempt: "primary" }, runtime);
+
+    expect(fetchSocialDocument).toHaveBeenCalledWith(requestedUrl, expect.anything());
+    expect(fetchHtmlDocument).not.toHaveBeenCalled();
+    expect(extract).not.toHaveBeenCalled();
+    expect(response).toMatchObject({
+      status: "success",
+      recipe: {
+        title: "Lemon garlic chicken",
+        sourceUrl: reelPageUrl,
+        siteName: "Facebook",
+        author: "Dinner with Dana",
+        videoUrl: reelPageUrl,
+        image: { url: "https://scontent.xx.fbcdn.net/v/t15/cover.jpg" },
+        ingredients: [
+          { text: "4 chicken thighs" },
+          { text: "2 tbsp olive oil" },
+          { text: "3 cloves garlic" }
+        ]
+      },
+      extraction: { sourceType: "social", fetchMode: "http" }
+    });
+  });
+
+  it("reads every Facebook link form through the Facebook path", async () => {
+    for (const url of [
+      "https://m.facebook.com/reel/900000000000001/",
+      "https://www.facebook.com/share/r/1AbCdEfGhI/",
+      "https://fb.watch/xYz_12AbC/",
+      "https://fb.me/abc123XYZ",
+      "https://fb.com/reel/900000000000001",
+      "https://web.facebook.com/watch/?v=900000000000001"
+    ]) {
+      const fetchSocialDocument = vi.fn(() => Promise.resolve(facebookDocument()));
+      const { response } = await extractRecipe(
+        { url, attempt: "primary" },
+        createRuntime({ fetchSocialDocument })
+      );
+
+      expect(fetchSocialDocument).toHaveBeenCalledWith(url, expect.anything());
+      expect(response.status).toBe("success");
+    }
+  });
+
+  it("does not turn a cut caption into a recipe, and says Facebook only shares part of it", async () => {
+    const fetchHtmlDocument = vi.fn((url: string) =>
+      Promise.resolve(htmlResult(url, recipeJsonLd))
+    );
+    const { response } = await extractRecipe(
+      { url: postPageUrl, attempt: "primary" },
+      createRuntime({
+        fetchSocialDocument: () =>
+          Promise.resolve(
+            facebookDocument(cutCaption, { url: postPageUrl, captionTruncated: true })
+          ),
+        fetchHtmlDocument
+      })
+    );
+
+    expect(response).toMatchObject({
+      status: "failure",
+      reason: "source_blocked",
+      userMessage:
+        "Facebook only shares part of that post's text with other apps, so LinkDish can't read the whole recipe. Paste the full recipe text or import a screenshot of the post instead.",
+      recovery: { retryable: false, allowFallback: false }
+    });
+    expect(fetchHtmlDocument).not.toHaveBeenCalled();
+  });
+
+  it("follows a recipe link in the post's page when the caption is cut, validating it first", async () => {
+    const fetchHtmlDocument = vi.fn((url: string) =>
+      Promise.resolve(htmlResult(url, recipeJsonLd))
+    );
+    const validateSourceUrl = vi.fn(() => Promise.resolve({ safe: true as const }));
+    const { response } = await extractRecipe(
+      { url: postPageUrl, attempt: "primary" },
+      createRuntime({
+        fetchSocialDocument: () =>
+          Promise.resolve(
+            facebookDocument(cutCaption, {
+              url: postPageUrl,
+              isVideo: false,
+              captionTruncated: true,
+              linkedUrls: ["https://www.spotify.com/track/1", `${recipeUrl}?fbclid=IwAR0`]
+            })
+          ),
+        fetchHtmlDocument,
+        validateSourceUrl
+      })
+    );
+
+    expect(fetchHtmlDocument.mock.calls.map(([url]) => url)).toEqual([`${recipeUrl}?fbclid=IwAR0`]);
+    expect(validateSourceUrl).toHaveBeenCalledWith(`${recipeUrl}?fbclid=IwAR0`);
+    expect(response).toMatchObject({
+      status: "success",
+      recipe: { title: "One-Pan Tomato Pasta" },
+      extraction: { strategy: "recipe-schema" }
+    });
+    expect(response.status === "success" && response.recipe.videoUrl).toBeFalsy();
+  });
+
+  it("follows a recipe link written in the caption, keeping the reel as the video", async () => {
+    const fetchHtmlDocument = vi.fn((url: string) =>
+      Promise.resolve(htmlResult(url, recipeJsonLd))
+    );
+    const { response } = await extractRecipe(
+      { url: reelPageUrl, attempt: "primary" },
+      createRuntime({
+        fetchSocialDocument: () =>
+          Promise.resolve(
+            facebookDocument(`Easiest pasta ever 🍝\nFull recipe: ${recipeUrl}\n#pasta`)
+          ),
+        fetchHtmlDocument,
+        validateSourceUrl: vi.fn(() => Promise.resolve({ safe: true as const }))
+      })
+    );
+
+    expect(fetchHtmlDocument.mock.calls.map(([url]) => url)).toEqual([recipeUrl]);
+    expect(response).toMatchObject({
+      status: "success",
+      recipe: { title: "One-Pan Tomato Pasta", sourceUrl: recipeUrl, videoUrl: reelPageUrl }
+    });
+  });
+
+  describe("a creator's teaser caption with a full-recipe link", () => {
+    const teaserUrl = "https://recipes-ideas.com/garbage-bread/";
+    const teaser = [
+      "AD",
+      "Ingredients:",
+      "1 tbsp steak seasoning (I used McCormick)",
+      "12 oz. Velveeta, cubed",
+      "1/2 lb. chopped bacon...",
+      `FULL RECIPE: ${teaserUrl}`
+    ].join("\n");
+    const teaserDocument = (text = teaser) =>
+      facebookDocument(text, {
+        url: postPageUrl,
+        captionTruncated: true
+      });
+
+    it("follows the link and returns the linked page's recipe", async () => {
+      const fetchHtmlDocument = vi.fn((url: string) =>
+        Promise.resolve(htmlResult(url, recipeJsonLd))
+      );
+      const { response } = await extractRecipe(
+        { url: postPageUrl, attempt: "primary" },
+        createRuntime({
+          fetchSocialDocument: () => Promise.resolve(teaserDocument()),
+          fetchHtmlDocument
+        })
+      );
+
+      expect(fetchHtmlDocument.mock.calls.map(([url]) => url)).toEqual([teaserUrl]);
+      expect(response).toMatchObject({
+        status: "success",
+        recipe: { title: "One-Pan Tomato Pasta", sourceUrl: teaserUrl }
+      });
+    });
+
+    it("never returns the teaser itself when the link gives no recipe", async () => {
+      for (const fetchHtmlDocument of [
+        (url: string) => Promise.resolve(htmlResult(url, articleWeak)),
+        () => Promise.reject(new Error("down"))
+      ]) {
+        const { response } = await extractRecipe(
+          { url: postPageUrl, attempt: "primary" },
+          createRuntime({
+            fetchSocialDocument: () => Promise.resolve(teaserDocument()),
+            fetchHtmlDocument
+          })
+        );
+
+        expect(response).toMatchObject({
+          status: "failure",
+          reason: "source_blocked",
+          userMessage: expect.stringContaining("only shares part of that post's text") as string
+        });
+      }
+    });
+
+    it("fails the same way when the link is unsafe", async () => {
+      const fetchHtmlDocument = vi.fn((url: string) =>
+        Promise.resolve(htmlResult(url, recipeJsonLd))
+      );
+      const { response } = await extractRecipe(
+        { url: postPageUrl, attempt: "primary" },
+        createRuntime({
+          fetchSocialDocument: () => Promise.resolve(teaserDocument()),
+          fetchHtmlDocument,
+          validateSourceUrl: (url: string) =>
+            Promise.resolve(
+              url === teaserUrl ? { safe: false, reason: "private_address" } : { safe: true }
+            )
+        })
+      );
+
+      expect(fetchHtmlDocument).not.toHaveBeenCalled();
+      expect(response).toMatchObject({ status: "failure", reason: "source_blocked" });
+    });
+  });
+
+  it("tries a caption's Full recipe link first, and keeps the caption when the link has no recipe", async () => {
+    const link = "https://recipes-ideas.com/lemon-chicken/";
+    const text = `${fullCaption}\nFull recipe: ${link}`;
+    const fetchHtmlDocument = vi.fn((url: string) =>
+      Promise.resolve(htmlResult(url, recipeJsonLd))
+    );
+    const linked = await extractRecipe(
+      { url: reelPageUrl, attempt: "primary" },
+      createRuntime({
+        fetchSocialDocument: () => Promise.resolve(facebookDocument(text)),
+        fetchHtmlDocument
+      })
+    );
+    const fallback = await extractRecipe(
+      { url: reelPageUrl, attempt: "primary" },
+      createRuntime({
+        fetchSocialDocument: () => Promise.resolve(facebookDocument(text)),
+        fetchHtmlDocument: (url: string) => Promise.resolve(htmlResult(url, articleWeak))
+      })
+    );
+
+    expect(fetchHtmlDocument.mock.calls.map(([url]) => url)).toEqual([link]);
+    expect(linked.response).toMatchObject({
+      status: "success",
+      recipe: { sourceUrl: link, videoUrl: reelPageUrl }
+    });
+    expect(fallback.response).toMatchObject({
+      status: "success",
+      recipe: { title: "Lemon garlic chicken", siteName: "Facebook" }
+    });
+  });
+
+  it("skips an unsafe link and falls back to the cut-caption message", async () => {
+    const fetchHtmlDocument = vi.fn((url: string) =>
+      Promise.resolve(htmlResult(url, recipeJsonLd))
+    );
+    const { response } = await extractRecipe(
+      { url: postPageUrl, attempt: "primary" },
+      createRuntime({
+        fetchSocialDocument: () =>
+          Promise.resolve(
+            facebookDocument(cutCaption, {
+              captionTruncated: true,
+              linkedUrls: ["http://169.254.169.254/latest/meta-data/recipe"]
+            })
+          ),
+        fetchHtmlDocument,
+        validateSourceUrl: (url: string) =>
+          Promise.resolve(
+            url.includes("169.254") ? { safe: false, reason: "private_address" } : { safe: true }
+          )
+      })
+    );
+
+    expect(fetchHtmlDocument).not.toHaveBeenCalled();
+    expect(response).toMatchObject({ status: "failure", reason: "source_blocked" });
+  });
+
+  it("keeps a reel's own ingredients when its linked page has no recipe", async () => {
+    const { response } = await extractRecipe(
+      { url: reelPageUrl, attempt: "primary" },
+      createRuntime({
+        fetchSocialDocument: () =>
+          Promise.resolve(
+            facebookDocument(
+              [
+                "Garlic noodles",
+                "Ingredients:",
+                "200 g noodles",
+                "3 tbsp butter",
+                "4 cloves garlic"
+              ].join("\n"),
+              { linkedUrls: [`${recipeUrl}-weak`] }
+            )
+          ),
+        fetchHtmlDocument: (url: string) => Promise.resolve(htmlResult(url, articleWeak)),
+        validateSourceUrl: vi.fn(() => Promise.resolve({ safe: true as const }))
+      })
+    );
+
+    expect(response).toMatchObject({
+      status: "success",
+      recipe: { steps: [{ index: 1, text: "Follow the video for the method." }] }
+    });
+  });
+
+  it("says the caption has no recipe when a whole caption has none", async () => {
+    const { response } = await extractRecipe(
+      { url: reelPageUrl, attempt: "primary" },
+      createRuntime({
+        fetchSocialDocument: () => Promise.resolve(facebookDocument("so good 😍 #dinner"))
+      })
+    );
+
+    expect(response).toMatchObject({
+      status: "failure",
+      reason: "parse_failed",
+      userMessage:
+        "That post's caption doesn't include a written recipe. Try the recipe's website instead."
+    });
+  });
+
+  it("tells the person Facebook blocked the page and to paste the text or use a screenshot", async () => {
+    for (const reason of ["blocked"] as const) {
+      const { response } = await extractRecipe(
+        { url: reelPageUrl, attempt: "primary" },
+        createRuntime({
+          fetchSocialDocument: () => Promise.reject(new SocialFetchError("login wall", reason, 200))
+        })
+      );
+
+      expect(response).toMatchObject({
+        status: "failure",
+        reason: "source_blocked",
+        userMessage:
+          "Facebook blocked LinkDish from reading that post. Paste the recipe text or import a screenshot of the post instead.",
+        recovery: { retryable: false, allowFallback: false, suggestedAction: "try_another_url" }
+      });
+    }
+
+    const removed = await extractRecipe(
+      { url: reelPageUrl, attempt: "primary" },
+      createRuntime({
+        fetchSocialDocument: () => Promise.reject(new SocialFetchError("gone", "not_found", 404))
+      })
+    );
+
+    expect(removed.response).toMatchObject({
+      reason: "parse_failed",
+      userMessage: "That post is private, removed or not available to read."
+    });
+  });
+
+  it("does not read the post when billing denies the import", async () => {
+    await expect(
+      extractRecipe(
+        { url: reelPageUrl, attempt: "primary" },
+        createRuntime({ fetchSocialDocument: () => Promise.resolve(facebookDocument()) }),
+        { authorization: Promise.resolve(false) }
+      )
+    ).rejects.toThrow("Billing did not authorize this extraction.");
+  });
+
+  it("rejects Facebook pages that are not a post without fetching them", async () => {
+    const fetchSocialDocument = vi.fn(() => Promise.resolve(facebookDocument()));
+
+    for (const url of [
+      "https://www.facebook.com/dinnerwithdana",
+      "https://www.facebook.com/profile.php?id=100001"
+    ]) {
+      const { response } = await extractRecipe(
+        { url, attempt: "primary" },
+        createRuntime({ fetchSocialDocument })
+      );
+
+      expect(response).toMatchObject({
+        reason: "unsupported_source",
+        userMessage:
+          "That Facebook link isn't a post or reel. Share a single public post or reel, or paste the recipe instead."
+      });
+    }
+
+    expect(fetchSocialDocument).not.toHaveBeenCalled();
+  });
+
+  it("treats a l.facebook.com link to a recipe site as that site's link, with the usual safety checks", async () => {
+    const fetchHtmlDocument = vi.fn((url: string) =>
+      Promise.resolve(htmlResult(url, recipeJsonLd))
+    );
+    const fetchSocialDocument = vi.fn(() => Promise.resolve(facebookDocument()));
+    const validateSourceUrl = vi.fn(() => Promise.resolve({ safe: true as const }));
+    const wrapped = `https://l.facebook.com/l.php?u=${encodeURIComponent(recipeUrl)}&h=AT0abc`;
+
+    const { response } = await extractRecipe(
+      { url: wrapped, attempt: "primary" },
+      createRuntime({ fetchHtmlDocument, fetchSocialDocument, validateSourceUrl })
+    );
+
+    expect(validateSourceUrl).toHaveBeenCalledWith(recipeUrl);
+    expect(fetchHtmlDocument.mock.calls.map(([url]) => url)).toEqual([recipeUrl]);
+    expect(fetchSocialDocument).not.toHaveBeenCalled();
+    expect(response).toMatchObject({
+      status: "success",
+      recipe: { sourceUrl: recipeUrl }
+    });
+
+    const unsafe = await extractRecipe(
+      {
+        url: `https://lm.facebook.com/l.php?u=${encodeURIComponent("http://127.0.0.1/recipe")}`,
+        attempt: "primary"
+      },
+      createRuntime({
+        fetchHtmlDocument,
+        validateSourceUrl: () => Promise.resolve({ safe: false, reason: "private_address" })
+      })
+    );
+
+    expect(unsafe.response).toMatchObject({ status: "failure", reason: "unsupported_source" });
+    expect(fetchHtmlDocument).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends a l.facebook.com link to a Facebook reel down the Facebook path", async () => {
+    const fetchSocialDocument = vi.fn(() => Promise.resolve(facebookDocument()));
+    const reel = "https://www.facebook.com/reel/900000000000001/";
+
+    const { response } = await extractRecipe(
+      { url: `https://l.facebook.com/l.php?u=${encodeURIComponent(reel)}`, attempt: "primary" },
+      createRuntime({ fetchSocialDocument })
+    );
+
+    expect(fetchSocialDocument).toHaveBeenCalledWith(reel, expect.anything());
+    expect(response.status).toBe("success");
   });
 });
 
@@ -975,6 +1589,70 @@ describe("the video recipe reader", () => {
     expect(response).toMatchObject({ status: "success", recipe: { title: "Easy chili" } });
   });
 
+  it("skips the read once the day's reads are used up", async () => {
+    const videoRecipeReader = reader();
+    const runtime = createRuntime({
+      fetchSocialDocument: () => Promise.resolve(tiktokDocument("so good 😍 #foodtok")),
+      fetchSocialVideo,
+      videoRecipeReader,
+      videoReadAllowance: { reserve: () => Promise.resolve(false) }
+    });
+
+    const { response, logContext } = await extractRecipe(
+      { url: tiktokUrl, attempt: "primary" },
+      runtime
+    );
+
+    expect(videoRecipeReader.read).not.toHaveBeenCalled();
+    expect(logContext.videoRead).toBe("skipped_daily_limit");
+    expect(response).toMatchObject({ status: "failure", reason: "parse_failed" });
+  });
+
+  it("skips the read when the daily limit can't be checked", async () => {
+    const videoRecipeReader = reader();
+    const runtime = createRuntime({
+      fetchSocialDocument: () => Promise.resolve(tiktokDocument("so good 😍 #foodtok")),
+      fetchSocialVideo,
+      videoRecipeReader,
+      videoReadAllowance: { reserve: () => Promise.reject(new Error("Upstash timed out")) }
+    });
+
+    const { logContext } = await extractRecipe({ url: tiktokUrl, attempt: "primary" }, runtime);
+
+    expect(videoRecipeReader.read).not.toHaveBeenCalled();
+    expect(logContext.videoRead).toBe("limit_unavailable");
+  });
+
+  it("does not use up a daily read on a failed download", async () => {
+    const reserve = vi.fn(() => Promise.resolve(true));
+    const runtime = createRuntime({
+      fetchSocialDocument: () => Promise.resolve(tiktokDocument("so good 😍 #foodtok")),
+      fetchSocialVideo: () => Promise.reject(new SocialFetchError("403", "blocked", 403)),
+      videoRecipeReader: reader(),
+      videoReadAllowance: { reserve }
+    });
+
+    const { logContext } = await extractRecipe({ url: tiktokUrl, attempt: "primary" }, runtime);
+
+    expect(reserve).not.toHaveBeenCalled();
+    expect(logContext.videoRead).toBe("download_failed");
+  });
+
+  it("reads the video while the day's reads last", async () => {
+    const reserve = vi.fn(() => Promise.resolve(true));
+    const runtime = createRuntime({
+      fetchSocialDocument: () => Promise.resolve(tiktokDocument("so good 😍 #foodtok")),
+      fetchSocialVideo,
+      videoRecipeReader: reader(),
+      videoReadAllowance: { reserve }
+    });
+
+    const { logContext } = await extractRecipe({ url: tiktokUrl, attempt: "primary" }, runtime);
+
+    expect(reserve).toHaveBeenCalledTimes(1);
+    expect(logContext.videoRead).toBe("read");
+  });
+
   it("reports a failed download as the caption's failure", async () => {
     const runtime = createRuntime({
       fetchSocialDocument: () => Promise.resolve(tiktokDocument("so good 😍 #foodtok")),
@@ -1039,6 +1717,115 @@ describe("the video recipe reader", () => {
       })
     );
 
+  it("offers an inspired recipe only when the video was read without a complete recipe", async () => {
+    const videoRecipeReader = reader(() =>
+      Promise.resolve(videoPayload({ recipeInVideo: false, ingredients: [], steps: [] }))
+    );
+    const runtime = createRuntime({ fetchYouTubeDocument: shortDocument(null), videoRecipeReader });
+    const { response } = await extractRecipe({ url: shortUrl, attempt: "primary" }, runtime);
+    expect(response).toMatchObject({
+      status: "failure",
+      reason: "parse_failed",
+      inspiredAvailable: true,
+      userMessage: "LinkDish could not find a complete recipe in the video or its available text."
+    });
+  });
+
+  it("creates an explicitly labeled recipe only on the user's request", async () => {
+    const videoRecipeReader = reader();
+    const runtime = createRuntime({ fetchYouTubeDocument: shortDocument(null), videoRecipeReader });
+    const { response, logContext } = await extractRecipe(
+      { url: shortUrl, attempt: "primary", inspired: true },
+      runtime
+    );
+    expect(videoRecipeReader.read).toHaveBeenCalledWith(
+      expect.objectContaining({ inspired: true })
+    );
+    expect(logContext.cacheStatus).toBe("bypass");
+    expect(response).toMatchObject({
+      status: "success",
+      recipe: {
+        title: "Garlic Butter Noodles",
+        confidence: { notes: [expect.stringContaining("AI-created recipe inspired by the video")] }
+      },
+      extraction: { warnings: [expect.stringContaining("AI-created recipe")] }
+    });
+  });
+
+  describe("from a pin that links to a video", () => {
+    const pinUrl = "https://www.pinterest.com/pin/123456789/";
+    const pinTo = (link: string) =>
+      vi.fn((url: string) =>
+        Promise.resolve(
+          htmlResult(
+            url,
+            url === pinUrl || url === "https://pin.it/abc123"
+              ? `<html><head><meta property="og:see_also" content="${link}"></head><body>A pin</body></html>`
+              : recipeJsonLd,
+            url === "https://pin.it/abc123" ? pinUrl : url
+          )
+        )
+      );
+
+    it.each([pinUrl, "https://pin.it/abc123"])(
+      "offers and creates one through the pin's link (%s)",
+      async (url) => {
+        const runtime = (videoRecipeReader: ReturnType<typeof reader>) =>
+          createRuntime({
+            fetchHtmlDocument: pinTo(shortUrl),
+            fetchYouTubeDocument: shortDocument(null),
+            videoRecipeReader
+          });
+        const noRecipe = reader(() =>
+          Promise.resolve(videoPayload({ recipeInVideo: false, ingredients: [], steps: [] }))
+        );
+
+        const offered = await extractRecipe({ url, attempt: "primary" }, runtime(noRecipe));
+        expect(offered.response).toMatchObject({ status: "failure", inspiredAvailable: true });
+
+        const created = reader();
+        const { response } = await extractRecipe(
+          { url, attempt: "primary", inspired: true },
+          runtime(created)
+        );
+        expect(created.read).toHaveBeenCalledWith(expect.objectContaining({ inspired: true }));
+        expect(response).toMatchObject({
+          status: "success",
+          recipe: { title: "Garlic Butter Noodles" }
+        });
+      }
+    );
+
+    it("refuses when the pin links to a web page instead", async () => {
+      const videoRecipeReader = reader();
+      const { response } = await extractRecipe(
+        { url: pinUrl, attempt: "primary", inspired: true },
+        createRuntime({
+          fetchHtmlDocument: pinTo("https://fixtures.linkdish.test/recipe-jsonld"),
+          videoRecipeReader
+        })
+      );
+
+      expect(videoRecipeReader.read).not.toHaveBeenCalled();
+      expect(response).toMatchObject({
+        status: "failure",
+        userMessage: "An inspired recipe can only be created from a supported YouTube video."
+      });
+    });
+  });
+
+  it("does not fabricate a recipe when no food is identified", async () => {
+    const videoRecipeReader = reader(() =>
+      Promise.resolve(videoPayload({ recipeInVideo: false, ingredients: [], steps: [] }))
+    );
+    const runtime = createRuntime({ fetchYouTubeDocument: shortDocument(null), videoRecipeReader });
+    const { response } = await extractRecipe(
+      { url: shortUrl, attempt: "primary", inspired: true },
+      runtime
+    );
+    expect(response).toMatchObject({ status: "failure", reason: "parse_failed" });
+  });
+
   it("passes a YouTube Short with no written recipe to the reader by URL", async () => {
     const videoRecipeReader = reader();
     const runtime = createRuntime({
@@ -1102,5 +1889,342 @@ describe("the video recipe reader", () => {
 
     expect(logContext.videoRead).toBe("failed");
     expect(response).toMatchObject({ status: "failure", reason: "parse_failed" });
+  });
+});
+
+describe("a Facebook reel whose recipe is in the comments", () => {
+  const reelUrl = "https://www.facebook.com/fedbysab/videos/recipe-in-comments/1105272202246497/";
+  const caption = "🚨 Recipe in Comments ⭐️ Pull Apart Buffalo Chicken Quesadilla Ring 🧀 🌶️";
+  const facebookVideo = {
+    videoId: "1105272202246497",
+    mediaUrl: "https://video-ord5-2.xx.fbcdn.net/o1/v/t2/f2/m86/reel-sd.mp4",
+    durationSeconds: 24
+  };
+  const reelDocument = (overrides: Partial<TextSourceDocument> = {}): TextSourceDocument => ({
+    kind: "text",
+    url: reelUrl,
+    origin: "facebook",
+    text: caption,
+    title: null,
+    authorName: "fedbysab.com",
+    thumbnailUrl: "https://scontent.xx.fbcdn.net/v/t15/cover.jpg",
+    isVideo: true,
+    captionTruncated: false,
+    linkedUrls: [],
+    facebookVideo,
+    ...overrides
+  });
+
+  const site = "https://fedbysab.com";
+  const recipePage = (name: string, description: string, ingredients: string[], steps: string[]) =>
+    `<!doctype html><html><head><title>${name} - fed by sab</title>
+    <script type="application/ld+json">${JSON.stringify({
+      "@context": "https://schema.org",
+      "@type": "Recipe",
+      name,
+      description,
+      recipeIngredient: ingredients,
+      recipeInstructions: steps.map((text) => ({ "@type": "HowToStep", text })),
+      recipeYield: "8"
+    })}</script></head><body><h1>${name}</h1></body></html>`;
+  /* fedbysab.com's two quesadilla rings: the reel is the buffalo one, the search ranks the taco one first. */
+  const pages: Record<string, string> = {
+    [`${site}/blooming-chicken-quesadilla-ring/`]: recipePage(
+      "Blooming Chicken Quesadilla Ring",
+      "Flour tortillas rolled with chicken quesadilla filling and shaped into a pull apart ring.",
+      ["12 medium flour tortillas", "3 cups cooked chicken", "1 1/2 tbsp taco seasoning"],
+      [
+        "Mix the chicken with the taco seasoning.",
+        "Arrange the cones in a ring and bake for 20 minutes."
+      ]
+    ),
+    [`${site}/buffalo-chicken-blooming-quesadilla/`]: recipePage(
+      "Buffalo Chicken Blooming Quesadilla",
+      "Flour tortillas rolled with buffalo chicken filling and shaped into a pull apart ring.",
+      [
+        "12 flour tortillas",
+        "4 cups cooked chicken",
+        "8 ounces cream cheese",
+        "1/4 cup Buffalo sauce"
+      ],
+      [
+        "Mix the chicken, cream cheese and buffalo sauce.",
+        "Arrange the cones in a ring and bake for 20 minutes."
+      ]
+    ),
+    [`${site}/buffalo-chicken-pasta-salad/`]: recipePage(
+      "Buffalo Chicken Pasta Salad",
+      "A creamy buffalo chicken pasta salad.",
+      ["1 lb pasta", "2 cups chicken", "1/3 cup buffalo sauce"],
+      ["Boil the pasta.", "Toss everything together."]
+    )
+  };
+  const searchResults = [
+    { title: "Blooming Chicken Quesadilla Ring", url: `${site}/blooming-chicken-quesadilla-ring/` },
+    { title: "Pizza Dip Ring", url: `${site}/pizza-dip-ring/` },
+    { title: "Buffalo Chicken Pasta Salad", url: `${site}/buffalo-chicken-pasta-salad/` },
+    {
+      title: "Buffalo Chicken Blooming Quesadilla",
+      url: `${site}/buffalo-chicken-blooming-quesadilla/`
+    }
+  ];
+  const fetchSitePage = () =>
+    vi.fn((url: string) => Promise.resolve(htmlResult(url, pages[url] ?? articleWeak)));
+
+  const videoReader = () => ({
+    available: true,
+    model: "gemini-test",
+    read: vi.fn<VideoRecipeReader["read"]>(() =>
+      Promise.resolve({
+        recipeInVideo: true,
+        notRecipeReason: null,
+        title: "Pull Apart Buffalo Chicken Quesadilla Ring",
+        servings: null,
+        prepTimeMinutes: null,
+        cookTimeMinutes: null,
+        ingredients: [
+          {
+            item: "shredded chicken",
+            amount: null,
+            section: null,
+            source: "visual",
+            quote: "shredded chicken in a bowl"
+          },
+          {
+            item: "buffalo sauce",
+            amount: null,
+            section: null,
+            source: "visual",
+            quote: "orange sauce poured on the chicken"
+          },
+          {
+            item: "flour tortillas",
+            amount: null,
+            section: null,
+            source: "visual",
+            quote: "tortillas cut in half"
+          }
+        ],
+        steps: [
+          {
+            text: "Mix the chicken with the buffalo sauce and cheese.",
+            source: "visual",
+            quote: "mixing the filling"
+          },
+          {
+            text: "Roll the filling into tortilla cones and arrange them in a ring.",
+            source: "visual",
+            quote: "cones arranged in a ring"
+          }
+        ]
+      })
+    )
+  });
+  const downloadVideo = () =>
+    vi.fn<NonNullable<ExtractorRuntime["fetchFacebookVideo"]>>(() =>
+      Promise.resolve({
+        bytes: new Uint8Array([1, 2, 3]),
+        mimeType: "video/mp4",
+        durationSeconds: 24
+      })
+    );
+
+  it("finds the recipe on the creator's site, picking the one whose recipe matches the caption", async () => {
+    const searchCreatorSite = vi.fn(() => Promise.resolve(searchResults));
+    const fetchHtmlDocument = fetchSitePage();
+    const fetchFacebookVideo = downloadVideo();
+
+    const { response } = await extractRecipe(
+      { url: "https://www.facebook.com/share/r/1HGYsgcsQk/", attempt: "primary" },
+      createRuntime({
+        fetchSocialDocument: () => Promise.resolve(reelDocument()),
+        searchCreatorSite,
+        fetchHtmlDocument,
+        fetchFacebookVideo,
+        videoRecipeReader: videoReader()
+      })
+    );
+
+    expect(searchCreatorSite).toHaveBeenCalledTimes(1);
+    expect(searchCreatorSite).toHaveBeenCalledWith(
+      "fedbysab.com",
+      "Pull Apart Buffalo Chicken Quesadilla Ring",
+      expect.anything()
+    );
+    expect(fetchHtmlDocument.mock.calls.map(([url]) => url).sort()).toEqual([
+      `${site}/blooming-chicken-quesadilla-ring/`,
+      `${site}/buffalo-chicken-blooming-quesadilla/`,
+      `${site}/buffalo-chicken-pasta-salad/`
+    ]);
+    expect(fetchFacebookVideo).not.toHaveBeenCalled();
+    expect(response).toMatchObject({
+      status: "success",
+      recipe: {
+        title: "Buffalo Chicken Blooming Quesadilla",
+        sourceUrl: `${site}/buffalo-chicken-blooming-quesadilla/`,
+        videoUrl: reelUrl
+      }
+    });
+  });
+
+  it("retries a long dish name with its last words when the site finds nothing", async () => {
+    const searchCreatorSite = vi
+      .fn<NonNullable<ExtractorRuntime["searchCreatorSite"]>>()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce(searchResults);
+
+    const { response } = await extractRecipe(
+      { url: reelUrl, attempt: "primary" },
+      createRuntime({
+        fetchSocialDocument: () => Promise.resolve(reelDocument()),
+        searchCreatorSite,
+        fetchHtmlDocument: fetchSitePage()
+      })
+    );
+
+    expect(searchCreatorSite.mock.calls.map(([, query]) => query)).toEqual([
+      "Pull Apart Buffalo Chicken Quesadilla Ring",
+      "Chicken Quesadilla Ring"
+    ]);
+    expect(response).toMatchObject({
+      status: "success",
+      recipe: { title: "Buffalo Chicken Blooming Quesadilla" }
+    });
+  });
+
+  it("watches the reel when the creator's site has no clear match", async () => {
+    for (const results of [
+      [],
+      /* Only the taco version: its recipe covers too little of the caption. */
+      [searchResults[0]!, searchResults[2]!]
+    ]) {
+      const fetchFacebookVideo = downloadVideo();
+      const videoRecipeReader = videoReader();
+
+      const { response, logContext } = await extractRecipe(
+        { url: reelUrl, attempt: "primary" },
+        createRuntime({
+          fetchSocialDocument: () => Promise.resolve(reelDocument()),
+          searchCreatorSite: () => Promise.resolve(results),
+          fetchHtmlDocument: fetchSitePage(),
+          fetchFacebookVideo,
+          videoRecipeReader
+        })
+      );
+
+      expect(fetchFacebookVideo).toHaveBeenCalledWith(facebookVideo, expect.anything());
+      expect(videoRecipeReader.read.mock.calls[0]?.[0]).toMatchObject({
+        source: { kind: "file", mimeType: "video/mp4" },
+        context: { platform: "facebook", caption, authorName: "fedbysab.com" }
+      });
+      expect(response).toMatchObject({
+        status: "success",
+        recipe: {
+          title: "Pull Apart Buffalo Chicken Quesadilla Ring",
+          sourceUrl: reelUrl,
+          videoUrl: reelUrl,
+          siteName: "Facebook"
+        }
+      });
+      expect(logContext).toMatchObject({ videoRead: "read" });
+    }
+  });
+
+  it("watches the reel of a page that has no site of its own", async () => {
+    const searchCreatorSite = vi.fn(() => Promise.resolve(searchResults));
+    const fetchFacebookVideo = downloadVideo();
+
+    const { response } = await extractRecipe(
+      { url: reelUrl, attempt: "primary" },
+      createRuntime({
+        fetchSocialDocument: () => Promise.resolve(reelDocument({ authorName: "Fed by Sab" })),
+        searchCreatorSite,
+        fetchFacebookVideo,
+        videoRecipeReader: videoReader()
+      })
+    );
+
+    expect(searchCreatorSite).not.toHaveBeenCalled();
+    expect(fetchFacebookVideo).toHaveBeenCalledTimes(1);
+    expect(response.status).toBe("success");
+  });
+
+  it("says the recipe is in the comments when neither the site nor the video gives one", async () => {
+    const { response, logContext } = await extractRecipe(
+      { url: reelUrl, attempt: "primary" },
+      createRuntime({
+        fetchSocialDocument: () => Promise.resolve(reelDocument()),
+        searchCreatorSite: () => Promise.reject(new Error("site down")),
+        fetchFacebookVideo: downloadVideo(),
+        videoRecipeReader: { available: false, model: null, read: () => Promise.resolve(null) }
+      })
+    );
+
+    expect(response).toMatchObject({
+      status: "failure",
+      reason: "parse_failed",
+      userMessage:
+        "That post's recipe is in its comments, which Facebook only shows to people who are signed in. Paste the recipe text or import a screenshot of the comment instead."
+    });
+    expect(logContext).not.toHaveProperty("videoRead");
+  });
+
+  it("neither searches nor watches when the caption is the whole recipe", async () => {
+    const searchCreatorSite = vi.fn(() => Promise.resolve(searchResults));
+    const fetchFacebookVideo = downloadVideo();
+    const fullRecipe = [
+      "Buffalo chicken quesadilla ring",
+      "Ingredients:",
+      "4 cups shredded chicken",
+      "1/4 cup buffalo sauce",
+      "12 flour tortillas",
+      "Method:",
+      "1. Mix the chicken and sauce.",
+      "2. Roll into tortillas, arrange in a ring and bake for 20 minutes."
+    ].join("\n");
+
+    const { response } = await extractRecipe(
+      { url: reelUrl, attempt: "primary" },
+      createRuntime({
+        fetchSocialDocument: () => Promise.resolve(reelDocument({ text: fullRecipe })),
+        searchCreatorSite,
+        fetchFacebookVideo,
+        videoRecipeReader: videoReader()
+      })
+    );
+
+    expect(searchCreatorSite).not.toHaveBeenCalled();
+    expect(fetchFacebookVideo).not.toHaveBeenCalled();
+    expect(response).toMatchObject({ status: "success", recipe: { sourceUrl: reelUrl } });
+  });
+
+  it("looks a cut caption's dish up on the site, but never watches its video", async () => {
+    const cut = `Pull Apart Buffalo Chicken Quesadilla Ring 🧀\nIngredients:\n4 cups shredded chicken\n1/4 cup buffalo sa...`;
+    const fetchFacebookVideo = downloadVideo();
+    const runtime = (searchCreatorSite: NonNullable<ExtractorRuntime["searchCreatorSite"]>) =>
+      createRuntime({
+        fetchSocialDocument: () =>
+          Promise.resolve(reelDocument({ text: cut, captionTruncated: true })),
+        searchCreatorSite,
+        fetchHtmlDocument: fetchSitePage(),
+        fetchFacebookVideo,
+        videoRecipeReader: videoReader()
+      });
+
+    const found = await extractRecipe(
+      { url: reelUrl, attempt: "primary" },
+      runtime(() => Promise.resolve(searchResults))
+    );
+    const notFound = await extractRecipe(
+      { url: reelUrl, attempt: "primary" },
+      runtime(() => Promise.resolve([]))
+    );
+
+    expect(found.response).toMatchObject({
+      status: "success",
+      recipe: { title: "Buffalo Chicken Blooming Quesadilla" }
+    });
+    expect(notFound.response).toMatchObject({ status: "failure", reason: "source_blocked" });
+    expect(fetchFacebookVideo).not.toHaveBeenCalled();
   });
 });

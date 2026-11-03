@@ -80,7 +80,7 @@ type ScreenOptions = (input: { route: { name: string } }) => {
 };
 
 describe("TabLayout", () => {
-  it("renders Cookbook, Add, Shopping, and Household in order", () => {
+  it("renders Cookbook, Add, Plan, Shopping, and Household in order", () => {
     let renderer: ReturnType<typeof create>;
 
     act(() => {
@@ -101,12 +101,13 @@ describe("TabLayout", () => {
     ).toEqual([
       { name: "index", title: "Cookbook" },
       { name: "import", title: "Add" },
+      { name: "plan", title: "Plan" },
       { name: "shopping", title: "Shopping" },
       { name: "account", title: "Household" }
     ]);
   });
 
-  it("uses Add and Shopping icons without renaming the import route", () => {
+  it("uses Add, Plan and Shopping icons without renaming the import route", () => {
     let renderer: ReturnType<typeof create>;
 
     act(() => {
@@ -124,6 +125,10 @@ describe("TabLayout", () => {
       screenOptions({ route: { name: "shopping" } }).tabBarIcon({ color: "#29443b", size: 22 })
         .props.name
     ).toBe("cart-outline");
+    expect(
+      screenOptions({ route: { name: "plan" } }).tabBarIcon({ color: "#29443b", size: 22 }).props
+        .name
+    ).toBe("calendar-week");
   });
 
   it("gives the Cookbook tab the bouncing recipe-book icon", () => {

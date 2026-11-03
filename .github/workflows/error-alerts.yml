@@ -1,0 +1,55 @@
+name: Error Alerts
+
+# Hourly check of error_analytics (web and Android client errors). It emails and/or posts to a
+# chat webhook when there is a fatal error, a spike, or a new error. This repository is public,
+# so the job log shows counts only; error messages go to the private channels.
+#
+# Setup is described in docs/architecture.md under "Error alerts and crash reports": secret
+# ANALYTICS_DATABASE_URL (plus ANALYTICS_DATABASE_CA_CERT if the API uses one); for email, secrets
+# RESEND_API_KEY and ERROR_ALERT_EMAIL_TO and variable ERROR_ALERT_EMAIL_FROM; for Slack or
+# Discord, secret ERROR_ALERT_WEBHOOK_URL. Optional variables tune the thresholds. Without
+# ANALYTICS_DATABASE_URL the job does nothing.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 * * * *"
+
+concurrency:
+  group: error-alerts
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 10.8.0
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check recent errors
+        env:
+          ANALYTICS_DATABASE_URL: ${{ secrets.ANALYTICS_DATABASE_URL }}
+          ANALYTICS_DATABASE_CA_CERT: ${{ secrets.ANALYTICS_DATABASE_CA_CERT }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          ERROR_ALERT_EMAIL_TO: ${{ secrets.ERROR_ALERT_EMAIL_TO }}
+          ERROR_ALERT_EMAIL_FROM: ${{ vars.ERROR_ALERT_EMAIL_FROM }}
+          ERROR_ALERT_WEBHOOK_URL: ${{ secrets.ERROR_ALERT_WEBHOOK_URL }}
+          ERROR_ALERT_MIN_ERRORS: ${{ vars.ERROR_ALERT_MIN_ERRORS }}
+          ERROR_ALERT_WINDOW_MINUTES: ${{ vars.ERROR_ALERT_WINDOW_MINUTES }}
+          ERROR_ALERT_NEW_ERROR_MIN_COUNT: ${{ vars.ERROR_ALERT_NEW_ERROR_MIN_COUNT }}
+        run: pnpm --filter @linkdish/extractor-api alerts:errors

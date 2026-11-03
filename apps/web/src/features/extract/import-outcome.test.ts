@@ -64,6 +64,26 @@ describe("describeImportFailure", () => {
     expect(unchecked.actions).toEqual(["retry"]);
   });
 
+  it("explains a blocked Facebook link in Facebook's terms, with paste and screenshot first", () => {
+    const facebook = describeImportFailure(failure("source_blocked"), {
+      ...url,
+      sourceUrl: "https://www.facebook.com/reel/725554398033140/"
+    });
+
+    expect(facebook).toMatchObject({
+      kind: "blocked",
+      title: "Facebook wouldn't share that post"
+    });
+    expect(facebook.message).toContain("paste it here, or scan a screenshot");
+    expect(facebook.actions.slice(0, 2)).toEqual(["paste_text", "scan_photo"]);
+    expect(
+      describeImportFailure(failure("source_blocked"), {
+        ...url,
+        sourceUrl: "https://notfacebook.com/reel/1"
+      }).title
+    ).toBe("That site kept its door shut");
+  });
+
   it("maps each reason to specific next steps", () => {
     expect(describeImportFailure(failure("source_blocked"), url).actions).toEqual([
       "paste_text",

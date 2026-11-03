@@ -1,7 +1,10 @@
 import type { ExtractionResultCache } from "./cache/extraction-cache.js";
+import type { RecipeCompleter } from "./completion/gemini-recipe-completer.js";
 import type { RequestDeadline } from "./deadline.js";
 import type { VideoRecipeReader } from "./extractors/video/gemini-video-recipe-reader.js";
+import type { VideoReadAllowance } from "./extractors/video/video-read-allowance.js";
 import type { TikTokVideoFile } from "./fetchers/fetch-tiktok-video.js";
+import type { CreatorSiteSearchResult } from "./fetchers/search-creator-site.js";
 import type { ValidateSourceUrl } from "./source-url-safety.js";
 import type {
   ExtractRecipeImage,
@@ -52,26 +55,52 @@ export interface YouTubeSourceDocument {
 }
 
 /**
- * Recipe text that did not come from a fetched page: a TikTok caption read through oEmbed, or
- * text the user pasted. It is read by the rule-based text parser (extractors/text).
+ * Recipe text that did not come from a fetched page: a TikTok caption read through oEmbed, an
+ * Instagram caption read from the post's embed page, a Facebook caption read from the post's
+ * public page metadata, or text the user pasted. It is read by the rule-based text parser (extractors/text).
  */
 export interface TextSourceDocument {
   kind: "text";
   /** The recipe's source URL (the video's canonical URL, or the pasted text's source/synthetic URL). */
   url: string;
-  origin: "paste" | "tiktok";
+  origin: "paste" | "tiktok" | "instagram" | "facebook";
   text: string;
   title: string | null;
   authorName: string | null;
   thumbnailUrl: string | null;
+  /**
+   * For an Instagram post, whether it is a video (a reel). A photo post has no video to hold the
+   * method, so an ingredients-only caption is no recipe. TikToks are always videos.
+   */
+  isVideo?: boolean | undefined;
+  /**
+   * For a Facebook post, whether the caption is only part of the recipe: Facebook cut it
+   * (its public metadata ends a long caption with "...") or the creator did (an ingredient
+   * line ends in "..." above a "Full recipe" link). Such a caption is never turned into a recipe.
+   */
+  captionTruncated?: boolean | undefined;
+  /**
+   * For a Facebook post, links to other sites that the page itself shares (the link-out
+   * Facebook wraps in l.facebook.com), already unwrapped. Candidates for the written recipe.
+   */
+  linkedUrls?: string[] | undefined;
   /** For a TikTok, what the caption fetch learned about the video, for the video reader. */
   tiktokVideo?: TikTokVideoLocator | undefined;
+  /** For a Facebook video or reel, its MP4 on Facebook's CDN, for the video reader. */
+  facebookVideo?: FacebookVideoLocator | undefined;
 }
 
 /** Which TikTok video a post is, and, when the caption fetch read the embed page, its MP4. */
 export interface TikTokVideoLocator {
   videoId: string;
   mediaUrl: string | null;
+  durationSeconds: number | null;
+}
+
+/** Which Facebook video a post is and the MP4 link its public page gives a logged-out visitor. */
+export interface FacebookVideoLocator {
+  videoId: string;
+  mediaUrl: string;
   durationSeconds: number | null;
 }
 
@@ -202,20 +231,42 @@ export interface ExtractorRuntime {
     options?: SourceFetchOptions
   ): Promise<YouTubeSourceDocument>;
   /**
-   * Reads a social post's caption (TikTok oEmbed today). Runtimes without it treat those
-   * links as unsupported.
+   * Reads a social post's caption (TikTok through oEmbed, Instagram from its rendered embed
+   * page, Facebook from the post's public page metadata). Runtimes without it treat those links
+   * as unsupported.
    */
   fetchSocialDocument?: (url: string, options?: SourceFetchOptions) => Promise<TextSourceDocument>;
-  /** Downloads a TikTok post's video for the video recipe reader. */
+  /** Downloads a TikTok post's video for the video recipe reader (Facebook: fetchFacebookVideo). */
   fetchSocialVideo?: (
     videoUrl: string,
     options?: SourceFetchOptions & { locator?: TikTokVideoLocator | undefined }
   ) => Promise<TikTokVideoFile>;
+  /** Downloads a Facebook video or reel's MP4 (from its locator) for the video recipe reader. */
+  fetchFacebookVideo?: (
+    locator: FacebookVideoLocator,
+    options?: SourceFetchOptions
+  ) => Promise<TikTokVideoFile>;
   /**
-   * Gemini watching a TikTok or YouTube video whose caption, description and linked pages hold no
+   * Searches a creator's own site (a bare domain such as "fedbysab.com") for a dish, for posts
+   * whose recipe is not in the caption. Runtimes without it skip the lookup.
+   */
+  searchCreatorSite?: (
+    domain: string,
+    query: string,
+    options?: SourceFetchOptions
+  ) => Promise<CreatorSiteSearchResult[]>;
+  /**
+   * Gemini watching a TikTok, Facebook or YouTube video whose caption, description and linked pages hold no
    * written recipe. Absent, or unavailable, while VIDEO_RECIPE_READER_ENABLED is off.
    */
   videoRecipeReader?: VideoRecipeReader;
+  /**
+   * Gemini filling a saved recipe's gaps (amounts a video never stated) when the person asks,
+   * through POST /recipes/complete. Absent or unavailable without GEMINI_API_KEY.
+   */
+  recipeCompleter?: RecipeCompleter;
+  /** The daily cap on video reads. Runtimes without it do not cap them. */
+  videoReadAllowance?: VideoReadAllowance;
   fallbackExtractor: FallbackRecipeExtractor;
   recipeTextCleaner?: RecipeTextCleaner;
   /** URL-keyed store of validated success responses. Test runtimes omit it unless they opt in. */
@@ -225,7 +276,14 @@ export interface ExtractorRuntime {
 }
 
 export type VideoReadOutcome =
-  "read" | "no_recipe" | "failed" | "download_failed" | "too_long" | "skipped_budget";
+  | "read"
+  | "no_recipe"
+  | "failed"
+  | "download_failed"
+  | "too_long"
+  | "skipped_budget"
+  | "skipped_daily_limit"
+  | "limit_unavailable";
 
 export type ExtractionFailureReason = ExtractRecipeFailure["reason"];
 

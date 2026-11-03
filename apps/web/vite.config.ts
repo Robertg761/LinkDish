@@ -1,11 +1,13 @@
+import { fileURLToPath } from "node:url";
+
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
 import { defineConfig } from "vitest/config";
 
-import type { HtmlTagDescriptor, Plugin, Rollup } from "vite";
+import type { HtmlTagDescriptor, Plugin, Rolldown } from "vite";
 
-type ManualChunkMeta = Parameters<Rollup.GetManualChunk>[1];
-type OutputChunk = Rollup.OutputChunk;
+type ChunkingContext = Rolldown.ChunkingContext;
+type OutputChunk = Rolldown.OutputChunk;
 
 /** Brand canvas (#fbf7f0): splash background and browser chrome for the installed app. */
 const BRAND_CANVAS = "#f4efe7";
@@ -22,7 +24,7 @@ const preloadLandingRoute = (routeModule: string): Plugin => ({
   transformIndexHtml: {
     order: "post",
     handler(_html, context) {
-      const bundle: Rollup.OutputBundle | undefined = context.bundle;
+      const bundle: Rolldown.OutputBundle | undefined = context.bundle;
       const entry = context.chunk;
 
       if (!bundle || !entry) {
@@ -170,42 +172,49 @@ const DOMAIN_FORMAT_PATTERN =
  * the import queue count; see platform/boot-settle.ts) is not in `app-core`: the Cookbook's
  * first download carries only what its first paint needs.
  */
-const createManualChunks = (bootModules: readonly string[]): Rollup.GetManualChunk => {
-  let entryGraph: Set<string> | null = null;
-  let landingGraph: Set<string> | null = null;
+const createChunkGroups = (landingModuleId: string): Rolldown.CodeSplittingGroup[] => {
+  // The landing page's static import graph, walked once per chunking pass (a watch rebuild gets a
+  // new context, so an import that changed since the last build is seen).
+  const landingGraphs = new WeakMap<ChunkingContext, Set<string>>();
+  const landingGraphFor = (context: ChunkingContext): Set<string> => {
+    let graph = landingGraphs.get(context);
 
-  const collectStaticGraph = (meta: ManualChunkMeta, roots: string[]): Set<string> => {
-    const graph = new Set<string>();
-    const visit = (id: string) => {
-      if (graph.has(id)) {
-        return;
-      }
+    if (!graph) {
+      const visited = new Set<string>();
+      const visit = (id: string) => {
+        if (visited.has(id)) {
+          return;
+        }
 
-      graph.add(id);
-      meta.getModuleInfo(id)?.importedIds.forEach(visit);
-    };
+        visited.add(id);
+        context.getModuleInfo(id)?.importedIds.forEach(visit);
+      };
 
-    roots.forEach(visit);
+      visit(landingModuleId);
+      graph = visited;
+      landingGraphs.set(context, graph);
+    }
+
     return graph;
   };
 
-  const sharedChunkFor = (id: string, meta: ManualChunkMeta): string | undefined => {
+  const sharedChunkFor = (id: string, context: ChunkingContext): string | undefined => {
     const path = id.replaceAll("\\", "/");
-    const info = meta.getModuleInfo(id);
+    const info = context.getModuleInfo(id);
 
-    // Entry code stays in the entry; modules only ever imported lazily keep their own chunks.
-    if (entryGraph?.has(id) || !info || info.importers.length === 0) {
+    // Modules only ever imported lazily keep their own chunks.
+    if (!info || info.importers.length === 0) {
       return undefined;
     }
 
     if (path.endsWith(".css")) {
       // A stylesheet follows its component, so a page's own CSS never lands in a shared chunk.
-      const owners = new Set(info.importers.map((importer) => sharedChunkFor(importer, meta)));
+      const owners = new Set(info.importers.map((importer) => sharedChunkFor(importer, context)));
       return owners.size === 1 ? [...owners][0] : undefined;
     }
 
     if (APP_SHARED_PATTERN.test(path)) {
-      return landingGraph?.has(id) ? "app-core" : "app-shared";
+      return landingGraphFor(context).has(id) ? "app-core" : "app-shared";
     }
 
     if (DOMAIN_CORE_PATTERN.test(path)) {
@@ -215,33 +224,19 @@ const createManualChunks = (bootModules: readonly string[]): Rollup.GetManualChu
     return DOMAIN_FORMAT_PATTERN.test(path) ? "domain-format" : undefined;
   };
 
-  return (id, meta) => {
-    if (!entryGraph || !landingGraph) {
-      const moduleIds = [...meta.getModuleIds()];
-      entryGraph = collectStaticGraph(
-        meta,
-        moduleIds.filter((moduleId) => meta.getModuleInfo(moduleId)?.isEntry)
-      );
-      landingGraph = collectStaticGraph(
-        meta,
-        moduleIds.filter((moduleId) =>
-          bootModules.some((bootModule) => moduleId.replaceAll("\\", "/").endsWith(bootModule))
-        )
-      );
-    }
-
-    // Named explicitly: Rollup moves a manual chunk's dependencies into it unless they belong to
-    // another manual chunk, which would otherwise drag shell code (React, the router) along.
-    if (entryGraph.has(id)) {
-      return "index";
-    }
-
-    return sharedChunkFor(id, meta);
-  };
+  return [
+    // Listed first, so it claims the entry's static graph before the shared groups: a group pulls
+    // its modules' dependencies into its chunk unless another group already holds them, which
+    // would otherwise drag shell code (React, the router) into `app-core` and make every route
+    // download it.
+    { name: "index", tags: ["$initial"] },
+    { debugName: "shared", name: (id, context) => sharedChunkFor(id, context) ?? null }
+  ];
 };
 
 /** The page most visits start on; see preloadLandingRoute and app/routes.ts. */
 const LANDING_ROUTE_MODULE = "/src/features/library/LibraryPage.tsx";
+const LANDING_ROUTE_ID = fileURLToPath(new URL(`.${LANDING_ROUTE_MODULE}`, import.meta.url));
 
 export default defineConfig({
   test: {
@@ -250,9 +245,11 @@ export default defineConfig({
     globals: true
   },
   build: {
-    rollupOptions: {
+    rolldownOptions: {
       output: {
-        manualChunks: createManualChunks([LANDING_ROUTE_MODULE])
+        codeSplitting: {
+          groups: createChunkGroups(LANDING_ROUTE_ID)
+        }
       }
     }
   },

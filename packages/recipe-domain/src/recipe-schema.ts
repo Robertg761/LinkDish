@@ -127,6 +127,48 @@ export const recipeConfidenceSchema = z.object({
   })
 });
 
+/*
+ * Whether a recipe still has gaps for the person to fill. A video that shows a dish being made but
+ * never says how much of each thing goes in is imported anyway, with its ingredients listed bare
+ * and status "missing_amounts"; the apps then offer to fill the gaps with AI. Once that is done the
+ * status is "ai_filled", so the recipe keeps saying its amounts are estimates. Absent on recipes
+ * with nothing missing, including every recipe saved before this existed.
+ */
+export const recipeCompletionStatusSchema = z.enum(["missing_amounts", "ai_filled"]);
+
+export const recipeCompletionSchema = z.object({
+  status: recipeCompletionStatusSchema,
+  /** The ingredients the source named without an amount (the ones AI gave amounts to, once filled). */
+  ingredients: z
+    .array(z.string().min(1).max(MAX_RECIPE_INGREDIENT_TEXT_LENGTH))
+    .max(MAX_RECIPE_INGREDIENT_COUNT)
+    .default([]),
+  /** When AI filled the gaps (ISO 8601); null until then. */
+  filledAt: z.string().datetime().nullable().optional()
+});
+
+/**
+ * The fields an AI completion changes, to merge into the latest copy of a saved recipe (so a
+ * title or note edited while it was running is kept).
+ */
+export const getRecipeCompletionChanges = (completed: {
+  ingredients: { text: string; section?: string | null | undefined }[];
+  steps: { index: number; text: string }[];
+  servings: string | null;
+  prepTimeMinutes: number | null;
+  cookTimeMinutes: number | null;
+  confidence: z.infer<typeof recipeConfidenceSchema>;
+  completion?: z.infer<typeof recipeCompletionSchema> | null | undefined;
+}) => ({
+  ingredients: completed.ingredients,
+  steps: completed.steps,
+  servings: completed.servings,
+  prepTimeMinutes: completed.prepTimeMinutes,
+  cookTimeMinutes: completed.cookTimeMinutes,
+  confidence: completed.confidence,
+  completion: completed.completion ?? null
+});
+
 const recipeNutritionValueSchema = z
   .string()
   .min(1)
@@ -289,12 +331,15 @@ const recipeSchemaBase = z.object({
       .nullable()
       .optional()
   ),
-  videoUrl: z.preprocess(blankToNull, httpUrlSchema.nullable().optional())
+  videoUrl: z.preprocess(blankToNull, httpUrlSchema.nullable().optional()),
+  completion: recipeCompletionSchema.nullable().optional()
 });
 
 export type RecipeIngredient = z.infer<typeof recipeIngredientSchema>;
 export type RecipeStep = z.infer<typeof recipeStepSchema>;
 export type RecipeConfidence = z.infer<typeof recipeConfidenceSchema>;
+export type RecipeCompletion = z.infer<typeof recipeCompletionSchema>;
+export type RecipeCompletionStatus = z.infer<typeof recipeCompletionStatusSchema>;
 export type RecipeNutrition = z.infer<typeof recipeNutritionSchema>;
 export type RecipeImageSource = z.infer<typeof recipeImageSourceSchema>;
 export type RecipeImage = z.infer<typeof recipeImageSchema>;

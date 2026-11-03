@@ -1,5 +1,13 @@
 import { createContext, forwardRef, useContext, useState } from "react";
-import { Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import {
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  type TextInputInstance,
+  View
+} from "react-native";
 
 import type { PropsWithChildren, ReactNode } from "react";
 import type { StyleProp, TextStyle, ViewStyle } from "react-native";
@@ -290,7 +298,7 @@ interface AppTextFieldProps {
   value: string;
 }
 
-export const AppTextField = forwardRef<TextInput, AppTextFieldProps>(
+export const AppTextField = forwardRef<TextInputInstance, AppTextFieldProps>(
   ({ value, placeholder, onChangeText, onSubmitEditing, rightElement }, ref) => {
     const [isFocused, setIsFocused] = useState(false);
     return (
@@ -402,7 +410,8 @@ const styles = StyleSheet.create({
     color: appColors.canvas,
     fontSize: 15,
     fontWeight: "700",
-    letterSpacing: 0.2
+    letterSpacing: 0.2,
+    textAlign: "center"
   },
   buttonTextGhost: {
     color: appColors.accent
@@ -448,13 +457,13 @@ const styles = StyleSheet.create({
     color: appColors.text,
     fontSize: 40,
     letterSpacing: 0,
-    lineHeight: 43
+    lineHeight: 52
   },
   headline: {
     color: appColors.text,
     fontSize: 31,
     letterSpacing: 0,
-    lineHeight: 36
+    lineHeight: 42
   },
   inputContainer: {
     flexDirection: "row",
@@ -524,6 +533,6 @@ const styles = StyleSheet.create({
     color: appColors.text,
     fontSize: 22,
     letterSpacing: 0,
-    lineHeight: 28
+    lineHeight: 32
   }
 });

@@ -14,6 +14,7 @@ import React, {
 
 import { mobileEnv } from "../../config/env";
 import { logAuthWarning } from "../../lib/authLogging";
+import { unlinkMobileLibrary } from "../saved-recipes/librarySync";
 
 import { AccountChangedError } from "./account-changed-error";
 import { useClerkSession } from "./ClerkSessionContext";
@@ -332,6 +333,11 @@ export const AccountProvider = ({ children }: PropsWithChildren) => {
         try {
           await createClientWithHeaders(getAuthHeadersFor(deletingFor)).deleteAccount({
             confirmEmail
+          });
+          // Its cloud cookbook went with it: this device's cookbook stops syncing with it (and
+          // stays here).
+          await unlinkMobileLibrary(deletingFor).catch((error: unknown) => {
+            console.warn("Couldn't unlink this device's cookbook from the deleted account.", error);
           });
 
           // Another account signed in meanwhile: it stays signed in (the deleted account's

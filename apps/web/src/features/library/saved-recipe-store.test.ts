@@ -169,7 +169,7 @@ describe("saved-recipe-store", () => {
     await getDb();
     const stored = await getSavedRecipeById("legacy-recipe");
 
-    expect(fakeIdb.openCalls).toEqual([{ name: "linkdish-web", version: 4 }]);
+    expect(fakeIdb.openCalls).toEqual([{ name: "linkdish-web", version: 5 }]);
     expect(stored?.recipe.image ?? null).toBeNull();
     expect(stored?.recipe.title).toBe("Grandma's Cookies");
   });

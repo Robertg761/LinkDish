@@ -46,6 +46,10 @@ const urlFormState = vi.hoisted(() => ({
 }));
 
 vi.mock("react-native", () => ({
+  AccessibilityInfo: {
+    isReduceMotionEnabled: () => Promise.resolve(false),
+    addEventListener: () => ({ remove: () => undefined })
+  },
   ActivityIndicator: ({ color }: { color?: string }) =>
     React.createElement("activity-indicator", { color }),
   Animated: {
@@ -156,6 +160,20 @@ vi.mock("./components/UrlForm", () => ({
   }) => {
     urlFormState.props = props;
     return React.createElement("UrlForm");
+  }
+}));
+
+const pasteTextSheetState = vi.hoisted(() => ({
+  props: null as {
+    onImportText: (text: string) => void;
+    visible: boolean;
+  } | null
+}));
+
+vi.mock("./components/PasteTextSheet", () => ({
+  PasteTextSheet: (props: { onImportText: (text: string) => void; visible: boolean }) => {
+    pasteTextSheetState.props = props;
+    return null;
   }
 }));
 
@@ -282,7 +300,7 @@ describe("HomeScreen import gate", () => {
     });
   });
 
-  it("keeps anonymous users locally gated when free imports are exhausted", async () => {
+  it("opens the recipe limit screen when anonymous free imports are exhausted", async () => {
     await act(async () => {
       create(<HomeScreen />);
       await flushAsyncWork();
@@ -296,7 +314,10 @@ describe("HomeScreen import gate", () => {
       urlFormState.props?.onSubmit("https://example.com/free-limit");
     });
 
-    expect(routerMocks.push).toHaveBeenCalledWith("/upgrade");
+    expect(routerMocks.push).toHaveBeenCalledWith({
+      pathname: "/recipe",
+      params: { url: "https://example.com/free-limit" }
+    });
   });
 
   const openScanSheet = async () => {
@@ -448,5 +469,61 @@ describe("HomeScreen import gate", () => {
     expect(imagePickerMocks.launchImageLibraryAsync).not.toHaveBeenCalled();
     expect(imagePickerMocks.launchCameraAsync).not.toHaveBeenCalled();
     act(() => renderer.unmount());
+  });
+
+  it("opens the paste-text sheet and imports pasted text on the recipe screen", async () => {
+    accountState.isSignedIn = true;
+    let renderer: ReturnType<typeof create>;
+
+    await act(async () => {
+      renderer = create(<HomeScreen />);
+      await flushAsyncWork();
+    });
+
+    expect(pasteTextSheetState.props?.visible).toBe(false);
+
+    await act(async () => {
+      (
+        renderer!.root.findByProps({ testID: "paste-text-button" }).props as { onPress: () => void }
+      ).onPress();
+      await flushAsyncWork();
+    });
+
+    expect(pasteTextSheetState.props?.visible).toBe(true);
+
+    await act(async () => {
+      pasteTextSheetState.props?.onImportText("Pancakes: 2 eggs, 1 cup flour, fry them.");
+      await flushAsyncWork();
+    });
+
+    expect(routerMocks.push).toHaveBeenCalledWith({
+      pathname: "/recipe",
+      params: {
+        textImportId: expect.stringMatching(/^text-/u) as unknown,
+        url: expect.stringMatching(
+          /^https:\/\/linkdish\.app\/text-imports\/android-text-/u
+        ) as unknown
+      }
+    });
+    expect(pasteTextSheetState.props?.visible).toBe(false);
+  });
+
+  it("sends free users who are out of imports to the plans before they paste", async () => {
+    let renderer: ReturnType<typeof create>;
+
+    await act(async () => {
+      renderer = create(<HomeScreen />);
+      await flushAsyncWork();
+    });
+
+    await act(async () => {
+      (
+        renderer!.root.findByProps({ testID: "paste-text-button" }).props as { onPress: () => void }
+      ).onPress();
+      await flushAsyncWork();
+    });
+
+    expect(routerMocks.push).toHaveBeenCalledWith("/upgrade");
+    expect(pasteTextSheetState.props?.visible).toBe(false);
   });
 });

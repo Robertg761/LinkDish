@@ -29,6 +29,7 @@ const savedRecipesState = vi.hoisted(() => ({
   canUseSharedRecipeBook: false,
   cloneRecipe: vi.fn(),
   cloneSharedRecipe: vi.fn(),
+  collections: [] as unknown[],
   deleteSharedRecipe: vi.fn(),
   hasLoadedSavedRecipes: true,
   hasLoadedSharedRecipes: true,
@@ -154,6 +155,7 @@ vi.mock("react-native-reanimated", () => ({
   },
   Easing: {
     cubic: vi.fn((value: number) => value),
+    inOut: vi.fn((easing: unknown) => easing),
     out: vi.fn((easing: unknown) => easing)
   },
   FadeInDown: {
@@ -167,7 +169,10 @@ vi.mock("react-native-reanimated", () => ({
   },
   ReduceMotion: {
     System: "system"
-  }
+  },
+  useAnimatedStyle: (factory: () => unknown) => factory(),
+  useSharedValue: (initial: number) => React.useRef({ value: initial }).current,
+  withTiming: (value: number) => value
 }));
 
 vi.mock("react-native-safe-area-context", () => ({
@@ -243,6 +248,7 @@ describe("CookbookScreen navigation and sharing", () => {
     savedRecipesState.hasLoadedSharedRecipes = true;
     savedRecipesState.removeRecipe.mockReset();
     savedRecipesState.savedRecipes = [];
+    savedRecipesState.collections = [];
     savedRecipesState.setShareMode.mockReset();
     savedRecipesState.sharedRecipeError = null;
     savedRecipesState.sharedRecipes = [];
@@ -378,7 +384,9 @@ describe("CookbookScreen navigation and sharing", () => {
       renderer = create(<CookbookScreen />);
     });
 
-    expect(JSON.stringify(renderer!.toJSON())).not.toContain("Share all");
+    const panelBefore = renderer!.root.findAllByProps({ testID: "family-sharing-panel" }).at(-1);
+    expect(panelBefore?.props.importantForAccessibility).toBe("no-hide-descendants");
+    expect(panelBefore?.props.pointerEvents).toBe("none");
 
     const sharingText = renderer!.root.findByProps({ children: "Family sharing" });
     let sharingButton = sharingText.parent;
@@ -391,6 +399,10 @@ describe("CookbookScreen navigation and sharing", () => {
     act(() => {
       sharingButtonProps?.onPress?.();
     });
+
+    const panelAfter = renderer!.root.findAllByProps({ testID: "family-sharing-panel" }).at(-1);
+    expect(panelAfter?.props.importantForAccessibility).toBe("auto");
+    expect(panelAfter?.props.pointerEvents).toBe("auto");
 
     const shareAllText = renderer!.root.findByProps({ children: "Share all" });
     let shareAllButton = shareAllText.parent;
@@ -820,6 +832,61 @@ describe("CookbookScreen navigation and sharing", () => {
 
     output = JSON.stringify(renderer!.toJSON());
     expect(output).toContain("No favorites yet. Tap the heart on a recipe to keep it here.");
+  });
+
+  it("filters the Cookbook to one collection or one tag", () => {
+    savedRecipesState.collections = [
+      {
+        createdAt: "2026-10-01T00:00:00.000Z",
+        emoji: "🍲",
+        id: "c-soups",
+        name: "Soups",
+        sortOrder: 0,
+        updatedAt: "2026-10-01T00:00:00.000Z"
+      }
+    ];
+    savedRecipesState.savedRecipes = [
+      { ...savedRecipe, libraryExtras: { tags: ["Quick"] } },
+      {
+        ...savedRecipe,
+        id: "soup",
+        libraryExtras: { collectionIds: ["c-soups"] },
+        recipe: { ...savedRecipe.recipe, sourceUrl: "https://example.com/soup", title: "Leek Soup" }
+      }
+    ];
+
+    let renderer: ReturnType<typeof create>;
+
+    act(() => {
+      renderer = create(<CookbookScreen />);
+    });
+
+    const press = (label: string) =>
+      act(() => {
+        (
+          renderer!.root.findByProps({ accessibilityLabel: label }).props as {
+            onPress: () => void;
+          }
+        ).onPress();
+      });
+
+    expect(JSON.stringify(renderer!.toJSON())).toContain("🍲 Soups · 1");
+
+    press("Show the Soups collection");
+    let output = JSON.stringify(renderer!.toJSON());
+    expect(output).toContain("Leek Soup");
+    expect(output).not.toContain("Tomato Toast");
+
+    press("Show recipes tagged Quick");
+    output = JSON.stringify(renderer!.toJSON());
+    expect(output).toContain("Tomato Toast");
+    expect(output).not.toContain("Leek Soup");
+
+    // Tapping the active filter again shows everything.
+    press("Show recipes tagged Quick");
+    output = JSON.stringify(renderer!.toJSON());
+    expect(output).toContain("Tomato Toast");
+    expect(output).toContain("Leek Soup");
   });
 
   it("sorts by the quickest recipes and keeps untimed ones last", async () => {

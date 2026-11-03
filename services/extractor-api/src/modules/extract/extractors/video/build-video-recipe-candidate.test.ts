@@ -126,6 +126,36 @@ describe("isAmountSupported", () => {
     expect(isAmountSupported("1 cup", "add a splash of milk and 2 cups of flour")).toBe(false);
     expect(isAmountSupported("1 cup", "half a cup of butter")).toBe(false);
   });
+
+  it("holds an amount spelled with an article to its unit and number", () => {
+    expect(isAmountSupported("a tablespoon", "a tablespoon of honey")).toBe(true);
+    expect(isAmountSupported("a heaping cup", "a heaping cup of flour")).toBe(true);
+    expect(isAmountSupported("a pinch", "pinch of salt")).toBe(true);
+    expect(
+      isAmountSupported("a pinch", "add a tiny pinch of salt, then cook for 2 minutes", "salt")
+    ).toBe(true);
+    expect(isAmountSupported("a cup", "one cup of rice")).toBe(true);
+    expect(isAmountSupported("a cup", "2 heaping cups of flour")).toBe(false);
+    expect(isAmountSupported("a cup", "one and a half cups of milk")).toBe(false);
+    expect(isAmountSupported("a cup", "a cup and a half of flour")).toBe(false);
+    expect(isAmountSupported("a tablespoon", "a tablespoon and a half of honey")).toBe(false);
+    expect(isAmountSupported("a cup", "a few cups of flour")).toBe(false);
+    expect(isAmountSupported("a cup", "several cups of stock")).toBe(false);
+    expect(isAmountSupported("a cup", "2 big heaping cups of flour")).toBe(false);
+    expect(isAmountSupported("a can", "you can add beans")).toBe(false);
+    expect(isAmountSupported("a slice", "slice the onion thin")).toBe(false);
+    expect(isAmountSupported("a can", "a can of chickpeas")).toBe(true);
+    expect(isAmountSupported("a cup and a half", "half a cup of milk")).toBe(false);
+    expect(isAmountSupported("a cup and a half", "a cup and a half of milk")).toBe(true);
+    expect(isAmountSupported("a few cloves", "add a few cloves of garlic", "garlic")).toBe(true);
+    expect(isAmountSupported("several cups", "several cups of stock")).toBe(true);
+    expect(isAmountSupported("several cups", "a few cups of stock")).toBe(false);
+    expect(isAmountSupported("a few cloves", "a clove of garlic")).toBe(false);
+    expect(isAmountSupported("a tablespoon", "a teaspoon of salt")).toBe(false);
+    expect(isAmountSupported("a cup", "half a cup of butter")).toBe(false);
+    expect(isAmountSupported("a cup", "2 cups of flour")).toBe(false);
+    expect(isAmountSupported("a splash", "a pinch of salt")).toBe(false);
+  });
 });
 
 describe("isItemNamedIn", () => {
@@ -145,6 +175,74 @@ describe("isItemNamedIn", () => {
 });
 
 describe("buildVideoRecipeCandidate", () => {
+  it("keeps a silent montage's recipe and flags the missing amounts for the apps", () => {
+    const { candidate } = buildVideoRecipeCandidate(
+      payload({
+        title: "Broccoli Cheddar Soup",
+        ingredients: [
+          {
+            item: "carrots, shredded",
+            amount: null,
+            section: null,
+            source: "visual",
+            quote: "shredded carrots poured into the pot"
+          },
+          {
+            item: "broccoli",
+            amount: null,
+            section: null,
+            source: "visual",
+            quote: "broccoli florets being chopped"
+          },
+          {
+            item: "cheddar cheese",
+            amount: null,
+            section: null,
+            source: "visual",
+            quote: "shredded cheddar stirred in"
+          }
+        ],
+        steps: [
+          {
+            text: "Soften the carrots in butter.",
+            source: "visual",
+            quote: "carrots cooking in the pot"
+          },
+          {
+            text: "Stir in the broccoli, then the milk.",
+            source: "visual",
+            quote: "milk poured over the broccoli"
+          },
+          { text: "Melt in the cheddar.", source: "visual", quote: "cheese melting into the soup" }
+        ]
+      }),
+      options
+    );
+
+    expect(candidate?.recipe).toMatchObject({
+      title: "Broccoli Cheddar Soup",
+      ingredients: [
+        { text: "carrots, shredded" },
+        { text: "broccoli" },
+        { text: "cheddar cheese" }
+      ],
+      completion: {
+        status: "missing_amounts",
+        ingredients: ["carrots, shredded", "broccoli", "cheddar cheese"]
+      }
+    });
+    expect(candidate?.recipe.steps).toHaveLength(3);
+    expect(candidate?.warnings).toEqual([
+      "The video doesn't give amounts for: carrots, shredded, broccoli, cheddar cheese."
+    ]);
+  });
+
+  it("flags nothing when every amount is stated", () => {
+    expect(
+      buildVideoRecipeCandidate(payload(), options).candidate?.recipe.completion
+    ).toBeUndefined();
+  });
+
   it("builds a recipe from evidence-backed ingredients and steps", () => {
     const { candidate, rejections } = buildVideoRecipeCandidate(payload(), options);
 

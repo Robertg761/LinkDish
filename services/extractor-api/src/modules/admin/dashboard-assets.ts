@@ -697,13 +697,14 @@ export const adminDashboardHtml = `<!doctype html>
           <button class="rail-link" data-page-target="model" type="button"><span class="rail-dot"></span>AI Model Control</button>
           <button class="rail-link" data-page-target="providers" type="button"><span class="rail-dot"></span>Providers</button>
           <button class="rail-link" data-page-target="settings" type="button"><span class="rail-dot"></span>Settings</button>
+          <button class="rail-link" data-page-target="activity" type="button"><span class="rail-dot"></span>Admin Activity</button>
           <button class="rail-link" data-page-target="notes" type="button"><span class="rail-dot"></span>Notes</button>
         </div>
 
         <div class="rail-footer">
           <h3>Access</h3>
           <strong>Admin Operator</strong>
-          <span class="muted">Token protected</span>
+          <span class="muted">Named token, audited</span>
         </div>
       </aside>
 
@@ -880,6 +881,16 @@ export const adminDashboardHtml = `<!doctype html>
           </section>
         </section>
 
+        <section class="page" data-page="activity" hidden>
+          <section class="panel" id="admin-activity-panel">
+            <div class="panel-head">
+              <h2>Admin Activity</h2>
+              <span class="status" id="admin-activity-status">Loading</span>
+            </div>
+            <div id="admin-activity"></div>
+          </section>
+        </section>
+
         <section class="page" data-page="notes" hidden>
           <section class="panel" id="notes-panel">
             <h2>Notes For Later</h2>
@@ -929,6 +940,10 @@ export const adminDashboardHtml = `<!doctype html>
         settings: {
           title: "Settings",
           description: "Runtime configuration, environment profile, and production-readiness state."
+        },
+        activity: {
+          title: "Admin Activity",
+          description: "Audit log of admin sign-in failures, lockouts, account lookups, plan grants, and model changes."
         },
         notes: {
           title: "Notes",
@@ -1641,7 +1656,9 @@ export const adminDashboardHtml = `<!doctype html>
           ["Browser fetch", snapshot.environment.runtime.browserFetchEnabled ? "Enabled" : "Disabled"],
           ["Rate limit", snapshot.environment.runtime.rateLimitMax + " / " + snapshot.environment.runtime.rateLimitWindowMs + " ms"],
           ["Sign-in code limit", snapshot.environment.runtime.authLoginCodeRateLimitMax + " / " + snapshot.environment.runtime.authLoginCodeRateLimitWindowMs + " ms"],
-          ["Admin auth", snapshot.security.authMode],
+          ["Admin auth", escapeHtml(snapshot.security.authMode)],
+          ["Admin sign-in lockout", snapshot.security.authFailureLimitMax + " failures / " + snapshot.security.authFailureLimitWindowMs + " ms per network"],
+          ["Admin audit retention", snapshot.security.auditRetentionDays + " days"],
           ["RevenueCat", snapshot.billing.revenueCatConfigured ? "Configured" : "Missing"],
           ["Upstash", snapshot.billing.upstashConfigured ? "Configured" : "Missing"]
         ];
@@ -1741,6 +1758,48 @@ export const adminDashboardHtml = `<!doctype html>
         \`;
       }
 
+      function renderAdminActivity(snapshot) {
+        const audit = snapshot.adminAudit || { entries: [], error: "Admin audit log unavailable." };
+        const status = document.getElementById("admin-activity-status");
+        status.className = audit.error ? "status warn" : "status good";
+        status.textContent = audit.error ? "Unavailable" : audit.entries.length + " recent";
+
+        if (audit.error) {
+          document.getElementById("admin-activity").innerHTML = \`<div class="note">\${escapeHtml(audit.error)}</div>\`;
+          return;
+        }
+
+        if (audit.entries.length === 0) {
+          document.getElementById("admin-activity").innerHTML = '<p class="muted">No admin activity recorded yet.</p>';
+          return;
+        }
+
+        const outcomeClass = (outcome) => outcome === "success" ? "status good" : outcome === "denied" ? "status bad" : "status warn";
+        const detailText = (detail) => detail
+          ? Object.entries(detail).filter(([, value]) => value != null).map(([key, value]) => key + ": " + value).join(", ")
+          : "";
+
+        document.getElementById("admin-activity").innerHTML = \`
+          <div class="table-scroll">
+            <table>
+              <thead><tr><th>Time</th><th>Who</th><th>Action</th><th>Result</th><th>IP</th><th>Details</th></tr></thead>
+              <tbody>
+                \${audit.entries.map((entry) => \`
+                  <tr>
+                    <td>\${escapeHtml(new Date(entry.at).toLocaleString())}</td>
+                    <td><strong>\${escapeHtml(entry.actor ?? "unknown")}</strong></td>
+                    <td>\${escapeHtml(entry.action)}</td>
+                    <td><span class="\${outcomeClass(entry.outcome)}">\${escapeHtml(entry.outcome)}</span></td>
+                    <td>\${escapeHtml(entry.ip)}</td>
+                    <td class="wrap">\${escapeHtml(detailText(entry.detail))}</td>
+                  </tr>
+                \`).join("")}
+              </tbody>
+            </table>
+          </div>
+        \`;
+      }
+
       function renderNotes(snapshot) {
         const notes = [
           ...snapshot.notes,
@@ -1769,6 +1828,7 @@ export const adminDashboardHtml = `<!doctype html>
         renderEnvironmentProfile(snapshot);
         renderRecent(snapshot);
         renderIosWaitlist(snapshot);
+        renderAdminActivity(snapshot);
         renderNotes(snapshot);
         document.getElementById("refresh-status").className = "status good";
         document.getElementById("refresh-status").textContent = "Updated " + new Date(snapshot.generatedAt).toLocaleTimeString();
