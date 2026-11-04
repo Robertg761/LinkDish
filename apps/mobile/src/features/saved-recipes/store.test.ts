@@ -258,6 +258,20 @@ describe("saved recipe store helpers", () => {
     expect(getQuotaSavedRecipeCount([starter, clone])).toBe(1);
   });
 
+  it("leaves household-deletion copies out of the free quota count", () => {
+    const personal = Array.from({ length: 15 }, (_, index) => ({
+      ...createSavedRecipeRecord(buildSuccessState(), "2026-04-19T12:00:00.000Z"),
+      id: `personal-${index}`
+    }));
+    const copies = [0, 1].map((index) => ({
+      ...createSavedRecipeRecord(buildSuccessState(), "2026-04-19T12:00:00.000Z"),
+      id: `household-copy-${index}`,
+      origin: "household-deletion-copy" as const
+    }));
+
+    expect(getQuotaSavedRecipeCount([...personal, ...copies])).toBe(15);
+  });
+
   it("increments repeated clone titles", () => {
     const soup = createSavedRecipeRecord(buildSuccessState(), "2026-04-19T12:00:00.000Z");
     const firstClone = {

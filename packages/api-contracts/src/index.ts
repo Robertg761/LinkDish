@@ -692,8 +692,17 @@ export const libraryRecipeSchema = z.object({
   cookLog: z.array(libraryCookLogEntrySchema).max(MAX_LIBRARY_COOK_LOG_ENTRIES).optional(),
   timesCooked: z.number().int().nonnegative().optional(),
   lastCookedAt: z.string().datetime().optional(),
-  preferredServings: z.number().positive().max(10_000).optional()
+  preferredServings: z.number().positive().max(10_000).optional(),
+  /**
+   * Set only on a recipe the server copied into this cookbook from a Family household's shared
+   * book when the household owner deleted their account and the new owner has no Family plan
+   * (HOUSEHOLD_DELETION_COPY_ORIGIN). Such a copy is not an import and does not count toward the
+   * Free saved-recipe cap; it also lets the shared book and the copy be told apart later.
+   */
+  origin: z.literal("household-deletion-copy").optional()
 });
+
+export const HOUSEHOLD_DELETION_COPY_ORIGIN = "household-deletion-copy" as const;
 
 export const libraryCollectionSchema = z.object({
   name: z.string().trim().min(1).max(MAX_LIBRARY_COLLECTION_NAME_LENGTH),

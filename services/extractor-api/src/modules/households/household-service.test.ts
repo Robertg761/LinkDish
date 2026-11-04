@@ -1001,23 +1001,196 @@ describe("household-service", () => {
     });
   });
 
-  it("dissolves a household and pending invites when the owner deletes their account", async () => {
+  it("transfers the household to the longest-standing member when the owner deletes their account", async () => {
     stubRevenueCatFamily(() => true);
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-07-01T12:00:00.000Z"));
     const { auth, households } = await importHouseholdModules();
     const owner = await createUser(auth, "owner@example.com");
-    const member = await createUser(auth, "member@example.com");
+    const firstMember = await createUser(auth, "first@example.com");
+    const secondMember = await createUser(auth, "second@example.com");
     const pending = await createUser(auth, "pending@example.com");
+    const lateJoiner = await createUser(auth, "late@example.com");
+
+    await households.createHouseholdForOwner(owner);
+    await households.createHouseholdInvite(owner, firstMember.email);
+    const firstInviteCode = getLastInviteCode();
+    await households.createHouseholdInvite(owner, secondMember.email);
+    const secondInviteCode = getLastInviteCode();
+    // Second member joins first in time order of invites, but the first member joins earlier.
+    vi.setSystemTime(new Date("2026-07-02T12:00:00.000Z"));
+    await households.acceptHouseholdInvite(firstMember, firstInviteCode);
+    vi.setSystemTime(new Date("2026-07-03T12:00:00.000Z"));
+    await households.acceptHouseholdInvite(secondMember, secondInviteCode);
+    await households.createHouseholdInvite(owner, pending.email);
+    const ownerIssuedInviteCode = getLastInviteCode();
+
+    await households.upsertSharedRecipeForUser(owner, buildSharedRecipeInput("Owner Soup"));
+    await households.upsertSharedRecipeForUser(firstMember, buildSharedRecipeInput("First Soup"));
+    await households.upsertSharedRecipeForUser(secondMember, buildSharedRecipeInput("Second Soup"));
+    await households.upsertShoppingItemsForUser(owner, {
+      items: [buildShoppingItem("owner_item", owner.id, "2026-07-03T12:00:00.000Z")]
+    });
+    await households.upsertShoppingItemsForUser(firstMember, {
+      items: [buildShoppingItem("first_item", firstMember.id, "2026-07-03T12:00:00.000Z")]
+    });
+    await households.upsertShoppingItemsForUser(secondMember, {
+      items: [buildShoppingItem("second_item", secondMember.id, "2026-07-03T12:00:00.000Z")]
+    });
+
+    await households.deleteAccountAndHouseholdAccess(owner, owner.email);
+
+    await expect(auth.getUserByEmail(owner.email)).resolves.toBeNull();
+    await expect(households.getHouseholdSummaryForUser(owner.id)).resolves.toEqual({
+      household: null
+    });
+
+    const newOwnerSummary = await households.getHouseholdSummaryForUser(firstMember.id);
+    expect(newOwnerSummary.household).toMatchObject({
+      activeMemberCount: 2,
+      cooldownSlotCount: 0,
+      ownerUserId: firstMember.id,
+      role: "owner"
+    });
+    expect(newOwnerSummary.household?.members.map((member) => member.userId).sort()).toEqual(
+      [firstMember.id, secondMember.id].sort()
+    );
+    expect(newOwnerSummary.household?.invites).toEqual([]);
+    await expect(households.getHouseholdSummaryForUser(secondMember.id)).resolves.toMatchObject({
+      household: { ownerUserId: firstMember.id, role: "member" }
+    });
+
+    const sharedRecipes = await households.getSharedRecipesForUser(secondMember);
+    expect(sharedRecipes.recipes.map((recipe) => recipe.ownerUserId).sort()).toEqual(
+      [firstMember.id, secondMember.id].sort()
+    );
+
+    const shoppingList = await households.getHouseholdShoppingListForUser(secondMember);
+    expect(shoppingList.items.map((item) => item.id).sort()).toEqual(["first_item", "second_item"]);
+
+    await expect(
+      households.acceptHouseholdInvite(pending, ownerIssuedInviteCode)
+    ).rejects.toMatchObject({
+      message: "That household invite is no longer valid.",
+      statusCode: 404
+    });
+
+    // Invites issued by a remaining member (today only the owner can invite, so the new owner)
+    // keep working after the transfer.
+    await households.createHouseholdInvite(firstMember, lateJoiner.email);
+    await households.acceptHouseholdInvite(lateJoiner, getLastInviteCode());
+    await expect(households.getHouseholdSummaryForUser(lateJoiner.id)).resolves.toMatchObject({
+      household: { ownerUserId: firstMember.id, role: "member" }
+    });
+    vi.useRealTimers();
+  });
+
+  it("copies the shared book into members' own cookbooks when the new owner has no Family", async () => {
+    const familyUsers = new Set<string>();
+    stubRevenueCatFamilyForUserIds(familyUsers);
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-07-01T12:00:00.000Z"));
+    const { auth, households } = await importHouseholdModules({ LIBRARY_SYNC_ENABLED: "true" });
+    const library = await import("../library/library-service.js");
+    const enforceBilling = await import("../billing/enforce-billing.js");
+    const owner = await createUser(auth, "owner@example.com");
+    const firstMember = await createUser(auth, "first@example.com");
+    const secondMember = await createUser(auth, "second@example.com");
+    familyUsers.add(owner.id);
+
+    await households.createHouseholdForOwner(owner);
+    await households.createHouseholdInvite(owner, firstMember.email);
+    const firstCode = getLastInviteCode();
+    await households.createHouseholdInvite(owner, secondMember.email);
+    const secondCode = getLastInviteCode();
+    vi.setSystemTime(new Date("2026-07-02T12:00:00.000Z"));
+    await households.acceptHouseholdInvite(firstMember, firstCode);
+    vi.setSystemTime(new Date("2026-07-03T12:00:00.000Z"));
+    await households.acceptHouseholdInvite(secondMember, secondCode);
+
+    await households.upsertSharedRecipeForUser(owner, buildSharedRecipeInput("Owner Soup"));
+    await households.upsertSharedRecipeForUser(firstMember, buildSharedRecipeInput("First Soup"));
+    await households.upsertSharedRecipeForUser(secondMember, buildSharedRecipeInput("Second Soup"));
+    // The second member already has First Soup in their own cookbook: it must not be copied again.
+    await library.pushLibraryChanges(secondMember.id, [
+      {
+        id: "saved-first-soup",
+        kind: "recipe",
+        recipe: {
+          ...buildSharedRecipeInput("First Soup"),
+          createdAt: "2026-07-03T12:00:00.000Z",
+          sourceSavedRecipeId: undefined
+        },
+        updatedAt: "2026-07-03T12:00:00.000Z"
+      }
+    ]);
+    const quotaEntriesBefore = enforceBilling.getInMemoryQuotaEntryCount();
+
+    const outcome = await households.copySharedRecipesToMembersIfSuccessorLacksFamily(owner.id);
+    expect(outcome?.copiedByUser).toEqual({ [firstMember.id]: 2, [secondMember.id]: 1 });
+    // Running it again copies nothing.
+    const rerun = await households.copySharedRecipesToMembersIfSuccessorLacksFamily(owner.id);
+    expect(rerun?.copiedByUser).toEqual({ [firstMember.id]: 0, [secondMember.id]: 0 });
+
+    await households.deleteAccountAndHouseholdAccess(owner, owner.email);
+
+    const titlesFor = async (userId: string) => {
+      const pulled = await library.pullLibraryChanges(userId, "0");
+      return pulled.changes
+        .filter((change) => change.kind === "recipe" && !change.deleted)
+        .map((change) => ({ origin: change.recipe?.origin, title: change.recipe?.recipe.title }))
+        .sort((left, right) => String(left.title).localeCompare(String(right.title)));
+    };
+
+    expect(await titlesFor(firstMember.id)).toEqual([
+      { origin: "household-deletion-copy", title: "First Soup" },
+      { origin: "household-deletion-copy", title: "Second Soup" }
+    ]);
+    expect(await titlesFor(secondMember.id)).toEqual([
+      { origin: undefined, title: "First Soup" },
+      { origin: "household-deletion-copy", title: "Second Soup" }
+    ]);
+    // The departing owner's own recipe is not copied, and no import was counted.
+    expect(enforceBilling.getInMemoryQuotaEntryCount()).toBe(quotaEntriesBefore);
+    await expect(households.getHouseholdSummaryForUser(firstMember.id)).resolves.toMatchObject({
+      household: { ownerUserId: firstMember.id }
+    });
+    vi.useRealTimers();
+  });
+
+  it("skips the private copy when the new owner already has Family", async () => {
+    stubRevenueCatFamily(() => true);
+    const { auth, households } = await importHouseholdModules({ LIBRARY_SYNC_ENABLED: "true" });
+    const library = await import("../library/library-service.js");
+    const owner = await createUser(auth, "owner@example.com");
+    const member = await createUser(auth, "member@example.com");
 
     await households.createHouseholdForOwner(owner);
     await households.createHouseholdInvite(owner, member.email);
     await households.acceptHouseholdInvite(member, getLastInviteCode());
+    await households.upsertSharedRecipeForUser(member, buildSharedRecipeInput("Member Soup"));
+
+    await households.deleteAccountAndHouseholdAccess(owner, owner.email);
+
+    const pulled = await library.pullLibraryChanges(member.id, "0");
+    expect(pulled.changes).toEqual([]);
+  });
+
+  it("dissolves a household and pending invites when the owner deletes their account as the last member", async () => {
+    stubRevenueCatFamily(() => true);
+    const { auth, households } = await importHouseholdModules();
+    const owner = await createUser(auth, "owner@example.com");
+    const pending = await createUser(auth, "pending@example.com");
+
+    await households.createHouseholdForOwner(owner);
+    await households.upsertSharedRecipeForUser(owner, buildSharedRecipeInput("Owner Soup"));
     await households.createHouseholdInvite(owner, pending.email);
     const pendingInviteCode = getLastInviteCode();
 
     await households.deleteAccountAndHouseholdAccess(owner, owner.email);
 
     await expect(auth.getUserByEmail(owner.email)).resolves.toBeNull();
-    await expect(households.getHouseholdSummaryForUser(member.id)).resolves.toEqual({
+    await expect(households.getHouseholdSummaryForUser(owner.id)).resolves.toEqual({
       household: null
     });
     await expect(
@@ -1025,6 +1198,9 @@ describe("household-service", () => {
     ).rejects.toMatchObject({
       message: "That household invite is no longer valid.",
       statusCode: 404
+    });
+    await expect(households.getHouseholdSummaryForUser(pending.id)).resolves.toEqual({
+      household: null
     });
   });
 

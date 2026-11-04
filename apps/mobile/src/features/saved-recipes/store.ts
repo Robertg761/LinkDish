@@ -38,6 +38,11 @@ export interface SavedRecipeRecord {
   fetchMode: SuccessfulExtractionState["fetchMode"];
   id: string;
   isStarter?: boolean | undefined;
+  /**
+   * "household-deletion-copy": copied in by the server when a Family owner deleted their account
+   * and the new owner has no Family plan. Not counted toward the Free saved-recipe cap.
+   */
+  origin?: "household-deletion-copy" | undefined;
   libraryExtras?: SavedRecipeLibraryExtras | undefined;
   notes?: string | undefined;
   provenance: SuccessfulExtractionState["provenance"];
@@ -279,7 +284,8 @@ export const starterRecipeSeedRecordToSavedRecipeRecord = (
 });
 
 export const getQuotaSavedRecipeCount = (savedRecipes: SavedRecipeRecord[]): number =>
-  savedRecipes.filter((entry) => !entry.isStarter).length;
+  savedRecipes.filter((entry) => !entry.isStarter && entry.origin !== "household-deletion-copy")
+    .length;
 
 export const restoreSavedRecipeState = (
   savedRecipe: SavedRecipeRecord

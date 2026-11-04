@@ -42,7 +42,10 @@ import {
   hasActiveRevenueCatFamilyEntitlement,
   verifyActiveRevenueCatFamilyEntitlement
 } from "../billing/revenuecat-entitlements.js";
-import { deleteLibraryForUser } from "../library/library-service.js";
+import {
+  deleteLibraryForUser,
+  writeHouseholdDeletionCopiesForUser
+} from "../library/library-service.js";
 import {
   addStoreSetMembers,
   deleteStoreKeys,
@@ -1269,6 +1272,173 @@ export const dissolveHousehold = async (ownerUserId: string): Promise<void> => {
   });
 };
 
+/* The remaining member who becomes owner: earliest memberJoinedAt, then memberUserIds order. */
+export const pickSuccessorOwnerUserId = (
+  household: HouseholdRecord,
+  departingUserId: string
+): string | null => {
+  const remainingMemberIds = household.memberUserIds.filter((userId) => userId !== departingUserId);
+  const fallbackJoinedAt = Date.parse(household.createdAt);
+  const joinedAtFor = (userId: string): number => {
+    const parsed = Date.parse(household.memberJoinedAt[userId] ?? "");
+
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+
+    return Number.isFinite(fallbackJoinedAt) ? fallbackJoinedAt : Number.POSITIVE_INFINITY;
+  };
+
+  return (
+    remainingMemberIds
+      .map((userId, index) => ({ index, joinedAt: joinedAtFor(userId), userId }))
+      .sort((left, right) => left.joinedAt - right.joinedAt || left.index - right.index)[0]
+      ?.userId ?? null
+  );
+};
+
+/* Stable library id for a household-deletion copy, so retries never duplicate. */
+const householdDeletionCopyId = (householdId: string, sharedRecipeId: string, userId: string) =>
+  `household-copy-${createHmac("sha256", "household-deletion-copy")
+    .update(`${householdId}:${sharedRecipeId}:${userId}`)
+    .digest("base64url")
+    .slice(0, 32)}`;
+
+/*
+ * Safety net (Robert's option B): when the owner deletes their account and the successor owner has
+ * no Family entitlement, the shared book stops being visible (getActiveHouseholdQuotaForUser gates
+ * on the owner's Family). So, before the transfer, every remaining member gets a private copy of
+ * every shared recipe that will survive (all but the departing owner's), in their own cookbook.
+ * Copies are written server side with origin "household-deletion-copy": no import counted, not in
+ * the Free cap, idempotent (stable ids, source URL de-dup). Runs before the transfer so a failure
+ * leaves the household untouched and the deletion can simply be retried.
+ */
+export const copySharedRecipesToMembersIfSuccessorLacksFamily = async (
+  ownerUserId: string
+): Promise<{
+  copiedByUser: Record<string, number>;
+  skippedForLimitByUser: Record<string, number>;
+} | null> => {
+  const householdId = await getHouseholdIdForUser(ownerUserId);
+  const household = householdId ? await getHouseholdById(householdId) : null;
+
+  if (!household || household.ownerUserId !== ownerUserId) {
+    return null;
+  }
+
+  const successor = pickSuccessorOwnerUserId(household, ownerUserId);
+
+  if (!successor || (await hasActiveRevenueCatFamilyEntitlement(successor).catch(() => false))) {
+    return null;
+  }
+
+  const survivingShared = (await listSharedRecipeRecordsForHousehold(household.id)).filter(
+    (record) => record.ownerUserId !== ownerUserId
+  );
+  const copiedByUser: Record<string, number> = {};
+  const skippedForLimitByUser: Record<string, number> = {};
+
+  for (const memberUserId of household.memberUserIds.filter((userId) => userId !== ownerUserId)) {
+    const outcome = await writeHouseholdDeletionCopiesForUser(
+      memberUserId,
+      survivingShared.map((record) => ({
+        id: householdDeletionCopyId(household.id, record.id, memberUserId),
+        recipe: {
+          createdAt: record.createdAt,
+          fetchMode: record.fetchMode,
+          provenance: record.provenance,
+          recipe: record.recipe,
+          strategy: record.strategy,
+          warnings: record.warnings,
+          ...(record.notes ? { notes: record.notes } : {})
+        }
+      }))
+    );
+    copiedByUser[memberUserId] = outcome.copied.length;
+    skippedForLimitByUser[memberUserId] = outcome.skippedForLimit.length;
+
+    if (outcome.skippedForLimit.length > 0) {
+      console.warn(
+        "Household deletion copy hit the cloud cookbook limit.",
+        memberUserId,
+        outcome.skippedForLimit.length
+      );
+    }
+  }
+
+  return { copiedByUser, skippedForLimitByUser };
+};
+
+/*
+ * Removes a departing owner (account deletion) while keeping the household for everyone else.
+ * The longest-standing remaining member becomes the owner. Only the departing owner's own
+ * shared recipes, shopping items and issued invites are removed. No cooldown slot is added,
+ * because the departing account no longer exists to rejoin.
+ * Returns false (and changes nothing) when no other member remains, so the caller can dissolve.
+ *
+ * The copy-to-private safety net runs before this in copySharedRecipesToMembersIfSuccessorLacksFamily.
+ */
+export const transferHouseholdOwnershipAndRemoveUser = async (
+  ownerUserId: string
+): Promise<{ transferred: boolean; newOwnerUserId: string | null }> => {
+  const householdId = await getHouseholdIdForUser(ownerUserId);
+
+  if (!householdId) {
+    return { newOwnerUserId: null, transferred: false };
+  }
+
+  return withHouseholdLock(householdId, async () => {
+    const household = await getHouseholdById(householdId);
+
+    if (!household || household.ownerUserId !== ownerUserId) {
+      return { newOwnerUserId: null, transferred: false };
+    }
+
+    const remainingMemberIds = household.memberUserIds.filter((userId) => userId !== ownerUserId);
+
+    if (remainingMemberIds.length === 0) {
+      return { newOwnerUserId: null, transferred: false };
+    }
+
+    const newOwnerUserId = pickSuccessorOwnerUserId(household, ownerUserId)!;
+
+    const memberJoinedAt = { ...household.memberJoinedAt };
+    delete memberJoinedAt[ownerUserId];
+
+    const inviteHashes = await getStoreSetMembers(householdKeys.householdInvites(householdId));
+    const invites = await getRecordsByKeys(
+      inviteRecordSchema,
+      inviteHashes.map(householdKeys.invite)
+    );
+    const ownerInviteHashes = inviteHashes.filter(
+      (_inviteHash, index) => invites[index]?.invitedByUserId === ownerUserId
+    );
+
+    await saveHousehold(
+      pruneExpiredCooldowns({
+        ...household,
+        memberJoinedAt,
+        memberUserIds: remainingMemberIds,
+        ownerUserId: newOwnerUserId
+      })
+    );
+
+    if (ownerInviteHashes.length > 0) {
+      await deleteStoreKeys(...ownerInviteHashes.map(householdKeys.invite));
+      await removeStoreSetMembers(
+        householdKeys.householdInvites(householdId),
+        ...ownerInviteHashes
+      );
+    }
+
+    await deleteStoreKeys(householdKeys.householdByUser(ownerUserId));
+    await deleteSharedRecipesForUserInHousehold(householdId, ownerUserId);
+    await deleteShoppingItemsForUserInHousehold(householdId, ownerUserId);
+
+    return { newOwnerUserId, transferred: true };
+  });
+};
+
 export const deleteAccountAndHouseholdAccess = async (
   user: AccountUser,
   confirmEmail: string
@@ -1289,7 +1459,14 @@ export const deleteAccountAndHouseholdAccess = async (
     const household = householdId ? await getHouseholdById(householdId) : null;
 
     if (household?.ownerUserId === user.id) {
-      await dissolveHousehold(user.id);
+      // The household carries on under the longest-standing remaining member.
+      // Only dissolve when the owner was the last member.
+      await copySharedRecipesToMembersIfSuccessorLacksFamily(user.id);
+      const { transferred } = await transferHouseholdOwnershipAndRemoveUser(user.id);
+
+      if (!transferred) {
+        await dissolveHousehold(user.id);
+      }
     } else if (household) {
       await leaveHousehold(user);
     }
