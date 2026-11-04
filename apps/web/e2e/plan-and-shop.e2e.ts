@@ -39,6 +39,34 @@ test("adds a recipe's groceries to the shopping list and ticks one off", async (
   await expect(main.getByText(`${count - 1} to buy`)).toBeVisible();
 });
 
+test("keeps a tick when the page reloads the moment it's tapped", async ({ page }) => {
+  await page.getByRole("button", { name: "Add to shopping list" }).click();
+
+  const sheet = page.getByRole("dialog", { name: "Add ingredients" });
+  const add = sheet.getByRole("button", { name: /^Add \d+ items?$/u });
+  const count = Number((await add.textContent())?.match(/\d+/u)?.[0]);
+  await add.click();
+  await expect(sheet).toBeHidden();
+  await toasts(page).getByRole("button", { name: "View list" }).click();
+
+  const main = page.getByRole("main");
+  await expect(main.getByText(`${count} to buy`)).toBeVisible();
+
+  // Phone speed, with the reload in the tap's own task: the write to IndexedDB can't finish.
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Emulation.setCPUThrottlingRate", { rate: 6 });
+  const reloaded = page.waitForEvent("load");
+  await page
+    .evaluate(() => {
+      document.querySelector<HTMLElement>('[role="checkbox"]')?.click();
+      location.reload();
+    })
+    .catch(() => undefined); // The reload can tear down the evaluation before it answers.
+  await reloaded;
+
+  await expect(main.getByText(`${count - 1} to buy`)).toBeVisible();
+});
+
 test("plans a recipe for tonight's dinner", async ({ page }) => {
   await page.getByRole("button", { name: "More actions" }).click();
   await page.getByRole("menuitem", { name: "Add to meal plan…" }).click();
