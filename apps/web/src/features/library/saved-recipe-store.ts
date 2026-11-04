@@ -1,5 +1,6 @@
 // The samples module directly: the package index would bring the whole domain engine (and zod)
 // into the Cookbook's first download.
+import { recipeContentFingerprint } from "@linkdish/recipe-domain/src/recipe-fingerprint";
 import { createStarterRecipeSeedRecords } from "@linkdish/recipe-domain/src/samples";
 
 import { apiClient } from "../../api/client";
@@ -1111,23 +1112,26 @@ const ownSyncOf = (
  * or unshared then).
  */
 /**
- * Hides household-deletion copies while the household's shared original (same source URL) is
- * visible, so a member never sees a recipe twice once the shared book comes back. Nothing is
- * deleted: with no shared list (household inactive) every copy shows again.
+ * Hides household-deletion copies while an identical shared original is visible, so a member never
+ * sees a recipe twice once the shared book comes back. A copy the member edited differs from the
+ * original, so it stays visible. Nothing is deleted: with no shared list (household inactive)
+ * every copy shows again.
  */
 export const hideHouseholdCopiesShownAsShared = <
-  Recipe extends Pick<WebSavedRecipe, "origin" | "sourceUrl">
+  Recipe extends Pick<WebSavedRecipe, "notes" | "origin" | "recipe">
 >(
   recipes: readonly Recipe[],
-  family: readonly { recipe: { sourceUrl: string } }[] | null
+  family: readonly Pick<SharedRecipe, "notes" | "recipe">[] | null
 ): Recipe[] => {
   if (!family || family.length === 0) {
     return [...recipes];
   }
 
-  const sharedUrls = new Set(family.map((entry) => entry.recipe.sourceUrl));
+  const sharedContent = new Set(family.map(recipeContentFingerprint));
   return recipes.filter(
-    (recipe) => recipe.origin !== "household-deletion-copy" || !sharedUrls.has(recipe.sourceUrl)
+    (recipe) =>
+      recipe.origin !== "household-deletion-copy" ||
+      !sharedContent.has(recipeContentFingerprint(recipe))
   );
 };
 

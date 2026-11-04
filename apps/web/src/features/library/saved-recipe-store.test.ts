@@ -336,16 +336,29 @@ describe("saved-recipe-store", () => {
     expect(await countQuotaSavedRecipes()).toBe(LOCAL_LIMIT_FREE);
   });
 
+  it("keeps a household-deletion copy the member edited visible beside the shared original", () => {
+    const recipe = { sourceUrl: "https://example.com/a", title: "A" } as Recipe;
+    const copy = { id: "household-copy-a", origin: "household-deletion-copy" as const, recipe };
+    const editedRecipe = { ...copy, id: "household-copy-b", recipe: { ...recipe, title: "Mine" } };
+    const editedNotes = { ...copy, id: "household-copy-c", notes: "Less salt" };
+
+    expect(
+      hideHouseholdCopiesShownAsShared([copy, editedRecipe, editedNotes], [{ recipe }])
+    ).toEqual([editedRecipe, editedNotes]);
+  });
+
   it("hides household-deletion copies only while the shared original is visible", () => {
-    const own = { id: "own", sourceUrl: "https://example.com/a" };
+    const recipeA = { sourceUrl: "https://example.com/a", title: "A" } as Recipe;
+    const recipeB = { sourceUrl: "https://example.com/b", title: "B" } as Recipe;
+    const own = { id: "own", recipe: recipeA };
     const copy = {
       id: "household-copy-a",
       origin: "household-deletion-copy" as const,
-      sourceUrl: "https://example.com/a"
+      recipe: recipeA
     };
-    const otherCopy = { ...copy, id: "household-copy-b", sourceUrl: "https://example.com/b" };
+    const otherCopy = { ...copy, id: "household-copy-b", recipe: recipeB };
     const recipes = [own, copy, otherCopy];
-    const family = [{ recipe: { sourceUrl: "https://example.com/a" } }];
+    const family = [{ recipe: recipeA }];
 
     // Household active: the copy of a visible shared recipe is hidden, the rest stay.
     expect(hideHouseholdCopiesShownAsShared(recipes, family)).toEqual([own, otherCopy]);

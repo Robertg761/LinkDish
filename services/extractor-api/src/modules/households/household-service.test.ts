@@ -1176,18 +1176,20 @@ describe("household-service", () => {
     expect(pulled.changes).toEqual([]);
   });
 
-  it("still deletes the account and transfers the household when the copy step fails", async () => {
-    // The successor has no Family, so the copy path is entered; its library write then fails.
+  it("stops the deletion with the household intact when the copy step fails, then succeeds on retry", async () => {
+    // The successor has no Family, so the copy path is entered; its library write then fails once.
     // (A rejected entitlement lookup alone is caught inside the copy step and reads as "no
     // Family", so the failure is forced on the library write instead.)
     const familyUsers = new Set<string>();
     stubRevenueCatFamilyForUserIds(familyUsers);
-    const writeCopies = vi.fn(() => Promise.reject(new Error("library store unavailable")));
+    const writeCopies = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("library store unavailable"))
+      .mockResolvedValue({ copied: [], skippedDuplicate: [], skippedForLimit: [] });
     vi.doMock("../library/library-service.js", async (importOriginal) => ({
       ...(await importOriginal<Record<string, unknown>>()),
       writeHouseholdDeletionCopiesForUser: writeCopies
     }));
-    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
     try {
       const { auth, households } = await importHouseholdModules({ LIBRARY_SYNC_ENABLED: "true" });
       const owner = await createUser(auth, "owner@example.com");
@@ -1199,15 +1201,18 @@ describe("household-service", () => {
       await households.acceptHouseholdInvite(member, getLastInviteCode());
       await households.upsertSharedRecipeForUser(member, buildSharedRecipeInput("Member Soup"));
 
-      await expect(
-        households.deleteAccountAndHouseholdAccess(owner, owner.email)
-      ).resolves.not.toThrow();
-
-      expect(writeCopies).toHaveBeenCalled();
-      expect(consoleErrorSpy).toHaveBeenCalledWith(
-        "Failed to copy shared recipes for a departing household owner.",
-        expect.any(Error)
+      await expect(households.deleteAccountAndHouseholdAccess(owner, owner.email)).rejects.toThrow(
+        "library store unavailable"
       );
+
+      await expect(auth.getUserByEmail(owner.email)).resolves.not.toBeNull();
+      await expect(households.getHouseholdSummaryForUser(member.id)).resolves.toMatchObject({
+        household: { ownerUserId: owner.id }
+      });
+
+      await households.deleteAccountAndHouseholdAccess(owner, owner.email);
+
+      expect(writeCopies).toHaveBeenCalledTimes(2);
       await expect(auth.getUserByEmail(owner.email)).resolves.toBeNull();
       await expect(households.getHouseholdSummaryForUser(member.id)).resolves.toMatchObject({
         household: { ownerUserId: member.id, role: "owner" }
@@ -1217,7 +1222,7 @@ describe("household-service", () => {
     }
   });
 
-  it("still deletes the account and dissolves the household when the transfer fails", async () => {
+  it("never closes the household for the others when the transfer fails, and finishes on retry", async () => {
     stubRevenueCatFamily(() => true);
     let failHouseholdWrite = false;
     vi.doMock("../storage/upstash-store.js", async (importOriginal) => {
@@ -1237,7 +1242,6 @@ describe("household-service", () => {
         }
       };
     });
-    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
     try {
       const { auth, households } = await importHouseholdModules();
       const owner = await createUser(auth, "owner@example.com");
@@ -1246,23 +1250,78 @@ describe("household-service", () => {
       await households.createHouseholdForOwner(owner);
       await households.createHouseholdInvite(owner, member.email);
       await households.acceptHouseholdInvite(member, getLastInviteCode());
+      await households.upsertSharedRecipeForUser(member, buildSharedRecipeInput("Member Soup"));
 
       failHouseholdWrite = true;
-      await expect(
-        households.deleteAccountAndHouseholdAccess(owner, owner.email)
-      ).resolves.not.toThrow();
-
-      expect(failHouseholdWrite).toBe(false);
-      expect(consoleErrorSpy).toHaveBeenCalledWith(
-        "Failed to transfer household ownership, closing the household.",
-        expect.any(Error)
+      await expect(households.deleteAccountAndHouseholdAccess(owner, owner.email)).rejects.toThrow(
+        "household store write failed"
       );
-      await expect(auth.getUserByEmail(owner.email)).resolves.toBeNull();
-      await expect(households.getHouseholdSummaryForUser(member.id)).resolves.toEqual({
-        household: null
+
+      await expect(auth.getUserByEmail(owner.email)).resolves.not.toBeNull();
+      await expect(households.getHouseholdSummaryForUser(member.id)).resolves.toMatchObject({
+        household: { ownerUserId: owner.id }
       });
+
+      await households.deleteAccountAndHouseholdAccess(owner, owner.email);
+
+      await expect(auth.getUserByEmail(owner.email)).resolves.toBeNull();
+      await expect(households.getHouseholdSummaryForUser(member.id)).resolves.toMatchObject({
+        household: { ownerUserId: member.id, role: "owner" }
+      });
+      await expect(households.getSharedRecipesForUser(member)).resolves.toMatchObject({
+        recipes: [{ recipe: { title: "Member Soup" } }]
+      });
+    } finally {
+      vi.doUnmock("../storage/upstash-store.js");
+    }
+  });
+
+  it("finishes a deletion whose earlier attempt moved the household but kept the owner's pointer", async () => {
+    stubRevenueCatFamily(() => true);
+    let failPointerDelete = false;
+    vi.doMock("../storage/upstash-store.js", async (importOriginal) => {
+      const actual = await importOriginal<Record<string, unknown>>();
+      const realDeleteStoreKeys = actual.deleteStoreKeys as (...keys: string[]) => unknown;
+      return {
+        ...actual,
+        deleteStoreKeys: (...keys: string[]) => {
+          if (
+            failPointerDelete &&
+            keys.some((key) => key.startsWith("linkdish:household-by-user:"))
+          ) {
+            failPointerDelete = false;
+            throw new Error("pointer delete failed");
+          }
+          return realDeleteStoreKeys(...keys);
+        }
+      };
+    });
+    try {
+      const { auth, households } = await importHouseholdModules();
+      const owner = await createUser(auth, "owner@example.com");
+      const member = await createUser(auth, "member@example.com");
+
+      await households.createHouseholdForOwner(owner);
+      await households.createHouseholdInvite(owner, member.email);
+      await households.acceptHouseholdInvite(member, getLastInviteCode());
+      await households.upsertSharedRecipeForUser(member, buildSharedRecipeInput("Member Soup"));
+
+      failPointerDelete = true;
+      await expect(households.deleteAccountAndHouseholdAccess(owner, owner.email)).rejects.toThrow(
+        "pointer delete failed"
+      );
+
+      await households.deleteAccountAndHouseholdAccess(owner, owner.email);
+
+      await expect(auth.getUserByEmail(owner.email)).resolves.toBeNull();
       await expect(households.getHouseholdSummaryForUser(owner.id)).resolves.toEqual({
         household: null
+      });
+      await expect(households.getHouseholdSummaryForUser(member.id)).resolves.toMatchObject({
+        household: { ownerUserId: member.id, role: "owner" }
+      });
+      await expect(households.getSharedRecipesForUser(member)).resolves.toMatchObject({
+        recipes: [{ recipe: { title: "Member Soup" } }]
       });
     } finally {
       vi.doUnmock("../storage/upstash-store.js");

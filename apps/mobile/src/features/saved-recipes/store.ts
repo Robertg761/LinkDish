@@ -2,6 +2,7 @@ import { MAX_LIBRARY_COOK_LOG_ENTRIES } from "@linkdish/api-contracts";
 import {
   createRecipeSearchIndex,
   isLikelySameRecipe,
+  recipeContentFingerprint,
   recipeSearchFields
 } from "@linkdish/recipe-domain";
 
@@ -421,6 +422,8 @@ export const cloneSavedRecipeRecord = (
     favorite: undefined,
     id: createSavedRecipeId(new Date(clonedAt)),
     isStarter: undefined,
+    // Only the server's own household copies are exempt from the Free cap, not duplicates of them.
+    origin: undefined,
     // A copy starts its own cooking history and rating.
     libraryExtras: copyableLibraryExtras(sourceRecord.libraryExtras),
     notes: sourceRecord.notes,
@@ -645,22 +648,24 @@ export const recordSharedLinkOwners = <Entry extends SavedRecipeRecord>(
  * shared. Signed out, it reads as stored (nothing can be shared or unshared then).
  */
 /**
- * Hides household-deletion copies while the household's shared original (same source URL) is
- * visible, so a member never sees a recipe twice once the shared book comes back. Nothing is
- * deleted: with no shared list (household inactive) every copy shows again.
+ * Hides household-deletion copies while an identical shared original is visible, so a member never
+ * sees a recipe twice once the shared book comes back. A copy the member edited differs from the
+ * original, so it stays visible. Nothing is deleted: with no shared list (household inactive)
+ * every copy shows again.
  */
 export const hideHouseholdCopiesShownAsShared = <Entry extends SavedRecipeRecord>(
   records: readonly Entry[],
-  familyRecipes: readonly Pick<SharedRecipe, "recipe">[] | null
+  familyRecipes: readonly Pick<SharedRecipe, "notes" | "recipe">[] | null
 ): Entry[] => {
   if (!familyRecipes || familyRecipes.length === 0) {
     return [...records];
   }
 
-  const sharedUrls = new Set(familyRecipes.map((entry) => entry.recipe.sourceUrl));
+  const sharedContent = new Set(familyRecipes.map(recipeContentFingerprint));
   return records.filter(
     (record) =>
-      record.origin !== "household-deletion-copy" || !sharedUrls.has(record.recipe.sourceUrl)
+      record.origin !== "household-deletion-copy" ||
+      !sharedContent.has(recipeContentFingerprint(record))
   );
 };
 

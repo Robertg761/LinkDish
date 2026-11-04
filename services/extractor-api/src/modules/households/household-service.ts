@@ -1256,7 +1256,8 @@ export const dissolveHousehold = async (ownerUserId: string): Promise<void> => {
   await withHouseholdLock(householdId, async () => {
     const household = await getHouseholdById(householdId);
 
-    if (!household) {
+    // Only its owner can close a household: a stale pointer must never take it from the others.
+    if (!household || household.ownerUserId !== ownerUserId) {
       return;
     }
 
@@ -1310,8 +1311,8 @@ const householdDeletionCopyId = (householdId: string, sharedRecipeId: string, us
  * on the owner's Family). So, before the transfer, every remaining member gets a private copy of
  * every shared recipe that will survive (all but the departing owner's), in their own cookbook.
  * Copies are written server side with origin "household-deletion-copy": no import counted, not in
- * the Free cap, idempotent (stable ids, source URL de-dup). Runs before the transfer so a failure
- * leaves the household untouched and the deletion can simply be retried.
+ * the Free cap, idempotent (stable ids, source URL de-dup). Runs before the transfer, and a failure
+ * stops the deletion, so the household stays untouched and the person can simply retry.
  */
 export const copySharedRecipesToMembersIfSuccessorLacksFamily = async (
   ownerUserId: string
@@ -1376,6 +1377,10 @@ export const copySharedRecipesToMembersIfSuccessorLacksFamily = async (
  * because the departing account no longer exists to rejoin.
  * Returns false (and changes nothing) when no other member remains, so the caller can dissolve.
  *
+ * The departing owner's data goes first and their household pointer last, so if any step fails the
+ * deletion can be retried and still reach whatever is left (see the stale pointer check in
+ * deleteAccountAndHouseholdAccess).
+ *
  * The copy-to-private safety net runs before this in copySharedRecipesToMembersIfSuccessorLacksFamily.
  */
 export const transferHouseholdOwnershipAndRemoveUser = async (
@@ -1414,14 +1419,8 @@ export const transferHouseholdOwnershipAndRemoveUser = async (
       (_inviteHash, index) => invites[index]?.invitedByUserId === ownerUserId
     );
 
-    await saveHousehold(
-      pruneExpiredCooldowns({
-        ...household,
-        memberJoinedAt,
-        memberUserIds: remainingMemberIds,
-        ownerUserId: newOwnerUserId
-      })
-    );
+    await deleteSharedRecipesForUserInHousehold(householdId, ownerUserId);
+    await deleteShoppingItemsForUserInHousehold(householdId, ownerUserId);
 
     if (ownerInviteHashes.length > 0) {
       await deleteStoreKeys(...ownerInviteHashes.map(householdKeys.invite));
@@ -1431,9 +1430,15 @@ export const transferHouseholdOwnershipAndRemoveUser = async (
       );
     }
 
+    await saveHousehold(
+      pruneExpiredCooldowns({
+        ...household,
+        memberJoinedAt,
+        memberUserIds: remainingMemberIds,
+        ownerUserId: newOwnerUserId
+      })
+    );
     await deleteStoreKeys(householdKeys.householdByUser(ownerUserId));
-    await deleteSharedRecipesForUserInHousehold(householdId, ownerUserId);
-    await deleteShoppingItemsForUserInHousehold(householdId, ownerUserId);
 
     return { newOwnerUserId, transferred: true };
   });
@@ -1459,27 +1464,19 @@ export const deleteAccountAndHouseholdAccess = async (
     const household = householdId ? await getHouseholdById(householdId) : null;
 
     if (household?.ownerUserId === user.id) {
-      // The household carries on under the longest-standing remaining member.
-      // Only dissolve when the owner was the last member.
-      //
-      // Neither step below may stop the account being deleted: the copies are a convenience for
-      // the other members, and failing the whole delete would trap the person who asked to leave.
-      // A copy failure is logged and the deletion carries on; a transfer failure falls back to
-      // closing the household rather than leaving it half moved.
-      await copySharedRecipesToMembersIfSuccessorLacksFamily(user.id).catch((error: unknown) => {
-        console.error("Failed to copy shared recipes for a departing household owner.", error);
-      });
-
-      const transferred = await transferHouseholdOwnershipAndRemoveUser(user.id)
-        .then((result) => result.transferred)
-        .catch((error: unknown) => {
-          console.error("Failed to transfer household ownership, closing the household.", error);
-          return false;
-        });
+      // The household carries on under the longest-standing remaining member. Only dissolve when
+      // the owner was the last member. A failure in either step stops the deletion with an error
+      // the person can retry: closing the household instead would destroy the other members'
+      // recipes because of a passing store or lock error.
+      await copySharedRecipesToMembersIfSuccessorLacksFamily(user.id);
+      const { transferred } = await transferHouseholdOwnershipAndRemoveUser(user.id);
 
       if (!transferred) {
         await dissolveHousehold(user.id);
       }
+    } else if (household && !household.memberUserIds.includes(user.id)) {
+      // An earlier attempt moved the household on but failed before removing this pointer.
+      await deleteStoreKeys(householdKeys.householdByUser(user.id));
     } else if (household) {
       await leaveHousehold(user);
     }
