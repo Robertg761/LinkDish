@@ -3,7 +3,9 @@ import { randomBytes } from "node:crypto";
 import { z } from "zod";
 
 import {
+  HOUSEHOLD_DELETION_COPY_ORIGIN,
   type LibraryChange,
+  type LibraryRecipe,
   libraryChangeSchema,
   type LibraryItemKind,
   MAX_LIBRARY_COLLECTIONS,
@@ -396,6 +398,108 @@ export const pushLibraryChanges = async (
       newer,
       rejected: rejected.sort((left, right) => left.index - right.index)
     };
+  });
+};
+
+/** A recipe the server places in a member's cookbook when their household owner deletes their account. */
+export interface HouseholdDeletionCopy {
+  /** Stable per (household, shared recipe), so a retry writes the same item instead of a duplicate. */
+  id: string;
+  recipe: Omit<LibraryRecipe, "origin">;
+}
+
+/**
+ * Writes household-deletion copies into a member's personal cookbook. Server side only: it never
+ * goes through an import, so no import is counted, and the copies carry
+ * `origin: "household-deletion-copy"` so clients leave them out of the Free saved-recipe cap.
+ * A copy is skipped when the cookbook already holds an item with its id (already copied) or a
+ * live recipe with the same source URL (the member already has that recipe). Copies that would
+ * pass MAX_LIBRARY_RECIPES are not written and are reported back in `skippedForLimit`.
+ */
+export const writeHouseholdDeletionCopiesForUser = async (
+  userId: string,
+  copies: readonly HouseholdDeletionCopy[]
+): Promise<{ copied: string[]; skippedDuplicate: string[]; skippedForLimit: string[] }> => {
+  const result = {
+    copied: [] as string[],
+    skippedDuplicate: [] as string[],
+    skippedForLimit: [] as string[]
+  };
+
+  if (copies.length === 0) {
+    return result;
+  }
+
+  return withLibraryLock(userId, async () => {
+    const liveResult = await runStoreCommand(["SMEMBERS", libraryKeys.live(userId, "recipe")]);
+    const liveIds = (Array.isArray(liveResult.result) ? liveResult.result : []).filter(
+      (value): value is string => typeof value === "string"
+    );
+    const liveKeys = liveIds.map((id) => libraryKeys.item(userId, "recipe", id));
+    const liveValues = liveKeys.length ? await getStoreStrings(liveKeys) : [];
+    const liveSourceUrls = new Set(
+      liveValues.flatMap((value, index) => {
+        const stored = readStoredChange(value ?? null, liveKeys[index] ?? "");
+        return stored?.recipe ? [stored.recipe.recipe.sourceUrl] : [];
+      })
+    );
+    const copyKeys = copies.map((copy) => libraryKeys.item(userId, "recipe", copy.id));
+    const existingCopies = await getStoreStrings(copyKeys);
+    let liveCount = liveIds.length;
+    const now = new Date().toISOString();
+    const accepted: LibraryChange[] = [];
+
+    copies.forEach((copy, index) => {
+      // Any stored item under the copy id (even a tombstone the member deleted) means it was
+      // copied before: never copy it again.
+      if (existingCopies[index] || liveSourceUrls.has(copy.recipe.recipe.sourceUrl)) {
+        result.skippedDuplicate.push(copy.id);
+        return;
+      }
+
+      if (liveCount >= MAX_LIBRARY_RECIPES) {
+        result.skippedForLimit.push(copy.id);
+        return;
+      }
+
+      liveCount += 1;
+      liveSourceUrls.add(copy.recipe.recipe.sourceUrl);
+      accepted.push(
+        libraryChangeSchema.parse({
+          id: copy.id,
+          kind: "recipe",
+          recipe: { ...copy.recipe, origin: HOUSEHOLD_DELETION_COPY_ORIGIN },
+          updatedAt: now
+        })
+      );
+      result.copied.push(copy.id);
+    });
+
+    if (accepted.length > 0) {
+      const lastRev = toInteger(
+        (await runStoreCommand(["INCRBY", libraryKeys.rev(userId), String(accepted.length)])).result
+      );
+      const firstRev = lastRev - accepted.length + 1;
+
+      await runStoreWrites(
+        accepted.flatMap((change, offset) => [
+          [
+            "SET",
+            libraryKeys.item(userId, change.kind, change.id),
+            JSON.stringify({ change, rev: firstRev + offset, storedAt: now })
+          ],
+          [
+            "ZADD",
+            libraryKeys.changes(userId),
+            String(firstRev + offset),
+            toMember(change.kind, change.id)
+          ],
+          ["SADD", libraryKeys.live(userId, change.kind), change.id]
+        ])
+      );
+    }
+
+    return result;
   });
 };
 

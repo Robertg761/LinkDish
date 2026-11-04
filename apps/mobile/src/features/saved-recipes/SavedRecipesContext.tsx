@@ -64,6 +64,7 @@ import {
   getOwnSharedRecipeId,
   recordSharedLinkOwners,
   markSavedRecipeUnshared,
+  hideHouseholdCopiesShownAsShared,
   withOwnSharedLink,
   removeSavedRecipeRecord,
   savedRecipeRecordToSharedRecipeRequest,
@@ -1767,13 +1768,22 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
   );
   // The cookbook as the signed-in account sees it: another account's Family link on a recipe
   // reads as not shared (it can't update or unshare that account's copy).
-  const visibleSavedRecipes = useMemo(() => {
+  const linkedSavedRecipes = useMemo(() => {
     const family = hasLoadedSharedRecipes ? sharedRecipes : null;
     return savedRecipes.map((record) => withOwnSharedLink(record, user?.id, family));
   }, [hasLoadedSharedRecipes, savedRecipes, sharedRecipes, user?.id]);
+  const visibleSavedRecipes = useMemo(
+    () =>
+      hideHouseholdCopiesShownAsShared(
+        linkedSavedRecipes,
+        hasLoadedSharedRecipes ? sharedRecipes : null
+      ),
+    [hasLoadedSharedRecipes, linkedSavedRecipes, sharedRecipes]
+  );
+  // By id it reads every record, hidden copies too: a meal plan entry can point at one.
   const getSavedRecipeById = useCallback(
-    (id: string) => getSavedRecipeRecordById(visibleSavedRecipes, id),
-    [visibleSavedRecipes]
+    (id: string) => getSavedRecipeRecordById(linkedSavedRecipes, id),
+    [linkedSavedRecipes]
   );
   const getSavedRecipeBySourceUrl = useCallback(
     (sourceUrl: string) => getSavedRecipeRecordBySourceUrl(visibleSavedRecipes, sourceUrl),
