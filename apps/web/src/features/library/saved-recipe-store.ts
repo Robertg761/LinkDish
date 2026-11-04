@@ -257,8 +257,7 @@ export async function countSavedRecipes(): Promise<number> {
 /** Personal recipes that count toward the free limit (starter recipes are excluded). */
 export async function countQuotaSavedRecipes(): Promise<number> {
   const db = await getDb();
-  const keys = await db.getAllKeys(STORE_NAME);
-  return keys.filter((key) => !isStarterRecipeId(key)).length;
+  return countPersonalRecipes(await db.getAllKeys(STORE_NAME));
 }
 
 const isPremium = (options?: SavedRecipeQuotaOptions): boolean =>
@@ -337,8 +336,19 @@ type NewRecipeOutcome =
   | { record?: undefined; refused: "duplicate"; stored: WebSavedRecipe }
   | { record?: undefined; refused: "limit_exceeded" };
 
+/**
+ * Starters and household-deletion copies (origin "household-deletion-copy") do not count toward
+ * the free limit. The server always gives those copies a `household-copy-` id, so the count can
+ * stay keys-only (no whole-record reads).
+ */
+export const HOUSEHOLD_DELETION_COPY_ID_PREFIX = "household-copy-";
+
 const countPersonalRecipes = (keys: readonly IDBValidKey[]): number =>
-  keys.filter((key) => !isStarterRecipeId(key)).length;
+  keys.filter(
+    (key) =>
+      !isStarterRecipeId(key) &&
+      !(typeof key === "string" && key.startsWith(HOUSEHOLD_DELETION_COPY_ID_PREFIX))
+  ).length;
 
 /**
  * Those of `collectionIds` whose collection still exists, read through the `collections` store of
@@ -543,27 +553,25 @@ async function seedStarterRecipes(): Promise<WebSavedRecipe[] | null> {
     return null;
   }
 
-  const seeded = createStarterRecipeSeedRecords().map(
-    (starterRecipe): WebSavedRecipe => ({
-      id: starterRecipe.id,
-      recipe: starterRecipe.recipe,
-      sourceUrl: starterRecipe.recipe.sourceUrl,
-      sourceHost: getSourceHost(starterRecipe.recipe.sourceUrl),
-      createdAt: starterRecipe.savedAt,
-      updatedAt: starterRecipe.savedAt,
-      extraction: {
-        fetchMode: starterRecipe.fetchMode,
-        provenance: starterRecipe.provenance,
-        strategy: starterRecipe.strategy,
-        warnings: starterRecipe.warnings
-      },
-      isStarter: true,
-      timesCooked: 0,
-      sync: {
-        status: "local_only"
-      }
-    })
-  );
+  const seeded = createStarterRecipeSeedRecords().map((starterRecipe): WebSavedRecipe => ({
+    id: starterRecipe.id,
+    recipe: starterRecipe.recipe,
+    sourceUrl: starterRecipe.recipe.sourceUrl,
+    sourceHost: getSourceHost(starterRecipe.recipe.sourceUrl),
+    createdAt: starterRecipe.savedAt,
+    updatedAt: starterRecipe.savedAt,
+    extraction: {
+      fetchMode: starterRecipe.fetchMode,
+      provenance: starterRecipe.provenance,
+      strategy: starterRecipe.strategy,
+      warnings: starterRecipe.warnings
+    },
+    isStarter: true,
+    timesCooked: 0,
+    sync: {
+      status: "local_only"
+    }
+  }));
 
   await Promise.all([...seeded.map((recipe) => store.put(recipe)), tx.done]);
 
@@ -1102,6 +1110,27 @@ const ownSyncOf = (
  * getOwnSharedRecipeId) reads as not shared. Signed out, it reads as stored (nothing can be shared
  * or unshared then).
  */
+/**
+ * Hides household-deletion copies while the household's shared original (same source URL) is
+ * visible, so a member never sees a recipe twice once the shared book comes back. Nothing is
+ * deleted: with no shared list (household inactive) every copy shows again.
+ */
+export const hideHouseholdCopiesShownAsShared = <
+  Recipe extends Pick<WebSavedRecipe, "origin" | "sourceUrl">
+>(
+  recipes: readonly Recipe[],
+  family: readonly { recipe: { sourceUrl: string } }[] | null
+): Recipe[] => {
+  if (!family || family.length === 0) {
+    return [...recipes];
+  }
+
+  const sharedUrls = new Set(family.map((entry) => entry.recipe.sourceUrl));
+  return recipes.filter(
+    (recipe) => recipe.origin !== "household-deletion-copy" || !sharedUrls.has(recipe.sourceUrl)
+  );
+};
+
 export const withOwnSharedLink = <Recipe extends Pick<WebSavedRecipe, "sync">>(
   recipe: Recipe,
   account: string | null,
@@ -1383,8 +1412,7 @@ export function setRecipeFavorite(
 
 /** New tags, or how to change the stored ones (e.g. add one: `(tags) => [...tags, "Quick"]`). */
 export type RecipeTagsUpdate =
-  | readonly string[]
-  | ((current: readonly string[]) => readonly string[]);
+  readonly string[] | ((current: readonly string[]) => readonly string[]);
 
 /**
  * Sets the recipe's tags. Pass a function to change the tags as stored when the write happens

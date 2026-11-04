@@ -64,6 +64,7 @@ import {
   getOwnSharedRecipeId,
   recordSharedLinkOwners,
   markSavedRecipeUnshared,
+  hideHouseholdCopiesShownAsShared,
   withOwnSharedLink,
   removeSavedRecipeRecord,
   savedRecipeRecordToSharedRecipeRequest,
@@ -1769,7 +1770,9 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
   // reads as not shared (it can't update or unshare that account's copy).
   const visibleSavedRecipes = useMemo(() => {
     const family = hasLoadedSharedRecipes ? sharedRecipes : null;
-    return savedRecipes.map((record) => withOwnSharedLink(record, user?.id, family));
+    return hideHouseholdCopiesShownAsShared(savedRecipes, family).map((record) =>
+      withOwnSharedLink(record, user?.id, family)
+    );
   }, [hasLoadedSharedRecipes, savedRecipes, sharedRecipes, user?.id]);
   const getSavedRecipeById = useCallback(
     (id: string) => getSavedRecipeRecordById(visibleSavedRecipes, id),

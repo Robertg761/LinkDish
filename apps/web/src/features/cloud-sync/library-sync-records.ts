@@ -57,6 +57,7 @@ export const toLibraryRecipe = (record: WebSavedRecipe): LibraryRecipe => {
     warnings: record.extraction.warnings,
     ...(notes ? { notes } : {}),
     ...(record.clonedFromId ? { clonedFromId: record.clonedFromId } : {}),
+    ...(record.origin ? { origin: record.origin } : {}),
     ...(record.favorite ? { favorite: true } : {}),
     ...(record.tags?.length ? { tags: record.tags } : {}),
     ...(record.collectionIds?.length ? { collectionIds: record.collectionIds } : {}),
@@ -79,6 +80,7 @@ export const toLibraryCollection = (collection: WebCollection): LibraryCollectio
 const SYNCED_OPTIONAL_KEYS = [
   "notes",
   "clonedFromId",
+  "origin",
   "favorite",
   "tags",
   "collectionIds",
@@ -136,6 +138,7 @@ export const fromLibraryRecipe = (
     ...next,
     ...(item.notes ? { notes: item.notes } : {}),
     ...(item.clonedFromId ? { clonedFromId: item.clonedFromId } : {}),
+    ...(item.origin ? { origin: item.origin } : {}),
     ...(item.favorite ? { favorite: true } : {}),
     ...(item.tags?.length ? { tags: item.tags } : {}),
     ...(item.collectionIds?.length ? { collectionIds: item.collectionIds } : {}),

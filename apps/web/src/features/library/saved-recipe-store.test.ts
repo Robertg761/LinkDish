@@ -44,7 +44,9 @@ import {
   syncRecipeToHousehold,
   updateRecipeNotes,
   updateSavedRecipe,
-  withOwnSharedLink
+  withOwnSharedLink,
+  hideHouseholdCopiesShownAsShared,
+  putSavedRecipe
 } from "./saved-recipe-store";
 
 import type { WebSavedRecipe } from "./saved-recipe-types";
@@ -314,6 +316,42 @@ describe("saved-recipe-store", () => {
 
     expect(await countSavedRecipes()).toBe(LOCAL_LIMIT_FREE);
     expect(await countQuotaSavedRecipes()).toBe(LOCAL_LIMIT_FREE);
+  });
+
+  it("does not count household-deletion copies toward the free limit", async () => {
+    let template: WebSavedRecipe | undefined;
+    for (let i = 0; i < LOCAL_LIMIT_FREE; i += 1) {
+      template = (await saveRecipe(createSaveInput(i), false)).recipe!;
+    }
+    for (const index of [0, 1]) {
+      await putSavedRecipe({
+        ...template!,
+        id: `household-copy-${index}`,
+        origin: "household-deletion-copy",
+        sourceUrl: `https://example.com/shared-${index}`
+      });
+    }
+
+    expect(await countSavedRecipes()).toBe(LOCAL_LIMIT_FREE + 2);
+    expect(await countQuotaSavedRecipes()).toBe(LOCAL_LIMIT_FREE);
+  });
+
+  it("hides household-deletion copies only while the shared original is visible", () => {
+    const own = { id: "own", sourceUrl: "https://example.com/a" };
+    const copy = {
+      id: "household-copy-a",
+      origin: "household-deletion-copy" as const,
+      sourceUrl: "https://example.com/a"
+    };
+    const otherCopy = { ...copy, id: "household-copy-b", sourceUrl: "https://example.com/b" };
+    const recipes = [own, copy, otherCopy];
+    const family = [{ recipe: { sourceUrl: "https://example.com/a" } }];
+
+    // Household active: the copy of a visible shared recipe is hidden, the rest stay.
+    expect(hideHouseholdCopiesShownAsShared(recipes, family)).toEqual([own, otherCopy]);
+    // Household inactive (no shared list, or an empty one): every copy shows; nothing is lost.
+    expect(hideHouseholdCopiesShownAsShared(recipes, null)).toEqual(recipes);
+    expect(hideHouseholdCopiesShownAsShared(recipes, [])).toEqual(recipes);
   });
 
   it("counts a replacement whose recipe was deleted meanwhile against the free limit", async () => {

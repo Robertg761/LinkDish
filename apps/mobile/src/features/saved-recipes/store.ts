@@ -644,6 +644,26 @@ export const recordSharedLinkOwners = <Entry extends SavedRecipeRecord>(
  * `record` as signed-in `userId` sees it: another account's Family link on it reads as not
  * shared. Signed out, it reads as stored (nothing can be shared or unshared then).
  */
+/**
+ * Hides household-deletion copies while the household's shared original (same source URL) is
+ * visible, so a member never sees a recipe twice once the shared book comes back. Nothing is
+ * deleted: with no shared list (household inactive) every copy shows again.
+ */
+export const hideHouseholdCopiesShownAsShared = <Entry extends SavedRecipeRecord>(
+  records: readonly Entry[],
+  familyRecipes: readonly Pick<SharedRecipe, "recipe">[] | null
+): Entry[] => {
+  if (!familyRecipes || familyRecipes.length === 0) {
+    return [...records];
+  }
+
+  const sharedUrls = new Set(familyRecipes.map((entry) => entry.recipe.sourceUrl));
+  return records.filter(
+    (record) =>
+      record.origin !== "household-deletion-copy" || !sharedUrls.has(record.recipe.sourceUrl)
+  );
+};
+
 export const withOwnSharedLink = <Entry extends SavedRecipeRecord>(
   record: Entry,
   userId: string | null | undefined,
