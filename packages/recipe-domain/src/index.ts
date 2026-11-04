@@ -4,6 +4,7 @@
  * path, so it must keep its name and location. Every module is pure and re-exported here.
  */
 export * from "./recipe-schema.js";
+export * from "./recipe-fingerprint.js";
 export * from "./samples.js";
 export * from "./cook-timers.js";
 export * from "./ingredient-quantities.js";

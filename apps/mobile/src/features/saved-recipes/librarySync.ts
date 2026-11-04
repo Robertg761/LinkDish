@@ -190,6 +190,7 @@ export const toLibraryRecipe = (record: SavedRecipeRecord): LibraryRecipe => {
     warnings: record.warnings,
     ...(notes ? { notes } : {}),
     ...(record.clonedFromId ? { clonedFromId: record.clonedFromId } : {}),
+    ...(record.origin ? { origin: record.origin } : {}),
     ...(record.favorite ? { favorite: true } : {}),
     ...(record.timesCooked ? { timesCooked: record.timesCooked } : {}),
     ...extrasOf(record.libraryExtras)
@@ -218,6 +219,7 @@ export const fromLibraryRecipe = (
   return {
     ...existing,
     clonedFromId: item.clonedFromId,
+    origin: item.origin,
     favorite: item.favorite ? true : undefined,
     fetchMode: item.fetchMode,
     id,
