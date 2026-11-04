@@ -1184,7 +1184,7 @@ describe("household-service", () => {
     stubRevenueCatFamilyForUserIds(familyUsers);
     const writeCopies = vi.fn(() => Promise.reject(new Error("library store unavailable")));
     vi.doMock("../library/library-service.js", async (importOriginal) => ({
-      ...(await importOriginal<typeof import("../library/library-service.js")>()),
+      ...(await importOriginal<Record<string, unknown>>()),
       writeHouseholdDeletionCopiesForUser: writeCopies
     }));
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
@@ -1221,16 +1221,20 @@ describe("household-service", () => {
     stubRevenueCatFamily(() => true);
     let failHouseholdWrite = false;
     vi.doMock("../storage/upstash-store.js", async (importOriginal) => {
-      const actual = await importOriginal<typeof import("../storage/upstash-store.js")>();
+      const actual = await importOriginal<Record<string, unknown>>();
+      const realSetStoreString = actual.setStoreString as (
+        key: string,
+        ...rest: unknown[]
+      ) => unknown;
       return {
         ...actual,
-        setStoreString: (async (key: string, ...rest: unknown[]) => {
+        setStoreString: (key: string, ...rest: unknown[]) => {
           if (failHouseholdWrite && key.startsWith("linkdish:household:")) {
             failHouseholdWrite = false;
             throw new Error("household store write failed");
           }
-          return (actual.setStoreString as (...args: unknown[]) => unknown)(key, ...rest);
-        }) as typeof actual.setStoreString
+          return realSetStoreString(key, ...rest);
+        }
       };
     });
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
