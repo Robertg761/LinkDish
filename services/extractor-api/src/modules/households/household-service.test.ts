@@ -1176,6 +1176,95 @@ describe("household-service", () => {
     expect(pulled.changes).toEqual([]);
   });
 
+  it("still deletes the account and transfers the household when the copy step fails", async () => {
+    // The successor has no Family, so the copy path is entered; its library write then fails.
+    // (A rejected entitlement lookup alone is caught inside the copy step and reads as "no
+    // Family", so the failure is forced on the library write instead.)
+    const familyUsers = new Set<string>();
+    stubRevenueCatFamilyForUserIds(familyUsers);
+    const writeCopies = vi.fn(() => Promise.reject(new Error("library store unavailable")));
+    vi.doMock("../library/library-service.js", async (importOriginal) => ({
+      ...(await importOriginal<typeof import("../library/library-service.js")>()),
+      writeHouseholdDeletionCopiesForUser: writeCopies
+    }));
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      const { auth, households } = await importHouseholdModules({ LIBRARY_SYNC_ENABLED: "true" });
+      const owner = await createUser(auth, "owner@example.com");
+      const member = await createUser(auth, "member@example.com");
+      familyUsers.add(owner.id);
+
+      await households.createHouseholdForOwner(owner);
+      await households.createHouseholdInvite(owner, member.email);
+      await households.acceptHouseholdInvite(member, getLastInviteCode());
+      await households.upsertSharedRecipeForUser(member, buildSharedRecipeInput("Member Soup"));
+
+      await expect(
+        households.deleteAccountAndHouseholdAccess(owner, owner.email)
+      ).resolves.not.toThrow();
+
+      expect(writeCopies).toHaveBeenCalled();
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        "Failed to copy shared recipes for a departing household owner.",
+        expect.any(Error)
+      );
+      await expect(auth.getUserByEmail(owner.email)).resolves.toBeNull();
+      await expect(households.getHouseholdSummaryForUser(member.id)).resolves.toMatchObject({
+        household: { ownerUserId: member.id, role: "owner" }
+      });
+    } finally {
+      vi.doUnmock("../library/library-service.js");
+    }
+  });
+
+  it("still deletes the account and dissolves the household when the transfer fails", async () => {
+    stubRevenueCatFamily(() => true);
+    let failHouseholdWrite = false;
+    vi.doMock("../storage/upstash-store.js", async (importOriginal) => {
+      const actual = await importOriginal<typeof import("../storage/upstash-store.js")>();
+      return {
+        ...actual,
+        setStoreString: (async (key: string, ...rest: unknown[]) => {
+          if (failHouseholdWrite && key.startsWith("linkdish:household:")) {
+            failHouseholdWrite = false;
+            throw new Error("household store write failed");
+          }
+          return (actual.setStoreString as (...args: unknown[]) => unknown)(key, ...rest);
+        }) as typeof actual.setStoreString
+      };
+    });
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      const { auth, households } = await importHouseholdModules();
+      const owner = await createUser(auth, "owner@example.com");
+      const member = await createUser(auth, "member@example.com");
+
+      await households.createHouseholdForOwner(owner);
+      await households.createHouseholdInvite(owner, member.email);
+      await households.acceptHouseholdInvite(member, getLastInviteCode());
+
+      failHouseholdWrite = true;
+      await expect(
+        households.deleteAccountAndHouseholdAccess(owner, owner.email)
+      ).resolves.not.toThrow();
+
+      expect(failHouseholdWrite).toBe(false);
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        "Failed to transfer household ownership, closing the household.",
+        expect.any(Error)
+      );
+      await expect(auth.getUserByEmail(owner.email)).resolves.toBeNull();
+      await expect(households.getHouseholdSummaryForUser(member.id)).resolves.toEqual({
+        household: null
+      });
+      await expect(households.getHouseholdSummaryForUser(owner.id)).resolves.toEqual({
+        household: null
+      });
+    } finally {
+      vi.doUnmock("../storage/upstash-store.js");
+    }
+  });
+
   it("dissolves a household and pending invites when the owner deletes their account as the last member", async () => {
     stubRevenueCatFamily(() => true);
     const { auth, households } = await importHouseholdModules();

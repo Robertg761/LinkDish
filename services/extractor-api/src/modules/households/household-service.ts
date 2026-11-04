@@ -1461,8 +1461,21 @@ export const deleteAccountAndHouseholdAccess = async (
     if (household?.ownerUserId === user.id) {
       // The household carries on under the longest-standing remaining member.
       // Only dissolve when the owner was the last member.
-      await copySharedRecipesToMembersIfSuccessorLacksFamily(user.id);
-      const { transferred } = await transferHouseholdOwnershipAndRemoveUser(user.id);
+      //
+      // Neither step below may stop the account being deleted: the copies are a convenience for
+      // the other members, and failing the whole delete would trap the person who asked to leave.
+      // A copy failure is logged and the deletion carries on; a transfer failure falls back to
+      // closing the household rather than leaving it half moved.
+      await copySharedRecipesToMembersIfSuccessorLacksFamily(user.id).catch((error: unknown) => {
+        console.error("Failed to copy shared recipes for a departing household owner.", error);
+      });
+
+      const transferred = await transferHouseholdOwnershipAndRemoveUser(user.id)
+        .then((result) => result.transferred)
+        .catch((error: unknown) => {
+          console.error("Failed to transfer household ownership, closing the household.", error);
+          return false;
+        });
 
       if (!transferred) {
         await dissolveHousehold(user.id);
