@@ -18,6 +18,7 @@ import { registerExtractRoute } from "./modules/extract/routes/extract-route.js"
 import { getSharedExtractorRuntime } from "./modules/extract/services/runtime.js";
 import { registerHouseholdRoutes } from "./modules/households/routes/household-routes.js";
 import { registerImageRoute } from "./modules/image/image-proxy.js";
+import { registerRecipePhotoRoutes } from "./modules/image/recipe-photo-routes.js";
 import { registerLibraryRoutes } from "./modules/library/routes/library-routes.js";
 import { registerIosWaitlistRoutes } from "./modules/waitlist/routes/ios-waitlist-routes.js";
 
@@ -90,6 +91,7 @@ export const buildApp = (options?: { runtime?: ExtractorRuntime }) => {
   registerLibraryRoutes(app);
   registerIosWaitlistRoutes(app);
   registerImageRoute(app);
+  registerRecipePhotoRoutes(app);
   registerExtractRoute(app, runtime);
 
   return app;

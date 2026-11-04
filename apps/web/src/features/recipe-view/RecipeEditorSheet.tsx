@@ -4,7 +4,13 @@ import { getFriendlyErrorMessage } from "../../api/error-message";
 import { Button } from "../../components/Button";
 import { ConfirmationDialog } from "../../components/ConfirmationDialog";
 import { Field, TextAreaField } from "../../components/Field";
+import { RecipeImage } from "../../components/RecipeImage";
 import { Sheet } from "../../components/Sheet";
+import {
+  PHOTO_PREP_MESSAGES,
+  PhotoPrepError,
+  prepareRecipePhoto
+} from "../extract/image-downscale";
 
 import {
   formatEditableIngredients,
@@ -15,7 +21,7 @@ import {
   splitEditableLines
 } from "./recipe-editing";
 
-import type { Recipe } from "@linkdish/recipe-domain";
+import type { Recipe, RecipeImage as RecipeImageData } from "@linkdish/recipe-domain";
 
 import "./RecipeEditorSheet.css";
 
@@ -48,6 +54,8 @@ interface RecipeEditorSheetProps {
   /** The source link is editable for web recipes, never for photo imports. */
   sourceUrl?: string | null | undefined;
   onSave: (values: RecipeEditorValues) => Promise<void>;
+  /** Stores a chosen picture; pictures live with the account, so it is absent when signed out. */
+  onUploadPhoto?: ((dataUrl: string) => Promise<RecipeImageData>) | undefined;
   title?: string | undefined;
 }
 
@@ -64,6 +72,14 @@ interface Draft {
 }
 
 type DraftErrors = Partial<Record<keyof Draft, string>>;
+
+/** What happens to the recipe's picture on save. `uploaded` keeps a retry from sending it twice. */
+type PictureDraft =
+  | { kind: "keep" }
+  | { kind: "remove" }
+  | { dataUrl: string; kind: "new"; uploaded?: RecipeImageData | undefined };
+
+const KEEP_PICTURE: PictureDraft = { kind: "keep" };
 
 const toDraft = (recipe: Recipe, notes: string | null | undefined, sourceUrl: string): Draft => ({
   cook: recipe.cookTimeMinutes == null ? "" : String(recipe.cookTimeMinutes),
@@ -156,6 +172,7 @@ export const RecipeEditorSheet: React.FC<RecipeEditorSheetProps> = ({
   notes,
   sourceUrl,
   onSave,
+  onUploadPhoto,
   title = "Edit recipe"
 }) => {
   const sourceEditable = sourceUrl != null;
@@ -166,6 +183,9 @@ export const RecipeEditorSheet: React.FC<RecipeEditorSheetProps> = ({
   // What the editor opened with: the recipe on screen may change meanwhile (another tab saves).
   const [opened, setOpened] = useState<Draft>(initial);
   const [draft, setDraft] = useState<Draft>(initial);
+  const [picture, setPicture] = useState<PictureDraft>(KEEP_PICTURE);
+  const [pictureError, setPictureError] = useState("");
+  const pictureInputRef = useRef<HTMLInputElement>(null);
   const [errors, setErrors] = useState<DraftErrors>({});
   const [formError, setFormError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -177,6 +197,8 @@ export const RecipeEditorSheet: React.FC<RecipeEditorSheetProps> = ({
     if (open && !wasOpenRef.current) {
       setOpened(initial);
       setDraft(initial);
+      setPicture(KEEP_PICTURE);
+      setPictureError("");
       setErrors({});
       setFormError("");
       setConfirmDiscard(false);
@@ -185,9 +207,50 @@ export const RecipeEditorSheet: React.FC<RecipeEditorSheetProps> = ({
     wasOpenRef.current = open;
   }, [initial, open]);
 
-  const dirty = (Object.keys(opened) as Array<keyof Draft>).some(
-    (key) => draft[key] !== opened[key]
-  );
+  const dirty =
+    picture.kind !== "keep" ||
+    (Object.keys(opened) as Array<keyof Draft>).some((key) => draft[key] !== opened[key]);
+  const hasPicture = picture.kind === "new" || (picture.kind === "keep" && Boolean(recipe.image));
+
+  const choosePicture = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    // Cleared so that choosing the same file again still counts as a change.
+    event.target.value = "";
+
+    if (!file) {
+      return;
+    }
+
+    setPictureError("");
+
+    try {
+      const { dataUrl } = await prepareRecipePhoto(file);
+      setPicture({ dataUrl, kind: "new" });
+    } catch (error) {
+      setPictureError(
+        error instanceof PhotoPrepError ? error.message : PHOTO_PREP_MESSAGES.unreadable
+      );
+    }
+  };
+
+  /** The picture to save: `undefined` leaves the recipe's as it is, `null` removes it. */
+  const resolvePicture = async (): Promise<RecipeImageData | null | undefined> => {
+    if (picture.kind !== "new") {
+      return picture.kind === "remove" ? null : undefined;
+    }
+
+    if (picture.uploaded) {
+      return picture.uploaded;
+    }
+
+    if (!onUploadPhoto) {
+      return undefined;
+    }
+
+    const uploaded = await onUploadPhoto(picture.dataUrl);
+    setPicture({ ...picture, uploaded });
+    return uploaded;
+  };
 
   const update =
     (key: keyof Draft) => (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
@@ -227,12 +290,15 @@ export const RecipeEditorSheet: React.FC<RecipeEditorSheetProps> = ({
     }
 
     // Only what the cook changed: the rest may have been changed elsewhere since the editor opened.
-    const recipeChanges = changedRecipeFields(opened, draft, sourceEditable);
+    const fieldChanges = changedRecipeFields(opened, draft, sourceEditable);
     const notesChanged = notesOf(draft) !== notesOf(opened);
 
     setSaving(true);
 
     try {
+      const image = await resolvePicture();
+      const recipeChanges = image === undefined ? fieldChanges : { ...fieldChanges, image };
+
       await onSave({
         changes: {
           recipe: recipeChanges,
@@ -285,6 +351,61 @@ export const RecipeEditorSheet: React.FC<RecipeEditorSheetProps> = ({
             </p>
           ) : null}
 
+          <div className="recipe-editor-picture">
+            <div className="recipe-editor-picture-preview">
+              {picture.kind === "new" ? (
+                <img alt="Your new recipe picture" src={picture.dataUrl} />
+              ) : (
+                <RecipeImage
+                  aspectRatio="auto"
+                  image={picture.kind === "remove" ? null : recipe.image}
+                  sizes="96px"
+                  title={recipe.title}
+                  widths={[96, 480]}
+                />
+              )}
+            </div>
+            <div className="recipe-editor-picture-actions">
+              <span className="recipe-editor-picture-label">Picture</span>
+              {onUploadPhoto ? (
+                <Button
+                  disabled={saving}
+                  onClick={() => pictureInputRef.current?.click()}
+                  size="sm"
+                  variant="secondary"
+                >
+                  {hasPicture ? "Change picture" : "Add picture"}
+                </Button>
+              ) : null}
+              {hasPicture ? (
+                <Button
+                  disabled={saving}
+                  onClick={() => setPicture({ kind: "remove" })}
+                  size="sm"
+                  variant="ghost"
+                >
+                  Remove
+                </Button>
+              ) : null}
+              {onUploadPhoto ? (
+                <input
+                  accept="image/*"
+                  aria-label="Choose a picture"
+                  hidden
+                  onChange={(event) => void choosePicture(event)}
+                  ref={pictureInputRef}
+                  type="file"
+                />
+              ) : (
+                <p className="recipe-editor-picture-hint">Sign in to use your own picture.</p>
+              )}
+            </div>
+            {pictureError ? (
+              <p className="recipe-editor-picture-error" role="alert">
+                {pictureError}
+              </p>
+            ) : null}
+          </div>
           <TextAreaField
             autoComplete="off"
             error={errors.title}

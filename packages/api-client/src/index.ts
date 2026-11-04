@@ -36,6 +36,8 @@ import {
   updateAccountProfileRequestSchema,
   updateAccountProfileResponseSchema,
   updateSharedRecipeRequestSchema,
+  uploadRecipePhotoRequestSchema,
+  uploadRecipePhotoResponseSchema,
   upsertShoppingItemsRequestSchema,
   upsertShoppingItemsResponseSchema,
   upsertSharedRecipeRequestSchema,
@@ -80,6 +82,7 @@ import {
   type UpdateAccountProfileRequest,
   type UpdateAccountProfileResponse,
   type UpdateSharedRecipeRequest,
+  type UploadRecipePhotoRequest,
   type UpsertShoppingItemsRequest,
   type UpsertShoppingItemsResponse,
   type UpsertSharedRecipeRequest,
@@ -89,6 +92,7 @@ import {
   type WebBillingRedirectResponse
 } from "@linkdish/api-contracts";
 
+import type { RecipeImage } from "@linkdish/recipe-domain";
 import type { ZodType } from "zod";
 
 export type FetchLike = typeof fetch;
@@ -256,6 +260,14 @@ export interface ExtractorApiClient {
     input: AnalyticsEventBatchRequest,
     options?: RequestOptionsArgument
   ): Promise<AnalyticsEventBatchResponse>;
+  /**
+   * Stores a person's own picture for a recipe (signed in) and answers with what the recipe keeps:
+   * an image like any other, at a URL on this client's API.
+   */
+  uploadRecipePhoto(
+    input: UploadRecipePhotoRequest,
+    options?: RequestOptionsArgument
+  ): Promise<RecipeImage>;
   updateAccountProfile(
     input: UpdateAccountProfileRequest,
     options?: RequestOptionsArgument
@@ -727,6 +739,16 @@ export const createExtractorApiClient = (
         responseSchema: pushLibraryChangesResponseSchema,
         signal: callOptions?.signal
       });
+    },
+    async uploadRecipePhoto(input, callOptions) {
+      const { height, path, width } = await requestJson("/image/photos", {
+        body: validateInput(uploadRecipePhotoRequestSchema, input),
+        method: "POST",
+        responseSchema: uploadRecipePhotoResponseSchema,
+        signal: callOptions?.signal
+      });
+
+      return { height, source: "content", url: `${normalizedBaseUrl}${path}`, width };
     },
     async removeHouseholdMember(input, callOptions) {
       return requestJson("/household/members/remove", {

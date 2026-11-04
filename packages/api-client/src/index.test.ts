@@ -67,6 +67,43 @@ const successEnvelope = {
   }
 } as const;
 
+describe("recipe photos", () => {
+  it("answers with an image the recipe can keep, at this client's API", async () => {
+    const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ height: 900, path: "/image/photos/abc.webp", width: 1200 }), {
+        status: 201
+      })
+    );
+    const client = createExtractorApiClient({
+      baseUrl: "https://api.example.com/",
+      fetchImplementation
+    });
+
+    await expect(
+      client.uploadRecipePhoto({ dataUrl: "data:image/jpeg;base64,abc" })
+    ).resolves.toEqual({
+      height: 900,
+      source: "content",
+      url: "https://api.example.com/image/photos/abc.webp",
+      width: 1200
+    });
+    expect(fetchImplementation.mock.calls[0]?.[0]).toBe("https://api.example.com/image/photos");
+  });
+
+  it("refuses anything but a picture before sending it", async () => {
+    const fetchImplementation = vi.fn<typeof fetch>();
+    const client = createExtractorApiClient({
+      baseUrl: "https://api.example.com",
+      fetchImplementation
+    });
+
+    await expect(
+      client.uploadRecipePhoto({ dataUrl: "data:image/svg+xml;base64,abc" })
+    ).rejects.toThrow();
+    expect(fetchImplementation).not.toHaveBeenCalled();
+  });
+});
+
 describe("error responses", () => {
   it("does not treat a 403 whose body matches the schema as success", async () => {
     const fetchImplementation = createFetchMock(() =>

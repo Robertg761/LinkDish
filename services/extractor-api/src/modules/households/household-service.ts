@@ -42,6 +42,7 @@ import {
   hasActiveRevenueCatFamilyEntitlement,
   verifyActiveRevenueCatFamilyEntitlement
 } from "../billing/revenuecat-entitlements.js";
+import { deleteRecipePhotosForUser } from "../image/recipe-photo-store.js";
 import {
   deleteLibraryForUser,
   writeHouseholdDeletionCopiesForUser
@@ -1482,6 +1483,7 @@ export const deleteAccountAndHouseholdAccess = async (
     }
 
     await deleteLibraryForUser(user.id);
+    await deleteRecipePhotosForUser(user.id);
     await markUserDeleted(user.id);
     await tombstoneExternalIdentitiesForUser(user.id);
 

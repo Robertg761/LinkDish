@@ -245,6 +245,15 @@ describe("vercel.json API functions", () => {
     expect(functions.length).toBeLessThanOrEqual(12);
   });
 
+  it("sends recipe pictures to the image function, ahead of the catch-all", () => {
+    const rewrites = apiConfig.rewrites ?? [];
+    const position = (source: string) => rewrites.findIndex((rule) => rule.source === source);
+
+    expect(rewrites[position("/image/photos")]?.destination).toBe("/api/image");
+    expect(rewrites[position("/image/photos/:file")]?.destination).toBe("/api/image?photo=:file");
+    expect(position("/image/photos/:file")).toBeLessThan(position("/(.*)"));
+  });
+
   it("only rewrites to functions that exist", () => {
     for (const rule of apiConfig.rewrites ?? []) {
       const target = /^\/api\/([^/?]+)/u.exec(rule.destination)?.[1];

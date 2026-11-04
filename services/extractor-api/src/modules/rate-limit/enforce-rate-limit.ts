@@ -47,7 +47,7 @@ export const getInMemoryRateLimitEntryCount = (): number => inMemoryRateLimitCou
 
 export interface PublicEndpointRateLimitPolicy {
   max: number;
-  scope: "analytics" | "billing-usage" | "image" | "support-ticket";
+  scope: "analytics" | "billing-usage" | "image" | "recipe-photo" | "support-ticket";
   windowMs: number;
 }
 

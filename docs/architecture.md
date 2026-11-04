@@ -73,6 +73,20 @@ size` checks the budgets after a build (entry ≤ 115 KB gzip, landing JS ≤
   the API drops unknown events individually, so deploy the API before clients
   that send new names.
 
+## Recipe Pictures
+
+A recipe's `image` is always an http(s) URL, read through the `/image` proxy. A
+person's own picture keeps it that way, so syncing, sharing and installed clients
+need nothing new: `POST /image/photos` (signed in; rate limited; 100 per account)
+re-encodes the upload with sharp to a WebP of at most 1200px without its metadata,
+stores it in Upstash, and the recipe keeps the URL `GET /image/photos/<id>.webp`
+answers. Those URLs are public but unguessable, because household members and the
+proxy read them unsigned. Both editors upload on save, so backing out stores
+nothing. Pictures are removed with the account, stay out of the nightly snapshot
+(a recipe that loses one shows its designed cover), and aren't removed when a
+recipe stops using them, so replaced pictures count toward the 100. They run in
+the `image` function: the Hobby plan's 12 functions are all taken.
+
 ## Mobile
 
 - Expo Router drives navigation between the intake screen and a result preview screen.
