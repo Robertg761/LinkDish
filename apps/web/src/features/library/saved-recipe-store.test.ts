@@ -336,6 +336,15 @@ describe("saved-recipe-store", () => {
     expect(await countQuotaSavedRecipes()).toBe(LOCAL_LIMIT_FREE);
   });
 
+  it("does not pass the household-copy exemption on to a duplicate", async () => {
+    const { recipe: saved } = await saveRecipe(createSaveInput(0), false);
+    await putSavedRecipe({ ...saved!, id: "household-copy-a", origin: "household-deletion-copy" });
+
+    const duplicate = await duplicateSavedRecipe("household-copy-a");
+
+    expect(duplicate?.origin).toBeUndefined();
+  });
+
   it("keeps a household-deletion copy the member edited visible beside the shared original", () => {
     const recipe = { sourceUrl: "https://example.com/a", title: "A" } as Recipe;
     const copy = { id: "household-copy-a", origin: "household-deletion-copy" as const, recipe };

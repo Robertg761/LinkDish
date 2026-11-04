@@ -918,12 +918,14 @@ export async function duplicateSavedRecipe(
         : undefined;
 
       // A copy is a fresh personal recipe: it keeps content, notes, tags and collections, but not
-      // starter status, sync state or this copy's own cooking history.
+      // starter status, household copy status, sync state or this copy's own cooking history.
       const copyable: WebSavedRecipe = withCollectionIds(existing, collectionIds);
       delete copyable.cookLog;
       delete copyable.favorite;
       delete copyable.isStarter;
       delete copyable.lastCookedAt;
+      // Only the server's own household copies are exempt from the Free cap, not duplicates of them.
+      delete copyable.origin;
       delete copyable.lastOpenedAt;
       delete copyable.rating;
       const now = new Date().toISOString();
