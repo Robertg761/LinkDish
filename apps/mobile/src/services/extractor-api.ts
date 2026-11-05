@@ -4,7 +4,7 @@ import { getMobileAnalyticsHeaders, trackMobileEvent } from "../analytics/client
 import { mobileEnv } from "../config/env";
 import { buildMockCompletionResponse, buildMockExtractionResponse } from "../mocks/extraction";
 
-import { fetchPageOnDevice } from "./device-page-fetch";
+import { fetchPageOnDevice, unwrapFacebookLinkWrapper } from "./device-page-fetch";
 import { isTextExtractionRequest, type MobileExtractionRequest } from "./extraction-request";
 
 import type { CompleteRecipeResponse, ExtractRecipeResponse } from "@linkdish/api-contracts";
@@ -204,7 +204,8 @@ const extractFromDevicePage = async (
   request: Extract<MobileExtractionRequest, { url: string }>,
   blocked: Extract<ExtractRecipeResponse, { status: "failure" }>
 ): Promise<ExtractRecipeResponse> => {
-  const page = await fetchPageOnDevice(request.url);
+  /* The API matches the page against the link's own target, so the wrapper URL is still sent. */
+  const page = await fetchPageOnDevice(unwrapFacebookLinkWrapper(request.url));
 
   if (!page) {
     return { ...blocked, userMessage: devicePageBlockedMessage(request.url) };

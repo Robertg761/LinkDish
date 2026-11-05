@@ -21,10 +21,14 @@ vi.mock("@linkdish/api-client", async (importOriginal) => ({
   createExtractorApiClient: () => clientMocks
 }));
 
-vi.mock("./device-page-fetch", () => deviceMocks);
+vi.mock("./device-page-fetch", async (importOriginal) => ({
+  ...(await importOriginal<typeof DevicePageFetchModule>()),
+  ...deviceMocks
+}));
 
 import { extractRecipe } from "./extractor-api";
 
+import type * as DevicePageFetchModule from "./device-page-fetch";
 import type * as ApiClientModule from "@linkdish/api-client";
 
 const url = "https://www.allrecipes.com/recipe/13309/rich-and-simple-french-onion-soup/";
@@ -57,6 +61,18 @@ describe("extractRecipe for a site that blocks LinkDish's servers", () => {
       devicePage: { html: "<html>soup</html>", finalUrl: url }
     });
     expect(response).toBe(fromDevice);
+  });
+
+  it("downloads a Facebook-wrapped link's own target but sends the link as given", async () => {
+    const wrapped = `https://l.facebook.com/l.php?u=${encodeURIComponent(url)}&h=abc`;
+    deviceMocks.fetchPageOnDevice.mockResolvedValue({ html: "<html>soup</html>", finalUrl: url });
+
+    await extractRecipe({ url: wrapped, attempt: "primary" });
+
+    expect(deviceMocks.fetchPageOnDevice).toHaveBeenCalledWith(url);
+    expect(clientMocks.extractRecipeFromDevicePage).toHaveBeenCalledWith(
+      expect.objectContaining({ url: wrapped })
+    );
   });
 
   it("points to Paste text when the phone is turned away too", async () => {

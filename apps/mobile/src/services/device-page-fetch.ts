@@ -176,6 +176,38 @@ const downloadPage = async (
   return { html: slim, finalUrl };
 };
 
+/**
+ * A link copied out of Facebook (l.facebook.com/l.php?u=...) is just a wrapper; the API reads
+ * its u= target, so the phone downloads that page too. Mirrors the API's unwrapFacebookRedirect.
+ */
+export const unwrapFacebookLinkWrapper = (url: string): string => {
+  let current = url;
+
+  for (let depth = 0; depth < 3; depth += 1) {
+    try {
+      const parsed = new URL(current);
+      const host = parsed.hostname.toLowerCase();
+      const target = parsed.searchParams.get("u");
+
+      if ((host !== "l.facebook.com" && host !== "lm.facebook.com") || !target) {
+        return current;
+      }
+
+      const targetUrl = new URL(target);
+
+      if (targetUrl.protocol !== "https:" && targetUrl.protocol !== "http:") {
+        return current;
+      }
+
+      current = targetUrl.toString();
+    } catch {
+      return current;
+    }
+  }
+
+  return current;
+};
+
 /** Downloads a recipe page on this device, as the app. Null when it got no readable page. */
 export const fetchPageOnDevice = async (
   url: string,
