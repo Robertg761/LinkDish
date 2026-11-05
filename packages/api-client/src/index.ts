@@ -20,6 +20,7 @@ import {
   deleteAccountResponseSchema,
   extractRecipeRequestSchema,
   extractRecipeResponseSchema,
+  extractRecipeDevicePageRequestSchema,
   extractRecipeTextRequestSchema,
   householdMutationResponseSchema,
   householdShoppingListResponseSchema,
@@ -66,6 +67,7 @@ import {
   type DeleteAccountResponse,
   type ExtractRecipeRequest,
   type ExtractRecipeResponse,
+  type ExtractRecipeDevicePageRequestInput,
   type ExtractRecipeTextRequestInput,
   type HouseholdMutationResponse,
   type HouseholdShoppingListResponse,
@@ -223,6 +225,14 @@ export interface ExtractorApiClient {
    */
   extractRecipeFromText(
     input: ExtractRecipeTextRequestInput,
+    options?: RequestOptionsArgument
+  ): Promise<ExtractRecipeResponse>;
+  /**
+   * Reads a recipe page the caller downloaded itself, after /extract answered its link with
+   * `deviceFetchAvailable` (the site blocks LinkDish's server). Counts like a link import.
+   */
+  extractRecipeFromDevicePage(
+    input: ExtractRecipeDevicePageRequestInput,
     options?: RequestOptionsArgument
   ): Promise<ExtractRecipeResponse>;
   getAuthConfig(options?: RequestOptionsArgument): Promise<AuthConfigResponse>;
@@ -664,6 +674,15 @@ export const createExtractorApiClient = (
     async extractRecipeFromText(input, callOptions) {
       return requestJson("/extract", {
         body: validateInput(extractRecipeTextRequestSchema, input),
+        method: "POST",
+        responseSchema: extractRecipeResponseSchema,
+        timeoutMs: extractTimeoutMs,
+        signal: callOptions?.signal
+      });
+    },
+    async extractRecipeFromDevicePage(input, callOptions) {
+      return requestJson("/extract", {
+        body: validateInput(extractRecipeDevicePageRequestSchema, input),
         method: "POST",
         responseSchema: extractRecipeResponseSchema,
         timeoutMs: extractTimeoutMs,

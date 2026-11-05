@@ -4,6 +4,7 @@ import { getMobileAnalyticsHeaders, trackMobileEvent } from "../analytics/client
 import { mobileEnv } from "../config/env";
 import { buildMockCompletionResponse, buildMockExtractionResponse } from "../mocks/extraction";
 
+import { fetchPageOnDevice } from "./device-page-fetch";
 import { isTextExtractionRequest, type MobileExtractionRequest } from "./extraction-request";
 
 import type { CompleteRecipeResponse, ExtractRecipeResponse } from "@linkdish/api-contracts";
@@ -58,6 +59,31 @@ export const runExtractorRequestWithRetry = async <Response>(
     return operation();
   }
 };
+
+/* "www.allrecipes.com" -> "allrecipes.com", for messages. */
+const siteLabel = (url: string): string => {
+  try {
+    return new URL(url).hostname.replace(/^www\./iu, "");
+  } catch {
+    return "That site";
+  }
+};
+
+/** The API could not read a web page because the site blocks its servers, not people. */
+export const shouldFetchPageOnDevice = (
+  request: MobileExtractionRequest,
+  response: ExtractRecipeResponse
+): boolean =>
+  response.status === "failure" &&
+  response.reason === "source_blocked" &&
+  response.deviceFetchAvailable === true &&
+  !isTextExtractionRequest(request) &&
+  !("images" in request) &&
+  "url" in request &&
+  !("inspired" in request && request.inspired);
+
+export const devicePageBlockedMessage = (url: string): string =>
+  `${siteLabel(url)} wouldn't open for LinkDish, even from your phone. Copy the recipe from the page and use Paste text instead.`;
 
 interface ExtractRecipeOptions {
   authToken?: string | null;
@@ -151,12 +177,45 @@ export async function extractRecipe(
           ...(request.sourceUrl ? { sourceUrl: request.sourceUrl } : {})
         })
       : client.extractRecipe(request);
-  const response = await runExtractorRequestWithRetry(operation);
+  let response = await runExtractorRequestWithRetry(operation);
 
   if (shouldRetryRetryableExtractionFailure(response)) {
     await wait(EXTRACTOR_RETRY_DELAY_MS);
-    return operation();
+    response = await operation();
+  }
+
+  if (
+    response.status === "failure" &&
+    "url" in request &&
+    shouldFetchPageOnDevice(request, response)
+  ) {
+    return extractFromDevicePage(client, request, response);
   }
 
   return response;
 }
+
+/*
+ * The site blocks LinkDish's servers, so the phone downloads the page itself and the API reads
+ * that HTML. If the phone is turned away too, the person is pointed to Paste text.
+ */
+const extractFromDevicePage = async (
+  client: ReturnType<typeof getBillingClient>,
+  request: Extract<MobileExtractionRequest, { url: string }>,
+  blocked: Extract<ExtractRecipeResponse, { status: "failure" }>
+): Promise<ExtractRecipeResponse> => {
+  const page = await fetchPageOnDevice(request.url);
+
+  if (!page) {
+    return { ...blocked, userMessage: devicePageBlockedMessage(request.url) };
+  }
+
+  return runExtractorRequestWithRetry(() =>
+    client.extractRecipeFromDevicePage({
+      url: request.url,
+      attempt: request.attempt,
+      devicePage: page,
+      ...(request.correlationId ? { correlationId: request.correlationId } : {})
+    })
+  );
+};

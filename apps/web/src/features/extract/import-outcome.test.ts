@@ -84,6 +84,23 @@ describe("describeImportFailure", () => {
     ).toBe("That site kept its door shut");
   });
 
+  it("names a site that blocks LinkDish's servers and points to Paste text or the phone app", () => {
+    const blocked = describeImportFailure(
+      failure("source_blocked", { deviceFetchAvailable: true }),
+      {
+        ...url,
+        sourceUrl: "https://www.allrecipes.com/recipe/13309/rich-and-simple-french-onion-soup/"
+      }
+    );
+
+    expect(blocked).toMatchObject({ kind: "blocked", title: "That site kept its door shut" });
+    expect(blocked.message).toMatch(
+      /^allrecipes\.com doesn't let LinkDish's servers read its pages/u
+    );
+    expect(blocked.message).toContain("LinkDish phone app");
+    expect(blocked.actions[0]).toBe("paste_text");
+  });
+
   it("maps each reason to specific next steps", () => {
     expect(describeImportFailure(failure("source_blocked"), url).actions).toEqual([
       "paste_text",
