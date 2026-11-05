@@ -641,7 +641,10 @@ If production `/extract` skips the browser fetch, it is a deployment regression 
 - The live canary manifest is intentionally separate from PR-blocking CI so real-world regressions can be measured without making the pipeline flaky.
 - API deploys (`deploy-api.yml`) are gated on it instead: the workflow deploys with
   `--prod --skip-domain`, runs the health check and the live canary against that deployment's
-  own `*.vercel.app` URL, and only then runs `vercel promote`. After promoting it confirms through
+  own `*.vercel.app` URL, and only then runs `vercel promote`. A case that misses its expected outcome
+  gets one more try, so one bad answer from a third-party site doesn't stop a deploy while a real
+  regression, which misses twice, still does. The artifact records the miss as
+  `primaryRetriedAfter`. After promoting it confirms through
   the Vercel API that api.linkdish.ca points at the new deployment before the final health check.
   A failing check leaves api.linkdish.ca on the previous deployment, and the run summary names the
   staged URL so it can be promoted by hand when the failure is a third-party site rather than the

@@ -2,7 +2,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-const defaultTimeoutMs = 20_000;
+/* Above the slowest case (a video read of about 15s plus TikTok retries); the apps allow 120s. */
+const defaultTimeoutMs = 30_000;
 const outcomeRank = {
   failure: 0,
   needs_retry: 1,
@@ -132,6 +133,21 @@ const validateExpectedOutcome = ({
     outcomeFailureReason: null
   };
 };
+
+/*
+ * A failed primary attempt that falls short of the entry's expected outcome. `needs_retry` has its
+ * own fallback attempt, and a plan_limit answer means the token was refused, which a retry can't
+ * change.
+ */
+const missedOutcome = (entry, attempt) =>
+  getAttemptStatus(attempt) !== "needs_retry" &&
+  !isPlanLimited(attempt) &&
+  !validateExpectedOutcome({
+    expectedMinimumOutcome: entry.expectedMinimumOutcome,
+    finalStatus: getAttemptStatus(attempt),
+    driftDetected: false,
+    planLimited: false
+  }).expectedOutcomeMet;
 
 export const validateManifestEntry = ({ entry, preflight }) => {
   if (preflight.timedOut || preflight.error) {
@@ -310,16 +326,29 @@ export const runLiveCanary = async ({
     });
     let primary = null;
     let fallback = null;
+    let primaryRetriedAfter = null;
 
     if (!preflight.driftDetected) {
-      primary = await invokeExtractAttempt({
-        baseUrl,
-        url: entry.url,
-        attempt: "primary",
-        headers: extractHeaders,
-        timeoutMs,
-        fetchImplementation
-      });
+      const invokePrimary = () =>
+        invokeExtractAttempt({
+          baseUrl,
+          url: entry.url,
+          attempt: "primary",
+          headers: extractHeaders,
+          timeoutMs,
+          fetchImplementation
+        });
+
+      primary = await invokePrimary();
+
+      // Third-party sites answer differently from one request to the next, and one bad answer must
+      // not hold back a deploy, so a miss gets one more try. The canary skips the extract cache, so
+      // that try does the work again: a real regression misses twice and still fails. Which miss
+      // was retried stays in the artifact.
+      if (missedOutcome(entry, primary)) {
+        primaryRetriedAfter = primary.payload?.reason ?? "unknown";
+        primary = await invokePrimary();
+      }
 
       if (primary.payload?.status === "needs_retry") {
         fallback = await invokeExtractAttempt({
@@ -355,6 +384,7 @@ export const runLiveCanary = async ({
       driftReason: preflight.driftReason,
       preflight,
       primary,
+      primaryRetriedAfter,
       fallback,
       finalStatus,
       ...outcome
