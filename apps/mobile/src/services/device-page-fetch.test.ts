@@ -26,6 +26,21 @@ describe("slimPageHtml", () => {
   });
 });
 
+describe("slimPageHtml edge cases", () => {
+  it("handles odd closing tags, unclosed elements and look-alike tag names", () => {
+    expect(slimPageHtml("<p>a</p><script>x</script\t\n bar><p>b</p>")).toBe("<p>a</p><p>b</p>");
+    expect(slimPageHtml("<SCRIPT>x</SCRIPT><p>b</p>")).toBe("<p>b</p>");
+    expect(slimPageHtml("<p>a</p><style>x")).toBe("<p>a</p>");
+    expect(slimPageHtml("<p>a<!-- open")).toBe("<p>a");
+    expect(slimPageHtml("<scripted>keep</scripted><svgx>keep</svgx>")).toBe(
+      "<scripted>keep</scripted><svgx>keep</svgx>"
+    );
+    expect(slimPageHtml('<script type="application/json">{"a":1}</script>')).toBe(
+      '<script type="application/json">{"a":1}</script>'
+    );
+  });
+});
+
 describe("fetchPageOnDevice", () => {
   it("returns the slimmed page and where it ended up", async () => {
     const fetchImplementation = vi.fn(() => Promise.resolve(htmlResponse(page)));

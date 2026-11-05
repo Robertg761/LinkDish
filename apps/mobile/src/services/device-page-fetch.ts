@@ -36,18 +36,68 @@ const isHtmlContentType = (value: string | null): boolean =>
 const looksLikeChallengePage = (html: string): boolean =>
   /<title[^>]*>\s*just a moment/iu.test(html) || /cf-chl-|challenge-platform/iu.test(html);
 
+const removableElements = ["script", "style", "svg"] as const;
+const jsonScriptTypePattern = /\btype\s*=\s*["']?application\/(?:ld\+)?json/u;
+
 /**
  * Drops what the API never reads (styles, SVG, comments and every script but JSON-LD/JSON data),
- * which makes a typical recipe page several times smaller to upload.
+ * which makes a typical recipe page several times smaller to upload. The API parses what is left
+ * with a real HTML parser and never renders it, so this only trims size; it is not a sanitizer.
+ * A forward-only scan (linear time), not regular-expression replacement.
  */
-export const slimPageHtml = (html: string): string =>
-  html
-    .replace(/<!--[\s\S]*?-->/gu, "")
-    .replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/giu, "")
-    .replace(/<svg\b[^>]*>[\s\S]*?<\/svg\s*>/giu, "")
-    .replace(/<script\b([^>]*)>[\s\S]*?<\/script\s*>/giu, (script, attributes: string) =>
-      /\btype\s*=\s*["']?application\/(?:ld\+)?json/iu.test(attributes) ? script : ""
-    );
+export const slimPageHtml = (html: string): string => {
+  const lower = html.toLowerCase();
+  const parts: string[] = [];
+  let kept = 0;
+  let index = 0;
+
+  while (index < html.length) {
+    const tagStart = lower.indexOf("<", index);
+
+    if (tagStart === -1) {
+      break;
+    }
+
+    let removeUntil = -1;
+
+    if (lower.startsWith("<!--", tagStart)) {
+      const commentEnd = lower.indexOf("-->", tagStart + 4);
+      removeUntil = commentEnd === -1 ? html.length : commentEnd + 3;
+    } else {
+      const name = removableElements.find(
+        (element) =>
+          lower.startsWith(`<${element}`, tagStart) &&
+          /[\s/>]/u.test(lower.charAt(tagStart + element.length + 1))
+      );
+
+      if (name) {
+        const openEnd = lower.indexOf(">", tagStart);
+        const closeStart = openEnd === -1 ? -1 : lower.indexOf(`</${name}`, openEnd);
+        const closeEnd = closeStart === -1 ? -1 : lower.indexOf(">", closeStart);
+        const elementEnd = closeEnd === -1 ? html.length : closeEnd + 1;
+        const keepsData =
+          name === "script" &&
+          openEnd !== -1 &&
+          jsonScriptTypePattern.test(lower.slice(tagStart, openEnd));
+
+        removeUntil = keepsData ? -1 : elementEnd;
+        index = keepsData ? elementEnd : index;
+      }
+    }
+
+    if (removeUntil === -1) {
+      index = Math.max(index, tagStart + 1);
+      continue;
+    }
+
+    parts.push(html.slice(kept, tagStart));
+    kept = removeUntil;
+    index = removeUntil;
+  }
+
+  parts.push(html.slice(kept));
+  return parts.join("");
+};
 
 const downloadOnce = async (
   url: string,
