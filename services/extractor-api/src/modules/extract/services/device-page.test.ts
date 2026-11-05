@@ -83,6 +83,27 @@ describe("sites that block LinkDish's servers", () => {
     expect(response).not.toHaveProperty("deviceFetchAvailable");
   });
 
+  it("never sends a device after a redirect the server refused as unsafe", async () => {
+    const { response } = await extractRecipe(
+      { url: recipeUrl, attempt: "primary" },
+      createRuntime({
+        fetchHtmlDocument: () =>
+          Promise.reject(
+            new HtmlFetchError(
+              "Refused unsafe redirect target: private_address",
+              "blocked",
+              ["unsafe_redirect:private_address"],
+              302,
+              "http://192.168.1.1/"
+            )
+          )
+      })
+    );
+
+    expect(response).toMatchObject({ status: "failure", reason: "source_blocked" });
+    expect(response).not.toHaveProperty("deviceFetchAvailable");
+  });
+
   it("reads the page the device downloaded without fetching it again", async () => {
     const fetchHtmlDocument = vi.fn(paymentRequired);
     const { response, logContext } = await extractRecipe(

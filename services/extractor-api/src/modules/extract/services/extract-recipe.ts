@@ -324,6 +324,18 @@ const getDocumentLogFields = (sourceDocument: SourceDocument, fetchMode: FetchMo
   browserAttempted: fetchMode === "browser"
 });
 
+/*
+ * The site itself answered with a refusal status. A URL-safety rejection (a redirect to a private
+ * address) or a redirect loop is also "blocked", but a device must never be sent after those.
+ */
+const deviceFetchStatusCodes = new Set([401, 402, 403, 429, 451, 503]);
+const isSiteRefusal = (error: HtmlFetchError | BrowserFetchError): boolean =>
+  error.statusCode !== undefined &&
+  deviceFetchStatusCodes.has(error.statusCode) &&
+  !error.blockedSignals.some(
+    (signal) => signal.startsWith("unsafe_redirect") || signal === "too_many_redirects"
+  );
+
 const mapFetchErrorToResponse = (
   error: unknown,
   sourceType: DetectionResult["sourceType"],
@@ -361,6 +373,7 @@ const mapFetchErrorToResponse = (
       error.reason === "blocked" &&
       options.deviceFetchable &&
       (error instanceof HtmlFetchError || error instanceof BrowserFetchError) &&
+      isSiteRefusal(error) &&
       sourceType !== "youtube" &&
       sourceType !== "social"
     ) {

@@ -40,6 +40,9 @@ describe("slimPageHtml edge cases", () => {
         '<script>const city="İstanbul";</script><script type="application/ld+json">{"a":1}</script>'
       )
     ).toBe('<script type="application/ld+json">{"a":1}</script>');
+    expect(slimPageHtml('<p>a</p><svg aria-hidden="true"/><h1>Soup</h1>')).toBe(
+      "<p>a</p><h1>Soup</h1>"
+    );
     expect(slimPageHtml('<script type="application/json">{"a":1}</script>')).toBe(
       '<script type="application/json">{"a":1}</script>'
     );
@@ -65,6 +68,40 @@ describe("fetchPageOnDevice", () => {
     await expect(fetchPageOnDevice(url, { fetchImplementation })).resolves.toBeNull();
     expect(fetchImplementation).toHaveBeenCalledOnce();
     expect(fetchImplementation.mock.calls[0]?.[1].headers).not.toHaveProperty("user-agent");
+  });
+
+  it("reads a page that only loads Cloudflare's challenge script", async () => {
+    const withScript = page.replace(
+      "</head>",
+      '<script src="/cdn-cgi/challenge-platform/scripts/jsd/main.js"></script></head>'
+    );
+    const fetchImplementation = vi.fn(() => Promise.resolve(htmlResponse(withScript)));
+
+    const result = await fetchPageOnDevice(url, { fetchImplementation });
+
+    expect(result?.html).toContain("application/ld+json");
+  });
+
+  it("never uploads a page that redirected off the site or to a local address", async () => {
+    for (const landedOn of [
+      "http://192.168.1.1/admin",
+      "http://router.local/",
+      "https://elsewhere.example/recipe"
+    ]) {
+      const fetchImplementation = vi.fn(() => Promise.resolve(htmlResponse(page, 200, landedOn)));
+
+      await expect(fetchPageOnDevice(url, { fetchImplementation })).resolves.toBeNull();
+    }
+
+    const sameSite = vi.fn(() =>
+      Promise.resolve(htmlResponse(page, 200, "https://allrecipes.com/recipe/13309/"))
+    );
+    await expect(fetchPageOnDevice(url, { fetchImplementation: sameSite })).resolves.toMatchObject({
+      finalUrl: "https://allrecipes.com/recipe/13309/"
+    });
+    await expect(
+      fetchPageOnDevice("http://10.0.0.5/recipe", { fetchImplementation: sameSite })
+    ).resolves.toBeNull();
   });
 
   it("does not download a page that is too big", async () => {

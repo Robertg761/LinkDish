@@ -28,8 +28,44 @@ type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
 const isHtmlContentType = (value: string | null): boolean =>
   !value || /\b(?:text\/html|application\/xhtml\+xml)\b/iu.test(value);
 
+/* A challenge page's title says so; a normal page may still load Cloudflare's challenge script. */
 const looksLikeChallengePage = (html: string): boolean =>
-  /<title[^>]*>\s*just a moment/iu.test(html) || /cf-chl-|challenge-platform/iu.test(html);
+  /<title[^>]*>\s*(?:just a moment|attention required)/iu.test(html);
+
+/* "www.allrecipes.com" and "allrecipes.com" share "allrecipes.com". */
+const siteKey = (hostname: string): string => hostname.toLowerCase().split(".").slice(-2).join(".");
+
+const isPrivateHost = (hostname: string): boolean => {
+  const host = hostname.toLowerCase().replace(/^\[|\]$/gu, "");
+
+  return (
+    host === "localhost" ||
+    host.endsWith(".localhost") ||
+    host.endsWith(".local") ||
+    host.endsWith(".internal") ||
+    /^[\d.]+$/u.test(host) ||
+    host.includes(":")
+  );
+};
+
+/**
+ * The page must have stayed on the site the person asked for, on a public name: a redirect to
+ * another site, an IP address or a local name is never uploaded.
+ */
+const isSameSitePublicPage = (requestedUrl: string, finalUrl: string): boolean => {
+  try {
+    const requested = new URL(requestedUrl);
+    const final = new URL(finalUrl);
+
+    return (
+      /^https?:$/u.test(final.protocol) &&
+      !isPrivateHost(final.hostname) &&
+      siteKey(final.hostname) === siteKey(requested.hostname)
+    );
+  } catch {
+    return false;
+  }
+};
 
 const removableElements = ["script", "style", "svg"] as const;
 const jsonScriptTypePattern = /\btype\s*=\s*["']?application\/(?:ld\+)?json/u;
@@ -68,9 +104,11 @@ export const slimPageHtml = (html: string): string => {
 
       if (name) {
         const openEnd = lower.indexOf(">", tagStart);
-        const closeStart = openEnd === -1 ? -1 : lower.indexOf(`</${name}`, openEnd);
+        /* <svg aria-hidden="true"/> has no closing tag: it ends where it opens. */
+        const selfClosing = openEnd > 0 && lower.charAt(openEnd - 1) === "/";
+        const closeStart = openEnd === -1 || selfClosing ? -1 : lower.indexOf(`</${name}`, openEnd);
         const closeEnd = closeStart === -1 ? -1 : lower.indexOf(">", closeStart);
-        const elementEnd = closeEnd === -1 ? html.length : closeEnd + 1;
+        const elementEnd = selfClosing ? openEnd + 1 : closeEnd === -1 ? html.length : closeEnd + 1;
         const keepsData =
           name === "script" &&
           openEnd !== -1 &&
@@ -106,7 +144,9 @@ const downloadPage = async (
     signal: controller.signal
   });
 
-  if (!response.ok) {
+  const finalUrl = response.url || url;
+
+  if (!response.ok || !isSameSitePublicPage(url, finalUrl)) {
     return null;
   }
 
@@ -133,9 +173,7 @@ const downloadPage = async (
     return null;
   }
 
-  const finalUrl = response.url && /^https?:\/\//iu.test(response.url) ? response.url : undefined;
-
-  return { html: slim, ...(finalUrl ? { finalUrl } : {}) };
+  return { html: slim, finalUrl };
 };
 
 /** Downloads a recipe page on this device, as the app. Null when it got no readable page. */
@@ -143,7 +181,7 @@ export const fetchPageOnDevice = async (
   url: string,
   options: { fetchImplementation?: FetchLike; timeoutMs?: number } = {}
 ): Promise<DevicePage | null> => {
-  if (!/^https?:\/\//iu.test(url)) {
+  if (!isSameSitePublicPage(url, url)) {
     return null;
   }
 
