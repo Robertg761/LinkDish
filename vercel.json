@@ -167,6 +167,14 @@
       "destination": "/api/image"
     },
     {
+      "source": "/image/photos",
+      "destination": "/api/image"
+    },
+    {
+      "source": "/image/photos/:file",
+      "destination": "/api/image?photo=:file"
+    },
+    {
       "source": "/extract",
       "destination": "/api/extract"
     },

@@ -1,4 +1,5 @@
 import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { ExtractorApiError } from "@linkdish/api-client";
 import { getRecipeCompletionChanges, recipeSourceLabel } from "@linkdish/recipe-domain";
 import { AppButton, AppSurface, AppText } from "@linkdish/ui";
 import { Stack, router, useLocalSearchParams } from "expo-router";
@@ -53,6 +54,7 @@ import {
   getSharedRecipeOwnerLabel,
   sharedRecipeToSavedRecipeRecord
 } from "../src/features/saved-recipes/store";
+import { useRecipePictureDraft } from "../src/features/saved-recipes/useRecipePictureDraft";
 import { ShareCard } from "../src/features/share/ShareCard";
 import { shareRecipeCardImage } from "../src/features/share/shareRecipeCard";
 import { AddRecipeIngredientsSheet } from "../src/features/shopping/AddRecipeIngredientsSheet";
@@ -171,8 +173,10 @@ export default function RecipeScreen() {
     shareRecipe,
     unshareRecipe,
     updateSharedRecipe,
-    updateRecipe
+    updateRecipe,
+    uploadRecipePhoto
   } = useSavedRecipes();
+  const pictureDraft = useRecipePictureDraft(uploadRecipePhoto);
   const { showUpgradeMoment } = useOptionalUpgradeMoment();
   const [saveLimitMessage, setSaveLimitMessage] = useState<string | null>(null);
   const [editorError, setEditorError] = useState<string | null>(null);
@@ -399,6 +403,7 @@ export default function RecipeScreen() {
       createDraftSteps(recipe.steps.length > 0 ? recipe.steps.map((step) => step.text) : [""])
     );
     setDraftNotes(editableRecipe.notes ?? "");
+    pictureDraft.reset();
     setEditorError(null);
     setIsEditorVisible(true);
   };
@@ -413,7 +418,12 @@ export default function RecipeScreen() {
   };
 
   const applyRecipeEdits = async () => {
-    if (isEditorSaving || extraction.state.state !== "success" || !editableRecipe) {
+    if (
+      isEditorSaving ||
+      pictureDraft.isPreparing ||
+      extraction.state.state !== "success" ||
+      !editableRecipe
+    ) {
       return;
     }
 
@@ -426,17 +436,30 @@ export default function RecipeScreen() {
       return;
     }
 
-    const editedRecipe: Recipe = {
-      ...editableRecipe.recipe,
-      title,
-      servings: draftServings.trim() || null,
-      ingredients,
-      steps: steps.map((text, index) => ({ index: index + 1, text }))
-    };
-
     setIsEditorSaving(true);
 
     try {
+      let image: Recipe["image"];
+
+      try {
+        image = await pictureDraft.resolve(editableRecipe.recipe.image ?? null);
+      } catch (error) {
+        setEditorError(
+          (error instanceof ExtractorApiError && error.serverMessage) ||
+            "The picture could not be saved. Check your connection and try again."
+        );
+        return;
+      }
+
+      const editedRecipe: Recipe = {
+        ...editableRecipe.recipe,
+        image,
+        title,
+        servings: draftServings.trim() || null,
+        ingredients,
+        steps: steps.map((text, index) => ({ index: index + 1, text }))
+      };
+
       if (isSharedRecipeRoute && routeSharedRecipe) {
         const didUpdate = await updateSharedRecipe(routeSharedRecipe.id, {
           notes: draftNotes.trim() || undefined,
@@ -1158,18 +1181,26 @@ export default function RecipeScreen() {
           draftSteps={draftSteps}
           draftTitle={draftTitle}
           error={editorError}
+          isPreparingPicture={pictureDraft.isPreparing}
           isSaving={isEditorSaving}
           onAddStep={addDraftStep}
           onApply={() => {
             void applyRecipeEdits();
           }}
           onChangeStep={updateDraftStep}
+          onChoosePicture={() => {
+            void pictureDraft.choose();
+          }}
           onClose={closeRecipeEditor}
+          onRemovePicture={pictureDraft.remove}
           onRemoveStep={removeDraftStep}
+          picture={pictureDraft.preview(editableRecipe?.recipe.image ?? null)}
+          pictureError={pictureDraft.error}
           setDraftIngredients={setDraftIngredients}
           setDraftNotes={setDraftNotes}
           setDraftServings={setDraftServings}
           setDraftTitle={setDraftTitle}
+          signedIn={user != null}
           visible={isEditorVisible}
         />
         <AppDialog
@@ -1478,16 +1509,22 @@ const RecipeEditorModal = ({
   draftSteps,
   draftTitle,
   error,
+  isPreparingPicture,
   isSaving,
   onAddStep,
   onApply,
   onChangeStep,
+  onChoosePicture,
   onClose,
+  onRemovePicture,
   onRemoveStep,
+  picture,
+  pictureError,
   setDraftIngredients,
   setDraftNotes,
   setDraftServings,
   setDraftTitle,
+  signedIn,
   visible
 }: {
   draftIngredients: string;
@@ -1496,16 +1533,25 @@ const RecipeEditorModal = ({
   draftSteps: DraftStep[];
   draftTitle: string;
   error: string | null;
+  /** The chosen picture isn't ready yet, so saving now would leave it behind. */
+  isPreparingPicture: boolean;
   isSaving: boolean;
   onAddStep: () => void;
   onApply: () => void;
   onChangeStep: (stepId: string, value: string) => void;
+  onChoosePicture: () => void;
   onClose: () => void;
+  onRemovePicture: () => void;
   onRemoveStep: (stepId: string) => void;
+  /** What the picture will be on save: a URI to show, or null for the designed cover. */
+  picture: string | null;
+  pictureError: string | null;
   setDraftIngredients: (value: string) => void;
   setDraftNotes: (value: string) => void;
   setDraftServings: (value: string) => void;
   setDraftTitle: (value: string) => void;
+  /** A chosen picture is stored with the account, so choosing one needs an account. */
+  signedIn: boolean;
   visible: boolean;
 }) => {
   const scrollViewRef = useRef<ScrollViewInstance>(null);
@@ -1603,7 +1649,11 @@ const RecipeEditorModal = ({
               </AppText>
               <AppText variant="title">Edit Your Copy</AppText>
             </View>
-            <AppButton disabled={isSaving} label={isSaving ? "Saving" : "Done"} onPress={onApply} />
+            <AppButton
+              disabled={isSaving || isPreparingPicture}
+              label={isSaving ? "Saving" : "Done"}
+              onPress={onApply}
+            />
           </View>
 
           <ScrollView
@@ -1625,6 +1675,43 @@ const RecipeEditorModal = ({
                 <AppText>{error}</AppText>
               </AppSurface>
             ) : null}
+
+            <View style={styles.editorPicture}>
+              {picture ? (
+                <Image
+                  accessibilityIgnoresInvertColors
+                  resizeMode="cover"
+                  source={{ uri: picture }}
+                  style={styles.editorPicturePreview}
+                />
+              ) : (
+                <View style={[styles.editorPicturePreview, styles.editorPictureEmpty]}>
+                  <MaterialCommunityIcons color={appColors.muted} name="image-outline" size={26} />
+                </View>
+              )}
+              <View style={styles.editorPictureActions}>
+                <AppText variant="label">Picture</AppText>
+                {signedIn ? (
+                  <AppButton
+                    disabled={isSaving || isPreparingPicture}
+                    label={picture ? "Change picture" : "Add picture"}
+                    onPress={onChoosePicture}
+                    variant="outline"
+                  />
+                ) : (
+                  <AppText tone="muted">Sign in to use your own picture.</AppText>
+                )}
+                {picture ? (
+                  <AppButton
+                    disabled={isSaving}
+                    label="Remove picture"
+                    onPress={onRemovePicture}
+                    variant="ghost"
+                  />
+                ) : null}
+              </View>
+            </View>
+            {pictureError ? <AppText>{pictureError}</AppText> : null}
 
             <EditableField
               label="Title"
@@ -1887,6 +1974,25 @@ const styles = StyleSheet.create({
   editorError: {
     borderColor: appColors.accent,
     borderWidth: 1
+  },
+  editorPicture: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 14
+  },
+  editorPictureActions: {
+    flex: 1,
+    gap: 8
+  },
+  editorPictureEmpty: {
+    alignItems: "center",
+    backgroundColor: appColors.surfaceMuted,
+    justifyContent: "center"
+  },
+  editorPicturePreview: {
+    borderRadius: 10,
+    height: 96,
+    width: 96
   },
   editorField: {
     gap: 8

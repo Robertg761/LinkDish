@@ -643,6 +643,26 @@ export const deleteShoppingItemsResponseSchema = z.object({
 });
 
 /*
+ * A person's own picture for a recipe. The API re-encodes it and answers with where it lives; the
+ * recipe then holds that URL like any other picture (see recipe-photos.ts in the API).
+ */
+export const MAX_RECIPE_PHOTOS_PER_ACCOUNT = 100;
+export const RECIPE_PHOTO_PATH_PREFIX = "/image/photos/";
+
+export const uploadRecipePhotoRequestSchema = z.object({
+  dataUrl: imageDataUrlSchema
+});
+
+export const uploadRecipePhotoResponseSchema = z.object({
+  height: z.number().int().positive(),
+  path: z.string().startsWith(RECIPE_PHOTO_PATH_PREFIX),
+  width: z.number().int().positive()
+});
+
+export type UploadRecipePhotoRequest = z.infer<typeof uploadRecipePhotoRequestSchema>;
+export type UploadRecipePhotoResponse = z.infer<typeof uploadRecipePhotoResponseSchema>;
+
+/*
  * Personal library sync: a signed-in account's own cookbook (recipes with their personal metadata,
  * and collections), kept in the account and exchanged as changes. Each recipe or collection is one
  * item; the copy with the newest `updatedAt` wins, and a deletion travels as a tombstone.

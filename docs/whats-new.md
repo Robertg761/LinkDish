@@ -27,7 +27,8 @@ listings, the changelog page and social posts.
 - **Tap to check off ingredients** as you go; the ticks carry into cook mode.
 - **Ratings and a cook log.** "Cooked 3× · last 2 weeks ago."
 - **Better editor.** Edit title, description, servings, times, ingredients
-  (with sections), steps and notes, with a guard against losing changes.
+  (with sections), steps and notes, with a guard against losing changes. Signed
+  in, swap the recipe's picture for your own, or remove it.
 
 ## Cook mode, calmer
 

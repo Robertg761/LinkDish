@@ -42,6 +42,7 @@ import {
   hasActiveRevenueCatFamilyEntitlement,
   verifyActiveRevenueCatFamilyEntitlement
 } from "../billing/revenuecat-entitlements.js";
+import { deleteRecipePhotosForUser } from "../image/recipe-photo-store.js";
 import {
   deleteLibraryForUser,
   writeHouseholdDeletionCopiesForUser
@@ -1482,6 +1483,7 @@ export const deleteAccountAndHouseholdAccess = async (
     }
 
     await deleteLibraryForUser(user.id);
+    await deleteRecipePhotosForUser(user.id);
     await markUserDeleted(user.id);
     await tombstoneExternalIdentitiesForUser(user.id);
 
@@ -1490,6 +1492,11 @@ export const deleteAccountAndHouseholdAccess = async (
     // is logged rather than reported to the person.
     await deleteAnalyticsForAccount(user.id).catch((error: unknown) => {
       console.error("Failed to delete late analytics for a deleted account.", error);
+    });
+
+    // The same for a picture an upload stored as the account went (see storeRecipePhoto).
+    await deleteRecipePhotosForUser(user.id).catch((error: unknown) => {
+      console.error("Failed to delete late pictures for a deleted account.", error);
     });
   });
 };

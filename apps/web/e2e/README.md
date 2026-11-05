@@ -5,6 +5,8 @@ Playwright drives the web app's key flows in Chromium, at desktop and phone (Pix
 - `cookbook.e2e.ts`: the first-run welcome and starter recipes, opening a recipe, delete and undo
 - `import.e2e.ts`: importing from a link and saving it, and falling back to pasted text when a
   site blocks the link
+- `recipe-picture.e2e.ts`: replacing a recipe's picture and renaming it, signed in, through to
+  the cloud cookbook and a reload
 - `plan-and-shop.e2e.ts`: adding a recipe's groceries to the shopping list and ticking them off,
   keeping a tick through a reload that interrupts its write, and planning a recipe for dinner
 

@@ -112,6 +112,10 @@ export const storeKeySegments: Readonly<Record<string, "backup" | "ephemeral" | 
   library: "mixed",
   quota: "mixed",
   "rate-limit": "ephemeral",
+  // Uploaded recipe pictures: too large for the nightly snapshot, and a recipe that loses one
+  // falls back to its designed cover.
+  "recipe-photo": "ephemeral",
+  "recipe-photos": "ephemeral",
   session: "backup",
   user: "backup",
   "user-by-email": "backup",
