@@ -636,7 +636,7 @@ connections can still open these pages.
   and `deviceFetchAvailable: true`. A Pinterest pin whose outbound page is blocked does not set it,
   since the caller does not have that link.
 - The phone app (`apps/mobile/src/services/device-page-fetch.ts`) then downloads the page itself,
-  first with the app's own user agent and once more as the phone's Safari. It drops styles, SVG,
+  once, with the app's own user agent; it never poses as a browser, and a refusal stands. It drops styles, SVG,
   comments and every script but JSON-LD/JSON before uploading (`MAX_DEVICE_PAGE_HTML_CHARS`,
   3,000,000 characters). It sends `{ url, devicePage: { html, finalUrl } }` to `/extract`.
 - The API reads that HTML through the same path as the link (URL safety, detection, not-found and
