@@ -67,6 +67,16 @@ describe("fetchPageOnDevice", () => {
     ).toMatch(/Safari/u);
   });
 
+  it("does not download or retry a page that is too big", async () => {
+    const huge = new Response("x", {
+      headers: { "content-type": "text/html", "content-length": "50000000" }
+    });
+    const fetchImplementation = vi.fn(() => Promise.resolve(huge));
+
+    await expect(fetchPageOnDevice(url, { fetchImplementation })).resolves.toBeNull();
+    expect(fetchImplementation).toHaveBeenCalledOnce();
+  });
+
   it("gives up on challenge pages, errors and non-web links", async () => {
     const challenge = vi.fn(() => Promise.resolve(htmlResponse("<title>Just a moment...</title>")));
     const offline = vi.fn(() => Promise.reject(new Error("Network request failed")));

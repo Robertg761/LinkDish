@@ -99,22 +99,44 @@ export const slimPageHtml = (html: string): string => {
   return parts.join("");
 };
 
+/* "turned_away": the site refused this try, so another may work. Null: no try will. */
+type DownloadOutcome = DevicePage | "turned_away" | null;
+
 const downloadOnce = async (
   url: string,
   headers: Record<string, string>,
   fetchImplementation: FetchLike,
-  signal: AbortSignal
-): Promise<DevicePage | null> => {
-  const response = await fetchImplementation(url, { headers, method: "GET", signal });
+  controller: AbortController
+): Promise<DownloadOutcome> => {
+  const response = await fetchImplementation(url, {
+    headers,
+    method: "GET",
+    signal: controller.signal
+  });
 
-  if (!response.ok || !isHtmlContentType(response.headers.get("content-type"))) {
+  if (!response.ok) {
+    return "turned_away";
+  }
+
+  const declaredLength = Number(response.headers.get("content-length"));
+
+  if (
+    !isHtmlContentType(response.headers.get("content-type")) ||
+    declaredLength > MAX_DOWNLOADED_PAGE_CHARS
+  ) {
+    /* Stops the body download; React Native's fetch cannot read a body in bounded chunks. */
+    controller.abort();
     return null;
   }
 
   const html = await response.text();
 
-  if (html.length > MAX_DOWNLOADED_PAGE_CHARS || looksLikeChallengePage(html)) {
+  if (html.length > MAX_DOWNLOADED_PAGE_CHARS) {
     return null;
+  }
+
+  if (looksLikeChallengePage(html)) {
+    return "turned_away";
   }
 
   const slim = slimPageHtml(html);
@@ -149,10 +171,10 @@ export const fetchPageOnDevice = async (
   try {
     for (const headers of [pageHeaders, browserHeaders]) {
       try {
-        const page = await downloadOnce(url, headers, fetchImplementation, controller.signal);
+        const outcome = await downloadOnce(url, headers, fetchImplementation, controller);
 
-        if (page) {
-          return page;
+        if (outcome !== "turned_away") {
+          return outcome;
         }
       } catch {
         if (controller.signal.aborted) {
