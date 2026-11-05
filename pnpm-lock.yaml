@@ -6,6 +6,7 @@ settings:
 
 overrides:
   '@babel/core@<=7.29.0': 7.29.6
+  '@babel/parser@7.29.13': 7.29.11
   '@expo/ngrok>uuid': 11.1.1
   '@humanfs/node@<0.16.8': 0.16.8
   '@xmldom/xmldom@<0.8.15': 0.8.15
@@ -557,8 +558,8 @@ packages:
     resolution: {integrity: sha512-laoRpD/kO/iA4CDlgJbixHekg7oPvWALK0PQyK3Ob2I2njZRvVAD77RfWCIImtqWCq6KijoBoZK7bp/HlTWASQ==}
     engines: {node: '>=6.9.0'}
 
-  '@babel/parser@7.29.13':
-    resolution: {integrity: sha512-fJM50YYjlTiBhgdkGmC1tBpv+FMAyo4annf2X6Aks+0yRlaiVkYW/3f07xAfVVkYIoZ9fFZp+mEThUFnuybhkQ==}
+  '@babel/parser@7.29.11':
+    resolution: {integrity: sha512-OZ6+oaK7GMyg3IfCpj8JOmn8n+w2rJbDT0LLfVDTLb1ZFeKDh3AiNELgCMUw175IJHSkLl74hG0M0VLsvx+gag==}
     engines: {node: '>=6.0.0'}
     hasBin: true
 
@@ -7024,7 +7025,7 @@ snapshots:
       '@babel/helper-compilation-targets': 7.29.13
       '@babel/helper-module-transforms': 7.29.13(@babel/core@7.29.6)
       '@babel/helpers': 7.29.13
-      '@babel/parser': 7.29.13
+      '@babel/parser': 7.29.11
       '@babel/template': 7.29.7
       '@babel/traverse': 7.29.13
       '@babel/types': 7.29.11
@@ -7039,7 +7040,7 @@ snapshots:
 
   '@babel/generator@7.29.13':
     dependencies:
-      '@babel/parser': 7.29.13
+      '@babel/parser': 7.29.11
       '@babel/types': 7.29.11
       '@jridgewell/gen-mapping': 0.3.13
       '@jridgewell/trace-mapping': 0.3.31
@@ -7163,7 +7164,7 @@ snapshots:
       '@babel/template': 7.29.7
       '@babel/types': 7.29.11
 
-  '@babel/parser@7.29.13':
+  '@babel/parser@7.29.11':
     dependencies:
       '@babel/types': 7.29.11
 
@@ -7787,7 +7788,7 @@ snapshots:
   '@babel/template@7.29.7':
     dependencies:
       '@babel/code-frame': 7.29.7
-      '@babel/parser': 7.29.13
+      '@babel/parser': 7.29.11
       '@babel/types': 7.29.11
 
   '@babel/traverse@7.29.13':
@@ -7795,7 +7796,7 @@ snapshots:
       '@babel/code-frame': 7.29.7
       '@babel/generator': 7.29.13
       '@babel/helper-globals': 7.29.7
-      '@babel/parser': 7.29.13
+      '@babel/parser': 7.29.11
       '@babel/template': 7.29.7
       '@babel/types': 7.29.11
       debug: 4.4.3
@@ -9071,7 +9072,7 @@ snapshots:
   '@react-native/codegen@0.85.3(@babel/core@7.29.6)':
     dependencies:
       '@babel/core': 7.29.6
-      '@babel/parser': 7.29.13
+      '@babel/parser': 7.29.11
       hermes-parser: 0.33.3
       invariant: 2.2.4
       nullthrows: 1.1.1
@@ -9081,7 +9082,7 @@ snapshots:
   '@react-native/codegen@0.88.1(@babel/core@7.29.6)':
     dependencies:
       '@babel/core': 7.29.6
-      '@babel/parser': 7.29.13
+      '@babel/parser': 7.29.11
       flow-parser: 0.327.0
       invariant: 2.2.4
       nullthrows: 1.1.1
@@ -9641,7 +9642,7 @@ snapshots:
 
   '@types/babel__core@7.20.5':
     dependencies:
-      '@babel/parser': 7.29.13
+      '@babel/parser': 7.29.11
       '@babel/types': 7.29.11
       '@types/babel__generator': 7.27.0
       '@types/babel__template': 7.4.4
@@ -9655,7 +9656,7 @@ snapshots:
 
   '@types/babel__template@7.4.4':
     dependencies:
-      '@babel/parser': 7.29.13
+      '@babel/parser': 7.29.11
       '@babel/types': 7.29.11
     optional: true
 
@@ -11087,7 +11088,7 @@ snapshots:
 
   expo-modules-cli@0.4.0:
     dependencies:
-      '@babel/parser': 7.29.13
+      '@babel/parser': 7.29.11
       arg: 5.0.2
 
   expo-modules-core@58.0.30(react-native-worklets@0.13.1(@babel/core@7.29.6)(@react-native/metro-config@0.85.3(@babel/core@7.29.6)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(react-native@0.88.1(@babel/core@7.29.6)(@react-native/metro-config@0.85.3(@babel/core@7.29.6)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(@types/react@19.3.0)(bufferutil@4.1.0)(react@19.3.0)(utf-8-validate@6.0.6))(react@19.3.0))(react-native@0.88.1(@babel/core@7.29.6)(@react-native/metro-config@0.85.3(@babel/core@7.29.6)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(@types/react@19.3.0)(bufferutil@4.1.0)(react@19.3.0)(utf-8-validate@6.0.6))(react@19.3.0):
@@ -12374,7 +12375,7 @@ snapshots:
     dependencies:
       '@babel/core': 7.29.6
       '@babel/generator': 7.29.13
-      '@babel/parser': 7.29.13
+      '@babel/parser': 7.29.11
       '@babel/types': 7.29.11
       flow-enums-runtime: 0.0.6
       metro: 0.84.6(bufferutil@4.1.0)(utf-8-validate@6.0.6)
@@ -12394,7 +12395,7 @@ snapshots:
     dependencies:
       '@babel/core': 7.29.6
       '@babel/generator': 7.29.13
-      '@babel/parser': 7.29.13
+      '@babel/parser': 7.29.11
       '@babel/types': 7.29.11
       flow-enums-runtime: 0.0.6
       metro: 0.87.1(bufferutil@4.1.0)(utf-8-validate@6.0.6)
@@ -12414,7 +12415,7 @@ snapshots:
     dependencies:
       '@babel/core': 7.29.6
       '@babel/generator': 7.29.13
-      '@babel/parser': 7.29.13
+      '@babel/parser': 7.29.11
       '@babel/types': 7.29.11
       '@jridgewell/sourcemap-codec': 1.6.0
       flow-enums-runtime: 0.0.6
@@ -12436,7 +12437,7 @@ snapshots:
       '@babel/code-frame': 7.29.7
       '@babel/core': 7.29.6
       '@babel/generator': 7.29.13
-      '@babel/parser': 7.29.13
+      '@babel/parser': 7.29.11
       '@babel/template': 7.29.7
       '@babel/traverse': 7.29.13
       '@babel/types': 7.29.11
@@ -12481,7 +12482,7 @@ snapshots:
       '@babel/code-frame': 7.29.7
       '@babel/core': 7.29.6
       '@babel/generator': 7.29.13
-      '@babel/parser': 7.29.13
+      '@babel/parser': 7.29.11
       '@babel/template': 7.29.7
       '@babel/traverse': 7.29.13
       '@babel/types': 7.29.11
@@ -12525,7 +12526,7 @@ snapshots:
       '@babel/code-frame': 7.29.7
       '@babel/core': 7.29.6
       '@babel/generator': 7.29.13
-      '@babel/parser': 7.29.13
+      '@babel/parser': 7.29.11
       '@babel/template': 7.29.7
       '@babel/traverse': 7.29.13
       '@babel/types': 7.29.11
