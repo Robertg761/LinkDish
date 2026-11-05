@@ -35,6 +35,11 @@ describe("slimPageHtml edge cases", () => {
     expect(slimPageHtml("<scripted>keep</scripted><svgx>keep</svgx>")).toBe(
       "<scripted>keep</scripted><svgx>keep</svgx>"
     );
+    expect(
+      slimPageHtml(
+        '<script>const city="İstanbul";</script><script type="application/ld+json">{"a":1}</script>'
+      )
+    ).toBe('<script type="application/ld+json">{"a":1}</script>');
     expect(slimPageHtml('<script type="application/json">{"a":1}</script>')).toBe(
       '<script type="application/json">{"a":1}</script>'
     );

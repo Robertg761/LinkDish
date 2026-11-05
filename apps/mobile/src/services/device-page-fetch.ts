@@ -46,7 +46,8 @@ const jsonScriptTypePattern = /\btype\s*=\s*["']?application\/(?:ld\+)?json/u;
  * A forward-only scan (linear time), not regular-expression replacement.
  */
 export const slimPageHtml = (html: string): string => {
-  const lower = html.toLowerCase();
+  /* ASCII-only folding: toLowerCase() turns "İ" into two code units and shifts every offset. */
+  const lower = html.replace(/[A-Z]/gu, (letter) => String.fromCharCode(letter.charCodeAt(0) + 32));
   const parts: string[] = [];
   let kept = 0;
   let index = 0;
