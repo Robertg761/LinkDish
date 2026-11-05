@@ -4,7 +4,9 @@ import { MAX_DEVICE_PAGE_HTML_CHARS } from "@linkdish/api-contracts";
  * Some recipe sites (Allrecipes and the other People Inc brands) refuse every request from a
  * cloud server, but open for people. When /extract says a link was blocked and a device page is
  * welcome (`deviceFetchAvailable`), the app downloads the page over the person's own
- * connection, the way a browser would, and sends the HTML back to be read.
+ * connection and sends the HTML back to be read. It asks once, as itself (the app's own user
+ * agent): if the site turns the app away too, that answer stands and the person is pointed to
+ * Paste text. The app never poses as a browser to get past a site's checks.
  */
 
 const DEVICE_PAGE_TIMEOUT_MS = 15_000;
@@ -14,13 +16,6 @@ const MAX_DOWNLOADED_PAGE_CHARS = 12_000_000;
 const pageHeaders = {
   accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
   "accept-language": "en-US,en;q=0.9"
-} as const;
-
-/* The second try looks like the phone's own browser, for sites that turn apps away. */
-const browserHeaders = {
-  ...pageHeaders,
-  "user-agent":
-    "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1"
 } as const;
 
 export interface DevicePage {
@@ -100,23 +95,19 @@ export const slimPageHtml = (html: string): string => {
   return parts.join("");
 };
 
-/* "turned_away": the site refused this try, so another may work. Null: no try will. */
-type DownloadOutcome = DevicePage | "turned_away" | null;
-
-const downloadOnce = async (
+const downloadPage = async (
   url: string,
-  headers: Record<string, string>,
   fetchImplementation: FetchLike,
   controller: AbortController
-): Promise<DownloadOutcome> => {
+): Promise<DevicePage | null> => {
   const response = await fetchImplementation(url, {
-    headers,
+    headers: pageHeaders,
     method: "GET",
     signal: controller.signal
   });
 
   if (!response.ok) {
-    return "turned_away";
+    return null;
   }
 
   const declaredLength = Number(response.headers.get("content-length"));
@@ -132,12 +123,8 @@ const downloadOnce = async (
 
   const html = await response.text();
 
-  if (html.length > MAX_DOWNLOADED_PAGE_CHARS) {
+  if (html.length > MAX_DOWNLOADED_PAGE_CHARS || looksLikeChallengePage(html)) {
     return null;
-  }
-
-  if (looksLikeChallengePage(html)) {
-    return "turned_away";
   }
 
   const slim = slimPageHtml(html);
@@ -151,10 +138,7 @@ const downloadOnce = async (
   return { html: slim, ...(finalUrl ? { finalUrl } : {}) };
 };
 
-/**
- * Downloads a recipe page on this device: first as the app, then once more as the phone's
- * browser if the site turned the app away. Null when neither got a readable page.
- */
+/** Downloads a recipe page on this device, as the app. Null when it got no readable page. */
 export const fetchPageOnDevice = async (
   url: string,
   options: { fetchImplementation?: FetchLike; timeoutMs?: number } = {}
@@ -170,20 +154,8 @@ export const fetchPageOnDevice = async (
   }, options.timeoutMs ?? DEVICE_PAGE_TIMEOUT_MS);
 
   try {
-    for (const headers of [pageHeaders, browserHeaders]) {
-      try {
-        const outcome = await downloadOnce(url, headers, fetchImplementation, controller);
-
-        if (outcome !== "turned_away") {
-          return outcome;
-        }
-      } catch {
-        if (controller.signal.aborted) {
-          return null;
-        }
-      }
-    }
-
+    return await downloadPage(url, fetchImplementation, controller);
+  } catch {
     return null;
   } finally {
     clearTimeout(timer);

@@ -57,22 +57,17 @@ describe("fetchPageOnDevice", () => {
     expect(fetchImplementation).toHaveBeenCalledOnce();
   });
 
-  it("tries once more as the phone's browser when the app is turned away", async () => {
+  it("asks once, as the app, and takes no for an answer", async () => {
     const fetchImplementation = vi
       .fn<(url: string, init: RequestInit) => Promise<Response>>()
-      .mockResolvedValueOnce(htmlResponse("no", 402))
-      .mockResolvedValueOnce(htmlResponse(page));
+      .mockResolvedValue(htmlResponse("no", 402));
 
-    const result = await fetchPageOnDevice(url, { fetchImplementation });
-
-    expect(result?.html).toContain("Soup");
-    expect(fetchImplementation).toHaveBeenCalledTimes(2);
-    expect(
-      (fetchImplementation.mock.calls[1]?.[1].headers as Record<string, string>)["user-agent"]
-    ).toMatch(/Safari/u);
+    await expect(fetchPageOnDevice(url, { fetchImplementation })).resolves.toBeNull();
+    expect(fetchImplementation).toHaveBeenCalledOnce();
+    expect(fetchImplementation.mock.calls[0]?.[1].headers).not.toHaveProperty("user-agent");
   });
 
-  it("does not download or retry a page that is too big", async () => {
+  it("does not download a page that is too big", async () => {
     const huge = new Response("x", {
       headers: { "content-type": "text/html", "content-length": "50000000" }
     });
@@ -91,6 +86,6 @@ describe("fetchPageOnDevice", () => {
     await expect(
       fetchPageOnDevice("file:///etc/hosts", { fetchImplementation: offline })
     ).resolves.toBeNull();
-    expect(offline).toHaveBeenCalledTimes(2);
+    expect(offline).toHaveBeenCalledOnce();
   });
 });
