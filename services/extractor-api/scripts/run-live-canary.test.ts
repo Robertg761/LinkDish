@@ -79,7 +79,7 @@ describe("resolveCanaryTimeoutMs", () => {
   });
 
   it.each(["", "0", "-1", "1.5", "not-a-number"])("falls back to the default for %j", (value) => {
-    expect(resolveCanaryTimeoutMs(value)).toBe(20_000);
+    expect(resolveCanaryTimeoutMs(value)).toBe(30_000);
   });
 });
 
@@ -241,6 +241,119 @@ describe("runLiveCanary", () => {
 
     await rm(tempDir, { recursive: true, force: true });
     await rm(result.outputPath, { force: true });
+  });
+
+  describe("when the primary attempt misses its expected outcome", () => {
+    type Answer = "timeout" | "success" | "parse_failed" | "plan_limit";
+
+    /** Runs one case whose /extract calls answer with `answers` in turn. */
+    const runWithAnswers = async (answers: Answer[], expectedMinimumOutcome = "success") => {
+      const tempDir = await mkdtemp(path.join(os.tmpdir(), "linkdish-canary-"));
+      const manifestPath = path.join(tempDir, "manifest.json");
+      let extractCalls = 0;
+
+      await writeFile(
+        manifestPath,
+        JSON.stringify([
+          {
+            id: "video",
+            kind: "tiktok",
+            url: "https://example.com/video",
+            expectedMinimumOutcome,
+            expectedFinalUrlPattern: "example\\.com/video"
+          }
+        ])
+      );
+
+      const fetchImplementation = ((url) => {
+        if (typeof url === "string" && url.endsWith("/extract")) {
+          const answer = answers[extractCalls];
+          extractCalls += 1;
+
+          return answer === "timeout"
+            ? Promise.reject(Object.assign(new Error("aborted"), { name: "AbortError" }))
+            : Promise.resolve({
+                status: 200,
+                json: () =>
+                  Promise.resolve(
+                    answer === "success"
+                      ? { status: "success", recipe: { title: "Pasta" } }
+                      : { status: "failure", reason: answer }
+                  )
+              });
+        }
+
+        return Promise.resolve({
+          status: 200,
+          url,
+          text: () => Promise.resolve("<html><title>Video</title></html>")
+        });
+      }) as typeof fetch;
+
+      const result = await runLiveCanary({
+        manifestPath,
+        baseUrl: "http://127.0.0.1:3000",
+        timeoutMs: 100,
+        fetchImplementation
+      });
+      const artifact = JSON.parse(await readFile(result.outputPath, "utf8")) as {
+        results: Array<{ expectedOutcomeMet: boolean; primaryRetriedAfter: string | null }>;
+      };
+
+      await rm(tempDir, { recursive: true, force: true });
+      await rm(result.outputPath, { force: true });
+
+      return { extractCalls, outcome: artifact.results[0], summary: result.summary };
+    };
+
+    it("passes when a timed-out case answers on its second try, and records the miss", async () => {
+      const { extractCalls, outcome, summary } = await runWithAnswers(["timeout", "success"]);
+
+      expect(extractCalls).toBe(2);
+      expect(outcome).toMatchObject({ expectedOutcomeMet: true, primaryRetriedAfter: "timeout" });
+      expect(summary).toMatchObject({ failed: 0, passed: 1 });
+    });
+
+    it("passes when a failed read succeeds on its second try, and records the miss", async () => {
+      const { extractCalls, outcome } = await runWithAnswers(["parse_failed", "success"]);
+
+      expect(extractCalls).toBe(2);
+      expect(outcome).toMatchObject({
+        expectedOutcomeMet: true,
+        primaryRetriedAfter: "parse_failed"
+      });
+    });
+
+    it("still fails a case that misses twice, after only one more try", async () => {
+      const { extractCalls, outcome, summary } = await runWithAnswers([
+        "parse_failed",
+        "parse_failed",
+        "success"
+      ]);
+
+      expect(extractCalls).toBe(2);
+      expect(outcome).toMatchObject({ expectedOutcomeMet: false });
+      expect(summary).toMatchObject({ failed: 1, outcomeFailures: 1 });
+    });
+
+    it("doesn't try again when the first answer is what the case expects", async () => {
+      const { extractCalls, outcome } = await runWithAnswers(["success", "success"]);
+
+      expect(extractCalls).toBe(1);
+      expect(outcome).toMatchObject({ expectedOutcomeMet: true, primaryRetriedAfter: null });
+    });
+
+    it("doesn't try again when a case is expected to fail and does", async () => {
+      const { extractCalls } = await runWithAnswers(["parse_failed", "success"], "failure");
+
+      expect(extractCalls).toBe(1);
+    });
+
+    it("doesn't try again when the token was refused", async () => {
+      const { extractCalls } = await runWithAnswers(["plan_limit", "success"]);
+
+      expect(extractCalls).toBe(1);
+    });
   });
 
   it("sends canary headers and fails when the expected outcome is missed", async () => {
