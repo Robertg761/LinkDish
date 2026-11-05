@@ -67,6 +67,7 @@
     },
     "overrides": {
       "@babel/core@<=7.29.0": "7.29.6",
+      "@babel/parser@7.29.13": "7.29.11",
       "@expo/ngrok>uuid": "11.1.1",
       "@humanfs/node@<0.16.8": "0.16.8",
       "@xmldom/xmldom@<0.8.15": "0.8.15",
