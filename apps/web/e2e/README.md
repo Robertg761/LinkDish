@@ -6,7 +6,7 @@ Playwright drives the web app's key flows in Chromium, at desktop and phone (Pix
 - `import.e2e.ts`: importing from a link and saving it, and falling back to pasted text when a
   site blocks the link
 - `plan-and-shop.e2e.ts`: adding a recipe's groceries to the shopping list and ticking them off,
-  and planning a recipe for dinner
+  keeping a tick through a reload that interrupts its write, and planning a recipe for dinner
 
 Run them with:
 

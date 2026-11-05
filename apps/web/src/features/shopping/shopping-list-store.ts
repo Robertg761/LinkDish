@@ -18,6 +18,9 @@ import { getCurrentAccount } from "../../auth/account-scope";
 import { isDeepEqual } from "../../data/reconcile";
 import { getLinkDishWebDb, SHOPPING_ITEMS_STORE_NAME } from "../../storage/linkdish-db";
 
+import { forgetJournaledCheck, journalCheck, readCheckJournal } from "./shopping-check-journal";
+
+import type { JournaledCheck } from "./shopping-check-journal";
 import type {
   DeleteShoppingItemsResponse,
   UpsertShoppingItemsResponse
@@ -396,6 +399,8 @@ const initialSnapshot: ShoppingListSnapshot = { error: null, items: [], status: 
 let snapshot: ShoppingListSnapshot = initialSnapshot;
 let loadGeneration = 0;
 let inflightLoad: Promise<void> | null = null;
+/** This page's one pass over the check-offs an earlier page left unsaved. */
+let checkReplay: Promise<void> | null = null;
 const listeners = new Set<() => void>();
 
 interface ShoppingChannel {
@@ -603,6 +608,7 @@ export function setShoppingChannelFactoryForTests(factory: ShoppingChannelFactor
 export function resetShoppingListStoreForTests(): void {
   loadGeneration += 1;
   inflightLoad = null;
+  checkReplay = null;
 
   if (remoteReloadTimer) {
     clearTimeout(remoteReloadTimer);
@@ -641,6 +647,7 @@ const listed = (records: WebShoppingItem[], options: ListFilter = {}): WebShoppi
  * only come with `includeOtherHouseholds`.
  */
 export async function getShoppingItems(options: ListFilter = {}): Promise<WebShoppingItem[]> {
+  await replayJournaledChecks();
   const db = await getLinkDishWebDb();
   return listed((await db.getAll(STORE_NAME)) as WebShoppingItem[], options);
 }
@@ -987,32 +994,102 @@ export async function addShoppingItems(
   return getShoppingItems();
 }
 
+/** `existing` checked off (or put back) at `updatedAt`, by the account in `options`. */
+const withChecked = (
+  existing: WebShoppingItem,
+  checked: boolean,
+  updatedAt: string,
+  options: ShoppingWriteOptions
+): WebShoppingItem => ({
+  ...existing,
+  checked,
+  checkedBy: checked ? (options.userId ?? LOCAL_SHOPPING_USER) : null,
+  sync: syncStateFor(options, existing),
+  updatedAt
+});
+
 /**
  * Checks an item off (or puts it back). Resolves with the item as written, or undefined when it
- * isn't on the list (deleted, or kept for another household).
+ * isn't on the list (deleted, or kept for another household). The tap is journaled before the
+ * first await, so a reload that aborts the write below doesn't lose it.
  */
 export async function setShoppingItemChecked(
   id: string,
   checked: boolean,
   options: ShoppingWriteOptions
 ): Promise<WebShoppingItem | undefined> {
-  return changeShoppingRecords(
-    (records) => records.get(id),
-    (existing): ShoppingChanges<WebShoppingItem | undefined> => {
-      if (!isEditable(existing, options)) {
-        return { result: undefined };
-      }
+  const updatedAt = nowIso();
+  journalCheck(id, {
+    canSync: options.canSync,
+    checked,
+    householdId: options.householdId,
+    updatedAt,
+    userId: options.userId
+  });
 
-      const updated: WebShoppingItem = {
-        ...existing,
-        checked,
-        checkedBy: checked ? (options.userId ?? LOCAL_SHOPPING_USER) : null,
-        sync: syncStateFor(options, existing),
-        updatedAt: nowIso()
-      };
-      return { result: updated, upserted: [updated] };
+  try {
+    return await changeShoppingRecords(
+      (records) => records.get(id),
+      (existing): ShoppingChanges<WebShoppingItem | undefined> => {
+        if (!isEditable(existing, options)) {
+          return { result: undefined };
+        }
+
+        const updated = withChecked(existing, checked, updatedAt, options);
+        return { result: updated, upserted: [updated] };
+      }
+    );
+  } finally {
+    forgetJournaledCheck(id, updatedAt);
+  }
+}
+
+/**
+ * True when the stored item doesn't account for a journaled tap yet. That is decided by time, not
+ * by whether `checked` differs: a tap that puts an item back where it was stored is still a change
+ * the household has to hear about.
+ */
+const isUnappliedCheck = (existing: WebShoppingItem, check: JournaledCheck): boolean => {
+  const stored = timeOf(existing.updatedAt);
+  const tapped = timeOf(check.updatedAt);
+
+  return stored < tapped || (stored === tapped && existing.checked !== check.checked);
+};
+
+/**
+ * Applies the check-offs an earlier page left in the journal (its reload or close aborted their
+ * write), as of when they were made and for the account that made them. An item changed since
+ * keeps that change. Runs before this page's first read, so the list opens with them applied.
+ * If that fails the list still opens, they stay journaled and the next read tries again.
+ */
+function replayJournaledChecks(): Promise<void> {
+  checkReplay ??= (async () => {
+    const journal = readCheckJournal();
+    const ids = Object.keys(journal);
+
+    if (ids.length === 0) {
+      return;
     }
-  );
+
+    await changeShoppingRecords(readByIds(ids), (stored) => ({
+      result: undefined,
+      upserted: stored.flatMap((existing) => {
+        const check = existing && journal[existing.id];
+
+        return check && isEditable(existing, check) && isUnappliedCheck(existing, check)
+          ? [withChecked(existing, check.checked, check.updatedAt, check)]
+          : [];
+      })
+    }));
+
+    for (const id of ids) {
+      forgetJournaledCheck(id, journal[id]?.updatedAt ?? "");
+    }
+  })().catch(() => {
+    checkReplay = null;
+  });
+
+  return checkReplay;
 }
 
 export interface ShoppingItemPatch {

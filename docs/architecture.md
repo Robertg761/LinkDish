@@ -55,6 +55,10 @@ size` checks the budgets after a build (entry ≤ 115 KB gzip, landing JS ≤
   hanging. Reactive stores in `src/data` (`useSavedRecipes`, collections, meal
   plan, import queue, cook sessions) use `useSyncExternalStore`, optimistic
   writes with rollback, and a BroadcastChannel change feed across tabs.
+  A shopping check-off is also noted synchronously in localStorage until its
+  IndexedDB transaction is over: a reload aborts that transaction, so the next
+  load applies whatever is still noted (`shopping-check-journal.ts`). Each item
+  has its own key, because tabs share localStorage.
   Personal metadata (favorites, tags, collections, ratings, cook log) stays on
   the device and is never part of the household sync payload.
 - **Features.** Cookbook (ranked search, filters, collections, tags, shelves),
