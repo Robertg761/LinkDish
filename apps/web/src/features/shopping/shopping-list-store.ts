@@ -20,6 +20,7 @@ import { getLinkDishWebDb, SHOPPING_ITEMS_STORE_NAME } from "../../storage/linkd
 
 import { forgetJournaledCheck, journalCheck, readCheckJournal } from "./shopping-check-journal";
 
+import type { JournaledCheck } from "./shopping-check-journal";
 import type {
   DeleteShoppingItemsResponse,
   UpsertShoppingItemsResponse
@@ -1044,6 +1045,18 @@ export async function setShoppingItemChecked(
 }
 
 /**
+ * True when the stored item doesn't account for a journaled tap yet. That is decided by time, not
+ * by whether `checked` differs: a tap that puts an item back where it was stored is still a change
+ * the household has to hear about.
+ */
+const isUnappliedCheck = (existing: WebShoppingItem, check: JournaledCheck): boolean => {
+  const stored = timeOf(existing.updatedAt);
+  const tapped = timeOf(check.updatedAt);
+
+  return stored < tapped || (stored === tapped && existing.checked !== check.checked);
+};
+
+/**
  * Applies the check-offs an earlier page left in the journal (its reload or close aborted their
  * write), as of when they were made and for the account that made them. An item changed since
  * keeps that change. Runs before this page's first read, so the list opens with them applied.
@@ -1063,10 +1076,7 @@ function replayJournaledChecks(): Promise<void> {
       upserted: stored.flatMap((existing) => {
         const check = existing && journal[existing.id];
 
-        return check &&
-          isEditable(existing, check) &&
-          existing.checked !== check.checked &&
-          timeOf(existing.updatedAt) <= timeOf(check.updatedAt)
+        return check && isEditable(existing, check) && isUnappliedCheck(existing, check)
           ? [withChecked(existing, check.checked, check.updatedAt, check)]
           : [];
       })

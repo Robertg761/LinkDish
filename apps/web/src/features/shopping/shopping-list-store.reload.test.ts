@@ -7,7 +7,7 @@ import {
   forgetJournaledCheck,
   journalCheck,
   readCheckJournal,
-  SHOPPING_CHECK_JOURNAL_KEY
+  SHOPPING_CHECK_JOURNAL_PREFIX
 } from "./shopping-check-journal";
 import {
   deleteShoppingItems,
@@ -70,7 +70,7 @@ describe("check-offs across a reload", () => {
 
     expect(readCheckJournal().lemons).toMatchObject({ checked: true });
     await write;
-    expect(localStorage.getItem(SHOPPING_CHECK_JOURNAL_KEY)).toBeNull();
+    expect(readCheckJournal()).toEqual({});
   });
 
   it("gives the item the time journaled with the tap", async () => {
@@ -93,7 +93,7 @@ describe("check-offs across a reload", () => {
       checkedBy: "local",
       updatedAt: TAPPED_AT
     });
-    expect(localStorage.getItem(SHOPPING_CHECK_JOURNAL_KEY)).toBeNull();
+    expect(readCheckJournal()).toEqual({});
   });
 
   it("puts an item back when that was the tap the reload cut off", async () => {
@@ -101,6 +101,22 @@ describe("check-offs across a reload", () => {
     tapThenReload({ checked: false });
 
     expect((await getShoppingItems())[0]).toMatchObject({ checked: false, checkedBy: null });
+  });
+
+  it("tells the household about a put-back that matches what's stored", async () => {
+    // Checked, then put back, and the reload cut both writes off: the record is as it was.
+    await putShoppingItems([
+      item({ sync: { householdId: "h1", lastSyncedAt: ADDED_AT, status: "synced" } })
+    ]);
+    tapThenReload({ canSync: true, checked: false, householdId: "h1", userId: "u1" });
+    apiMocks.upsertShoppingItems.mockResolvedValue({ ignored: [], items: [] });
+    apiMocks.getShoppingList.mockResolvedValue({ items: [] });
+
+    await syncShoppingItems({ canSync: true, householdId: "h1", userId: "u1" });
+
+    expect(apiMocks.upsertShoppingItems).toHaveBeenCalledWith({
+      items: [expect.objectContaining({ checked: false, updatedAt: TAPPED_AT })]
+    });
   });
 
   it("sends a household check-off on the first sync, as the account that made it", async () => {
@@ -123,7 +139,7 @@ describe("check-offs across a reload", () => {
     tapThenReload();
 
     expect((await getShoppingItems())[0]).toMatchObject({ checked: false, text: "limes" });
-    expect(localStorage.getItem(SHOPPING_CHECK_JOURNAL_KEY)).toBeNull();
+    expect(readCheckJournal()).toEqual({});
   });
 
   it("leaves an item alone when the write got in before the reload", async () => {
@@ -140,7 +156,7 @@ describe("check-offs across a reload", () => {
     tapThenReload();
 
     expect(await getShoppingItems()).toEqual([]);
-    expect(localStorage.getItem(SHOPPING_CHECK_JOURNAL_KEY)).toBeNull();
+    expect(readCheckJournal()).toEqual({});
   });
 
   it("doesn't apply a tap to another household's item", async () => {
@@ -159,7 +175,7 @@ describe("check-offs across a reload", () => {
       "disk full"
     );
 
-    expect(localStorage.getItem(SHOPPING_CHECK_JOURNAL_KEY)).toBeNull();
+    expect(readCheckJournal()).toEqual({});
   });
 
   it("still shows the list when a tap can't be applied, and tries again on the next read", async () => {
@@ -171,7 +187,16 @@ describe("check-offs across a reload", () => {
     expect(readCheckJournal().lemons).toBeDefined();
 
     expect((await getShoppingItems())[0]).toMatchObject({ checked: true });
-    expect(localStorage.getItem(SHOPPING_CHECK_JOURNAL_KEY)).toBeNull();
+    expect(readCheckJournal()).toEqual({});
+  });
+
+  it("keeps another tab's tap when this tab's write finishes", () => {
+    journalCheck("lemons", { canSync: false, checked: true, updatedAt: TAPPED_AT });
+    journalCheck("limes", { canSync: false, checked: true, updatedAt: LATER });
+
+    forgetJournaledCheck("lemons", TAPPED_AT);
+
+    expect(Object.keys(readCheckJournal())).toEqual(["limes"]);
   });
 
   it("keeps a later tap when the earlier one's write finishes", () => {
@@ -183,11 +208,11 @@ describe("check-offs across a reload", () => {
     expect(readCheckJournal().lemons).toMatchObject({ checked: false, updatedAt: LATER });
   });
 
-  it("ignores a journal it can't read", async () => {
+  it("ignores an entry it can't read", async () => {
     await putShoppingItems([item()]);
 
-    for (const unreadable of ["not json", "null", '{"lemons":{"checked":"yes"}}']) {
-      localStorage.setItem(SHOPPING_CHECK_JOURNAL_KEY, unreadable);
+    for (const unreadable of ["not json", "null", '{"checked":"yes"}']) {
+      localStorage.setItem(`${SHOPPING_CHECK_JOURNAL_PREFIX}lemons`, unreadable);
       resetShoppingListStoreForTests();
 
       expect((await getShoppingItems())[0]).toMatchObject({ checked: false });

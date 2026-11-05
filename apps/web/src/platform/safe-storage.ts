@@ -66,6 +66,23 @@ export const safeRemoveItem = (key: string, kind: WebStorageKind = "local"): boo
   }
 };
 
+/** The keys in a storage area that start with `prefix`; none when it is unavailable or throws. */
+export const safeKeysWithPrefix = (prefix: string, kind: WebStorageKind = "local"): string[] => {
+  try {
+    const storage = resolveStorage(kind);
+
+    if (!storage) {
+      return [];
+    }
+
+    return Array.from({ length: storage.length }, (_, index) => storage.key(index)).filter(
+      (key): key is string => key?.startsWith(prefix) === true
+    );
+  } catch {
+    return [];
+  }
+};
+
 /** True when the storage area can actually be written to. */
 export const isStorageWritable = (kind: WebStorageKind = "local"): boolean => {
   const probeKey = "linkdish:storage-probe";
