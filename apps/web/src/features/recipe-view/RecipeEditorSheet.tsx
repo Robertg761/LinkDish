@@ -185,7 +185,10 @@ export const RecipeEditorSheet: React.FC<RecipeEditorSheetProps> = ({
   const [draft, setDraft] = useState<Draft>(initial);
   const [picture, setPicture] = useState<PictureDraft>(KEEP_PICTURE);
   const [pictureError, setPictureError] = useState("");
+  const [preparingPicture, setPreparingPicture] = useState(false);
   const pictureInputRef = useRef<HTMLInputElement>(null);
+  /** Moves on whenever a picture being prepared stops mattering, so its result is dropped. */
+  const pictureRunRef = useRef(0);
   const [errors, setErrors] = useState<DraftErrors>({});
   const [formError, setFormError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -197,8 +200,10 @@ export const RecipeEditorSheet: React.FC<RecipeEditorSheetProps> = ({
     if (open && !wasOpenRef.current) {
       setOpened(initial);
       setDraft(initial);
+      pictureRunRef.current += 1;
       setPicture(KEEP_PICTURE);
       setPictureError("");
+      setPreparingPicture(false);
       setErrors({});
       setFormError("");
       setConfirmDiscard(false);
@@ -221,16 +226,35 @@ export const RecipeEditorSheet: React.FC<RecipeEditorSheetProps> = ({
       return;
     }
 
+    pictureRunRef.current += 1;
+    const run = pictureRunRef.current;
+
     setPictureError("");
+    setPreparingPicture(true);
 
     try {
       const { dataUrl } = await prepareRecipePhoto(file);
-      setPicture({ dataUrl, kind: "new" });
+
+      if (run === pictureRunRef.current) {
+        setPicture({ dataUrl, kind: "new" });
+      }
     } catch (error) {
-      setPictureError(
-        error instanceof PhotoPrepError ? error.message : PHOTO_PREP_MESSAGES.unreadable
-      );
+      if (run === pictureRunRef.current) {
+        setPictureError(
+          error instanceof PhotoPrepError ? error.message : PHOTO_PREP_MESSAGES.unreadable
+        );
+      }
+    } finally {
+      if (run === pictureRunRef.current) {
+        setPreparingPicture(false);
+      }
     }
+  };
+
+  const removePicture = () => {
+    pictureRunRef.current += 1;
+    setPreparingPicture(false);
+    setPicture({ kind: "remove" });
   };
 
   /** The picture to save: `undefined` leaves the recipe's as it is, `null` removes it. */
@@ -280,6 +304,11 @@ export const RecipeEditorSheet: React.FC<RecipeEditorSheetProps> = ({
   };
 
   const save = async () => {
+    // Enter can still submit the form while a chosen picture is on its way.
+    if (preparingPicture) {
+      return;
+    }
+
     const nextErrors = validate(draft, sourceEditable);
     setErrors(nextErrors);
     setFormError("");
@@ -326,7 +355,7 @@ export const RecipeEditorSheet: React.FC<RecipeEditorSheetProps> = ({
             <Button disabled={saving} onClick={requestClose} variant="ghost">
               Cancel
             </Button>
-            <Button loading={saving} onClick={() => void save()}>
+            <Button disabled={preparingPicture} loading={saving} onClick={() => void save()}>
               Save changes
             </Button>
           </>
@@ -369,7 +398,7 @@ export const RecipeEditorSheet: React.FC<RecipeEditorSheetProps> = ({
               <span className="recipe-editor-picture-label">Picture</span>
               {onUploadPhoto ? (
                 <Button
-                  disabled={saving}
+                  disabled={saving || preparingPicture}
                   onClick={() => pictureInputRef.current?.click()}
                   size="sm"
                   variant="secondary"
@@ -378,12 +407,7 @@ export const RecipeEditorSheet: React.FC<RecipeEditorSheetProps> = ({
                 </Button>
               ) : null}
               {hasPicture ? (
-                <Button
-                  disabled={saving}
-                  onClick={() => setPicture({ kind: "remove" })}
-                  size="sm"
-                  variant="ghost"
-                >
+                <Button disabled={saving} onClick={removePicture} size="sm" variant="ghost">
                   Remove
                 </Button>
               ) : null}

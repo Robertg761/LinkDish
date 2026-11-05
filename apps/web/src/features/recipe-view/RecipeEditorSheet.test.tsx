@@ -254,6 +254,78 @@ describe("RecipeEditorSheet", () => {
       await screen.findByAltText("Your new recipe picture");
     };
 
+    const choosePhotoSlowly = () => {
+      let finish = (): void => undefined;
+
+      photoMocks.prepareRecipePhoto.mockReturnValue(
+        new Promise((resolve) => {
+          finish = () =>
+            resolve({
+              dataUrl: "data:image/jpeg;base64,late",
+              height: 9,
+              mimeType: "image/jpeg",
+              width: 9
+            });
+        })
+      );
+      fireEvent.change(screen.getByLabelText("Choose a picture"), {
+        target: { files: [new File(["photo"], "dinner.jpg", { type: "image/jpeg" })] }
+      });
+
+      return () => finish();
+    };
+
+    it("won't save while a chosen picture is still being prepared", async () => {
+      const onUploadPhoto = vi.fn().mockResolvedValue(uploaded);
+      const props = renderEditor({ onUploadPhoto, recipe: withPicture });
+
+      const finish = choosePhotoSlowly();
+
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled()
+      );
+      fireEvent.submit(document.querySelector(".recipe-editor-form") as HTMLFormElement);
+      expect(props.onSave).not.toHaveBeenCalled();
+
+      finish();
+      await screen.findByAltText("Your new recipe picture");
+      fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+      await waitFor(() => expect(props.onSave).toHaveBeenCalled());
+      expect(onUploadPhoto).toHaveBeenCalledWith("data:image/jpeg;base64,late");
+    });
+
+    it("drops a picture still being prepared when the cook removes it instead", async () => {
+      renderEditor({ onUploadPhoto: vi.fn(), recipe: withPicture });
+
+      const finish = choosePhotoSlowly();
+      fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+      finish();
+
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Save changes" })).toBeEnabled()
+      );
+      expect(screen.queryByAltText("Your new recipe picture")).not.toBeInTheDocument();
+    });
+
+    it("doesn't let a late picture into an editor opened again", async () => {
+      const props = { onClose: vi.fn(), onSave: vi.fn(), onUploadPhoto: vi.fn(), notes: "" };
+      const editor = (open: boolean) => (
+        <RecipeEditorSheet {...props} open={open} recipe={withPicture} />
+      );
+      const { rerender } = render(editor(true));
+
+      const finish = choosePhotoSlowly();
+      rerender(editor(false));
+      rerender(editor(true));
+      finish();
+
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Save changes" })).toBeEnabled()
+      );
+      expect(screen.queryByAltText("Your new recipe picture")).not.toBeInTheDocument();
+    });
+
     it("leaves the picture out of a save that didn't touch it", async () => {
       const props = renderEditor({ onUploadPhoto: vi.fn(), recipe: withPicture });
 

@@ -4,8 +4,9 @@ import {
   MAX_RECIPE_PHOTOS_PER_ACCOUNT,
   RECIPE_PHOTO_PATH_PREFIX
 } from "../../../../../packages/api-contracts/src/index.js";
+import { getUserById } from "../auth/auth-service.js";
 
-import { countRecipePhotos, saveRecipePhoto } from "./recipe-photo-store.js";
+import { countRecipePhotos, removeRecipePhoto, saveRecipePhoto } from "./recipe-photo-store.js";
 
 import type { UploadRecipePhotoResponse } from "../../../../../packages/api-contracts/src/index.js";
 
@@ -77,16 +78,20 @@ const reencode = async (dataUrl: string) => {
   }
 };
 
+const overLimitError = () =>
+  new RecipePhotoError(
+    `You've reached the limit of ${MAX_RECIPE_PHOTOS_PER_ACCOUNT} uploaded pictures.`,
+    409
+  );
+
 /** Stores a picture for `userId`, within the account's allowance. */
 export const storeRecipePhoto = async (
   userId: string,
   dataUrl: string
 ): Promise<UploadRecipePhotoResponse> => {
+  // Spares the re-encoding. The count that counts is the one taken as the picture is stored.
   if ((await countRecipePhotos(userId)) >= MAX_RECIPE_PHOTOS_PER_ACCOUNT) {
-    throw new RecipePhotoError(
-      `You've reached the limit of ${MAX_RECIPE_PHOTOS_PER_ACCOUNT} uploaded pictures.`,
-      409
-    );
+    throw overLimitError();
   }
 
   const { data, info } = await reencode(dataUrl);
@@ -96,7 +101,23 @@ export const storeRecipePhoto = async (
   }
 
   const id = randomBytes(16).toString("hex");
-  await saveRecipePhoto(userId, id, data);
+  const count = await saveRecipePhoto(userId, id, data);
+
+  // Uploads racing past the check above each see the count that includes them.
+  if (count > MAX_RECIPE_PHOTOS_PER_ACCOUNT) {
+    await removeRecipePhoto(userId, id);
+    throw overLimitError();
+  }
+
+  /*
+   * An upload can outlast the account it started under. Account deletion marks the account and
+   * then removes its pictures, so a picture stored before that removal is taken with the rest,
+   * and one stored after it sees the mark here.
+   */
+  if ((await getUserById(userId))?.deletedAt) {
+    await removeRecipePhoto(userId, id);
+    throw new RecipePhotoError("Sign in is required.", 401);
+  }
 
   return {
     height: info.height,

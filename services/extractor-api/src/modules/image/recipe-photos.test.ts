@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
 
 import sharpModule from "sharp";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MAX_RECIPE_PHOTOS_PER_ACCOUNT } from "../../../../../packages/api-contracts/src/index.js";
-import { getStoreSetMembers } from "../storage/upstash-store.js";
+import * as store from "../storage/upstash-store.js";
 
 import {
   countRecipePhotos,
@@ -13,6 +13,13 @@ import {
   saveRecipePhoto
 } from "./recipe-photo-store.js";
 import { RecipePhotoError, storeRecipePhoto } from "./recipe-photos.js";
+
+const auth = vi.hoisted(() => ({ getUserById: vi.fn() }));
+
+vi.mock("../auth/auth-service.js", () => ({ getUserById: auth.getUserById }));
+vi.mock("../storage/upstash-store.js", async (load) => ({
+  ...(await load<Record<string, unknown>>())
+}));
 
 /* What these tests use of sharp, beyond the little the API's own type shim declares. */
 interface TestImage {
@@ -57,6 +64,11 @@ describe("recipe photos", () => {
   beforeEach(() => {
     me = randomUUID();
     someoneElse = randomUUID();
+    auth.getUserById.mockResolvedValue(null);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it("stores an upload as WebP at an unguessable path and serves it back", async () => {
@@ -124,6 +136,50 @@ describe("recipe photos", () => {
     await expect(storeRecipePhoto(someoneElse, dataUrl)).resolves.toBeDefined();
   });
 
+  it("takes a picture back when uploads race past the allowance", async () => {
+    const bytes = Buffer.from("stored");
+
+    for (let index = 0; index < MAX_RECIPE_PHOTOS_PER_ACCOUNT - 1; index += 1) {
+      await saveRecipePhoto(me, index.toString(16).padStart(32, "0"), bytes);
+    }
+
+    const dataUrl = await jpegDataUrl(64, 64);
+    const uploads = await Promise.allSettled([
+      storeRecipePhoto(me, dataUrl),
+      storeRecipePhoto(me, dataUrl),
+      storeRecipePhoto(me, dataUrl)
+    ]);
+
+    expect(await countRecipePhotos(me)).toBeLessThanOrEqual(MAX_RECIPE_PHOTOS_PER_ACCOUNT);
+    expect(uploads.some((upload) => upload.status === "rejected")).toBe(true);
+  });
+
+  it("stores a picture and its place in the index together, or not at all", async () => {
+    const transaction = vi
+      .spyOn(store, "runStoreTransaction")
+      .mockResolvedValueOnce([{ result: "OK" }, { error: "out of memory" }, { result: 0 }]);
+
+    await expect(saveRecipePhoto(me, "a".repeat(32), Buffer.from("stored"))).rejects.toBeInstanceOf(
+      store.KeyValueStoreUnavailableError
+    );
+
+    expect(transaction.mock.calls[0]?.[0].map(([command]) => command)).toEqual([
+      "SET",
+      "SADD",
+      "SCARD"
+    ]);
+  });
+
+  it("takes back an upload that finished after its account was deleted", async () => {
+    auth.getUserById.mockResolvedValue({ deletedAt: "2026-11-05T00:00:00.000Z" });
+
+    await expect(storeRecipePhoto(me, await jpegDataUrl(64, 64))).rejects.toMatchObject({
+      statusCode: 401
+    });
+
+    expect(await countRecipePhotos(me)).toBe(0);
+  });
+
   it("answers null for a name that isn't a stored picture", async () => {
     expect(await readRecipePhoto(`${"a".repeat(32)}.webp`)).toBeNull();
 
@@ -140,7 +196,7 @@ describe("recipe photos", () => {
     await deleteRecipePhotosForUser(me);
 
     expect(await readRecipePhoto(fileOf(mine.path))).toBeNull();
-    expect(await getStoreSetMembers(`linkdish:recipe-photos:v1:${me}`)).toEqual([]);
+    expect(await store.getStoreSetMembers(`linkdish:recipe-photos:v1:${me}`)).toEqual([]);
     expect(await readRecipePhoto(fileOf(theirs.path))).not.toBeNull();
   });
 });

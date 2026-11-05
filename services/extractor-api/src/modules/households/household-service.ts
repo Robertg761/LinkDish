@@ -1493,6 +1493,11 @@ export const deleteAccountAndHouseholdAccess = async (
     await deleteAnalyticsForAccount(user.id).catch((error: unknown) => {
       console.error("Failed to delete late analytics for a deleted account.", error);
     });
+
+    // The same for a picture an upload stored as the account went (see storeRecipePhoto).
+    await deleteRecipePhotosForUser(user.id).catch((error: unknown) => {
+      console.error("Failed to delete late pictures for a deleted account.", error);
+    });
   });
 };
 

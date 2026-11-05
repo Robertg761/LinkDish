@@ -418,7 +418,12 @@ export default function RecipeScreen() {
   };
 
   const applyRecipeEdits = async () => {
-    if (isEditorSaving || extraction.state.state !== "success" || !editableRecipe) {
+    if (
+      isEditorSaving ||
+      pictureDraft.isPreparing ||
+      extraction.state.state !== "success" ||
+      !editableRecipe
+    ) {
       return;
     }
 
@@ -1176,6 +1181,7 @@ export default function RecipeScreen() {
           draftSteps={draftSteps}
           draftTitle={draftTitle}
           error={editorError}
+          isPreparingPicture={pictureDraft.isPreparing}
           isSaving={isEditorSaving}
           onAddStep={addDraftStep}
           onApply={() => {
@@ -1503,6 +1509,7 @@ const RecipeEditorModal = ({
   draftSteps,
   draftTitle,
   error,
+  isPreparingPicture,
   isSaving,
   onAddStep,
   onApply,
@@ -1526,6 +1533,8 @@ const RecipeEditorModal = ({
   draftSteps: DraftStep[];
   draftTitle: string;
   error: string | null;
+  /** The chosen picture isn't ready yet, so saving now would leave it behind. */
+  isPreparingPicture: boolean;
   isSaving: boolean;
   onAddStep: () => void;
   onApply: () => void;
@@ -1640,7 +1649,11 @@ const RecipeEditorModal = ({
               </AppText>
               <AppText variant="title">Edit Your Copy</AppText>
             </View>
-            <AppButton disabled={isSaving} label={isSaving ? "Saving" : "Done"} onPress={onApply} />
+            <AppButton
+              disabled={isSaving || isPreparingPicture}
+              label={isSaving ? "Saving" : "Done"}
+              onPress={onApply}
+            />
           </View>
 
           <ScrollView
@@ -1680,7 +1693,7 @@ const RecipeEditorModal = ({
                 <AppText variant="label">Picture</AppText>
                 {signedIn ? (
                   <AppButton
-                    disabled={isSaving}
+                    disabled={isSaving || isPreparingPicture}
                     label={picture ? "Change picture" : "Add picture"}
                     onPress={onChoosePicture}
                     variant="outline"

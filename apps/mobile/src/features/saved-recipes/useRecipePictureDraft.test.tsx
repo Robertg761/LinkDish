@@ -140,6 +140,66 @@ describe("useRecipePictureDraft", () => {
     expect(result.current.preview(thumbnail)).toBe(`proxied:${thumbnail.url}`);
   });
 
+  describe("while a chosen picture is being prepared", () => {
+    const pickSlowly = async (result: { current: Draft }) => {
+      let finish = (): void => undefined;
+
+      mocks.launchImageLibraryAsync.mockResolvedValue({ assets: [asset], canceled: false });
+      mocks.prepareRecipePicture.mockReturnValue(
+        new Promise((resolve) => {
+          finish = () => resolve("data:image/jpeg;base64,late");
+        })
+      );
+
+      let choosing: Promise<void> = Promise.resolve();
+      await act(async () => {
+        choosing = result.current.choose();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      return async () => {
+        await act(async () => {
+          finish();
+          await choosing;
+        });
+      };
+    };
+
+    it("says so until the picture is ready", async () => {
+      const result = renderDraft(vi.fn());
+
+      const finish = await pickSlowly(result);
+      expect(result.current.isPreparing).toBe(true);
+
+      await finish();
+
+      expect(result.current.isPreparing).toBe(false);
+      expect(result.current.preview(thumbnail)).toBe(asset.uri);
+    });
+
+    it("drops the picture when it is removed instead", async () => {
+      const result = renderDraft(vi.fn());
+
+      const finish = await pickSlowly(result);
+      act(() => result.current.remove());
+      await finish();
+
+      expect(result.current.isPreparing).toBe(false);
+      expect(result.current.preview(thumbnail)).toBeNull();
+    });
+
+    it("drops the picture when the editor opens again", async () => {
+      const result = renderDraft(vi.fn());
+
+      const finish = await pickSlowly(result);
+      act(() => result.current.reset());
+      await finish();
+
+      expect(result.current.preview(thumbnail)).toBe(`proxied:${thumbnail.url}`);
+    });
+  });
+
   it("forgets a chosen picture when the editor opens again", async () => {
     const upload = vi.fn();
     const result = renderDraft(upload);

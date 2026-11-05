@@ -82,7 +82,10 @@ re-encodes the upload with sharp to a WebP of at most 1200px without its metadat
 stores it in Upstash, and the recipe keeps the URL `GET /image/photos/<id>.webp`
 answers. Those URLs are public but unguessable, because household members and the
 proxy read them unsigned. Both editors upload on save, so backing out stores
-nothing. Pictures are removed with the account, stay out of the nightly snapshot
+nothing. A picture and its place in the account's index are written in one
+transaction, whose count backs the limit against concurrent uploads. An upload that
+outlasts its account takes itself back, and deletion clears pictures again after
+marking the account. Pictures are removed with the account, stay out of the nightly snapshot
 (a recipe that loses one shows its designed cover), and aren't removed when a
 recipe stops using them, so replaced pictures count toward the 100. They run in
 the `image` function: the Hobby plan's 12 functions are all taken.

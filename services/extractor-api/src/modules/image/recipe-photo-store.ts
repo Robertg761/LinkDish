@@ -1,9 +1,9 @@
 import {
-  addStoreSetMembers,
   deleteStoreKeys,
   getStoreSetMembers,
   getStoreString,
-  setStoreString
+  KeyValueStoreUnavailableError,
+  runStoreTransaction
 } from "../storage/upstash-store.js";
 
 /*
@@ -20,9 +20,35 @@ const accountPhotosKey = (userId: string): string => `linkdish:recipe-photos:v1:
 export const countRecipePhotos = async (userId: string): Promise<number> =>
   (await getStoreSetMembers(accountPhotosKey(userId))).length;
 
-export const saveRecipePhoto = async (userId: string, id: string, bytes: Buffer): Promise<void> => {
-  await setStoreString(photoKey(id), bytes.toString("base64"));
-  await addStoreSetMembers(accountPhotosKey(userId), id);
+/**
+ * Stores a picture and its place in the account's index in one transaction, so no picture can
+ * exist that deleting the account would miss. Answers how many pictures the account now has.
+ */
+export const saveRecipePhoto = async (
+  userId: string,
+  id: string,
+  bytes: Buffer
+): Promise<number> => {
+  const results = await runStoreTransaction([
+    ["SET", photoKey(id), bytes.toString("base64")],
+    ["SADD", accountPhotosKey(userId), id],
+    ["SCARD", accountPhotosKey(userId)]
+  ]);
+  const failed = results.find((result) => result.error);
+
+  if (failed) {
+    throw new KeyValueStoreUnavailableError(failed.error ?? "The picture could not be stored.");
+  }
+
+  return Number(results[2]?.result);
+};
+
+/** Takes back one picture, in the same transaction shape it was stored with. */
+export const removeRecipePhoto = async (userId: string, id: string): Promise<void> => {
+  await runStoreTransaction([
+    ["DEL", photoKey(id)],
+    ["SREM", accountPhotosKey(userId), id]
+  ]);
 };
 
 /** The picture a `<id>.webp` file name stands for; null when there is none. */

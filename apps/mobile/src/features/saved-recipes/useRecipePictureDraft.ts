@@ -1,5 +1,5 @@
 import * as ImagePicker from "expo-image-picker";
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 
 import { buildProxiedRecipeImageUrl } from "../../lib/recipeImage";
 import { prepareRecipePicture } from "../recipe-intake/preparePickedImages";
@@ -21,18 +21,25 @@ const KEEP: RecipePictureDraft = { kind: "keep" };
 export const useRecipePictureDraft = (upload: (dataUrl: string) => Promise<RecipeImage>) => {
   const [draft, setDraft] = useState<RecipePictureDraft>(KEEP);
   const [error, setError] = useState<string | null>(null);
+  const [isPreparing, setIsPreparing] = useState(false);
+  /** Moves on whenever a picture being prepared stops mattering, so its result is dropped. */
+  const runRef = useRef(0);
 
-  const reset = useCallback(() => {
-    setDraft(KEEP);
+  const settle = useCallback((next: RecipePictureDraft) => {
+    runRef.current += 1;
+    setDraft(next);
     setError(null);
+    setIsPreparing(false);
   }, []);
 
-  const remove = useCallback(() => {
-    setDraft({ kind: "remove" });
-    setError(null);
-  }, []);
+  const reset = useCallback(() => settle(KEEP), [settle]);
+  const remove = useCallback(() => settle({ kind: "remove" }), [settle]);
 
   const choose = useCallback(async () => {
+    runRef.current += 1;
+    const run = runRef.current;
+    const isCurrent = () => run === runRef.current;
+
     setError(null);
 
     try {
@@ -43,15 +50,22 @@ export const useRecipePictureDraft = (upload: (dataUrl: string) => Promise<Recip
       });
       const asset = result.canceled ? undefined : result.assets[0];
 
-      if (asset) {
-        setDraft({
-          dataUrl: await prepareRecipePicture(asset),
-          kind: "new",
-          previewUri: asset.uri
-        });
+      if (asset && isCurrent()) {
+        setIsPreparing(true);
+        const dataUrl = await prepareRecipePicture(asset);
+
+        if (isCurrent()) {
+          setDraft({ dataUrl, kind: "new", previewUri: asset.uri });
+        }
       }
     } catch {
-      setError("That picture could not be opened. Try another one.");
+      if (isCurrent()) {
+        setError("That picture could not be opened. Try another one.");
+      }
+    } finally {
+      if (isCurrent()) {
+        setIsPreparing(false);
+      }
     }
   }, []);
 
@@ -74,5 +88,5 @@ export const useRecipePictureDraft = (upload: (dataUrl: string) => Promise<Recip
     return uploaded;
   };
 
-  return { choose, error, preview, remove, reset, resolve };
+  return { choose, error, isPreparing, preview, remove, reset, resolve };
 };
