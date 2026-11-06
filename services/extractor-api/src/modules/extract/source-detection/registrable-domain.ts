@@ -1,14 +1,14 @@
 import { isIP } from "node:net";
 
-import { getRegistrableDomain as getSharedRegistrableDomain } from "@linkdish/recipe-domain";
+import {
+  getRegistrableDomain as getSharedRegistrableDomain,
+  normalizeSiteHostname as normalizeHostname
+} from "@linkdish/recipe-domain";
 
 /*
  * The registrable-domain rules live in @linkdish/recipe-domain so the phone app checks pages the
  * same way. Node's own IP parser still decides what is an address here.
  */
-
-const normalizeHostname = (hostname: string): string =>
-  hostname.trim().toLowerCase().replace(/\.+$/u, "");
 
 export const getRegistrableDomain = (hostname: string): string => {
   const host = normalizeHostname(hostname);

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { getRegistrableDomain, isSameRegistrableDomain } from "./registrable-domain.js";
+import {
+  getRegistrableDomain,
+  isSameRegistrableDomain,
+  normalizeSiteHostname
+} from "./registrable-domain.js";
 
 describe("getRegistrableDomain", () => {
   it("finds the site below the public suffix", () => {
@@ -15,5 +19,14 @@ describe("getRegistrableDomain", () => {
     expect(isSameRegistrableDomain("www.allrecipes.com", "allrecipes.com")).toBe(true);
     expect(isSameRegistrableDomain("recipes.example.co.uk", "unrelated.co.uk")).toBe(false);
     expect(isSameRegistrableDomain("a.wordpress.com", "b.wordpress.com")).toBe(false);
+  });
+});
+
+describe("normalizeSiteHostname", () => {
+  it("trims trailing dots quickly, even a long run of them", () => {
+    expect(normalizeSiteHostname(" Example.COM.. ")).toBe("example.com");
+    const started = Date.now();
+    expect(normalizeSiteHostname(`a${".".repeat(100_000)}b`)).toHaveLength(100_002);
+    expect(Date.now() - started).toBeLessThan(500);
   });
 });

@@ -45,11 +45,22 @@ const sharedHostingSuffixes = new Set([
   "wordpress.com"
 ]);
 
-const normalizeHostname = (hostname: string): string =>
-  hostname.trim().toLowerCase().replace(/\.+$/u, "");
+/* Trailing dots ("example.com.") are trimmed with a loop: a /\.+$/ regex is slow on long runs of dots. */
+const trimTrailingDots = (value: string): string => {
+  let end = value.length;
+
+  while (end > 0 && value.charCodeAt(end - 1) === 46) {
+    end -= 1;
+  }
+
+  return value.slice(0, end);
+};
+
+export const normalizeSiteHostname = (hostname: string): string =>
+  trimTrailingDots(hostname.trim().toLowerCase());
 
 export const getRegistrableDomain = (hostname: string): string => {
-  const host = normalizeHostname(hostname);
+  const host = normalizeSiteHostname(hostname);
 
   /* IP literals (v4 dotted, v6 with colons or brackets) are their own site. */
   if (host.length === 0 || host.startsWith("[") || host.includes(":") || /^[\d.]+$/u.test(host)) {
