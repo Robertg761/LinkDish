@@ -4,13 +4,23 @@ import { getMobileAnalyticsHeaders, trackMobileEvent } from "../analytics/client
 import { mobileEnv } from "../config/env";
 import { buildMockCompletionResponse, buildMockExtractionResponse } from "../mocks/extraction";
 
-import { fetchPageOnDevice, unwrapFacebookLinkWrapper } from "./device-page-fetch";
-import { isTextExtractionRequest, type MobileExtractionRequest } from "./extraction-request";
+import { unwrapFacebookLinkWrapper } from "./device-page";
+import {
+  canOpenBlockedPage,
+  isDevicePageExtractionRequest,
+  isTextExtractionRequest,
+  type MobileExtractionRequest
+} from "./extraction-request";
 
 import type { CompleteRecipeResponse, ExtractRecipeResponse } from "@linkdish/api-contracts";
 import type { Recipe } from "@linkdish/recipe-domain";
 
-export type { MobileExtractionRequest, TextExtractionRequest } from "./extraction-request";
+export { canOpenBlockedPage } from "./extraction-request";
+export type {
+  DevicePageExtractionRequest,
+  MobileExtractionRequest,
+  TextExtractionRequest
+} from "./extraction-request";
 
 const apiClient = createExtractorApiClient({
   baseUrl: mobileEnv.apiBaseUrl,
@@ -69,21 +79,8 @@ const siteLabel = (url: string): string => {
   }
 };
 
-/** The API could not read a web page because the site blocks its servers, not people. */
-export const shouldFetchPageOnDevice = (
-  request: MobileExtractionRequest,
-  response: ExtractRecipeResponse
-): boolean =>
-  response.status === "failure" &&
-  response.reason === "source_blocked" &&
-  response.deviceFetchAvailable === true &&
-  !isTextExtractionRequest(request) &&
-  !("images" in request) &&
-  "url" in request &&
-  !("inspired" in request && request.inspired);
-
-export const devicePageBlockedMessage = (url: string): string =>
-  `${siteLabel(url)} wouldn't open for LinkDish, even from your phone. Copy the recipe from the page and use Paste text instead.`;
+export const openBlockedPageMessage = (url: string): string =>
+  `${siteLabel(unwrapFacebookLinkWrapper(url))} blocks LinkDish's servers, but it opens for you. Open the page here and save the recipe from it.`;
 
 interface ExtractRecipeOptions {
   authToken?: string | null;
@@ -176,7 +173,14 @@ export async function extractRecipe(
           ...(request.correlationId ? { correlationId: request.correlationId } : {}),
           ...(request.sourceUrl ? { sourceUrl: request.sourceUrl } : {})
         })
-      : client.extractRecipe(request);
+      : isDevicePageExtractionRequest(request)
+        ? client.extractRecipeFromDevicePage({
+            url: request.url,
+            attempt: request.attempt,
+            devicePage: request.devicePage,
+            ...(request.correlationId ? { correlationId: request.correlationId } : {})
+          })
+        : client.extractRecipe(request);
   let response = await runExtractorRequestWithRetry(operation);
 
   if (shouldRetryRetryableExtractionFailure(response)) {
@@ -184,39 +188,9 @@ export async function extractRecipe(
     response = await operation();
   }
 
-  if (
-    response.status === "failure" &&
-    "url" in request &&
-    shouldFetchPageOnDevice(request, response)
-  ) {
-    return extractFromDevicePage(client, request, response);
+  if (response.status === "failure" && "url" in request && canOpenBlockedPage(request, response)) {
+    return { ...response, userMessage: openBlockedPageMessage(request.url) };
   }
 
   return response;
 }
-
-/*
- * The site blocks LinkDish's servers, so the phone downloads the page itself and the API reads
- * that HTML. If the phone is turned away too, the person is pointed to Paste text.
- */
-const extractFromDevicePage = async (
-  client: ReturnType<typeof getBillingClient>,
-  request: Extract<MobileExtractionRequest, { url: string }>,
-  blocked: Extract<ExtractRecipeResponse, { status: "failure" }>
-): Promise<ExtractRecipeResponse> => {
-  /* The API matches the page against the link's own target, so the wrapper URL is still sent. */
-  const page = await fetchPageOnDevice(unwrapFacebookLinkWrapper(request.url));
-
-  if (!page) {
-    return { ...blocked, userMessage: devicePageBlockedMessage(request.url) };
-  }
-
-  return runExtractorRequestWithRetry(() =>
-    client.extractRecipeFromDevicePage({
-      url: request.url,
-      attempt: request.attempt,
-      devicePage: page,
-      ...(request.correlationId ? { correlationId: request.correlationId } : {})
-    })
-  );
-};

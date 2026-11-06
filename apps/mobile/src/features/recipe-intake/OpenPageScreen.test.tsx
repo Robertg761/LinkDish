@@ -1,0 +1,165 @@
+import React from "react";
+import { act, create, type ReactTestRenderer } from "react-test-renderer";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const mocks = vi.hoisted(() => ({
+  injectJavaScript: vi.fn(),
+  params: { url: "" },
+  replace: vi.fn(),
+  back: vi.fn()
+}));
+
+vi.mock("expo-router", () => ({
+  router: { back: mocks.back, replace: mocks.replace },
+  useLocalSearchParams: () => mocks.params
+}));
+
+vi.mock("react-native", () => ({
+  StyleSheet: { create: <T,>(styles: T) => styles, hairlineWidth: 1 },
+  View: ({ children }: { children?: React.ReactNode }) =>
+    React.createElement("view", null, children)
+}));
+
+vi.mock("react-native-safe-area-context", () => ({
+  SafeAreaView: ({ children }: { children?: React.ReactNode }) =>
+    React.createElement("safe-area", null, children)
+}));
+
+vi.mock("@linkdish/ui", () => ({
+  AppButton: (props: { label: string; disabled?: boolean; onPress: () => void }) =>
+    React.createElement("button", props),
+  AppText: ({ children }: { children?: React.ReactNode }) =>
+    React.createElement("text", null, children)
+}));
+
+vi.mock("../../theme/tokens", () => ({
+  appColors: { background: "#fff", border: "#ddd", surface: "#fff" },
+  appSpacing: { lg: 16, md: 12, sm: 8 }
+}));
+
+vi.mock("@expo/dom-webview", () => ({
+  DomWebView: React.forwardRef((props: Record<string, unknown>, ref) => {
+    React.useImperativeHandle(ref, () => ({ injectJavaScript: mocks.injectJavaScript }));
+    return React.createElement("web-view", props);
+  })
+}));
+
+import OpenPageScreen from "../../../app/open-page";
+
+import { getPendingPageImport } from "./pageImport";
+
+
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+const url = "https://www.allrecipes.com/recipe/13309/rich-and-simple-french-onion-soup/";
+const recipePage =
+  '<html><head><title>Soup</title><script type="application/ld+json">{"@type":"Recipe"}</script></head><body>Soup</body></html>';
+
+const render = (): ReactTestRenderer => {
+  let renderer: ReactTestRenderer | undefined;
+  act(() => {
+    renderer = create(<OpenPageScreen />);
+  });
+  return renderer!;
+};
+
+const webView = (renderer: ReactTestRenderer) =>
+  renderer.root.find((node) => (node.type as unknown) === "web-view");
+const saveButton = (renderer: ReactTestRenderer) =>
+  renderer.root.find(
+    (node) =>
+      (node.type as unknown) === "button" &&
+      ["Save recipe", "Reading the page..."].includes(node.props.label as string)
+  );
+const post = (renderer: ReactTestRenderer, message: object) => {
+  act(() => {
+    (webView(renderer).props.onMessage as (event: unknown) => void)({
+      nativeEvent: { data: JSON.stringify(message) }
+    });
+  });
+};
+const tapSave = (renderer: ReactTestRenderer): string => {
+  act(() => {
+    (saveButton(renderer).props.onPress as () => void)();
+  });
+  const script = mocks.injectJavaScript.mock.lastCall?.[0] as string;
+  return /nonce:"([^"]+)"/u.exec(script)?.[1] ?? "";
+};
+const texts = (renderer: ReactTestRenderer) =>
+  renderer.root
+    .findAll((node) => (node.type as unknown) === "text")
+    .map((node) => String(node.props.children));
+
+describe("OpenPageScreen", () => {
+  beforeEach(() => {
+    mocks.params = { url };
+    mocks.injectJavaScript.mockReset();
+    mocks.replace.mockReset();
+    mocks.back.mockReset();
+  });
+
+  it("opens the page and reads nothing until the person taps Save", () => {
+    const renderer = render();
+
+    expect(webView(renderer).props.source).toEqual({ uri: url });
+    expect(saveButton(renderer).props.disabled).toBe(true);
+
+    post(renderer, { type: "linkdish:page-shown", href: url, title: "Soup" });
+
+    expect(saveButton(renderer).props.disabled).toBe(false);
+    expect(mocks.injectJavaScript).not.toHaveBeenCalled();
+    expect(mocks.replace).not.toHaveBeenCalled();
+  });
+
+  it("imports the page the person saved", () => {
+    const renderer = render();
+    post(renderer, { type: "linkdish:page-shown", href: url, title: "Soup" });
+    const nonce = tapSave(renderer);
+
+    post(renderer, { type: "linkdish:page-captured", nonce, href: url, html: recipePage });
+
+    expect(mocks.replace).toHaveBeenCalledOnce();
+    const params = (mocks.replace.mock.lastCall?.[0] as { params: Record<string, string> })
+      .params;
+    expect(params.url).toBe(url);
+    expect(getPendingPageImport(params.pageImportId!)).toMatchObject({
+      url,
+      devicePage: { finalUrl: url, html: expect.stringContaining("ld+json") as string }
+    });
+  });
+
+  it("ignores page messages that don't answer the person's tap", () => {
+    const renderer = render();
+    post(renderer, { type: "linkdish:page-shown", href: url, title: "Soup" });
+
+    post(renderer, { type: "linkdish:page-captured", nonce: "guess", href: url, html: recipePage });
+    tapSave(renderer);
+    post(renderer, { type: "linkdish:page-captured", nonce: "guess", href: url, html: recipePage });
+
+    expect(mocks.replace).not.toHaveBeenCalled();
+  });
+
+  it("explains when the saved page is on another site", () => {
+    const renderer = render();
+    post(renderer, { type: "linkdish:page-shown", href: url, title: "Soup" });
+    const nonce = tapSave(renderer);
+
+    post(renderer, {
+      type: "linkdish:page-captured",
+      nonce,
+      href: "https://ads.example.com/",
+      html: recipePage
+    });
+
+    expect(mocks.replace).not.toHaveBeenCalled();
+    expect(texts(renderer).join(" ")).toContain("This page isn't on allrecipes.com");
+  });
+
+  it("won't open a local address", () => {
+    mocks.params = { url: "http://192.168.1.1/" };
+    const renderer = render();
+
+    expect(renderer.root.findAll((node) => (node.type as unknown) === "web-view")).toHaveLength(0);
+    expect(texts(renderer).join(" ")).toContain("can't open that link");
+  });
+});

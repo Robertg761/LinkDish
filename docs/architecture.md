@@ -635,18 +635,23 @@ connections can still open these pages.
   `blocked`, a web page rather than YouTube or social), `/extract` fails with `source_blocked`
   and `deviceFetchAvailable: true`. A Pinterest pin whose outbound page is blocked does not set it,
   since the caller does not have that link.
-- The phone app (`apps/mobile/src/services/device-page-fetch.ts`) then downloads the page itself,
-  once, with the app's own user agent; it never poses as a browser, and a refusal stands. It drops styles, SVG,
-  comments and every script but JSON-LD/JSON before uploading (`MAX_DEVICE_PAGE_HTML_CHARS`,
-  3,000,000 characters). It sends `{ url, devicePage: { html, finalUrl } }` to `/extract`.
+- The phone app never downloads the page in the background (a plain request from a home
+  connection got the same 402 too). Its failure card offers "Open the page" instead, which opens
+  the link in an in-app browser view (`app/open-page.tsx`, built on the `@expo/dom-webview` view
+  the app already ships, with the system web view's own user agent). The person sees the page
+  load, answers any check the site shows them there as in any browser, and taps Save recipe. Only
+  then does the app read the page they are looking at (`document.documentElement.outerHTML`, tied
+  to that tap by a nonce, top frame only). `apps/mobile/src/services/device-page.ts` refuses a
+  page on another site, an IP address or a local name, or a page still showing the site's check;
+  it drops styles, SVG, comments and every script but JSON-LD/JSON before uploading
+  (`MAX_DEVICE_PAGE_HTML_CHARS`, 3,000,000 characters). It sends
+  `{ url, devicePage: { html, finalUrl } }` to `/extract`, with the page's own address as `url`.
 - The API reads that HTML through the same path as the link (URL safety, detection, not-found and
   unrelated-redirect checks, the deterministic extractors), using `extractRecipeFromDevicePage`.
   The HTML came from a client, so the result never reads or writes the shared result cache. It is
   billed like a link import, and logs `pageSource: "device"`.
-- If the phone is turned away too, the app shows "<site> wouldn't open for LinkDish, even from
-  your phone" and points to Paste text. The web app cannot download another site's page from the
-  browser (CORS), so for `deviceFetchAvailable` it names the site and points to Paste text or the
-  phone app.
+- The web app cannot open another site's page and read it (CORS, framing rules), so for
+  `deviceFetchAvailable` it names the site and points to Paste text or the phone app.
 
 Cached successes short-circuit this ladder. They are shared only when they cleared the success confidence bar for their source type, and they are billed like any other import.
 

@@ -2,7 +2,7 @@ import { ExtractorApiError } from "@linkdish/api-client";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { createMobileAnalyticsId, trackMobileEvent } from "../../../analytics/client";
-import { isTextExtractionRequest } from "../../../services/extraction-request";
+import { canOpenBlockedPage, isTextExtractionRequest } from "../../../services/extraction-request";
 import { extractRecipe } from "../../../services/extractor-api";
 import { useAccount } from "../../account/AccountContext";
 import { useBilling } from "../../billing/BillingContext";
@@ -102,7 +102,9 @@ const getExtractionRequestKey = (request: MobileExtractionRequest): string =>
           request.images.length,
           request.images.map((image) => `${image.mimeType}:${image.dataUrl.length}`).join(",")
         ].join(":")
-      : ["url", request.url, request.attempt].join(":");
+      : "devicePage" in request
+        ? ["page", request.url, request.attempt, request.devicePage.html.length].join(":")
+        : ["url", request.url, request.attempt].join(":");
 
 const getTransportFailureMessage = (error: unknown) => {
   const fallbackMessage =
@@ -537,6 +539,9 @@ export const useRecipeExtraction = (
           allowFallback: response.recovery?.allowFallback ?? false,
           quota: response.quota,
           inspiredAvailable: response.inspiredAvailable,
+          ...("url" in request && canOpenBlockedPage(request, response)
+            ? { openPageUrl: request.url }
+            : {}),
           suggestedAction: response.recovery?.suggestedAction ?? "try_another_url"
         });
       } catch (error) {

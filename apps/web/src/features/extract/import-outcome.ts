@@ -240,8 +240,8 @@ export const describeImportFailure = (
         message: facebook
           ? "Facebook doesn't let apps read this post, or only shares the start of it. Copy the recipe text from the post and paste it here, or scan a screenshot of it."
           : failure.deviceFetchAvailable
-            ? // The site turns away LinkDish's servers but not people; the phone app reads it from the phone.
-              `${blockedSiteName(context.sourceUrl)} doesn't let LinkDish's servers read its pages. Copy the recipe from the page and paste it here, or import the link in the LinkDish phone app, which opens it from your phone.`
+            ? // The site turns away LinkDish's servers but not people; the phone app can open the page.
+              `${blockedSiteName(context.sourceUrl)} doesn't let LinkDish's servers read its pages. Copy the recipe from the page and paste it here, or open the link in the LinkDish phone app and save it from the page there.`
             : "Some sites don't let recipe savers in. Copy the recipe from the page and paste it here, or snap a photo of it.",
         title: facebook ? "Facebook wouldn't share that post" : "That site kept its door shut"
       };

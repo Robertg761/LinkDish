@@ -116,6 +116,32 @@ describe("useRecipeExtraction", () => {
     mockedAsyncStorage.setItem.mockResolvedValue(undefined);
   });
 
+  it("offers to open a page whose site blocks LinkDish's servers", async () => {
+    const blockedUrl = "https://www.allrecipes.com/recipe/13309/soup/";
+    mockedExtractRecipe.mockResolvedValue({
+      status: "failure",
+      reason: "source_blocked",
+      userMessage: "allrecipes.com blocks LinkDish's servers, but it opens for you.",
+      deviceFetchAvailable: true,
+      recovery: { retryable: false, allowFallback: false, suggestedAction: "try_another_url" }
+    });
+
+    let renderer: ReturnType<typeof create>;
+
+    await act(() => {
+      renderer = create(<HookProbe url={blockedUrl} />);
+      return Promise.resolve();
+    });
+
+    await act(async () => {
+      await flushAsyncWork();
+    });
+
+    const output = renderer!.root.findByType(Text).props.children as string;
+    expect(output).toContain('"state":"failure"');
+    expect(output).toContain(`"openPageUrl":"${blockedUrl}"`);
+  });
+
   it("automatically tries fallback when the primary extraction asks for more help", async () => {
     mockedExtractRecipe
       .mockResolvedValueOnce({
