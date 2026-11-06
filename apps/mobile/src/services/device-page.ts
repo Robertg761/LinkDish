@@ -1,4 +1,5 @@
 import { MAX_DEVICE_PAGE_HTML_CHARS } from "@linkdish/api-contracts";
+import { isSameRegistrableDomain } from "@linkdish/recipe-domain";
 
 /*
  * Some recipe sites (Allrecipes and the other People Inc brands) refuse every request from a
@@ -84,9 +85,6 @@ export const readPageViewMessage = (data: string): PageViewMessage | null => {
 export const looksLikeChallengePage = (html: string): boolean =>
   /<title[^>]*>\s*(?:just a moment|attention required)/iu.test(html);
 
-/* "www.allrecipes.com" and "allrecipes.com" share "allrecipes.com". */
-const siteKey = (hostname: string): string => hostname.toLowerCase().split(".").slice(-2).join(".");
-
 const isPrivateHost = (hostname: string): boolean => {
   const host = hostname.toLowerCase().replace(/^\[|\]$/gu, "");
 
@@ -112,7 +110,9 @@ export const isSameSitePublicPage = (requestedUrl: string, pageUrl: string): boo
     return (
       /^https?:$/u.test(page.protocol) &&
       !isPrivateHost(page.hostname) &&
-      siteKey(page.hostname) === siteKey(requested.hostname)
+      /* Same registrable domain, as the API judges redirects: www. and a recipes. subdomain
+         count, another blog on wordpress.com or another site under co.uk does not. */
+      isSameRegistrableDomain(page.hostname, requested.hostname)
     );
   } catch {
     return false;

@@ -79,6 +79,22 @@ describe("prepareCapturedPage", () => {
     ]) {
       expect(prepareCapturedPage(url, { href, html: page })).toEqual({ problem: "other_site" });
     }
+
+    for (const [requested, href] of [
+      ["https://recipes.example.co.uk/soup", "https://unrelated.co.uk/soup"],
+      ["https://cook.wordpress.com/soup", "https://other.wordpress.com/soup"]
+    ] as const) {
+      expect(prepareCapturedPage(requested, { href, html: page })).toEqual({
+        problem: "other_site"
+      });
+    }
+
+    expect(
+      prepareCapturedPage("https://recipes.example.co.uk/soup", {
+        href: "https://www.example.co.uk/soup",
+        html: page
+      })
+    ).toHaveProperty("page");
   });
 
   it("says when the page is still the site's check, empty or too big", () => {
