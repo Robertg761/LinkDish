@@ -32,6 +32,8 @@ const EMPTY_RETRY_DELAY_MS = 2_000;
  * clear without loading a new page. After about a minute, Save recipe is offered instead.
  */
 const CHECK_RETRY_DELAY_MS = 3_000;
+/* A page that has not loaded at all by now (offline, a network or TLS error) gets Try again. */
+const LOAD_TIMEOUT_MS = 20_000;
 const MAX_CHECK_RETRIES = 20;
 
 const readFirstParam = (value: string | string[] | undefined): string | undefined =>
@@ -64,6 +66,9 @@ export default function OpenPageScreen() {
   /* The site a saved page must be on (a shortened link's destination once it shows). */
   const pageSiteRef = useRef<string | null>(null);
   const [shownHref, setShownHref] = useState<string | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const loadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hasLoadedRef = useRef(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isChecking, setIsChecking] = useState(false);
   /* Set once saving on its own has not worked: the person can then tap Save recipe. */
@@ -82,13 +87,33 @@ export default function OpenPageScreen() {
     setIsSaving(false);
   }, []);
 
-  useEffect(
-    () => () => {
+  /* Until a page on the site has loaded, a deadline runs; past it, the person can try again. */
+  const startLoadDeadline = useCallback(() => {
+    clearTimer(loadTimerRef);
+    setLoadFailed(false);
+    loadTimerRef.current = setTimeout(() => {
+      loadTimerRef.current = null;
+
+      if (!hasLoadedRef.current) {
+        setLoadFailed(true);
+      }
+    }, LOAD_TIMEOUT_MS);
+  }, []);
+
+  useEffect(() => {
+    startLoadDeadline();
+
+    return () => {
       clearTimer(captureTimerRef);
       clearTimer(autoSaveTimerRef);
-    },
-    []
-  );
+      clearTimer(loadTimerRef);
+    };
+  }, [startLoadDeadline]);
+
+  const tryLoadingAgain = useCallback(() => {
+    startLoadDeadline();
+    webViewRef.current?.reload();
+  }, [startLoadDeadline]);
 
   const capturePage = useCallback(() => {
     if (isDoneRef.current) {
@@ -158,6 +183,9 @@ export default function OpenPageScreen() {
           return;
         }
 
+        hasLoadedRef.current = true;
+        clearTimer(loadTimerRef);
+        setLoadFailed(false);
         emptyRetriesRef.current = 0;
         setProblem(null);
 
@@ -223,8 +251,9 @@ export default function OpenPageScreen() {
   }
 
   const site = pageSiteLabel(pageSiteRef.current ?? pageUrl);
-  const notice =
-    problem ??
+  const notice = loadFailed
+    ? `${site} didn't load. Check your connection, then tap Try again.`
+    : problem ??
     (isChecking
       ? `${site} is checking the visit. If it asks you something, answer it and LinkDish carries on.`
       : isSaving
@@ -246,7 +275,8 @@ export default function OpenPageScreen() {
         style={styles.page}
       />
       <View style={styles.actions}>
-        {problem || isChecking ? (
+        {loadFailed ? <AppButton label="Try again" onPress={tryLoadingAgain} /> : null}
+        {!loadFailed && (problem || isChecking) ? (
           <AppButton
             disabled={!shownHref || isSaving}
             label={isSaving ? "Reading the page..." : "Save recipe"}

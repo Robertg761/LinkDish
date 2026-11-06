@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   injectJavaScript: vi.fn(),
+  reload: vi.fn(),
   params: { url: "" },
   replace: vi.fn(),
   back: vi.fn()
@@ -39,7 +40,10 @@ vi.mock("../../theme/tokens", () => ({
 
 vi.mock("@expo/dom-webview", () => ({
   DomWebView: React.forwardRef((props: Record<string, unknown>, ref) => {
-    React.useImperativeHandle(ref, () => ({ injectJavaScript: mocks.injectJavaScript }));
+    React.useImperativeHandle(ref, () => ({
+      injectJavaScript: mocks.injectJavaScript,
+      reload: mocks.reload
+    }));
     return React.createElement("web-view", props);
   })
 }));
@@ -99,6 +103,7 @@ describe("OpenPageScreen", () => {
     vi.useFakeTimers();
     mocks.params = { url };
     mocks.injectJavaScript.mockReset();
+    mocks.reload.mockReset();
     mocks.replace.mockReset();
     mocks.back.mockReset();
   });
@@ -224,6 +229,28 @@ describe("OpenPageScreen", () => {
     shown(renderer);
     captured(renderer, settle());
 
+    expect(mocks.replace).toHaveBeenCalledOnce();
+  });
+
+  it("offers Try again when the page never loads, and carries on once it does", () => {
+    const renderer = render();
+
+    settle(20_000);
+    expect(texts(renderer)).toContain("allrecipes.com didn't load");
+    expect(buttons(renderer)).toEqual(["Try again", "Cancel"]);
+
+    act(() => {
+      (
+        renderer.root.find(
+          (node) => (node.type as unknown) === "button" && node.props.label === "Try again"
+        ).props.onPress as () => void
+      )();
+    });
+    expect(mocks.reload).toHaveBeenCalledOnce();
+    expect(buttons(renderer)).toEqual(["Cancel"]);
+
+    shown(renderer);
+    captured(renderer, settle());
     expect(mocks.replace).toHaveBeenCalledOnce();
   });
 
