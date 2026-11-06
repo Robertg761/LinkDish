@@ -211,6 +211,13 @@ export const analyticsMigrations: readonly AnalyticsMigration[] = [
 
       create index if not exists recipe_archive_hostname_idx
         on recipe_archive (source_hostname);
+
+      -- Links an admin removed (a takedown request): never archived again.
+      create table if not exists recipe_archive_removals (
+        url_hash text primary key,
+        canonical_url text not null,
+        removed_at timestamptz not null
+      );
     `
   }
 ];

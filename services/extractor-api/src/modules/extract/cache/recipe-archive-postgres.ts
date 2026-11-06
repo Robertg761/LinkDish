@@ -76,11 +76,15 @@ export const createPostgresRecipeArchiveStore = (
     },
     put: async (record) => {
       const pool = await requirePool();
-      await pool.query(
+      /* A link an admin removed (recipe_archive_removals) is never stored again. */
+      const result = await pool.query(
         `insert into recipe_archive (
            url_hash, canonical_url, source_hostname, source_type, extractor_version, origin,
            response, final_url, status_code, detection_confidence, extracted_at
-         ) values ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10, $11)
+         )
+         select $1::text, $2::text, $3::text, $4::text, $5::text, $6::text, $7::jsonb, $8::text,
+                $9::integer, $10::text, $11::timestamptz
+          where not exists (select 1 from recipe_archive_removals where url_hash = $1::text)
          on conflict (url_hash) do update set
            canonical_url = excluded.canonical_url,
            source_hostname = excluded.source_hostname,
@@ -107,6 +111,7 @@ export const createPostgresRecipeArchiveStore = (
           record.extractedAt
         ]
       );
+      return (result.rowCount ?? 0) > 0;
     },
     markRefreshFailed: async (urlHash, at) => {
       const pool = await requirePool();
@@ -115,10 +120,20 @@ export const createPostgresRecipeArchiveStore = (
         at
       ]);
     },
-    delete: async (urlHash) => {
+    remove: async (urlHash, canonicalUrl, at) => {
       const pool = await requirePool();
-      const result = await pool.query(`delete from recipe_archive where url_hash = $1`, [urlHash]);
-      return (result.rowCount ?? 0) > 0;
+      const result = await pool.query(
+        `with removed as (
+           delete from recipe_archive where url_hash = $1 returning 1
+         ), marked as (
+           insert into recipe_archive_removals (url_hash, canonical_url, removed_at)
+           values ($1, $2, $3)
+           on conflict (url_hash) do update set removed_at = excluded.removed_at
+         )
+         select count(*)::integer as removed from removed`,
+        [urlHash, canonicalUrl, at]
+      );
+      return Number(result.rows[0]?.removed ?? 0) > 0;
     }
   };
 };

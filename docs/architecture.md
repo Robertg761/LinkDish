@@ -552,8 +552,9 @@ Performance pieces in `services/extractor-api/src/modules/extract`:
   exactly what the result cache may hold (the same `evaluateExtractionCacheWrite` rules), but it
   has no TTL and survives `EXTRACTOR_CACHE_VERSION` bumps. Only the structured recipe is kept:
   title, ingredients, steps, times, servings, nutrition, the image's URL, the source link and
-  attribution fields, never page HTML or image bytes. People's own edits live in their cookbooks
-  and cloud library and never change an archive entry.
+  attribution fields, never page HTML or image bytes. The stored `recipe.sourceUrl` is the
+  canonical URL, not the first importer's exact link (hits re-stamp it with each caller's own).
+  People's own edits live in their cookbooks and cloud library and never change an archive entry.
   - The lookup runs alongside the result-cache lookup and URL validation, with a 1.5 s timeout
     (a slow or failing database reads as a miss). After a cache miss, an entry from the current
     extractor that is younger than `RECIPE_ARCHIVE_REFRESH_AFTER_DAYS` (default 30) is served
@@ -566,13 +567,17 @@ Performance pieces in `services/extractor-api/src/modules/extract`:
     cache, so the site is tried again once the day is up).
   - A Pinterest pin's outbound page is served from a fresh archive entry too; a stale one there
     is not used as a fallback.
-  - Writes run after the response, like cache writes. Bypass mode (inspired recipes, text and
+  - Writes run after the response, archive first and then the result cache (if the archive write
+    fails, the cache is still written). Bypass mode (inspired recipes, text and
     image imports) neither reads nor writes it; the authorized canary skips the read and
     refreshes the entry.
   - It is on whenever `ANALYTICS_DATABASE_URL` is set; `RECIPE_ARCHIVE_ENABLED=false` is the
     kill switch. `DELETE /admin/api/recipes?url=<link>` (admin auth, audited as
-    `recipe.remove`) removes a link from the archive and the result cache, for a takedown
-    request or a bad entry; recipes people already saved are not touched.
+    `recipe.remove`) removes a link from the archive and the result cache and records it in
+    `recipe_archive_removals`, for a takedown request or a bad entry. A removed link is never
+    archived or result-cached again (later imports read the site each time); deleting its row
+    from `recipe_archive_removals` lifts that. Recipes people already saved are not touched.
+  - A stale-copy fallback on a request billing turned down does not start the 24-hour backoff.
 - **One deadline** (`deadline.ts`): `EXTRACT_REQUEST_DEADLINE_MS` (default 50 s, under
   the 60 s `maxDuration`) sizes every step. The HTTP fetch retries at most once, only
   after connection errors, and not at all when Playwright can take over. The browser

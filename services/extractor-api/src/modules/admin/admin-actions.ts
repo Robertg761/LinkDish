@@ -99,8 +99,9 @@ const parseRecipeLink = (url: string | null): string => {
 
 /*
  * Removes a link's recipe from LinkDish's shared copies (a takedown request, a bad entry): the
- * recipe archive and the short-lived result cache. Recipes people already saved stay in their
- * cookbooks. A later import of the link reads the site again.
+ * recipe archive and the short-lived result cache, and keeps the link out of both from then on
+ * (recipe_archive_removals). Recipes people already saved stay in their cookbooks; later imports
+ * of the link read the site each time.
  */
 export const removeAdminArchivedRecipe = (
   context: AdminRequestContext,

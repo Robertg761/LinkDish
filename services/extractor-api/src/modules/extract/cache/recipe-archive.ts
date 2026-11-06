@@ -52,11 +52,20 @@ export interface RecipeArchiveRecord {
 /** Persistence for the archive. Postgres in production; an in-memory map in tests. */
 export interface RecipeArchiveStore {
   get(urlHash: string): Promise<RecipeArchiveRecord | null>;
-  /** Inserts or replaces the entry; a replacement clears refreshFailedAt. */
-  put(record: Omit<RecipeArchiveRecord, "refreshFailedAt">): Promise<void>;
+  /**
+   * Inserts or replaces the entry (a replacement clears refreshFailedAt). Returns false, storing
+   * nothing, when the link was removed by an admin.
+   */
+  put(record: Omit<RecipeArchiveRecord, "refreshFailedAt">): Promise<boolean>;
   markRefreshFailed(urlHash: string, at: string): Promise<void>;
-  delete(urlHash: string): Promise<boolean>;
+  /**
+   * Deletes the entry and records the removal, so the link is never archived again. Returns
+   * whether an entry existed.
+   */
+  remove(urlHash: string, canonicalUrl: string, at: string): Promise<boolean>;
 }
+
+export type RecipeArchiveSkipReason = ExtractionCacheSkipReason | "removed";
 
 export interface ArchivedRecipe extends CachedExtraction {
   extractorVersion: string;
@@ -69,12 +78,18 @@ export interface RecipeArchive {
   read(url: string): Promise<ArchivedRecipe | null>;
   /** True when the entry may be served without asking the site first. */
   isFresh(entry: ArchivedRecipe, now?: Date): boolean;
-  /** Stores a shareable success; returns why it was not stored, or null when stored. */
-  write(entry: ExtractionCacheWrite): Promise<ExtractionCacheSkipReason | null>;
+  /**
+   * Stores a shareable success; returns why it was not stored, or null when stored. "removed"
+   * means an admin took the link out, and it must not be shared from the result cache either.
+   */
+  write(entry: ExtractionCacheWrite): Promise<RecipeArchiveSkipReason | null>;
   /** Notes that reading the site again failed, so it is not retried for a while. */
   markRefreshFailed(url: string, now?: Date): Promise<void>;
-  /** Removes a link's entry (a takedown request, a bad entry). True when one existed. */
-  remove(url: string): Promise<boolean>;
+  /**
+   * Removes a link's entry and keeps it out from then on (a takedown request, a bad entry).
+   * True when an entry existed.
+   */
+  remove(url: string, now?: Date): Promise<boolean>;
 }
 
 export const recipeArchiveReadTimeoutMs = 1_500;
@@ -167,39 +182,56 @@ export const createRecipeArchive = ({
       return decision.skipReason;
     }
 
-    await store.put({
+    const canonicalUrl = canonicalizeSourceUrl(entry.requestUrl);
+    /*
+     * The first importer's exact link (other query parameters, a share token) is not kept: hits
+     * re-stamp sourceUrl with each caller's own link anyway.
+     */
+    const response = {
+      ...decision.response,
+      recipe: { ...decision.response.recipe, sourceUrl: canonicalUrl }
+    };
+    const stored = await store.put({
       urlHash: hashCanonicalSourceUrl(entry.requestUrl),
-      canonicalUrl: canonicalizeSourceUrl(entry.requestUrl),
+      canonicalUrl,
       sourceHostname: hostnameOf(entry.requestUrl),
       sourceType: decision.response.extraction.sourceType,
       extractorVersion: EXTRACTOR_CACHE_VERSION,
       origin: "server",
-      response: decision.response,
+      response,
       finalUrl: entry.finalUrl,
       statusCode: entry.statusCode,
       detectionConfidence: entry.detectionConfidence,
       extractedAt: new Date().toISOString()
     });
 
-    return null;
+    return stored ? null : "removed";
   },
   markRefreshFailed: (url, now = new Date()) =>
     store.markRefreshFailed(hashCanonicalSourceUrl(url), now.toISOString()),
-  remove: (url) => store.delete(hashCanonicalSourceUrl(url))
+  remove: (url, now = new Date()) =>
+    store.remove(hashCanonicalSourceUrl(url), canonicalizeSourceUrl(url), now.toISOString())
 });
 
 /* For tests and local development without a database. */
 export const createMemoryRecipeArchiveStore = (): RecipeArchiveStore & {
   records: Map<string, RecipeArchiveRecord>;
+  removals: Set<string>;
 } => {
   const records = new Map<string, RecipeArchiveRecord>();
+  const removals = new Set<string>();
 
   return {
     records,
+    removals,
     get: (urlHash) => Promise.resolve(records.get(urlHash) ?? null),
     put: (record) => {
+      if (removals.has(record.urlHash)) {
+        return Promise.resolve(false);
+      }
+
       records.set(record.urlHash, { ...record, refreshFailedAt: null });
-      return Promise.resolve();
+      return Promise.resolve(true);
     },
     markRefreshFailed: (urlHash, at) => {
       const record = records.get(urlHash);
@@ -210,6 +242,9 @@ export const createMemoryRecipeArchiveStore = (): RecipeArchiveStore & {
 
       return Promise.resolve();
     },
-    delete: (urlHash) => Promise.resolve(records.delete(urlHash))
+    remove: (urlHash) => {
+      removals.add(urlHash);
+      return Promise.resolve(records.delete(urlHash));
+    }
   };
 };

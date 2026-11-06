@@ -120,8 +120,9 @@ describe("recipe archive in the extract pipeline", () => {
       origin: "server",
       refreshFailedAt: null
     });
-    /* Structured recipe only: no page HTML is kept. */
+    /* Structured recipe only: no page HTML is kept, nor the first importer's exact link. */
     expect(JSON.stringify(record?.response)).not.toContain("<html");
+    expect(JSON.stringify(record?.response)).not.toContain("utm_source");
 
     const freshProcess = withEmptyCache();
     const second = await extractRecipe(
@@ -213,6 +214,7 @@ describe("recipe archive in the extract pipeline", () => {
       outcomeStatus: "success"
     });
     expect(stale.response).toEqual(first.response);
+    expect(stale.response.status === "success" && stale.response.recipe.sourceUrl).toBe(recipeUrl);
     expect(archiveStore.records.get(hashCanonicalSourceUrl(recipeUrl))?.refreshFailedAt).toEqual(
       expect.any(String)
     );
@@ -259,9 +261,9 @@ describe("recipe archive in the extract pipeline", () => {
   it("treats a slow or failing archive as a miss", async () => {
     const hanging: RecipeArchiveStore = {
       get: () => new Promise(() => undefined),
-      put: () => Promise.resolve(),
+      put: () => Promise.resolve(true),
       markRefreshFailed: () => Promise.resolve(),
-      delete: () => Promise.resolve(false)
+      remove: () => Promise.resolve(false)
     };
     const failing: RecipeArchiveStore = {
       ...hanging,
@@ -284,6 +286,49 @@ describe("recipe archive in the extract pipeline", () => {
     const result = await extractRecipe({ attempt: "primary", url: recipeUrl }, broken.runtime);
     expect(result.response.status).toBe("success");
     expect(result.logContext.cacheStatus).toBe("miss");
+
+    /* The result cache is still written when the archive write fails. */
+    const again = await extractRecipe({ attempt: "primary", url: recipeUrl }, broken.runtime);
+    expect(again.logContext.cacheStatus).toBe("hit");
+  });
+
+  it("keeps a removed link out of the archive and the result cache", async () => {
+    const archiveStore = createMemoryRecipeArchiveStore();
+    const { runtime, fetchHtmlDocument } = createTestRuntime({ archiveStore });
+
+    await extractRecipe({ attempt: "primary", url: recipeUrl }, runtime);
+    await expect(runtime.recipeArchive?.remove(`${recipeUrl}?utm_source=x`)).resolves.toBe(true);
+    await runtime.extractionCache?.remove(recipeUrl);
+    expect(archiveStore.records.size).toBe(0);
+
+    const afterRemoval = await extractRecipe({ attempt: "primary", url: recipeUrl }, runtime);
+    const nextImport = await extractRecipe({ attempt: "primary", url: recipeUrl }, runtime);
+
+    expect(afterRemoval.response.status).toBe("success");
+    expect(nextImport.logContext.cacheStatus).toBe("miss");
+    expect(fetchHtmlDocument).toHaveBeenCalledTimes(3);
+    expect(archiveStore.records.size).toBe(0);
+  });
+
+  it("does not start the refresh backoff when billing turned the request down", async () => {
+    const archiveStore = createMemoryRecipeArchiveStore();
+    const { runtime, withEmptyCache } = createTestRuntime({
+      archiveStore,
+      blocked: () => blockedNow
+    });
+    let blockedNow = false;
+
+    await extractRecipe({ attempt: "primary", url: recipeUrl }, runtime);
+    ageArchiveEntry(archiveStore, recipeUrl, {
+      extractedAt: new Date(Date.now() - 45 * dayMs).toISOString()
+    });
+    blockedNow = true;
+
+    await extractRecipe({ attempt: "primary", url: recipeUrl }, withEmptyCache(), {
+      authorization: Promise.resolve(false)
+    }).catch(() => undefined);
+
+    expect(archiveStore.records.get(hashCanonicalSourceUrl(recipeUrl))?.refreshFailedAt).toBeNull();
   });
 
   it("neither reads nor writes the archive when the cache is bypassed", async () => {

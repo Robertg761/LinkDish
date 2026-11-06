@@ -829,6 +829,12 @@ const cleanNormalizedExtraction = async (
   };
 };
 
+/*
+ * A shareable success goes into the recipe archive (LinkDish's lasting copy) and the short-lived
+ * result cache, under the same rules (deterministic, over the confidence bar, no cross-site
+ * redirect). The archive is written first: a link an admin removed is kept out of both. If the
+ * archive itself fails, the result cache is still written.
+ */
 const scheduleCacheWrite = (
   context: ExtractionContext,
   requestUrl: string,
@@ -836,49 +842,39 @@ const scheduleCacheWrite = (
   sourceDocument: SourceDocument,
   detection: DetectionResult
 ): Promise<void> => {
-  const cache = context.runtime.extractionCache;
+  const { extractionCache: cache, recipeArchive: archive } = context.runtime;
 
-  if (!cache || context.cacheMode === "bypass" || response.status !== "success") {
+  if ((!cache && !archive) || context.cacheMode === "bypass" || response.status !== "success") {
     return Promise.resolve();
   }
 
+  const entry = {
+    response,
+    requestUrl,
+    finalUrl: sourceDocument.kind === "html" ? sourceDocument.finalUrl : null,
+    statusCode: sourceDocument.kind === "html" ? sourceDocument.statusCode : null,
+    detectionConfidence: detection.confidence
+  };
+
   return context.afterResponse(async () => {
-    await cache.write({
-      response,
-      requestUrl,
-      finalUrl: sourceDocument.kind === "html" ? sourceDocument.finalUrl : null,
-      statusCode: sourceDocument.kind === "html" ? sourceDocument.statusCode : null,
-      detectionConfidence: detection.confidence
-    });
+    if (archive) {
+      const archived = await archive.write(entry).catch((error: unknown) => {
+        console.warn(
+          JSON.stringify({
+            event: "recipe_archive_write_failed",
+            message: error instanceof Error ? error.message : "Unknown error"
+          })
+        );
+        return null;
+      });
+
+      if (archived === "removed") {
+        return;
+      }
+    }
+
+    await cache?.write(entry);
   });
-};
-
-/*
- * Every success the result cache may share also goes into the recipe archive, LinkDish's lasting
- * copy (same rules: deterministic, over the confidence bar, no cross-site redirect).
- */
-const scheduleArchiveWrite = (
-  context: ExtractionContext,
-  requestUrl: string,
-  response: ExtractRecipeResponse,
-  sourceDocument: SourceDocument,
-  detection: DetectionResult
-): Promise<void> => {
-  const archive = context.runtime.recipeArchive;
-
-  if (!archive || context.cacheMode === "bypass" || response.status !== "success") {
-    return Promise.resolve();
-  }
-
-  return context.afterResponse(async () => {
-    await archive.write({
-      response,
-      requestUrl,
-      finalUrl: sourceDocument.kind === "html" ? sourceDocument.finalUrl : null,
-      statusCode: sourceDocument.kind === "html" ? sourceDocument.statusCode : null,
-      detectionConfidence: detection.confidence
-    });
-  }, "recipe_archive_write_failed");
 };
 
 const readArchivedRecipe = async (
@@ -1963,7 +1959,8 @@ const extractFromUrl = async (
   if (archived && live.response.status !== "success") {
     const archive = runtime.recipeArchive;
 
-    if (archive) {
+    /* A request billing turned down tells nothing about the site, so it starts no backoff. */
+    if (archive && (await context.authorization)) {
       await context.afterResponse(
         () => archive.markRefreshFailed(request.url),
         "recipe_archive_write_failed"
@@ -2286,7 +2283,6 @@ const extractFromUrlLive = async (
 
   if (response.status === "success") {
     await scheduleCacheWrite(context, sourceRequest.url, response, sourceDocument, detection);
-    await scheduleArchiveWrite(context, sourceRequest.url, response, sourceDocument, detection);
   }
 
   return {

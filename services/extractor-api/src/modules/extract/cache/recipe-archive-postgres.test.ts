@@ -78,13 +78,51 @@ describe("postgres recipe archive store", () => {
     expect(database.query.mock.calls[0]?.[1]).toEqual(["abc"]);
   });
 
-  it("returns null for a missing row and reports deletes", async () => {
+  it("returns null for a missing row", async () => {
     const empty = createPostgresRecipeArchiveStore(() => Promise.resolve(createDatabase()));
-    const deleted = createPostgresRecipeArchiveStore(() => Promise.resolve(createDatabase([], 1)));
 
     await expect(empty.get("missing")).resolves.toBeNull();
-    await expect(empty.delete("missing")).resolves.toBe(false);
-    await expect(deleted.delete("abc")).resolves.toBe(true);
+  });
+
+  it("reports whether a put stored anything (a removed link stores nothing)", async () => {
+    const stored = createDatabase([], 1);
+    const blocked = createDatabase([], 0);
+
+    await expect(
+      createPostgresRecipeArchiveStore(() => Promise.resolve(stored)).put(record)
+    ).resolves.toBe(true);
+    await expect(
+      createPostgresRecipeArchiveStore(() => Promise.resolve(blocked)).put(record)
+    ).resolves.toBe(false);
+    expect(stored.query.mock.calls[0]?.[0]).toContain(
+      "where not exists (select 1 from recipe_archive_removals"
+    );
+  });
+
+  it("removes an entry and records the removal", async () => {
+    const existed = createDatabase([{ removed: 1 }]);
+    const missing = createDatabase([{ removed: 0 }]);
+
+    await expect(
+      createPostgresRecipeArchiveStore(() => Promise.resolve(existed)).remove(
+        "abc",
+        "https://example.com/recipe",
+        "2026-11-07T00:00:00.000Z"
+      )
+    ).resolves.toBe(true);
+    await expect(
+      createPostgresRecipeArchiveStore(() => Promise.resolve(missing)).remove(
+        "abc",
+        "https://example.com/recipe",
+        "2026-11-07T00:00:00.000Z"
+      )
+    ).resolves.toBe(false);
+    expect(existed.query.mock.calls[0]?.[0]).toContain("insert into recipe_archive_removals");
+    expect(existed.query.mock.calls[0]?.[1]).toEqual([
+      "abc",
+      "https://example.com/recipe",
+      "2026-11-07T00:00:00.000Z"
+    ]);
   });
 
   it("fails clearly without a database", async () => {
