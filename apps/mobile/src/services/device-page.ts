@@ -85,6 +85,10 @@ export const readPageViewMessage = (data: string): PageViewMessage | null => {
 export const looksLikeChallengePage = (html: string): boolean =>
   /<title[^>]*>\s*(?:just a moment|attention required)/iu.test(html);
 
+/** The same check on a page's title, as the in-app view reports it. */
+export const isChallengeTitle = (title: string): boolean =>
+  /^\s*(?:just a moment|attention required)/iu.test(title);
+
 const isPrivateHost = (hostname: string): boolean => {
   const host = hostname.toLowerCase().replace(/^\[|\]$/gu, "");
 

@@ -249,6 +249,16 @@ export default function ImportProgressScreen() {
   /* The site blocks LinkDish's servers: the person can open the page here and save it. */
   const blockedPageUrl =
     extraction.state.state === "failure" ? extraction.state.openPageUrl : undefined;
+  /* Pasting the link is all the person does: the page opens on screen and saves itself. */
+  const openedBlockedPageRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!blockedPageUrl || openedBlockedPageRef.current === blockedPageUrl) {
+      return;
+    }
+
+    openedBlockedPageRef.current = blockedPageUrl;
+    router.replace({ pathname: "/open-page", params: { url: blockedPageUrl } });
+  }, [blockedPageUrl]);
   const isPreparingSharedImage = Boolean(sharedImageUri) && !sharedImageError;
 
   return (

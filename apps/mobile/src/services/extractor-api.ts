@@ -80,7 +80,7 @@ const siteLabel = (url: string): string => {
 };
 
 export const openBlockedPageMessage = (url: string): string =>
-  `${siteLabel(unwrapFacebookLinkWrapper(url))} blocks LinkDish's servers, but it opens for you. Open the page here and save the recipe from it.`;
+  `${siteLabel(unwrapFacebookLinkWrapper(url))} blocks LinkDish's servers, so LinkDish is opening the page on your phone instead.`;
 
 interface ExtractRecipeOptions {
   authToken?: string | null;

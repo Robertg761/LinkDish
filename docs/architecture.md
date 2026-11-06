@@ -636,14 +636,16 @@ connections can still open these pages.
   and `deviceFetchAvailable: true`. A Pinterest pin whose outbound page is blocked does not set it,
   since the caller does not have that link.
 - The phone app never downloads the page in the background (a plain request from a home
-  connection got the same 402 too). Its failure card offers "Open the page" instead, which opens
-  the link in an in-app browser view (`app/open-page.tsx`, built on the `@expo/dom-webview` view
-  the app already ships, with the system web view's own user agent). The person sees the page
-  load, answers any check the site shows them there as in any browser, and taps Save recipe. Only
-  then does the app read the page they are looking at (`document.documentElement.outerHTML`, tied
-  to that tap by a nonce, top frame only). `apps/mobile/src/services/device-page.ts` refuses a
-  page on another site, an IP address or a local name, or a page still showing the site's check;
-  it drops styles, SVG, comments and every script but JSON-LD/JSON before uploading
+  connection got the same 402 too). Instead, right after the failure, it opens the link on screen
+  in an in-app browser view (`app/open-page.tsx`, built on the `@expo/dom-webview` view the app
+  already ships, with the system web view's own user agent). The person sees the page load and
+  answers any check the site shows them there, as in any browser; pasting the link is all they
+  have to do. Once a page on the link's site (or a shortened link's destination) has loaded and
+  is not the site's check, the app reads it (`document.documentElement.outerHTML`, tied to that
+  request by a nonce, top frame only) and moves on to the recipe. If reading fails, a Save recipe
+  button lets the person try again once the page looks right. `apps/mobile/src/services/device-page.ts`
+  refuses a page on another site, an IP address or a local name, or a page still showing the
+  site's check; it drops styles, SVG, comments and every script but JSON-LD/JSON before uploading
   (`MAX_DEVICE_PAGE_HTML_CHARS`, 3,000,000 characters). It sends
   `{ url, devicePage: { html, finalUrl } }` to `/extract`, with the page's own address as `url`.
 - The API reads that HTML through the same path as the link (URL safety, detection, not-found and

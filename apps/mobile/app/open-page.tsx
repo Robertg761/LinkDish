@@ -9,6 +9,7 @@ import { createPendingPageImport } from "../src/features/recipe-intake/pageImpor
 import {
   PAGE_SHOWN_SCRIPT,
   buildCaptureScript,
+  isChallengeTitle,
   isSameSitePublicPage,
   pageProblemMessage,
   pageSiteLabel,
@@ -19,16 +20,25 @@ import {
 } from "../src/services/device-page";
 import { appColors, appSpacing } from "../src/theme/tokens";
 
-/* The page answers a Save tap at once; past this, something in it is stuck. */
+/* The page answers a capture at once; past this, something in it is stuck. */
 const CAPTURE_TIMEOUT_MS = 10_000;
+/* A loaded page gets a moment to settle before it is read. */
+const AUTO_SAVE_DELAY_MS = 1_200;
+/* A page that loaded but read as empty is read again a few times before giving up. */
+const MAX_EMPTY_RETRIES = 2;
+const EMPTY_RETRY_DELAY_MS = 2_000;
 
 const readFirstParam = (value: string | string[] | undefined): string | undefined =>
   Array.isArray(value) ? value[0] : value;
 
+const newNonce = (): string => `${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
+
 /**
- * A recipe site that blocks LinkDish's servers, opened in an in-app browser view. The person
- * sees the page load as in any browser and taps Save recipe; the app then reads the page they
- * are looking at and sends it to be imported. Nothing is read before that tap.
+ * A recipe site that blocks LinkDish's servers, opened on screen in an in-app browser view right
+ * after the person pastes the link. The page loads in front of them, as in any browser (they
+ * answer any check the site shows them there). Once the recipe page itself has loaded, the app
+ * reads that page, sends it to be imported and moves on to the recipe. If that doesn't work out,
+ * a Save recipe button lets them try once the page looks right.
  */
 export default function OpenPageScreen() {
   const params = useLocalSearchParams<{ url?: string | string[] }>();
@@ -41,56 +51,97 @@ export default function OpenPageScreen() {
   const webViewRef = useRef<DomWebViewRef>(null);
   const captureNonceRef = useRef<string | null>(null);
   const captureTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const emptyRetriesRef = useRef(0);
+  const isDoneRef = useRef(false);
   /* The site a saved page must be on (a shortened link's destination once it shows). */
   const pageSiteRef = useRef<string | null>(null);
   const [shownHref, setShownHref] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [isChecking, setIsChecking] = useState(false);
+  /* Set once saving on its own has not worked: the person can then tap Save recipe. */
   const [problem, setProblem] = useState<string | null>(null);
+
+  const clearTimer = (timerRef: { current: ReturnType<typeof setTimeout> | null }) => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  };
 
   const stopWaiting = useCallback(() => {
     captureNonceRef.current = null;
-
-    if (captureTimerRef.current) {
-      clearTimeout(captureTimerRef.current);
-      captureTimerRef.current = null;
-    }
-
+    clearTimer(captureTimerRef);
     setIsSaving(false);
   }, []);
 
   useEffect(
     () => () => {
-      if (captureTimerRef.current) {
-        clearTimeout(captureTimerRef.current);
-      }
+      clearTimer(captureTimerRef);
+      clearTimer(autoSaveTimerRef);
     },
     []
   );
 
-  const saveRecipe = useCallback(() => {
-    const nonce = `${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
+  const capturePage = useCallback(() => {
+    if (isDoneRef.current) {
+      return;
+    }
+
+    const nonce = newNonce();
 
     captureNonceRef.current = nonce;
-    setProblem(null);
     setIsSaving(true);
+    clearTimer(captureTimerRef);
     captureTimerRef.current = setTimeout(() => {
       stopWaiting();
-      setProblem("LinkDish couldn't read this page. Let it finish loading, then try again.");
+      setProblem("LinkDish couldn't read this page. When the recipe shows, tap Save recipe.");
     }, CAPTURE_TIMEOUT_MS);
     webViewRef.current?.injectJavaScript(buildCaptureScript(nonce));
   }, [stopWaiting]);
+
+  const scheduleCapture = useCallback(
+    (delayMs: number) => {
+      clearTimer(autoSaveTimerRef);
+      autoSaveTimerRef.current = setTimeout(() => {
+        autoSaveTimerRef.current = null;
+        capturePage();
+      }, delayMs);
+    },
+    [capturePage]
+  );
+
+  const saveRecipe = useCallback(() => {
+    setProblem(null);
+    emptyRetriesRef.current = MAX_EMPTY_RETRIES;
+    capturePage();
+  }, [capturePage]);
 
   const handleMessage = useCallback(
     (event: { nativeEvent: { data: string } }) => {
       const message = readPageViewMessage(event.nativeEvent.data);
 
-      if (!message || !pageUrl) {
+      if (!message || !pageUrl || isDoneRef.current) {
         return;
       }
 
       if (message.kind === "shown") {
         pageSiteRef.current = resolvePageSite(pageUrl, pageSiteRef.current, message.href);
         setShownHref(message.href);
+        const checking = isChallengeTitle(message.title);
+        setIsChecking(checking);
+
+        /* Each new page that loads on the site is read on its own; a check page is waited out. */
+        if (
+          !checking &&
+          pageSiteRef.current &&
+          isSameSitePublicPage(pageSiteRef.current, message.href)
+        ) {
+          emptyRetriesRef.current = 0;
+          setProblem(null);
+          scheduleCapture(AUTO_SAVE_DELAY_MS);
+        }
+
         return;
       }
 
@@ -103,17 +154,31 @@ export default function OpenPageScreen() {
       const prepared = prepareCapturedPage(pageSite, { href: message.href, html: message.html });
 
       if ("problem" in prepared) {
+        if (prepared.problem === "challenge") {
+          /* The site is checking the visit; the page it lets through will load and be read. */
+          setIsChecking(true);
+          return;
+        }
+
+        if (prepared.problem === "empty" && emptyRetriesRef.current < MAX_EMPTY_RETRIES) {
+          emptyRetriesRef.current += 1;
+          scheduleCapture(EMPTY_RETRY_DELAY_MS);
+          return;
+        }
+
         setProblem(pageProblemMessage(prepared.problem, pageSite));
         return;
       }
 
+      isDoneRef.current = true;
+      clearTimer(autoSaveTimerRef);
       const pendingImport = createPendingPageImport(message.href, prepared.page);
       router.replace({
         pathname: "/recipe",
         params: { pageImportId: pendingImport.id, url: pendingImport.url }
       });
     },
-    [pageUrl, stopWaiting]
+    [pageUrl, scheduleCapture, stopWaiting]
   );
 
   if (!canOpen || !pageUrl) {
@@ -129,12 +194,20 @@ export default function OpenPageScreen() {
     );
   }
 
+  const site = pageSiteLabel(pageSiteRef.current ?? pageUrl);
+  const notice =
+    problem ??
+    (isChecking
+      ? `${site} is checking the visit. If it asks you something, answer it and LinkDish carries on.`
+      : isSaving
+        ? `Reading the recipe from ${site}...`
+        : `${site} doesn't let LinkDish's servers in, so it opens here. LinkDish saves the recipe as soon as the page loads.`);
+
   return (
     <SafeAreaView edges={["bottom"]} style={styles.screen}>
       <View style={styles.notice}>
         <AppText muted style={styles.noticeText}>
-          {problem ??
-            `${pageSiteLabel(pageUrl)} opens here as it would in your browser. When you can see the recipe, tap Save recipe.`}
+          {notice}
         </AppText>
       </View>
       <DomWebView
@@ -145,11 +218,13 @@ export default function OpenPageScreen() {
         style={styles.page}
       />
       <View style={styles.actions}>
-        <AppButton
-          disabled={!shownHref || isSaving}
-          label={isSaving ? "Reading the page..." : "Save recipe"}
-          onPress={saveRecipe}
-        />
+        {problem ? (
+          <AppButton
+            disabled={!shownHref || isSaving}
+            label={isSaving ? "Reading the page..." : "Save recipe"}
+            onPress={saveRecipe}
+          />
+        ) : null}
         <AppButton label="Cancel" onPress={() => router.back()} variant="ghost" />
       </View>
     </SafeAreaView>

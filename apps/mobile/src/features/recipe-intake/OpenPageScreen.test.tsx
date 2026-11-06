@@ -1,6 +1,6 @@
 import React from "react";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   injectJavaScript: vi.fn(),
@@ -65,12 +65,10 @@ const render = (): ReactTestRenderer => {
 
 const webView = (renderer: ReactTestRenderer) =>
   renderer.root.find((node) => (node.type as unknown) === "web-view");
-const saveButton = (renderer: ReactTestRenderer) =>
-  renderer.root.find(
-    (node) =>
-      (node.type as unknown) === "button" &&
-      ["Save recipe", "Reading the page..."].includes(node.props.label as string)
-  );
+const buttons = (renderer: ReactTestRenderer) =>
+  renderer.root
+    .findAll((node) => (node.type as unknown) === "button")
+    .map((node) => node.props.label as string);
 const post = (renderer: ReactTestRenderer, message: object) => {
   act(() => {
     (webView(renderer).props.onMessage as (event: unknown) => void)({
@@ -78,45 +76,48 @@ const post = (renderer: ReactTestRenderer, message: object) => {
     });
   });
 };
-const tapSave = (renderer: ReactTestRenderer): string => {
+const shown = (renderer: ReactTestRenderer, href = url, title = "Soup") =>
+  post(renderer, { type: "linkdish:page-shown", href, title });
+/* Lets the page settle; returns the nonce of the capture the app then asked for. */
+const settle = (ms = 1_200): string => {
   act(() => {
-    (saveButton(renderer).props.onPress as () => void)();
+    vi.advanceTimersByTime(ms);
   });
-  const script = mocks.injectJavaScript.mock.lastCall?.[0] as string;
-  return /nonce:"([^"]+)"/u.exec(script)?.[1] ?? "";
+  const script = mocks.injectJavaScript.mock.lastCall?.[0] as string | undefined;
+  return script ? (/nonce:"([^"]+)"/u.exec(script)?.[1] ?? "") : "";
 };
+const captured = (renderer: ReactTestRenderer, nonce: string, href = url, html = recipePage) =>
+  post(renderer, { type: "linkdish:page-captured", nonce, href, html });
 const texts = (renderer: ReactTestRenderer) =>
   renderer.root
     .findAll((node) => (node.type as unknown) === "text")
-    .map((node) => String(node.props.children));
+    .map((node) => String(node.props.children))
+    .join(" ");
 
 describe("OpenPageScreen", () => {
   beforeEach(() => {
+    vi.useFakeTimers();
     mocks.params = { url };
     mocks.injectJavaScript.mockReset();
     mocks.replace.mockReset();
     mocks.back.mockReset();
   });
 
-  it("opens the page and reads nothing until the person taps Save", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("opens the page on screen and saves the recipe on its own once it loads", () => {
     const renderer = render();
 
     expect(webView(renderer).props.source).toEqual({ uri: url });
-    expect(saveButton(renderer).props.disabled).toBe(true);
-
-    post(renderer, { type: "linkdish:page-shown", href: url, title: "Soup" });
-
-    expect(saveButton(renderer).props.disabled).toBe(false);
+    expect(buttons(renderer)).toEqual(["Cancel"]);
     expect(mocks.injectJavaScript).not.toHaveBeenCalled();
-    expect(mocks.replace).not.toHaveBeenCalled();
-  });
 
-  it("imports the page the person saved", () => {
-    const renderer = render();
-    post(renderer, { type: "linkdish:page-shown", href: url, title: "Soup" });
-    const nonce = tapSave(renderer);
-
-    post(renderer, { type: "linkdish:page-captured", nonce, href: url, html: recipePage });
+    shown(renderer);
+    const nonce = settle();
+    expect(nonce).not.toBe("");
+    captured(renderer, nonce);
 
     expect(mocks.replace).toHaveBeenCalledOnce();
     const params = (mocks.replace.mock.lastCall?.[0] as { params: Record<string, string> })
@@ -128,40 +129,76 @@ describe("OpenPageScreen", () => {
     });
   });
 
-  it("ignores page messages that don't answer the person's tap", () => {
+  it("waits out the site's check and saves the page it lets through", () => {
     const renderer = render();
-    post(renderer, { type: "linkdish:page-shown", href: url, title: "Soup" });
 
-    post(renderer, { type: "linkdish:page-captured", nonce: "guess", href: url, html: recipePage });
-    tapSave(renderer);
-    post(renderer, { type: "linkdish:page-captured", nonce: "guess", href: url, html: recipePage });
+    shown(renderer, url, "Just a moment...");
+    expect(settle()).toBe("");
+    expect(texts(renderer)).toContain("allrecipes.com is checking the visit");
+
+    shown(renderer);
+    captured(renderer, settle());
+
+    expect(mocks.replace).toHaveBeenCalledOnce();
+  });
+
+  it("keeps waiting when the page it read was still the check", () => {
+    const renderer = render();
+    shown(renderer);
+    captured(renderer, settle(), url, "<title>Just a moment...</title>");
+
+    expect(mocks.replace).not.toHaveBeenCalled();
+    expect(buttons(renderer)).toEqual(["Cancel"]);
+
+    shown(renderer);
+    captured(renderer, settle());
+    expect(mocks.replace).toHaveBeenCalledOnce();
+  });
+
+  it("ignores page messages that don't answer its own request", () => {
+    const renderer = render();
+
+    captured(renderer, "guess");
+    shown(renderer);
+    settle();
+    captured(renderer, "guess");
 
     expect(mocks.replace).not.toHaveBeenCalled();
   });
 
-  it("explains when the saved page is on another site", () => {
+  it("does not read pages on another site, and offers Save when reading fails", () => {
     const renderer = render();
-    post(renderer, { type: "linkdish:page-shown", href: url, title: "Soup" });
-    const nonce = tapSave(renderer);
 
-    post(renderer, {
-      type: "linkdish:page-captured",
-      nonce,
-      href: "https://ads.example.com/",
-      html: recipePage
-    });
+    shown(renderer, "https://ads.example.com/");
+    expect(settle()).toBe("");
+
+    shown(renderer);
+    captured(renderer, settle(), "https://ads.example.com/");
 
     expect(mocks.replace).not.toHaveBeenCalled();
-    expect(texts(renderer).join(" ")).toContain("This page isn't on allrecipes.com");
+    expect(texts(renderer)).toContain("This page isn't on allrecipes.com");
+    expect(buttons(renderer)).toEqual(["Save recipe", "Cancel"]);
+  });
+
+  it("reads an empty page again before giving up", () => {
+    const renderer = render();
+    shown(renderer);
+    captured(renderer, settle(), url, "<script>x</script>");
+    captured(renderer, settle(2_000), url, "<script>x</script>");
+    expect(buttons(renderer)).toEqual(["Cancel"]);
+    captured(renderer, settle(2_000), url, "<script>x</script>");
+
+    expect(buttons(renderer)).toEqual(["Save recipe", "Cancel"]);
   });
 
   it("saves a shortened link's recipe page, judged by where the link led", () => {
     mocks.params = { url: "https://bit.ly/onion-soup" };
     const renderer = render();
-    post(renderer, { type: "linkdish:page-shown", href: url, title: "Soup" });
-    const nonce = tapSave(renderer);
 
-    post(renderer, { type: "linkdish:page-captured", nonce, href: url, html: recipePage });
+    shown(renderer, "https://bit.ly/onion-soup+");
+    expect(settle()).toBe("");
+    shown(renderer);
+    captured(renderer, settle());
 
     expect(mocks.replace).toHaveBeenCalledOnce();
   });
@@ -171,6 +208,6 @@ describe("OpenPageScreen", () => {
     const renderer = render();
 
     expect(renderer.root.findAll((node) => (node.type as unknown) === "web-view")).toHaveLength(0);
-    expect(texts(renderer).join(" ")).toContain("can't open that link");
+    expect(texts(renderer)).toContain("can't open that link");
   });
 });
