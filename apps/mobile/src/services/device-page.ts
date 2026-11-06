@@ -256,6 +256,47 @@ export const resolvePageSite = (
     : null;
 };
 
+/*
+ * The API's hosting takes request bodies up to 4.5 MB. The page travels as a JSON string, where
+ * non-ASCII text takes up to three bytes a character and quotes or backslashes gain an escape, so
+ * its encoded size is checked too, with room left for the rest of the request.
+ */
+const MAX_DEVICE_PAGE_UPLOAD_BYTES = 4_000_000;
+
+/** The UTF-8 size of a string once JSON-encoded, without building another copy of it. */
+export const jsonUtf8Bytes = (value: string): number => {
+  let bytes = 2;
+
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+
+    if (code === 0x22 || code === 0x5c || code === 0x08 || code === 0x0c || code === 0x0a || code === 0x0d || code === 0x09) {
+      bytes += 2;
+    } else if (code < 0x20) {
+      bytes += 6;
+    } else if (code < 0x80) {
+      bytes += 1;
+    } else if (code < 0x800) {
+      bytes += 2;
+    } else if (code >= 0xd800 && code <= 0xdbff && index + 1 < value.length) {
+      const next = value.charCodeAt(index + 1);
+
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        bytes += 4;
+        index += 1;
+      } else {
+        bytes += 6;
+      }
+    } else if (code >= 0xd800 && code <= 0xdfff) {
+      bytes += 6;
+    } else {
+      bytes += 3;
+    }
+  }
+
+  return bytes;
+};
+
 /**
  * Turns the page the person saved into what /extract takes, or says why it can't be sent: it
  * left the site, it is still the site's check, or it is empty or too big once slimmed.
@@ -282,7 +323,7 @@ export const prepareCapturedPage = (
     return { problem: "empty" };
   }
 
-  if (html.length > MAX_DEVICE_PAGE_HTML_CHARS) {
+  if (html.length > MAX_DEVICE_PAGE_HTML_CHARS || jsonUtf8Bytes(html) > MAX_DEVICE_PAGE_UPLOAD_BYTES) {
     return { problem: "too_large" };
   }
 

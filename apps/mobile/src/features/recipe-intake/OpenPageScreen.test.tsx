@@ -142,13 +142,37 @@ describe("OpenPageScreen", () => {
     expect(mocks.replace).toHaveBeenCalledOnce();
   });
 
+  it("reads the page again while the check shows, so a check that clears in place still saves", () => {
+    const renderer = render();
+
+    shown(renderer, url, "Just a moment...");
+    expect(buttons(renderer)).toEqual(["Save recipe", "Cancel"]);
+    captured(renderer, settle(3_000), url, "<title>Just a moment...</title>");
+    captured(renderer, settle(3_000));
+
+    expect(mocks.replace).toHaveBeenCalledOnce();
+  });
+
+  it("offers Save after the check has shown for about a minute", () => {
+    const renderer = render();
+    shown(renderer, url, "Just a moment...");
+
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      captured(renderer, settle(3_000), url, "<title>Just a moment...</title>");
+    }
+
+    expect(mocks.replace).not.toHaveBeenCalled();
+    expect(texts(renderer)).toContain("still checking the page");
+    expect(buttons(renderer)).toEqual(["Save recipe", "Cancel"]);
+  });
+
   it("keeps waiting when the page it read was still the check", () => {
     const renderer = render();
     shown(renderer);
     captured(renderer, settle(), url, "<title>Just a moment...</title>");
 
     expect(mocks.replace).not.toHaveBeenCalled();
-    expect(buttons(renderer)).toEqual(["Cancel"]);
+    expect(buttons(renderer)).toEqual(["Save recipe", "Cancel"]);
 
     shown(renderer);
     captured(renderer, settle());

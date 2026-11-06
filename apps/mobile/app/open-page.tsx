@@ -27,6 +27,12 @@ const AUTO_SAVE_DELAY_MS = 1_200;
 /* A page that loaded but read as empty is read again a few times before giving up. */
 const MAX_EMPTY_RETRIES = 2;
 const EMPTY_RETRY_DELAY_MS = 2_000;
+/*
+ * While the site is checking the visit, the page is read again every few seconds: some checks
+ * clear without loading a new page. After about a minute, Save recipe is offered instead.
+ */
+const CHECK_RETRY_DELAY_MS = 3_000;
+const MAX_CHECK_RETRIES = 20;
 
 const readFirstParam = (value: string | string[] | undefined): string | undefined =>
   Array.isArray(value) ? value[0] : value;
@@ -53,6 +59,7 @@ export default function OpenPageScreen() {
   const captureTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const emptyRetriesRef = useRef(0);
+  const checkRetriesRef = useRef(0);
   const isDoneRef = useRef(false);
   /* The site a saved page must be on (a shortened link's destination once it shows). */
   const pageSiteRef = useRef<string | null>(null);
@@ -111,6 +118,22 @@ export default function OpenPageScreen() {
     [capturePage]
   );
 
+  /* Reads the page again soon while the site's check is showing; offers Save after a while. */
+  const recheckWhileChecking = useCallback(
+    (pageSite: string) => {
+      if (checkRetriesRef.current >= MAX_CHECK_RETRIES) {
+        setIsChecking(false);
+        setProblem(pageProblemMessage("challenge", pageSite));
+        return;
+      }
+
+      checkRetriesRef.current += 1;
+      setIsChecking(true);
+      scheduleCapture(CHECK_RETRY_DELAY_MS);
+    },
+    [scheduleCapture]
+  );
+
   const saveRecipe = useCallback(() => {
     setProblem(null);
     emptyRetriesRef.current = MAX_EMPTY_RETRIES;
@@ -128,20 +151,25 @@ export default function OpenPageScreen() {
       if (message.kind === "shown") {
         pageSiteRef.current = resolvePageSite(pageUrl, pageSiteRef.current, message.href);
         setShownHref(message.href);
-        const checking = isChallengeTitle(message.title);
-        setIsChecking(checking);
+        const onSite =
+          pageSiteRef.current !== null && isSameSitePublicPage(pageSiteRef.current, message.href);
 
-        /* Each new page that loads on the site is read on its own; a check page is waited out. */
-        if (
-          !checking &&
-          pageSiteRef.current &&
-          isSameSitePublicPage(pageSiteRef.current, message.href)
-        ) {
-          emptyRetriesRef.current = 0;
-          setProblem(null);
-          scheduleCapture(AUTO_SAVE_DELAY_MS);
+        if (!onSite || !pageSiteRef.current) {
+          return;
         }
 
+        emptyRetriesRef.current = 0;
+        setProblem(null);
+
+        /* Each new page that loads on the site is read on its own; a check page is waited out. */
+        if (isChallengeTitle(message.title)) {
+          recheckWhileChecking(pageSiteRef.current);
+          return;
+        }
+
+        checkRetriesRef.current = 0;
+        setIsChecking(false);
+        scheduleCapture(AUTO_SAVE_DELAY_MS);
         return;
       }
 
@@ -155,8 +183,8 @@ export default function OpenPageScreen() {
 
       if ("problem" in prepared) {
         if (prepared.problem === "challenge") {
-          /* The site is checking the visit; the page it lets through will load and be read. */
-          setIsChecking(true);
+          /* The site is checking the visit; the page it lets through will be read. */
+          recheckWhileChecking(pageSite);
           return;
         }
 
@@ -178,7 +206,7 @@ export default function OpenPageScreen() {
         params: { pageImportId: pendingImport.id, url: pendingImport.url }
       });
     },
-    [pageUrl, scheduleCapture, stopWaiting]
+    [pageUrl, recheckWhileChecking, scheduleCapture, stopWaiting]
   );
 
   if (!canOpen || !pageUrl) {
@@ -218,7 +246,7 @@ export default function OpenPageScreen() {
         style={styles.page}
       />
       <View style={styles.actions}>
-        {problem ? (
+        {problem || isChecking ? (
           <AppButton
             disabled={!shownHref || isSaving}
             label={isSaving ? "Reading the page..." : "Save recipe"}

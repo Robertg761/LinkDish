@@ -5,6 +5,7 @@ import {
   buildCaptureScript,
   pageProblemMessage,
   prepareCapturedPage,
+  jsonUtf8Bytes,
   readPageViewMessage,
   resolvePageSite,
   slimPageHtml,
@@ -202,5 +203,20 @@ describe("resolvePageSite", () => {
     expect(resolvePageSite(short, null, "http://10.0.0.1/")).toBeNull();
     expect(resolvePageSite(short, null, url)).toBe(url);
     expect(resolvePageSite(short, url, "https://www.example.com/")).toBe(url);
+  });
+});
+
+describe("jsonUtf8Bytes", () => {
+  it("matches the encoded size of the JSON string", () => {
+    for (const value of ["", "soup", 'a"b\\c\n', "crème brûlée", "汤", "🍲", "\u0001", "\ud800x"]) {
+      expect(jsonUtf8Bytes(value)).toBe(Buffer.byteLength(JSON.stringify(value), "utf8"));
+    }
+  });
+
+  it("refuses a page whose upload would be too big even under the character cap", () => {
+    const html = `<p>${"汤".repeat(1_600_000)}</p>`;
+
+    expect(html.length).toBeLessThan(3_000_000);
+    expect(prepareCapturedPage(url, { href: url, html })).toEqual({ problem: "too_large" });
   });
 });
