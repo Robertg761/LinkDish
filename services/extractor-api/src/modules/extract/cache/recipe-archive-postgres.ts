@@ -68,7 +68,11 @@ export const createPostgresRecipeArchiveStore = (
                 response, final_url, status_code, detection_confidence, extracted_at,
                 refresh_failed_at
            from recipe_archive
-          where url_hash = $1`,
+          where url_hash = $1
+            -- A row a write raced in while an admin removed the link is never served.
+            and not exists (
+              select 1 from recipe_archive_removals removal where removal.url_hash = $1
+            )`,
         [urlHash]
       );
       const row = result.rows[0] as RecipeArchiveRow | undefined;

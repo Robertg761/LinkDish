@@ -76,6 +76,7 @@ describe("postgres recipe archive store", () => {
       refreshFailedAt: "2026-11-07T00:00:00.000Z"
     });
     expect(database.query.mock.calls[0]?.[1]).toEqual(["abc"]);
+    expect(database.query.mock.calls[0]?.[0]).toContain("not exists");
   });
 
   it("returns null for a missing row", async () => {

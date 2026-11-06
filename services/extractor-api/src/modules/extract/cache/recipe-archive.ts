@@ -224,7 +224,8 @@ export const createMemoryRecipeArchiveStore = (): RecipeArchiveStore & {
   return {
     records,
     removals,
-    get: (urlHash) => Promise.resolve(records.get(urlHash) ?? null),
+    get: (urlHash) =>
+      Promise.resolve(removals.has(urlHash) ? null : (records.get(urlHash) ?? null)),
     put: (record) => {
       if (removals.has(record.urlHash)) {
         return Promise.resolve(false);

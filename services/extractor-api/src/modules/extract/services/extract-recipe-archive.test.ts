@@ -310,6 +310,22 @@ describe("recipe archive in the extract pipeline", () => {
     expect(archiveStore.records.size).toBe(0);
   });
 
+  it("never serves a row that a write raced in while the link was being removed", async () => {
+    const archiveStore = createMemoryRecipeArchiveStore();
+    const { runtime, withEmptyCache, fetchHtmlDocument } = createTestRuntime({ archiveStore });
+
+    await extractRecipe({ attempt: "primary", url: recipeUrl }, runtime);
+    const key = hashCanonicalSourceUrl(recipeUrl);
+    const raced = archiveStore.records.get(key);
+    await runtime.recipeArchive?.remove(recipeUrl);
+    archiveStore.records.set(key, raced!);
+
+    const result = await extractRecipe({ attempt: "primary", url: recipeUrl }, withEmptyCache());
+
+    expect(result.logContext.cacheStatus).toBe("miss");
+    expect(fetchHtmlDocument).toHaveBeenCalledTimes(2);
+  });
+
   it("does not start the refresh backoff when billing turned the request down", async () => {
     const archiveStore = createMemoryRecipeArchiveStore();
     const { runtime, withEmptyCache } = createTestRuntime({
