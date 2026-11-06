@@ -907,7 +907,9 @@ const readArchivedRecipe = async (
 /*
  * An archive entry served without reading the site also refills the short-lived result cache,
  * so the next import of the link is answered from Upstash. Only entries from the current
- * extractor are copied: the cache key carries EXTRACTOR_CACHE_VERSION.
+ * extractor are copied: the cache key carries EXTRACTOR_CACHE_VERSION. An entry served only
+ * because a refresh just failed is not copied either: the cache would hold it for its whole TTL
+ * and keep the site from being read again after the one-day backoff.
  */
 const scheduleCacheBackfill = (
   context: ExtractionContext,
@@ -916,7 +918,11 @@ const scheduleCacheBackfill = (
 ): Promise<void> => {
   const cache = context.runtime.extractionCache;
 
-  if (!cache || archived.extractorVersion !== EXTRACTOR_CACHE_VERSION) {
+  if (
+    !cache ||
+    archived.extractorVersion !== EXTRACTOR_CACHE_VERSION ||
+    archived.refreshFailedAt !== null
+  ) {
     return Promise.resolve();
   }
 

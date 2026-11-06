@@ -217,10 +217,15 @@ describe("recipe archive in the extract pipeline", () => {
       expect.any(String)
     );
 
-    const backedOff = await extractRecipe({ attempt: "primary", url: recipeUrl }, withEmptyCache());
+    const sameProcess = withEmptyCache();
+    const backedOff = await extractRecipe({ attempt: "primary", url: recipeUrl }, sameProcess);
 
     expect(fetchHtmlDocument).toHaveBeenCalledTimes(2);
     expect(backedOff.logContext.cacheStatus).toBe("archive");
+
+    /* The backed-off copy was not put in the result cache, so the next try reaches the archive. */
+    const again = await extractRecipe({ attempt: "primary", url: recipeUrl }, sameProcess);
+    expect(again.logContext.cacheStatus).toBe("archive");
   });
 
   it("returns the site's failure when there is no archived copy", async () => {
