@@ -39,6 +39,8 @@ export type ExtractionUiState =
       message: string;
       allowFallback: boolean;
       inspiredAvailable?: boolean | undefined;
+      /** The site blocks LinkDish's servers: the person can open this page in the app instead. */
+      openPageUrl?: string | undefined;
       quota?: QuotaStatus | undefined;
       suggestedAction: "retry_primary" | "retry_fallback" | "try_another_url" | "try_again_later";
     };

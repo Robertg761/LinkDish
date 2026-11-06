@@ -4,12 +4,23 @@ import { getMobileAnalyticsHeaders, trackMobileEvent } from "../analytics/client
 import { mobileEnv } from "../config/env";
 import { buildMockCompletionResponse, buildMockExtractionResponse } from "../mocks/extraction";
 
-import { isTextExtractionRequest, type MobileExtractionRequest } from "./extraction-request";
+import { unwrapFacebookLinkWrapper } from "./device-page";
+import {
+  canOpenBlockedPage,
+  isDevicePageExtractionRequest,
+  isTextExtractionRequest,
+  type MobileExtractionRequest
+} from "./extraction-request";
 
 import type { CompleteRecipeResponse, ExtractRecipeResponse } from "@linkdish/api-contracts";
 import type { Recipe } from "@linkdish/recipe-domain";
 
-export type { MobileExtractionRequest, TextExtractionRequest } from "./extraction-request";
+export { canOpenBlockedPage } from "./extraction-request";
+export type {
+  DevicePageExtractionRequest,
+  MobileExtractionRequest,
+  TextExtractionRequest
+} from "./extraction-request";
 
 const apiClient = createExtractorApiClient({
   baseUrl: mobileEnv.apiBaseUrl,
@@ -58,6 +69,18 @@ export const runExtractorRequestWithRetry = async <Response>(
     return operation();
   }
 };
+
+/* "www.allrecipes.com" -> "allrecipes.com", for messages. */
+const siteLabel = (url: string): string => {
+  try {
+    return new URL(url).hostname.replace(/^www\./iu, "");
+  } catch {
+    return "That site";
+  }
+};
+
+export const openBlockedPageMessage = (url: string): string =>
+  `${siteLabel(unwrapFacebookLinkWrapper(url))} blocks LinkDish's servers, so LinkDish is opening the page on your phone instead.`;
 
 interface ExtractRecipeOptions {
   authToken?: string | null;
@@ -150,12 +173,23 @@ export async function extractRecipe(
           ...(request.correlationId ? { correlationId: request.correlationId } : {}),
           ...(request.sourceUrl ? { sourceUrl: request.sourceUrl } : {})
         })
-      : client.extractRecipe(request);
-  const response = await runExtractorRequestWithRetry(operation);
+      : isDevicePageExtractionRequest(request)
+        ? client.extractRecipeFromDevicePage({
+            url: request.url,
+            attempt: request.attempt,
+            devicePage: request.devicePage,
+            ...(request.correlationId ? { correlationId: request.correlationId } : {})
+          })
+        : client.extractRecipe(request);
+  let response = await runExtractorRequestWithRetry(operation);
 
   if (shouldRetryRetryableExtractionFailure(response)) {
     await wait(EXTRACTOR_RETRY_DELAY_MS);
-    return operation();
+    response = await operation();
+  }
+
+  if (response.status === "failure" && "url" in request && canOpenBlockedPage(request, response)) {
+    return { ...response, userMessage: openBlockedPageMessage(request.url) };
   }
 
   return response;

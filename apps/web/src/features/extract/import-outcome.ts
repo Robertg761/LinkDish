@@ -183,6 +183,15 @@ const describePlanLimit = (
   };
 };
 
+/* "https://www.allrecipes.com/recipe/1" -> "allrecipes.com". */
+const blockedSiteName = (sourceUrl: string | null | undefined): string => {
+  try {
+    return sourceUrl ? new URL(sourceUrl).hostname.replace(/^www\./iu, "") : "That site";
+  } catch {
+    return "That site";
+  }
+};
+
 /** A failure response from POST /extract, in words. */
 export const describeImportFailure = (
   failure: ExtractRecipeFailure,
@@ -230,7 +239,10 @@ export const describeImportFailure = (
         kind: "blocked",
         message: facebook
           ? "Facebook doesn't let apps read this post, or only shares the start of it. Copy the recipe text from the post and paste it here, or scan a screenshot of it."
-          : "Some sites don't let recipe savers in. Copy the recipe from the page and paste it here, or snap a photo of it.",
+          : failure.deviceFetchAvailable
+            ? // The site turns away LinkDish's servers but not people; the phone app can open the page.
+              `${blockedSiteName(context.sourceUrl)} doesn't let LinkDish's servers read its pages. Copy the recipe from the page and paste it here, or open the link in the LinkDish phone app and save it from the page there.`
+            : "Some sites don't let recipe savers in. Copy the recipe from the page and paste it here, or snap a photo of it.",
         title: facebook ? "Facebook wouldn't share that post" : "That site kept its door shut"
       };
     }

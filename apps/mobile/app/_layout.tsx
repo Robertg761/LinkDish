@@ -111,6 +111,12 @@ export default function RootLayout() {
                           }}
                         />
                         <Stack.Screen
+                          name="open-page"
+                          options={{
+                            title: "Open the page"
+                          }}
+                        />
+                        <Stack.Screen
                           name="import-progress"
                           options={{
                             title: "Importing recipe"

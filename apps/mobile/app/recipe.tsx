@@ -32,6 +32,7 @@ import { ExtractionAnimation } from "../src/features/recipe-intake/components/Ex
 import { requestRecipeUrlReset } from "../src/features/recipe-intake/intakeResetEvents";
 import {
   usePendingImageImport,
+  usePendingPageImport,
   usePendingTextImport
 } from "../src/features/recipe-intake/usePendingImageImport";
 import { RecipeFavoriteButton } from "../src/features/recipe-results/components/RecipeFavoriteButton";
@@ -144,9 +145,11 @@ const getSourceLabel = (sourceUrl: string | undefined) => {
 };
 
 export default function RecipeScreen() {
-  const { edit, imageImportId, savedId, sharedId, textImportId, url } = useLocalSearchParams<{
+  const { edit, imageImportId, pageImportId, savedId, sharedId, textImportId, url } =
+    useLocalSearchParams<{
     edit?: string;
     imageImportId?: string;
+    pageImportId?: string;
     savedId?: string;
     sharedId?: string;
     textImportId?: string;
@@ -227,6 +230,8 @@ export default function RecipeScreen() {
     usePendingImageImport(imageImportId);
   const { pendingImport: pendingTextImport, status: textImportStatus } =
     usePendingTextImport(textImportId);
+  const { pendingImport: pendingPageImport, status: pageImportStatus } =
+    usePendingPageImport(pageImportId);
 
   const extractionSource = useMemo(() => {
     if (savedId || sharedId) {
@@ -258,14 +263,49 @@ export default function RecipeScreen() {
       };
     }
 
+    if (pageImportId) {
+      if (!pendingPageImport) {
+        return undefined;
+      }
+
+      return {
+        attempt: "primary" as const,
+        devicePage: pendingPageImport.devicePage,
+        url: pendingPageImport.url
+      };
+    }
+
     return url;
-  }, [imageImportId, pendingImageImport, pendingTextImport, savedId, sharedId, textImportId, url]);
+  }, [
+    imageImportId,
+    pageImportId,
+    pendingImageImport,
+    pendingPageImport,
+    pendingTextImport,
+    savedId,
+    sharedId,
+    textImportId,
+    url
+  ]);
   const extraction = useRecipeExtraction(
     extractionSource,
     routeSharedRecipeRecord ?? routeSavedRecipe
   );
   const currentRecipeSourceUrl =
     extraction.state.state === "success" ? extraction.state.recipe.sourceUrl : url;
+  /* The site blocks LinkDish's servers: the person can open the page here and save it. */
+  const blockedPageUrl =
+    extraction.state.state === "failure" ? extraction.state.openPageUrl : undefined;
+  /* Pasting the link is all the person does: the page opens on screen and saves itself. */
+  const openedBlockedPageRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!blockedPageUrl || openedBlockedPageRef.current === blockedPageUrl) {
+      return;
+    }
+
+    openedBlockedPageRef.current = blockedPageUrl;
+    router.replace({ pathname: "/open-page", params: { url: blockedPageUrl } });
+  }, [blockedPageUrl]);
   const hasRequestedUrlResetRef = useRef<string | null>(null);
   const hasOpenedRequestedEditorRef = useRef<string | null>(null);
   const currentSavedRecipe = currentRecipeSourceUrl
@@ -861,7 +901,8 @@ export default function RecipeScreen() {
         {extraction.state.state === "empty" &&
         !isSharedRecipeRequest &&
         !imageImportId &&
-        !textImportId ? (
+        !textImportId &&
+        !pageImportId ? (
           <StatusCard
             body="Head back and paste a recipe source to keep going."
             primaryAction={{
@@ -880,6 +921,17 @@ export default function RecipeScreen() {
               onPress: () => router.replace("/import")
             }}
             title="Your scan needs another look"
+          />
+        ) : null}
+
+        {extraction.state.state === "empty" && pageImportStatus === "missing" && url ? (
+          <StatusCard
+            body="LinkDish closed before it could read the page you saved. Open it again to pick up where you left off."
+            primaryAction={{
+              label: "Open the page",
+              onPress: () => router.replace({ pathname: "/open-page", params: { url } })
+            }}
+            title="That page needs another look"
           />
         ) : null}
 
@@ -950,7 +1002,13 @@ export default function RecipeScreen() {
                     label: "Generate a recipe",
                     onPress: () => setIsInspiredConfirmationVisible(true)
                   }
-                : extraction.state.reason === "plan_limit"
+                : blockedPageUrl
+                  ? {
+                      label: "Open the page",
+                      onPress: () =>
+                        router.replace({ pathname: "/open-page", params: { url: blockedPageUrl } })
+                    }
+                  : extraction.state.reason === "plan_limit"
                   ? {
                       label: "View Plans",
                       onPress: () => router.push("/upgrade")

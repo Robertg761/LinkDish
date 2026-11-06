@@ -126,6 +126,7 @@ const API_METHODS = [
   "deleteSharedRecipe",
   "deleteShoppingItems",
   "extractRecipe",
+  "extractRecipeFromDevicePage",
   "extractRecipeFromText",
   "getAuthConfig",
   "getBillingUsage",

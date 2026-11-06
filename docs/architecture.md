@@ -623,6 +623,38 @@ Production extraction is expected to follow this ladder:
 3. Deterministic extraction and confidence scoring.
 4. For YouTube, the "full recipe" links in the description when the description itself has no method.
 
+### Sites that block LinkDish's servers (device pages)
+
+Some sites refuse every request from a cloud IP, whatever the headers: Allrecipes and the other
+People Inc (formerly Dotdash Meredith) brands such as Simply Recipes, Serious Eats, EatingWell
+and Food & Wine answer with a Cloudflare HTTP 402 and a "contact contentlicensing" page. A real
+headless Chromium gets the same 402, so the browser render cannot help. People on their own
+connections can still open these pages.
+
+- When the page the caller asked for is blocked (`HtmlFetchError`/`BrowserFetchError` with reason
+  `blocked`, a web page rather than YouTube or social), `/extract` fails with `source_blocked`
+  and `deviceFetchAvailable: true`. A Pinterest pin whose outbound page is blocked does not set it,
+  since the caller does not have that link.
+- The phone app never downloads the page in the background (a plain request from a home
+  connection got the same 402 too). Instead, right after the failure, it opens the link on screen
+  in an in-app browser view (`app/open-page.tsx`, built on the `@expo/dom-webview` view the app
+  already ships, with the system web view's own user agent). The person sees the page load and
+  answers any check the site shows them there, as in any browser; pasting the link is all they
+  have to do. Once a page on the link's site (or a shortened link's destination) has loaded and
+  is not the site's check, the app reads it (`document.documentElement.outerHTML`, tied to that
+  request by a nonce, top frame only) and moves on to the recipe. If reading fails, a Save recipe
+  button lets the person try again once the page looks right. `apps/mobile/src/services/device-page.ts`
+  refuses a page on another site, an IP address or a local name, or a page still showing the
+  site's check; it drops styles, SVG, comments and every script but JSON-LD/JSON before uploading
+  (`MAX_DEVICE_PAGE_HTML_CHARS`, 3,000,000 characters). It sends
+  `{ url, devicePage: { html, finalUrl } }` to `/extract`, with the page's own address as `url`.
+- The API reads that HTML through the same path as the link (URL safety, detection, not-found and
+  unrelated-redirect checks, the deterministic extractors), using `extractRecipeFromDevicePage`.
+  The HTML came from a client, so the result never reads or writes the shared result cache. It is
+  billed like a link import, and logs `pageSource: "device"`.
+- The web app cannot open another site's page and read it (CORS, framing rules), so for
+  `deviceFetchAvailable` it names the site and points to Paste text or the phone app.
+
 Cached successes short-circuit this ladder. They are shared only when they cleared the success confidence bar for their source type, and they are billed like any other import.
 
 Strong structured recipes (the site's own JSON-LD or microdata with a title, two or more ingredients and a step) stop at step 3 with a success even when servings or times are missing. Anything that doesn't clear its confidence bar after these steps fails with a plain reason; no step calls an LLM. Photo scans are the only path that uses the configured Gemini/OpenAI provider.

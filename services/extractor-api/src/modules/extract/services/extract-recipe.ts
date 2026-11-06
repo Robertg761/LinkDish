@@ -30,7 +30,11 @@ import {
   SocialFetchError,
   YouTubeFetchError
 } from "../fetchers/errors.js";
-import { looksLikeNotFoundTitle, looksLikeUnrelatedRedirect } from "../fetchers/shared.js";
+import {
+  detectBlockedSignals,
+  looksLikeNotFoundTitle,
+  looksLikeUnrelatedRedirect
+} from "../fetchers/shared.js";
 import { normalizeExtractionCandidate } from "../normalizers/index.js";
 import {
   detectHostedMediaSourceType,
@@ -77,6 +81,12 @@ type ExtractRecipeUrlRequest = {
   attempt: "primary" | "fallback";
   url: string;
   inspired?: true;
+};
+
+/** A page the phone downloaded itself because the site refuses LinkDish's server. */
+type DevicePage = {
+  html: string;
+  finalUrl?: string | undefined;
 };
 
 type ExtractRecipeImageRequest = {
@@ -314,10 +324,24 @@ const getDocumentLogFields = (sourceDocument: SourceDocument, fetchMode: FetchMo
   browserAttempted: fetchMode === "browser"
 });
 
+/*
+ * The site itself answered with a refusal status. A URL-safety rejection (a redirect to a private
+ * address) or a redirect loop is also "blocked", but a device must never be sent after those.
+ */
+const deviceFetchStatusCodes = new Set([401, 402, 403, 429, 451, 503]);
+const isSiteRefusal = (error: HtmlFetchError | BrowserFetchError): boolean =>
+  error.statusCode !== undefined &&
+  deviceFetchStatusCodes.has(error.statusCode) &&
+  !error.blockedSignals.some(
+    (signal) => signal.startsWith("unsafe_redirect") || signal === "too_many_redirects"
+  );
+
 const mapFetchErrorToResponse = (
   error: unknown,
   sourceType: DetectionResult["sourceType"],
-  socialPlatform: ReturnType<typeof socialPlatformName> = "TikTok"
+  socialPlatform: ReturnType<typeof socialPlatformName> = "TikTok",
+  /** The blocked page is the one the caller asked for, so the caller could download it instead. */
+  options: { deviceFetchable?: boolean } = {}
 ): ExtractRecipeResponse => {
   const socialPost = socialPlatform === "TikTok" ? "video" : "post";
 
@@ -336,6 +360,33 @@ const mapFetchErrorToResponse = (
           retryable: true,
           allowFallback: false,
           suggestedAction: "retry_primary"
+        }
+      });
+    }
+
+    /*
+     * A web page that refuses the server (Allrecipes and the other People Inc sites answer every
+     * cloud IP with a 402) often still opens for people, so a client that can download the page
+     * itself is told it may send it (see extractRecipeFromDevicePage).
+     */
+    if (
+      error.reason === "blocked" &&
+      options.deviceFetchable &&
+      (error instanceof HtmlFetchError || error instanceof BrowserFetchError) &&
+      isSiteRefusal(error) &&
+      sourceType !== "youtube" &&
+      sourceType !== "social"
+    ) {
+      return extractRecipeResponseSchema.parse({
+        status: "failure",
+        reason: "source_blocked",
+        userMessage:
+          "That site blocks LinkDish's servers from reading its pages. Copy the recipe from the page and use Paste text instead.",
+        deviceFetchAvailable: true,
+        recovery: {
+          retryable: false,
+          allowFallback: false,
+          suggestedAction: "try_another_url"
         }
       });
     }
@@ -1924,14 +1975,18 @@ const extractFromUrl = async (
 
   const fetchFailureResult = (
     error: unknown,
-    detection: DetectionResult = initialDetection
+    detection: DetectionResult = initialDetection,
+    /* A pin's outbound page is not the link the caller has, so it cannot download it for us. */
+    deviceFetchable = true
   ): ExtractionResult => {
     /* Billing denied the request while a browser render waited for it: that is no fetch error. */
     if (error instanceof ExtractionCancelledError) {
       throw error;
     }
 
-    const response = mapFetchErrorToResponse(error, detection.sourceType);
+    const response = mapFetchErrorToResponse(error, detection.sourceType, undefined, {
+      deviceFetchable
+    });
     const metadata = getFetchErrorMetadata(error);
 
     return {
@@ -2006,7 +2061,7 @@ const extractFromUrl = async (
     try {
       fetchedSource = await fetchSourceDocument(pinOutboundUrl, outboundDetection, context);
     } catch (error) {
-      return fetchFailureResult(error, outboundDetection);
+      return fetchFailureResult(error, outboundDetection, false);
     }
   } else if (request.inspired && initialDetection.sourceType !== "youtube") {
     return rejectInspired(fetchedSource.detection);
@@ -2196,6 +2251,61 @@ export const extractRecipeFromUrl = async (
   } finally {
     dispose();
   }
+};
+
+/*
+ * The requested page is the one the device downloaded; anything else the extraction reads (a
+ * pin's outbound link, a linked recipe page) is fetched by the server as usual.
+ */
+const withDevicePage = (
+  runtime: ExtractorRuntime,
+  url: string,
+  page: DevicePage
+): ExtractorRuntime => ({
+  ...runtime,
+  fetchHtmlDocument: async (requestedUrl, options) => {
+    if (requestedUrl !== url) {
+      return runtime.fetchHtmlDocument(requestedUrl, options);
+    }
+
+    const { buildHtmlSourceDocument } = await import("../html/parsed-html-document.js");
+    const blockedSignals = detectBlockedSignals({ html: page.html, statusCode: 200 });
+
+    return {
+      document: buildHtmlSourceDocument({
+        url,
+        finalUrl: page.finalUrl ?? url,
+        html: page.html,
+        contentType: "text/html",
+        blockedSignals,
+        statusCode: 200
+      }),
+      mode: "http",
+      blockedSignals
+    };
+  }
+});
+
+/**
+ * A page the phone downloaded after /extract said the site blocks the server. It takes the same
+ * path as the link would have (URL safety, detection, the deterministic extractors), but the
+ * HTML came from a client, so the result never reads or writes the shared cache.
+ */
+export const extractRecipeFromDevicePage = async (
+  request: { url: string; attempt: "primary" | "fallback"; devicePage: DevicePage },
+  runtime: ExtractorRuntime = getSharedExtractorRuntime(),
+  options: ExtractRecipeOptions = {}
+): Promise<ExtractionResult> => {
+  const result = await extractRecipeFromUrl(
+    { url: request.url, attempt: request.attempt },
+    withDevicePage(runtime, unwrapFacebookRedirect(request.url), request.devicePage),
+    { ...options, cacheMode: "bypass" }
+  );
+
+  return {
+    ...result,
+    logContext: { ...result.logContext, pageSource: "device" }
+  };
 };
 
 const imageDetection: DetectionResult = {
@@ -2473,6 +2583,18 @@ export const extractRecipe = (
         attempt: "fallback",
         images: request.images,
         sourceUrl: request.sourceUrl
+      },
+      runtime,
+      options
+    );
+  }
+
+  if ("devicePage" in request) {
+    return extractRecipeFromDevicePage(
+      {
+        attempt: request.attempt ?? "primary",
+        url: request.url,
+        devicePage: request.devicePage
       },
       runtime,
       options

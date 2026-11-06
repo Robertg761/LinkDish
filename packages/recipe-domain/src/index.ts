@@ -27,3 +27,4 @@ export * from "./meal-plan-schema.js";
 export * from "./backup.js";
 export * from "./recipe-import.js";
 export * from "./recipe-export.js";
+export * from "./registrable-domain.js";

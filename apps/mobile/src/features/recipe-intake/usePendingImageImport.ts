@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
 
 import {
+  getPendingPageImport,
+  removePendingPageImport,
+  type PendingPageImport
+} from "./pageImport";
+import {
   getPendingImageImport,
   removePendingImageImport,
   type PendingImageImport
@@ -74,3 +79,8 @@ export const usePendingTextImport = (
   textImportId: string | undefined
 ): PendingImportState<PendingTextImport> =>
   usePendingImport(textImportId, getPendingTextImport, removePendingTextImport);
+
+export const usePendingPageImport = (
+  pageImportId: string | undefined
+): PendingImportState<PendingPageImport> =>
+  usePendingImport(pageImportId, getPendingPageImport, removePendingPageImport);

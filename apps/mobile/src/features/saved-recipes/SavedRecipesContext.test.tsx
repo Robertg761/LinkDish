@@ -331,6 +331,7 @@ const createMockClient = (): ExtractorApiClient => ({
   deleteShoppingItems: vi.fn(),
   deleteSharedRecipe: apiMocks.deleteSharedRecipe,
   extractRecipe: vi.fn(),
+  extractRecipeFromDevicePage: vi.fn(),
   extractRecipeFromText: vi.fn(),
   getAuthConfig: vi.fn(),
   getBillingUsage: vi.fn(),

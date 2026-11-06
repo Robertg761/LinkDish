@@ -330,5 +330,7 @@ export interface ExtractionLogContext {
   textCleanup?: "applied" | "not_needed" | "disabled" | "skipped_budget";
   /** Whether Gemini watched the video, and how that went, when nothing written held the recipe. */
   videoRead?: VideoReadOutcome;
+  /** "device": the phone downloaded the page because the site blocks the server. */
+  pageSource?: "device";
   latencyMs: number;
 }

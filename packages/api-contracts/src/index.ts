@@ -82,6 +82,27 @@ const extractRecipeUrlRequestSchema = z.object({
   correlationId: extractionCorrelationIdSchema.optional()
 });
 
+/**
+ * Some sites (Allrecipes and the other People Inc brands) refuse every request from a cloud
+ * server, so the API answers their links with `source_blocked` and `deviceFetchAvailable`. The
+ * phone app then downloads the page itself, over the person's own connection, and sends the
+ * HTML here to be read like a page the API fetched. Never cached: the page came from a client.
+ */
+export const MAX_DEVICE_PAGE_HTML_CHARS = 3_000_000;
+
+export const devicePageSchema = z.object({
+  html: z.string().min(1).max(MAX_DEVICE_PAGE_HTML_CHARS),
+  /** Where the page ended up after redirects, when the device knows. */
+  finalUrl: httpUrlSchema.optional()
+});
+
+export const extractRecipeDevicePageRequestSchema = z.object({
+  url: httpUrlSchema,
+  devicePage: devicePageSchema,
+  attempt: z.enum(["primary", "fallback"]).default("primary"),
+  correlationId: extractionCorrelationIdSchema.optional()
+});
+
 const extractRecipeImageRequestObjectSchema = z.object({
   images: z.array(extractRecipeImageSchema).min(1).max(MAX_IMAGE_EXTRACT_COUNT),
   sourceUrl: httpUrlSchema,
@@ -131,6 +152,8 @@ export const extractRecipeTextRequestSchema = z.object({
  */
 export const extractRecipeAnyRequestSchema = z.union([
   extractRecipeImageRequestSchema,
+  /* Before the plain link: a link schema would accept the same body and drop its page. */
+  extractRecipeDevicePageRequestSchema,
   extractRecipeUrlRequestSchema,
   extractRecipeTextRequestSchema
 ]);
@@ -233,6 +256,11 @@ export const extractRecipeFailureSchema = z.object({
   ]),
   userMessage: z.string().min(1),
   inspiredAvailable: z.boolean().optional(),
+  /**
+   * The site refused LinkDish's server, not necessarily people: a client that can download the
+   * page itself may send it back as an `extractRecipeDevicePageRequestSchema` request.
+   */
+  deviceFetchAvailable: z.boolean().optional(),
   recovery: recoverySchema.optional(),
   quota: quotaStatusSchema.optional()
 });
@@ -259,6 +287,10 @@ export type CompleteRecipeRequest = z.infer<typeof completeRecipeRequestSchema>;
 export type CompleteRecipeResponse = z.infer<typeof completeRecipeResponseSchema>;
 export type ExtractRecipeRequest = z.infer<typeof extractRecipeRequestSchema>;
 export type ExtractRecipeTextRequest = z.infer<typeof extractRecipeTextRequestSchema>;
+export type ExtractRecipeDevicePageRequest = z.infer<typeof extractRecipeDevicePageRequestSchema>;
+export type ExtractRecipeDevicePageRequestInput = z.input<
+  typeof extractRecipeDevicePageRequestSchema
+>;
 export type ExtractRecipeTextRequestInput = z.input<typeof extractRecipeTextRequestSchema>;
 export type ExtractRecipeAnyRequest = z.infer<typeof extractRecipeAnyRequestSchema>;
 export type ExtractRecipeImage = z.infer<typeof extractRecipeImageSchema>;
