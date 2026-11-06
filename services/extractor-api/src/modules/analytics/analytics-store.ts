@@ -195,6 +195,19 @@ const ensureSchema = async (): Promise<void> => {
   }
 };
 
+/*
+ * The same Postgres database also holds the recipe archive (recipe_archive, migration 4). Returns
+ * a pool with the schema current, or null when no database is configured.
+ */
+export const getMigratedAnalyticsDatabase = async (): Promise<Pool | null> => {
+  if (!configured()) {
+    return null;
+  }
+
+  await ensureSchema();
+  return getPool();
+};
+
 /* For the analytics:migrate script: applies pending migrations and returns their versions. */
 export const migrateAnalyticsDatabase = async (): Promise<number[]> =>
   runAnalyticsMigrations(await getPool());

@@ -7,7 +7,13 @@ import {
 } from "../storage/upstash-store.js";
 
 export type AdminAuditAction =
-  "auth.failed" | "auth.locked" | "billing.grant" | "llm.reset" | "llm.update" | "user.lookup";
+  | "auth.failed"
+  | "auth.locked"
+  | "billing.grant"
+  | "llm.reset"
+  | "llm.update"
+  | "recipe.remove"
+  | "user.lookup";
 
 export type AdminAuditOutcome = "denied" | "failure" | "success";
 

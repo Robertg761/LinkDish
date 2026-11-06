@@ -4,6 +4,7 @@ import { getAdminUserAccountDetails, type AdminUserLookupQuery } from "./user-ac
 
 import type { AdminAuditAction, AdminAuditDetail } from "./admin-audit.js";
 import type { AdminModelUpdate, ManagedFallbackExtractor } from "./model-control.js";
+import type { ExtractorRuntime } from "../extract/types.js";
 
 /*
  * The audited admin operations, shared by the Fastify routes and the Vercel adapter so both
@@ -71,3 +72,59 @@ export const resetAdminModelSettings = (
   context: AdminRequestContext,
   extractor: ManagedFallbackExtractor
 ) => withAudit(context, "llm.reset", {}, () => extractor.resetSettingsToEnv());
+
+export class AdminRecipeRemovalError extends Error {
+  constructor(
+    message: string,
+    readonly statusCode: number
+  ) {
+    super(message);
+    this.name = "AdminRecipeRemovalError";
+  }
+}
+
+const parseRecipeLink = (url: string | null): string => {
+  try {
+    const parsed = new URL(url ?? "");
+
+    if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+      return parsed.toString();
+    }
+  } catch {
+    // Reported below.
+  }
+
+  throw new AdminRecipeRemovalError("Pass the recipe link as ?url=https://...", 400);
+};
+
+/*
+ * Removes a link's recipe from LinkDish's shared copies (a takedown request, a bad entry): the
+ * recipe archive and the short-lived result cache. Recipes people already saved stay in their
+ * cookbooks. A later import of the link reads the site again.
+ */
+export const removeAdminArchivedRecipe = (
+  context: AdminRequestContext,
+  runtime: Pick<ExtractorRuntime, "extractionCache" | "recipeArchive">,
+  rawUrl: string | null
+) => {
+  const url = parseRecipeLink(rawUrl);
+
+  return withAudit(
+    context,
+    "recipe.remove",
+    { url: url.slice(0, 300) },
+    async () => {
+      const [archived] = await Promise.all([
+        runtime.recipeArchive?.remove(url) ?? Promise.resolve(false),
+        runtime.extractionCache?.remove(url)
+      ]);
+
+      return {
+        url,
+        archiveConfigured: Boolean(runtime.recipeArchive),
+        removedFromArchive: archived
+      };
+    },
+    (result) => ({ removedFromArchive: result.removedFromArchive })
+  );
+};

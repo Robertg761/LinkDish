@@ -1,6 +1,8 @@
 import { extractorApiEnv } from "../../../config/env.js";
 import { getSharedManagedFallbackExtractor } from "../../admin/model-control.js";
 import { createExtractionResultCache } from "../cache/extraction-cache.js";
+import { createPostgresRecipeArchiveStore } from "../cache/recipe-archive-postgres.js";
+import { createRecipeArchive } from "../cache/recipe-archive.js";
 import { createGeminiRecipeCompleter } from "../completion/gemini-recipe-completer.js";
 import { ExtractionCancelledError } from "../deadline.js";
 import { createGeminiVideoRecipeReader } from "../extractors/video/gemini-video-recipe-reader.js";
@@ -369,6 +371,16 @@ export const createDefaultExtractorRuntime = (): ExtractorRuntime => {
       ? {
           extractionCache: createExtractionResultCache({
             ttlSeconds: extractorApiEnv.EXTRACT_CACHE_TTL_SECONDS
+          })
+        }
+      : {}),
+    ...(extractorApiEnv.RECIPE_ARCHIVE_ENABLED && extractorApiEnv.ANALYTICS_DATABASE_URL
+      ? {
+          recipeArchive: createRecipeArchive({
+            store: createPostgresRecipeArchiveStore(async () =>
+              (await import("../../analytics/analytics-store.js")).getMigratedAnalyticsDatabase()
+            ),
+            refreshAfterMs: extractorApiEnv.RECIPE_ARCHIVE_REFRESH_AFTER_DAYS * 86_400_000
           })
         }
       : {}),

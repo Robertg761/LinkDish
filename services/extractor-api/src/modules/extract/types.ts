@@ -1,4 +1,5 @@
 import type { ExtractionResultCache } from "./cache/extraction-cache.js";
+import type { RecipeArchive } from "./cache/recipe-archive.js";
 import type { RecipeCompleter } from "./completion/gemini-recipe-completer.js";
 import type { RequestDeadline } from "./deadline.js";
 import type { VideoRecipeReader } from "./extractors/video/gemini-video-recipe-reader.js";
@@ -271,6 +272,8 @@ export interface ExtractorRuntime {
   recipeTextCleaner?: RecipeTextCleaner;
   /** URL-keyed store of validated success responses. Test runtimes omit it unless they opt in. */
   extractionCache?: ExtractionResultCache;
+  /** LinkDish's durable copy of recipes read from links. Absent without a database. */
+  recipeArchive?: RecipeArchive;
   validateSourceUrl: ValidateSourceUrl;
   dispose(): Promise<void>;
 }
@@ -324,8 +327,12 @@ export interface ExtractionLogContext {
   finalUrl: string | null;
   blockedSignals: string[];
   browserAttempted: boolean;
-  /** URL result cache outcome: served from cache, looked up and missed, or not consulted. */
-  cacheStatus?: "hit" | "miss" | "bypass";
+  /**
+   * URL result cache outcome: served from the cache, looked up and missed, or not consulted;
+   * "archive" served from the recipe archive without reading the site; "archive_stale" served an
+   * older archived copy because reading the site again failed.
+   */
+  cacheStatus?: "hit" | "miss" | "bypass" | "archive" | "archive_stale";
   /** Whether the Gemini text cleanup ran for a success, and why not when it did not. */
   textCleanup?: "applied" | "not_needed" | "disabled" | "skipped_budget";
   /** Whether Gemini watched the video, and how that went, when nothing written held the recipe. */

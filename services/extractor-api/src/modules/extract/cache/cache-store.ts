@@ -1,5 +1,6 @@
 import { createBoundedExpiringMap } from "../../bounded-expiring-map.js";
 import {
+  deleteStoreKeys,
   getStoreString,
   isKeyValueStoreConfigured,
   setStoreString
@@ -16,17 +17,26 @@ import {
 export interface CacheStore {
   get(key: string): Promise<string | null>;
   set(key: string, value: string, ttlSeconds: number): Promise<void>;
+  delete?(key: string): Promise<void>;
 }
 
 export const cacheStoreRequestTimeoutMs = 1_500;
 
-export const createMemoryCacheStore = (maxEntries: number): CacheStore => {
+export const createMemoryCacheStore = (
+  maxEntries: number
+): CacheStore & {
+  delete(key: string): Promise<void>;
+} => {
   const entries = createBoundedExpiringMap<string>({ maxEntries });
 
   return {
     get: (key) => Promise.resolve(entries.get(key) ?? null),
     set: (key, value, ttlSeconds) => {
       entries.set(key, value, Date.now() + ttlSeconds * 1_000);
+      return Promise.resolve();
+    },
+    delete: (key) => {
+      entries.delete(key);
       return Promise.resolve();
     }
   };
@@ -54,6 +64,7 @@ export const createDefaultCacheStore = ({
         timeoutMs: cacheStoreRequestTimeoutMs,
         ttlSeconds
       });
-    }
+    },
+    delete: (key) => (isKeyValueStoreConfigured() ? deleteStoreKeys(key) : memoryStore.delete(key))
   };
 };

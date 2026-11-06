@@ -373,7 +373,7 @@ parses `extractRecipeAnyRequestSchema`.
   `analytics_schema_migrations`. The API applies pending migrations on first use in each process
   (one transaction under an advisory lock, so concurrent cold starts apply each once); when the
   database is current that is a version read and no DDL. `pnpm --filter @linkdish/extractor-api
-  analytics:migrate` applies them by hand. Never edit a shipped migration; add the next one.
+analytics:migrate` applies them by hand. Never edit a shipped migration; add the next one.
   Migration 1 is the schema the API used to create on every cold start, still guarded by
   `if not exists`, so databases created that way adopt it. Migration 3 adds the error alert
   fingerprint index and checkpoint table; the alert job also applies pending migrations itself.
@@ -409,8 +409,7 @@ parses `extractRecipeAnyRequestSchema`.
   reports them twice. The first run, or a run after the checkpoint is lost, checks the last 60
   minutes; catch-up is capped at 24 hours. It alerts on any fatal error; on at least 25 errors
   (scaled up for a window longer than 60 minutes); or on a new error, first seen in the last 24
-  hours with none in the 7 days before, in the run where its count over those 24 hours reaches
-  3. Each alerting run sends one email (Resend) and/or one Slack or Discord webhook message, so
+  hours with none in the 7 days before, in the run where its count over those 24 hours reaches 3. Each alerting run sends one email (Resend) and/or one Slack or Discord webhook message, so
   a spike that continues alerts again every hour. A run that cannot deliver its alert fails and
   leaves the checkpoint where it was, so the next run reports those errors again.
 - Error messages come from clients, so the webhook message cannot ping anyone or render links
@@ -544,7 +543,35 @@ Performance pieces in `services/extractor-api/src/modules/extract`:
   presents `LINKDISH_CANARY_TOKEN` as a bearer token (the same check billing uses) skips
   cache reads and refreshes the entry; the bare `x-linkdish-canary` marker is
   caller-controlled and only keeps a request out of durable analytics. Responses carry
-  `x-linkdish-cache: hit|miss|bypass`, and logs and analytics carry `cacheStatus`.
+  `x-linkdish-cache: hit|miss|bypass|archive|archive_stale`, and logs and analytics carry
+  `cacheStatus`.
+- **Recipe archive** (`cache/recipe-archive.ts`, `cache/recipe-archive-postgres.ts`): LinkDish's
+  own lasting copy of every recipe it has read from a link, in the Postgres database the API
+  uses for analytics (table `recipe_archive`, analytics migration 4; the retention jobs never
+  touch it). It is keyed by the same `sha256(canonical URL)` as the result cache and holds
+  exactly what the result cache may hold (the same `evaluateExtractionCacheWrite` rules), but it
+  has no TTL and survives `EXTRACTOR_CACHE_VERSION` bumps. Only the structured recipe is kept:
+  title, ingredients, steps, times, servings, nutrition, the image's URL, the source link and
+  attribution fields, never page HTML or image bytes. People's own edits live in their cookbooks
+  and cloud library and never change an archive entry.
+  - The lookup runs alongside the result-cache lookup and URL validation, with a 1.5 s timeout
+    (a slow or failing database reads as a miss). After a cache miss, an entry from the current
+    extractor that is younger than `RECIPE_ARCHIVE_REFRESH_AFTER_DAYS` (default 30) is served
+    without contacting the site (`cacheStatus: "archive"`) and refills the result cache.
+  - An older entry, or one from an earlier extractor version, makes the import read the site
+    again; a success replaces the entry. If that read fails for any reason (the site now blocks
+    LinkDish, the page is gone, DNS fails), the archived copy is served instead
+    (`cacheStatus: "archive_stale"`) and `refresh_failed_at` is set, so the site is not asked
+    again for 24 hours (the entry counts as fresh until then).
+  - A Pinterest pin's outbound page is served from a fresh archive entry too; a stale one there
+    is not used as a fallback.
+  - Writes run after the response, like cache writes. Bypass mode (inspired recipes, text and
+    image imports) neither reads nor writes it; the authorized canary skips the read and
+    refreshes the entry.
+  - It is on whenever `ANALYTICS_DATABASE_URL` is set; `RECIPE_ARCHIVE_ENABLED=false` is the
+    kill switch. `DELETE /admin/api/recipes?url=<link>` (admin auth, audited as
+    `recipe.remove`) removes a link from the archive and the result cache, for a takedown
+    request or a bad entry; recipes people already saved are not touched.
 - **One deadline** (`deadline.ts`): `EXTRACT_REQUEST_DEADLINE_MS` (default 50 s, under
   the 60 s `maxDuration`) sizes every step. The HTTP fetch retries at most once, only
   after connection errors, and not at all when Playwright can take over. The browser
@@ -623,7 +650,7 @@ Production extraction is expected to follow this ladder:
 3. Deterministic extraction and confidence scoring.
 4. For YouTube, the "full recipe" links in the description when the description itself has no method.
 
-Cached successes short-circuit this ladder. They are shared only when they cleared the success confidence bar for their source type, and they are billed like any other import.
+Cached successes and fresh recipe-archive entries short-circuit this ladder, and a stale archive entry is served when the ladder fails. They are shared only when they cleared the success confidence bar for their source type, and they are billed like any other import.
 
 Strong structured recipes (the site's own JSON-LD or microdata with a title, two or more ingredients and a step) stop at step 3 with a success even when servings or times are missing. Anything that doesn't clear its confidence bar after these steps fails with a plain reason; no step calls an LLM. Photo scans are the only path that uses the configured Gemini/OpenAI provider.
 
