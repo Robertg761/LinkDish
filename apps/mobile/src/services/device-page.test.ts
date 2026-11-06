@@ -6,6 +6,7 @@ import {
   pageProblemMessage,
   prepareCapturedPage,
   readPageViewMessage,
+  resolvePageSite,
   slimPageHtml,
   unwrapFacebookLinkWrapper
 } from "./device-page";
@@ -187,5 +188,19 @@ describe("unwrapFacebookLinkWrapper", () => {
 describe("pageProblemMessage", () => {
   it("names the site", () => {
     expect(pageProblemMessage("other_site", url)).toContain("allrecipes.com");
+  });
+});
+
+describe("resolvePageSite", () => {
+  it("is the link's own site, or a shortened link's first real destination", () => {
+    expect(resolvePageSite(url, null, null)).toBe(url);
+    expect(resolvePageSite(url, null, "https://www.example.com/")).toBe(url);
+
+    const short = "https://bit.ly/soup";
+    expect(resolvePageSite(short, null, null)).toBeNull();
+    expect(resolvePageSite(short, null, "https://bit.ly/soup+")).toBeNull();
+    expect(resolvePageSite(short, null, "http://10.0.0.1/")).toBeNull();
+    expect(resolvePageSite(short, null, url)).toBe(url);
+    expect(resolvePageSite(short, url, "https://www.example.com/")).toBe(url);
   });
 });

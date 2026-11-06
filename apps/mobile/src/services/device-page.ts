@@ -1,5 +1,5 @@
 import { MAX_DEVICE_PAGE_HTML_CHARS } from "@linkdish/api-contracts";
-import { isSameRegistrableDomain } from "@linkdish/recipe-domain";
+import { isKnownLinkShortener, isSameRegistrableDomain } from "@linkdish/recipe-domain";
 
 /*
  * Some recipe sites (Allrecipes and the other People Inc brands) refuse every request from a
@@ -215,6 +215,41 @@ export const unwrapFacebookLinkWrapper = (url: string): string => {
   }
 
   return current;
+};
+
+const hostOf = (url: string): string | null => {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * The site a saved page must be on. That is the link's own site, unless the link is a shortener
+ * (bit.ly, linktr.ee...), whose job is to send people elsewhere: then it is the first page shown
+ * that is not a shortener, which the API followed too. Null while only the shortener has shown.
+ */
+export const resolvePageSite = (
+  linkUrl: string,
+  currentSite: string | null,
+  shownHref: string | null
+): string | null => {
+  if (currentSite) {
+    return currentSite;
+  }
+
+  const linkHost = hostOf(linkUrl);
+
+  if (linkHost && !isKnownLinkShortener(linkHost)) {
+    return linkUrl;
+  }
+
+  const shownHost = shownHref ? hostOf(shownHref) : null;
+
+  return shownHref && shownHost && !isKnownLinkShortener(shownHost) && isSameSitePublicPage(shownHref, shownHref)
+    ? shownHref
+    : null;
 };
 
 /**

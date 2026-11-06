@@ -14,6 +14,7 @@ import {
   pageSiteLabel,
   prepareCapturedPage,
   readPageViewMessage,
+  resolvePageSite,
   unwrapFacebookLinkWrapper
 } from "../src/services/device-page";
 import { appColors, appSpacing } from "../src/theme/tokens";
@@ -40,6 +41,8 @@ export default function OpenPageScreen() {
   const webViewRef = useRef<DomWebViewRef>(null);
   const captureNonceRef = useRef<string | null>(null);
   const captureTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /* The site a saved page must be on (a shortened link's destination once it shows). */
+  const pageSiteRef = useRef<string | null>(null);
   const [shownHref, setShownHref] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
@@ -86,6 +89,7 @@ export default function OpenPageScreen() {
       }
 
       if (message.kind === "shown") {
+        pageSiteRef.current = resolvePageSite(pageUrl, pageSiteRef.current, message.href);
         setShownHref(message.href);
         return;
       }
@@ -95,10 +99,11 @@ export default function OpenPageScreen() {
       }
 
       stopWaiting();
-      const prepared = prepareCapturedPage(pageUrl, { href: message.href, html: message.html });
+      const pageSite = resolvePageSite(pageUrl, pageSiteRef.current, null) ?? pageUrl;
+      const prepared = prepareCapturedPage(pageSite, { href: message.href, html: message.html });
 
       if ("problem" in prepared) {
-        setProblem(pageProblemMessage(prepared.problem, pageUrl));
+        setProblem(pageProblemMessage(prepared.problem, pageSite));
         return;
       }
 

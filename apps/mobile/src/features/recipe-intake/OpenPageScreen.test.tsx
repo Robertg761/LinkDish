@@ -155,6 +155,17 @@ describe("OpenPageScreen", () => {
     expect(texts(renderer).join(" ")).toContain("This page isn't on allrecipes.com");
   });
 
+  it("saves a shortened link's recipe page, judged by where the link led", () => {
+    mocks.params = { url: "https://bit.ly/onion-soup" };
+    const renderer = render();
+    post(renderer, { type: "linkdish:page-shown", href: url, title: "Soup" });
+    const nonce = tapSave(renderer);
+
+    post(renderer, { type: "linkdish:page-captured", nonce, href: url, html: recipePage });
+
+    expect(mocks.replace).toHaveBeenCalledOnce();
+  });
+
   it("won't open a local address", () => {
     mocks.params = { url: "http://192.168.1.1/" };
     const renderer = render();
