@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-
 import {
   extractRecipeSuccessSchema,
   type ExtractRecipeResponse,
@@ -8,7 +6,7 @@ import {
 import { isThresholdSourceType, successConfidenceThresholds } from "../confidence/thresholds.js";
 
 import { createDefaultCacheStore, type CacheStore } from "./cache-store.js";
-import { canonicalizeSourceUrl, isSameSiteFetch } from "./canonical-url.js";
+import { hashCanonicalSourceUrl, isSameSiteFetch } from "./canonical-url.js";
 
 import type { DetectionResult } from "../types.js";
 
@@ -92,19 +90,19 @@ export type ExtractionCacheSkipReason =
  * the server fetched itself are cached (a primary attempt's optional text cleanup only tidies
  * that deterministic recipe and keeps its strategy and provenance).
  */
-const isLlmDerived = (response: ExtractRecipeSuccess): boolean =>
+export const isLlmDerivedExtraction = (response: ExtractRecipeSuccess): boolean =>
   response.extraction.strategy === "llm-fallback" || response.extraction.provenance.includes("llm");
 
 export interface ExtractionResultCache {
   read(url: string): Promise<CachedExtraction | null>;
   /** Stores a cacheable success; returns why an entry was not stored, or null when stored. */
   write(entry: ExtractionCacheWrite): Promise<ExtractionCacheSkipReason | null>;
+  /** Drops a link's entry (an admin removal); a store without deletes lets it expire. */
+  remove(url: string): Promise<void>;
 }
 
 export const getExtractionCacheKey = (url: string): string =>
-  `${cacheKeyPrefix}:${EXTRACTOR_CACHE_VERSION}:${createHash("sha256")
-    .update(canonicalizeSourceUrl(url))
-    .digest("hex")}`;
+  `${cacheKeyPrefix}:${EXTRACTOR_CACHE_VERSION}:${hashCanonicalSourceUrl(url)}`;
 
 /**
  * Only validated deterministic successes at or above the success confidence bar
@@ -128,7 +126,7 @@ export const evaluateExtractionCacheWrite = (
     return { skipReason: "below_confidence_threshold" };
   }
 
-  if (isLlmDerived(entry.response)) {
+  if (isLlmDerivedExtraction(entry.response)) {
     return { skipReason: "llm_derived" };
   }
 
@@ -162,7 +160,7 @@ const parseCachedEntry = (rawValue: string): CachedExtraction | null => {
 
   if (
     !response.success ||
-    isLlmDerived(response.data) ||
+    isLlmDerivedExtraction(response.data) ||
     (detectionConfidence !== "high" &&
       detectionConfidence !== "medium" &&
       detectionConfidence !== "low")
@@ -211,5 +209,8 @@ export const createExtractionResultCache = ({
     );
 
     return null;
+  },
+  remove: async (url) => {
+    await store.delete?.(getExtractionCacheKey(url));
   }
 });

@@ -8,6 +8,7 @@
 export interface BoundedExpiringMap<T> {
   get(key: string, nowMs?: number): T | undefined;
   set(key: string, value: T, expiresAtMs: number | null, nowMs?: number): void;
+  delete(key: string): void;
   prune(nowMs?: number): number;
   size(): number;
   clear(): void;
@@ -84,6 +85,9 @@ export const createBoundedExpiringMap = <T>({
       entries.delete(key);
       entries.set(key, { value, expiresAtMs });
       maybePrune(nowMs);
+    },
+    delete: (key) => {
+      entries.delete(key);
     },
     prune,
     size: () => entries.size,

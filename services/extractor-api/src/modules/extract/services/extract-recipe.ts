@@ -15,6 +15,7 @@ import {
   type SourceType
 } from "../../../../../../packages/recipe-domain/src/index.js";
 import { extractorApiEnv } from "../../../config/env.js";
+import { EXTRACTOR_CACHE_VERSION } from "../cache/extraction-cache.js";
 import { isStrongStructuredCandidate } from "../confidence/score-recipe.js";
 import { successConfidenceThresholds } from "../confidence/thresholds.js";
 import {
@@ -52,6 +53,7 @@ import { assertYouTubeVideoId, getSharedExtractorRuntime } from "./runtime.js";
 import type * as HtmlAnalysis from "./html-analysis.js";
 import type { FetchMode } from "../../../../../../packages/api-contracts/src/index.js";
 import type { CachedExtraction } from "../cache/extraction-cache.js";
+import type { ArchivedRecipe } from "../cache/recipe-archive.js";
 import type { VideoRecipeSource } from "../extractors/video/gemini-video-recipe-reader.js";
 import type {
   VideoRecipeContext,
@@ -827,6 +829,12 @@ const cleanNormalizedExtraction = async (
   };
 };
 
+/*
+ * A shareable success goes into the recipe archive (LinkDish's lasting copy) and the short-lived
+ * result cache, under the same rules (deterministic, over the confidence bar, no cross-site
+ * redirect). The archive is written first: a link an admin removed is kept out of both. If the
+ * archive itself fails, the result cache is still written.
+ */
 const scheduleCacheWrite = (
   context: ExtractionContext,
   requestUrl: string,
@@ -834,26 +842,100 @@ const scheduleCacheWrite = (
   sourceDocument: SourceDocument,
   detection: DetectionResult
 ): Promise<void> => {
+  const { extractionCache: cache, recipeArchive: archive } = context.runtime;
+
+  if ((!cache && !archive) || context.cacheMode === "bypass" || response.status !== "success") {
+    return Promise.resolve();
+  }
+
+  const entry = {
+    response,
+    requestUrl,
+    finalUrl: sourceDocument.kind === "html" ? sourceDocument.finalUrl : null,
+    statusCode: sourceDocument.kind === "html" ? sourceDocument.statusCode : null,
+    detectionConfidence: detection.confidence
+  };
+
+  return context.afterResponse(async () => {
+    if (archive) {
+      const archived = await archive.write(entry).catch((error: unknown) => {
+        console.warn(
+          JSON.stringify({
+            event: "recipe_archive_write_failed",
+            message: error instanceof Error ? error.message : "Unknown error"
+          })
+        );
+        return null;
+      });
+
+      if (archived === "removed") {
+        return;
+      }
+    }
+
+    await cache?.write(entry);
+  });
+};
+
+const readArchivedRecipe = async (
+  context: ExtractionContext,
+  url: string
+): Promise<ArchivedRecipe | null> => {
+  const archive = context.runtime.recipeArchive;
+
+  if (!archive) {
+    return null;
+  }
+
+  try {
+    return await archive.read(url);
+  } catch (error) {
+    console.warn(
+      JSON.stringify({
+        event: "recipe_archive_read_failed",
+        message: error instanceof Error ? error.message : "Unknown error"
+      })
+    );
+    return null;
+  }
+};
+
+/*
+ * An archive entry served without reading the site also refills the short-lived result cache,
+ * so the next import of the link is answered from Upstash. Only entries from the current
+ * extractor are copied: the cache key carries EXTRACTOR_CACHE_VERSION. An entry served only
+ * because a refresh just failed is not copied either: the cache would hold it for its whole TTL
+ * and keep the site from being read again after the one-day backoff.
+ */
+const scheduleCacheBackfill = (
+  context: ExtractionContext,
+  url: string,
+  archived: ArchivedRecipe
+): Promise<void> => {
   const cache = context.runtime.extractionCache;
 
-  if (!cache || context.cacheMode === "bypass" || response.status !== "success") {
+  if (
+    !cache ||
+    archived.extractorVersion !== EXTRACTOR_CACHE_VERSION ||
+    archived.refreshFailedAt !== null
+  ) {
     return Promise.resolve();
   }
 
   return context.afterResponse(async () => {
     await cache.write({
-      response,
-      requestUrl,
-      finalUrl: sourceDocument.kind === "html" ? sourceDocument.finalUrl : null,
-      statusCode: sourceDocument.kind === "html" ? sourceDocument.statusCode : null,
-      detectionConfidence: detection.confidence
+      response: archived.response,
+      requestUrl: url,
+      finalUrl: archived.finalUrl,
+      statusCode: archived.statusCode,
+      detectionConfidence: archived.detectionConfidence
     });
   });
 };
 
-/* Unsupported social/video links can never be cached, so they skip the lookup. */
+/* Unsupported social/video links can never be cached or archived, so they skip the lookup. */
 const isCacheLookupEnabled = (context: ExtractionContext, initialDetection: DetectionResult) =>
-  Boolean(context.runtime.extractionCache) &&
+  Boolean(context.runtime.extractionCache ?? context.runtime.recipeArchive) &&
   context.cacheMode === "default" &&
   !isUnsupportedInitialSource(initialDetection.sourceType);
 
@@ -885,11 +967,20 @@ const readCachedExtraction = async (
  * sourceUrl is the URL this caller asked for (the saved-recipe id is derived
  * from it), and the log context describes this request.
  */
+const cacheHitReasons: Record<StoredResultStatus, string> = {
+  hit: "Served from the extraction result cache.",
+  archive: "Served from the recipe archive.",
+  archive_stale: "Served from the recipe archive after reading the source again failed."
+};
+
+type StoredResultStatus = "hit" | "archive" | "archive_stale";
+
 const buildCacheHitResult = (
   request: ExtractRecipeUrlRequest,
   cached: CachedExtraction,
   runtime: ExtractorRuntime,
-  hostname: string
+  hostname: string,
+  cacheStatus: StoredResultStatus = "hit"
 ): ExtractionResult => {
   const response = extractRecipeResponseSchema.parse({
     ...cached.response,
@@ -908,7 +999,7 @@ const buildCacheHitResult = (
         detection: {
           sourceType: extraction.sourceType,
           confidence: cached.detectionConfidence,
-          reasons: ["Served from the extraction result cache."],
+          reasons: [cacheHitReasons[cacheStatus]],
           adapterKey: null
         },
         attempt: request.attempt,
@@ -921,7 +1012,7 @@ const buildCacheHitResult = (
         blockedSignals: [],
         browserAttempted: false
       }),
-      cacheStatus: "hit"
+      cacheStatus
     }
   };
 };
@@ -1834,10 +1925,13 @@ const extractFromUrl = async (
   const hostname = new URL(request.url).hostname;
   const cacheLookupEnabled = !request.inspired && isCacheLookupEnabled(context, initialDetection);
 
-  /* URL safety (DNS) and the cache lookup are independent. */
+  /* URL safety (DNS), the cache lookup and the archive lookup are independent. */
   const validation = runtime.validateSourceUrl(request.url);
   const cacheLookup = cacheLookupEnabled
     ? readCachedExtraction(context, request.url)
+    : Promise.resolve(null);
+  const archiveLookup = cacheLookupEnabled
+    ? readArchivedRecipe(context, request.url)
     : Promise.resolve(null);
 
   void validation.catch(() => undefined);
@@ -1848,6 +1942,63 @@ const extractFromUrl = async (
     return buildCacheHitResult(request, cached, runtime, hostname);
   }
 
+  const archived = await archiveLookup;
+
+  if (archived && runtime.recipeArchive?.isFresh(archived)) {
+    await scheduleCacheBackfill(context, request.url, archived);
+    return buildCacheHitResult(request, archived, runtime, hostname, "archive");
+  }
+
+  const staleOutbound: StaleArchiveHolder = { current: null };
+  const live = await extractFromUrlLive(
+    request,
+    context,
+    hostname,
+    initialDetection,
+    validation,
+    staleOutbound
+  );
+
+  /*
+   * The archived copy is older than the refresh age (or from an older extractor), so the site was
+   * read again. When that fails (the site now blocks LinkDish, the page is gone, DNS fails), the
+   * copy LinkDish already has is better than an error. For a Pinterest pin, that is the copy of
+   * the recipe page the pin links to.
+   */
+  const stale = archived ? { request, archived } : staleOutbound.current;
+
+  if (stale && live.response.status !== "success") {
+    const archive = runtime.recipeArchive;
+
+    /* A request billing turned down tells nothing about the site, so it starts no backoff. */
+    if (archive && (await context.authorization)) {
+      await context.afterResponse(
+        () => archive.markRefreshFailed(stale.request.url),
+        "recipe_archive_write_failed"
+      );
+    }
+
+    return buildCacheHitResult(stale.request, stale.archived, runtime, hostname, "archive_stale");
+  }
+
+  return live;
+};
+
+/* An archived copy that was too old to serve up front, kept in case reading the site fails. */
+type StaleArchiveHolder = {
+  current: { request: ExtractRecipeUrlRequest; archived: ArchivedRecipe } | null;
+};
+
+/* Reads the link itself: everything after the cache and archive had nothing to serve. */
+const extractFromUrlLive = async (
+  request: ExtractRecipeUrlRequest,
+  context: ExtractionContext,
+  hostname: string,
+  initialDetection: DetectionResult,
+  validation: ReturnType<ExtractorRuntime["validateSourceUrl"]>,
+  staleOutbound: StaleArchiveHolder
+): Promise<ExtractionResult> => {
+  const { runtime } = context;
   const sourceUrlSafety = await validation;
 
   if (isSourceUrlRejection(sourceUrlSafety)) {
@@ -2001,6 +2152,20 @@ const extractFromUrl = async (
 
     if (cached) {
       return buildCacheHitResult(outboundRequest, cached, runtime, hostname);
+    }
+
+    const archivedOutbound =
+      !request.inspired && isCacheLookupEnabled(context, outboundDetection)
+        ? await readArchivedRecipe(context, pinOutboundUrl)
+        : null;
+
+    if (archivedOutbound && runtime.recipeArchive?.isFresh(archivedOutbound)) {
+      await scheduleCacheBackfill(context, pinOutboundUrl, archivedOutbound);
+      return buildCacheHitResult(outboundRequest, archivedOutbound, runtime, hostname, "archive");
+    }
+
+    if (archivedOutbound) {
+      staleOutbound.current = { request: outboundRequest, archived: archivedOutbound };
     }
 
     try {

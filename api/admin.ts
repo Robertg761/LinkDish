@@ -6,8 +6,10 @@ import {
   type AdminRequestContext
 } from "../services/extractor-api/src/modules/admin/admin-access.js";
 import {
+  AdminRecipeRemovalError,
   grantAdminBillingPlan,
   lookupAdminUserAccount,
+  removeAdminArchivedRecipe,
   resetAdminModelSettings,
   updateAdminModelSettings
 } from "../services/extractor-api/src/modules/admin/admin-actions.js";
@@ -299,6 +301,24 @@ const handleDelete = async (request: Request): Promise<Response> => {
 
   if (admin instanceof Response) {
     return admin;
+  }
+
+  if (getAdminPath(url) === "api/recipes") {
+    try {
+      return Response.json(
+        await removeAdminArchivedRecipe(
+          admin,
+          getSharedExtractorRuntime(),
+          url.searchParams.get("url")
+        )
+      );
+    } catch (error) {
+      if (error instanceof AdminRecipeRemovalError) {
+        return jsonError(error.message, error.statusCode);
+      }
+
+      throw error;
+    }
   }
 
   if (getAdminPath(url) !== "api/llm") {

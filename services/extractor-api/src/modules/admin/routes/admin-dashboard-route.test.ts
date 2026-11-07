@@ -539,6 +539,64 @@ describe("admin dashboard routes", () => {
     expect(persistedSettings.size).toBe(0);
   });
 
+  it("removes a link's recipe from the recipe archive and the result cache", async () => {
+    const { getSharedExtractorRuntime } = await import("../../extract/services/runtime.js");
+    const { createMemoryRecipeArchiveStore, createRecipeArchive } =
+      await import("../../extract/cache/recipe-archive.js");
+    const { hashCanonicalSourceUrl } = await import("../../extract/cache/canonical-url.js");
+    const archiveStore = createMemoryRecipeArchiveStore();
+    const removeFromCache = vi.fn(() => Promise.resolve());
+    const shared = getSharedExtractorRuntime();
+    const app = buildApp({
+      runtime: {
+        ...shared,
+        extractionCache: {
+          read: () => Promise.resolve(null),
+          write: () => Promise.resolve(null),
+          remove: removeFromCache
+        },
+        recipeArchive: createRecipeArchive({ store: archiveStore, refreshAfterMs: 1_000 })
+      }
+    });
+    const url = "https://example.com/recipes/onion-soup";
+    archiveStore.records.set(hashCanonicalSourceUrl(url), {
+      urlHash: hashCanonicalSourceUrl(url),
+      canonicalUrl: url,
+      sourceHostname: "example.com",
+      sourceType: "recipe_site",
+      extractorVersion: "test",
+      origin: "server",
+      response: {},
+      finalUrl: null,
+      statusCode: null,
+      detectionConfidence: "high",
+      extractedAt: new Date().toISOString(),
+      refreshFailedAt: null
+    });
+
+    const response = await app.inject({
+      method: "DELETE",
+      url: `/admin/api/recipes?url=${encodeURIComponent(`${url}?utm_source=x`)}`,
+      remoteAddress: "127.0.0.1"
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ archiveConfigured: true, removedFromArchive: true });
+    expect(archiveStore.records.size).toBe(0);
+    expect(removeFromCache).toHaveBeenCalledWith(`${url}?utm_source=x`);
+    /* Deleted again once an in-flight backfill from before the removal could have landed. */
+    expect(removeFromCache).toHaveBeenCalledTimes(2);
+
+    const invalid = await app.inject({
+      method: "DELETE",
+      url: "/admin/api/recipes?url=not-a-link",
+      remoteAddress: "127.0.0.1"
+    });
+
+    expect(invalid.statusCode).toBe(400);
+    await app.close();
+  }, 15_000);
+
   it("requires a configured admin token before running billing grants", async () => {
     const auth = await import("../../auth/auth-service.js");
     await auth.upsertUserByEmail("locked@example.com");

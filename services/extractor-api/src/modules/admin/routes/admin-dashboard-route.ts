@@ -6,8 +6,10 @@ import {
   type AdminRequestContext
 } from "../admin-access.js";
 import {
+  AdminRecipeRemovalError,
   grantAdminBillingPlan,
   lookupAdminUserAccount,
+  removeAdminArchivedRecipe,
   resetAdminModelSettings,
   updateAdminModelSettings
 } from "../admin-actions.js";
@@ -190,6 +192,25 @@ export const registerAdminDashboardRoutes = (app: FastifyInstance, runtime: Extr
           message: "Could not reset persisted model settings.",
           detail: error.message
         });
+      }
+
+      throw error;
+    }
+  });
+
+  /* Removes a link's recipe from the recipe archive and the result cache (?url=). */
+  app.delete("/admin/api/recipes", async (request, reply) => {
+    const { url } = (request.query ?? {}) as { url?: unknown };
+
+    try {
+      return await removeAdminArchivedRecipe(
+        getAdminContext(request),
+        runtime,
+        typeof url === "string" ? url : null
+      );
+    } catch (error) {
+      if (error instanceof AdminRecipeRemovalError) {
+        return reply.status(error.statusCode).send({ message: error.message });
       }
 
       throw error;

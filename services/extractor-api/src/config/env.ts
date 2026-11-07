@@ -67,6 +67,21 @@ const parsedExtractorApiEnv = readEnv(
       .default(7 * 24 * 60 * 60)
       .transform((value) => Math.min(Math.max(value, 60), 30 * 24 * 60 * 60)),
     /*
+     * LinkDish's own Postgres copy of every recipe read from a link (recipe-archive.ts). Only
+     * active when ANALYTICS_DATABASE_URL is set; this is the kill switch.
+     */
+    RECIPE_ARCHIVE_ENABLED: z
+      .union([trimmedBooleanString, z.boolean()])
+      .default("true")
+      .transform((value) => value === true || value === "true"),
+    /* Days an archived recipe is served before the site is read again, clamped to 1 .. 365. */
+    RECIPE_ARCHIVE_REFRESH_AFTER_DAYS: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(30)
+      .transform((value) => Math.min(Math.max(value, 1), 365)),
+    /*
      * Gemini text cleanup of successful imports. Even when enabled it only runs
      * when the text shows artifacts and an LLM provider is active (not "none").
      */

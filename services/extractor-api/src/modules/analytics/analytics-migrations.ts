@@ -184,6 +184,41 @@ export const analyticsMigrations: readonly AnalyticsMigration[] = [
         checked_until timestamptz not null
       );
     `
+  },
+  {
+    /*
+     * LinkDish's own copy of every recipe it has read from a link (modules/extract/cache/
+     * recipe-archive.ts). Not analytics: the analytics retention jobs never touch it.
+     */
+    version: 4,
+    name: "recipe_archive",
+    sql: `
+      create table if not exists recipe_archive (
+        url_hash text primary key,
+        canonical_url text not null,
+        source_hostname text not null,
+        source_type text not null,
+        extractor_version text not null,
+        origin text not null,
+        response jsonb not null,
+        final_url text,
+        status_code integer,
+        detection_confidence text not null,
+        first_extracted_at timestamptz not null default now(),
+        extracted_at timestamptz not null,
+        refresh_failed_at timestamptz
+      );
+
+      create index if not exists recipe_archive_hostname_idx
+        on recipe_archive (source_hostname);
+
+      -- Links an admin removed (a takedown request): never archived again.
+      create table if not exists recipe_archive_removals (
+        url_hash text primary key,
+        canonical_url text not null,
+        removed_at timestamptz not null
+      );
+    `
   }
 ];
 
