@@ -1949,28 +1949,44 @@ const extractFromUrl = async (
     return buildCacheHitResult(request, archived, runtime, hostname, "archive");
   }
 
-  const live = await extractFromUrlLive(request, context, hostname, initialDetection, validation);
+  const staleOutbound: StaleArchiveHolder = { current: null };
+  const live = await extractFromUrlLive(
+    request,
+    context,
+    hostname,
+    initialDetection,
+    validation,
+    staleOutbound
+  );
 
   /*
    * The archived copy is older than the refresh age (or from an older extractor), so the site was
    * read again. When that fails (the site now blocks LinkDish, the page is gone, DNS fails), the
-   * copy LinkDish already has is better than an error.
+   * copy LinkDish already has is better than an error. For a Pinterest pin, that is the copy of
+   * the recipe page the pin links to.
    */
-  if (archived && live.response.status !== "success") {
+  const stale = archived ? { request, archived } : staleOutbound.current;
+
+  if (stale && live.response.status !== "success") {
     const archive = runtime.recipeArchive;
 
     /* A request billing turned down tells nothing about the site, so it starts no backoff. */
     if (archive && (await context.authorization)) {
       await context.afterResponse(
-        () => archive.markRefreshFailed(request.url),
+        () => archive.markRefreshFailed(stale.request.url),
         "recipe_archive_write_failed"
       );
     }
 
-    return buildCacheHitResult(request, archived, runtime, hostname, "archive_stale");
+    return buildCacheHitResult(stale.request, stale.archived, runtime, hostname, "archive_stale");
   }
 
   return live;
+};
+
+/* An archived copy that was too old to serve up front, kept in case reading the site fails. */
+type StaleArchiveHolder = {
+  current: { request: ExtractRecipeUrlRequest; archived: ArchivedRecipe } | null;
 };
 
 /* Reads the link itself: everything after the cache and archive had nothing to serve. */
@@ -1979,7 +1995,8 @@ const extractFromUrlLive = async (
   context: ExtractionContext,
   hostname: string,
   initialDetection: DetectionResult,
-  validation: ReturnType<ExtractorRuntime["validateSourceUrl"]>
+  validation: ReturnType<ExtractorRuntime["validateSourceUrl"]>,
+  staleOutbound: StaleArchiveHolder
 ): Promise<ExtractionResult> => {
   const { runtime } = context;
   const sourceUrlSafety = await validation;
@@ -2145,6 +2162,10 @@ const extractFromUrlLive = async (
     if (archivedOutbound && runtime.recipeArchive?.isFresh(archivedOutbound)) {
       await scheduleCacheBackfill(context, pinOutboundUrl, archivedOutbound);
       return buildCacheHitResult(outboundRequest, archivedOutbound, runtime, hostname, "archive");
+    }
+
+    if (archivedOutbound) {
+      staleOutbound.current = { request: outboundRequest, archived: archivedOutbound };
     }
 
     try {

@@ -565,8 +565,8 @@ Performance pieces in `services/extractor-api/src/modules/extract`:
     (`cacheStatus: "archive_stale"`) and `refresh_failed_at` is set, so the site is not asked
     again for 24 hours (the entry counts as fresh until then, but is not copied into the result
     cache, so the site is tried again once the day is up).
-  - A Pinterest pin's outbound page is served from a fresh archive entry too; a stale one there
-    is not used as a fallback.
+  - A Pinterest pin's outbound page uses the archive the same way: a fresh entry is served, and
+    an older one is served when reading the recipe page again fails.
   - Writes run after the response, archive first and then the result cache (if the archive write
     fails, the cache is still written). Bypass mode (inspired recipes, text and
     image imports) neither reads nor writes it; the authorized canary skips the read and

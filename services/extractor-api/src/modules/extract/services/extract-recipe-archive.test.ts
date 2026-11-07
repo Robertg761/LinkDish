@@ -27,13 +27,15 @@ const dayMs = 86_400_000;
 const createTestRuntime = (
   options: {
     archiveStore?: RecipeArchiveStore;
-    blocked?: () => boolean;
+    blocked?: (url: string) => boolean;
     refreshAfterMs?: number;
+    /** Pages other than the recipe fixture, by URL. */
+    pages?: Record<string, string>;
   } = {}
 ) => {
   const archiveStore = options.archiveStore ?? createMemoryRecipeArchiveStore();
   const fetchHtmlDocument = vi.fn<ExtractorRuntime["fetchHtmlDocument"]>((url: string) => {
-    if (options.blocked?.()) {
+    if (options.blocked?.(url)) {
       return Promise.reject(new HtmlFetchError("Blocked", "blocked", ["status_402"], 402, url));
     }
 
@@ -42,7 +44,7 @@ const createTestRuntime = (
         kind: "html" as const,
         url,
         finalUrl: url,
-        html: recipeJsonLd,
+        html: options.pages?.[url] ?? recipeJsonLd,
         contentType: "text/html",
         title: "Fixture HTML",
         description: null,
@@ -228,6 +230,38 @@ describe("recipe archive in the extract pipeline", () => {
     /* The backed-off copy was not put in the result cache, so the next try reaches the archive. */
     const again = await extractRecipe({ attempt: "primary", url: recipeUrl }, sameProcess);
     expect(again.logContext.cacheStatus).toBe("archive");
+  });
+
+  it("serves a pin's archived recipe when the page it links to now blocks LinkDish", async () => {
+    const pinUrl = "https://www.pinterest.com/pin/123456789/";
+    const archiveStore = createMemoryRecipeArchiveStore();
+    let blockedNow = false;
+    const { runtime, withEmptyCache, fetchHtmlDocument } = createTestRuntime({
+      archiveStore,
+      blocked: (url) => blockedNow && url === recipeUrl,
+      pages: {
+        [pinUrl]: `<html><head><meta property="og:see_also" content="${recipeUrl}"><title>Pin</title></head><body>A pin</body></html>`
+      }
+    });
+
+    await extractRecipe({ attempt: "primary", url: recipeUrl }, runtime);
+    ageArchiveEntry(archiveStore, recipeUrl, {
+      extractedAt: new Date(Date.now() - 45 * dayMs).toISOString()
+    });
+    blockedNow = true;
+
+    const result = await extractRecipe({ attempt: "primary", url: pinUrl }, withEmptyCache());
+
+    expect(fetchHtmlDocument.mock.calls.map(([url]) => url)).toEqual([
+      recipeUrl,
+      pinUrl,
+      recipeUrl
+    ]);
+    expect(result.logContext.cacheStatus).toBe("archive_stale");
+    expect(result.response).toMatchObject({ status: "success", recipe: { sourceUrl: recipeUrl } });
+    expect(archiveStore.records.get(hashCanonicalSourceUrl(recipeUrl))?.refreshFailedAt).toEqual(
+      expect.any(String)
+    );
   });
 
   it("returns the site's failure when there is no archived copy", async () => {
