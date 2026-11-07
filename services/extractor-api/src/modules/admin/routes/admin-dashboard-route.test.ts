@@ -584,6 +584,8 @@ describe("admin dashboard routes", () => {
     expect(response.json()).toMatchObject({ archiveConfigured: true, removedFromArchive: true });
     expect(archiveStore.records.size).toBe(0);
     expect(removeFromCache).toHaveBeenCalledWith(`${url}?utm_source=x`);
+    /* Deleted again once an in-flight backfill from before the removal could have landed. */
+    expect(removeFromCache).toHaveBeenCalledTimes(2);
 
     const invalid = await app.inject({
       method: "DELETE",
@@ -593,7 +595,7 @@ describe("admin dashboard routes", () => {
 
     expect(invalid.statusCode).toBe(400);
     await app.close();
-  });
+  }, 15_000);
 
   it("requires a configured admin token before running billing grants", async () => {
     const auth = await import("../../auth/auth-service.js");

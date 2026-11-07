@@ -103,10 +103,21 @@ const parseRecipeLink = (url: string | null): string => {
  * (recipe_archive_removals). Recipes people already saved stay in their cookbooks; later imports
  * of the link read the site each time.
  */
+/*
+ * An import that read the archive just before the removal may still be copying that entry into
+ * the result cache (its write lands within the cache store's 1.5 s timeout). The removal marker
+ * is committed first, so nothing starts such a copy afterwards; the cache key is deleted again
+ * once any copy already under way has landed.
+ */
+export const recipeRemovalCacheSettleMs = 3_000;
+
+const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
 export const removeAdminArchivedRecipe = (
   context: AdminRequestContext,
   runtime: Pick<ExtractorRuntime, "extractionCache" | "recipeArchive">,
-  rawUrl: string | null
+  rawUrl: string | null,
+  { cacheSettleMs = recipeRemovalCacheSettleMs }: { cacheSettleMs?: number } = {}
 ) => {
   const url = parseRecipeLink(rawUrl);
 
@@ -115,10 +126,13 @@ export const removeAdminArchivedRecipe = (
     "recipe.remove",
     { url: url.slice(0, 300) },
     async () => {
-      const [archived] = await Promise.all([
-        runtime.recipeArchive?.remove(url) ?? Promise.resolve(false),
-        runtime.extractionCache?.remove(url)
-      ]);
+      const archived = (await runtime.recipeArchive?.remove(url)) ?? false;
+      await runtime.extractionCache?.remove(url);
+
+      if (runtime.recipeArchive && runtime.extractionCache) {
+        await wait(cacheSettleMs);
+        await runtime.extractionCache.remove(url);
+      }
 
       return {
         url,

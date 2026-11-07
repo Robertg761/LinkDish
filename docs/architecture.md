@@ -576,7 +576,9 @@ Performance pieces in `services/extractor-api/src/modules/extract`:
     `recipe.remove`) removes a link from the archive and the result cache and records it in
     `recipe_archive_removals`, for a takedown request or a bad entry. A removed link is never
     archived or result-cached again (later imports read the site each time); deleting its row
-    from `recipe_archive_removals` lifts that. Recipes people already saved are not touched.
+    from `recipe_archive_removals` lifts that. Archive reads skip removed links even if a racing
+    write left a row behind, and the route deletes the result-cache key again after 3 s in case an
+    import that read the archive just before the removal was still copying it into the cache. Recipes people already saved are not touched.
   - A stale-copy fallback on a request billing turned down does not start the 24-hour backoff.
 - **One deadline** (`deadline.ts`): `EXTRACT_REQUEST_DEADLINE_MS` (default 50 s, under
   the 60 s `maxDuration`) sizes every step. The HTTP fetch retries at most once, only
