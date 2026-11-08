@@ -2,12 +2,14 @@ import { ExtractorApiError } from "@linkdish/api-client";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { createMobileAnalyticsId, trackMobileEvent } from "../../../analytics/client";
+import { mobileEnv } from "../../../config/env";
 import { isTextExtractionRequest } from "../../../services/extraction-request";
 import { extractRecipe } from "../../../services/extractor-api";
 import { useAccount } from "../../account/AccountContext";
 import { useBilling } from "../../billing/BillingContext";
 import { formatMonthlyQuotaCopy } from "../../billing/quota-copy";
 import { useOptionalUpgradeMoment } from "../../billing/UpgradeMomentContext";
+import { AiConsentDeclinedError, requireAiConsent } from "../../privacy/ai-consent";
 import { INVALID_RECIPE_URL_MESSAGE, isAllowedRecipeUrl } from "../../recipe-intake/urlValidation";
 import { restoreSavedRecipeState, type SavedRecipeRecord } from "../../saved-recipes/store";
 import { getDraftRecipeExtraction, saveDraftRecipeExtraction } from "../draftStore";
@@ -236,9 +238,10 @@ export const useRecipeExtraction = (
           ? { state: "loading", attempt: initialAttempt }
           : { state: "empty" }
   );
+  const [awaitingAiConsent, setAwaitingAiConsent] = useState(false);
 
   useEffect(() => {
-    if (state.state !== "loading" || !requestSourceUrl) {
+    if (awaitingAiConsent || state.state !== "loading" || !requestSourceUrl) {
       return;
     }
 
@@ -259,7 +262,12 @@ export const useRecipeExtraction = (
     }, EXTRACTION_TIMEOUT_MS);
 
     return () => clearTimeout(timer);
-  }, [requestSourceUrl, state.state, state.state === "loading" ? state.attempt : undefined]);
+  }, [
+    awaitingAiConsent,
+    requestSourceUrl,
+    state.state,
+    state.state === "loading" ? state.attempt : undefined
+  ]);
 
   const trackAbandonedImport = (
     lifecycle: ImportLifecycle | null,
@@ -403,13 +411,23 @@ export const useRecipeExtraction = (
         return;
       }
 
-      setState({
-        state: "loading",
-        attempt: requestAttempt,
-        ...(options.inspired ? { inspired: true } : {})
-      });
-
       try {
+        // Ask before starting the request timeout, and abandon a route that changed while
+        // consent was open. The API boundary also guards direct callers and retries.
+        if (!mobileEnv.useMockApi) {
+          setAwaitingAiConsent(true);
+          try {
+            await requireAiConsent();
+          } finally {
+            if (isCurrentRequest()) setAwaitingAiConsent(false);
+          }
+        }
+        if (!isCurrentRequest()) return;
+        setState({
+          state: "loading",
+          attempt: requestAttempt,
+          ...(options.inspired ? { inspired: true } : {})
+        });
         const authToken = await getAuthToken();
 
         if (!isCurrentRequest()) {
@@ -545,6 +563,16 @@ export const useRecipeExtraction = (
         }
 
         lifecycle.terminal = true;
+        if (error instanceof AiConsentDeclinedError) {
+          setState({
+            state: "failure",
+            reason: "ai_consent_declined",
+            message: error.message,
+            allowFallback: false,
+            suggestedAction: "retry_primary"
+          });
+          return;
+        }
         trackMobileEvent({
           correlationId: lifecycle.correlationId,
           eventName: "import_failed",

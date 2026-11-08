@@ -6,6 +6,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Animated,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   Share,
@@ -18,6 +19,7 @@ import { AppDialog } from "../src/components/AppDialog";
 import { mobileEnv } from "../src/config/env";
 import { useAccount } from "../src/features/account/AccountContext";
 import { useBilling } from "../src/features/billing/BillingContext";
+import { RestorePurchasesFeedback } from "../src/features/billing/RestorePurchasesFeedback";
 import { useOptionalUpgradeMoment } from "../src/features/billing/UpgradeMomentContext";
 import { useSavedRecipes } from "../src/features/saved-recipes/SavedRecipesContext";
 import { useReduceMotion } from "../src/hooks/useReduceMotion";
@@ -572,9 +574,11 @@ function HouseholdView() {
                 </>
               ) : (
                 <>
-                  <AppText muted>LinkDish Family is required to create a household.</AppText>
+                  <AppText muted>{Platform.OS === "ios"
+                    ? "An existing LinkDish Family plan is required to create a household. Family subscriptions are not available to purchase on iOS at launch."
+                    : "LinkDish Family is required to create a household."}</AppText>
                   <AppButton
-                    label="View plans"
+                    label={Platform.OS === "ios" ? "About household access" : "View plans"}
                     onPress={() => showUpgradeMoment("share_to_family_no_plan")}
                   />
                   {revenueCatConfigured ? (
@@ -590,6 +594,7 @@ function HouseholdView() {
             </AppSurface>
           </>
         )}
+        <RestorePurchasesFeedback />
       </ScrollView>
       <Modal
         animationType="fade"

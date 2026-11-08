@@ -2,6 +2,7 @@ import { ExtractorApiError, createExtractorApiClient } from "@linkdish/api-clien
 
 import { getMobileAnalyticsHeaders, trackMobileEvent } from "../analytics/client";
 import { mobileEnv } from "../config/env";
+import { requireAiConsent } from "../features/privacy/ai-consent";
 import { buildMockCompletionResponse, buildMockExtractionResponse } from "../mocks/extraction";
 
 import { isTextExtractionRequest, type MobileExtractionRequest } from "./extraction-request";
@@ -97,6 +98,7 @@ export const completeRecipe = async (
     return buildMockCompletionResponse(recipe);
   }
 
+  await requireAiConsent();
   return runExtractorRequestWithRetry(() => getBillingClient(options).completeRecipe({ recipe }));
 };
 
@@ -125,6 +127,7 @@ export async function extractRecipe(
     return buildMockExtractionResponse(request);
   }
 
+  await requireAiConsent();
   const client = getBillingClient(options);
 
   trackMobileEvent({

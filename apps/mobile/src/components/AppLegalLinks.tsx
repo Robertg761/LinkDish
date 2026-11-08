@@ -1,6 +1,8 @@
 import { AppButton } from "@linkdish/ui";
 import { Alert, Linking, Platform, View } from "react-native";
 
+import { reviewAiConsent } from "../features/privacy/ai-consent";
+
 const openLink = (url: string) => {
   void Linking.openURL(url).catch(() => {
     Alert.alert(
@@ -12,6 +14,14 @@ const openLink = (url: string) => {
 
 export const AppLegalLinks = () => (
   <View>
+    <AppButton label="AI data sharing" onPress={() => void reviewAiConsent()} variant="ghost" />
+    {Platform.OS === "ios" ? (
+      <AppButton
+        label="Manage subscription"
+        onPress={() => openLink("https://apps.apple.com/account/subscriptions")}
+        variant="ghost"
+      />
+    ) : null}
     <AppButton
       label="Privacy policy"
       onPress={() => openLink("https://linkdish.ca/privacy/")}

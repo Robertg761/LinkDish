@@ -3,6 +3,7 @@ import { useCallback, useState } from "react";
 import { completeRecipe } from "../../../services/extractor-api";
 import { useAccount } from "../../account/AccountContext";
 import { useBilling } from "../../billing/BillingContext";
+import { AiConsentDeclinedError } from "../../privacy/ai-consent";
 
 import type { Recipe } from "@linkdish/recipe-domain";
 
@@ -58,8 +59,14 @@ export const useRecipeCompletion = () => {
         }
 
         return { status: "filled", recipe: response.recipe };
-      } catch {
-        return { status: "failed", message: genericFailure };
+      } catch (error) {
+        return {
+          status: "failed",
+          message:
+            error instanceof AiConsentDeclinedError
+              ? "Nothing was sent for AI processing. Allow Gemini processing to fill in this recipe."
+              : genericFailure
+        };
       } finally {
         setIsFilling(false);
       }

@@ -2,8 +2,8 @@ import { AppButton, AppSurface, AppText } from "@linkdish/ui";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { router, usePathname } from "expo-router";
 import React from "react";
-import { useEffect, useState } from "react";
-import { Modal, Pressable, StyleSheet, View, useWindowDimensions } from "react-native";
+import { useEffect, useRef, useState } from "react";
+import { Modal, Platform, Pressable, StyleSheet, View, useWindowDimensions } from "react-native";
 
 import { appColors, appSpacing } from "../../theme/tokens";
 
@@ -104,7 +104,11 @@ const COOKBOOK_LANDING_PATHS = new Set(["/", "/import", "/shopping"]);
 export const shouldLandOnCookbookAfterOnboarding = (pathname: string | null | undefined): boolean =>
   pathname == null || COOKBOOK_LANDING_PATHS.has(pathname);
 
-export const FirstRunOnboardingGate = () => {
+export const FirstRunOnboardingGate = ({
+  onVisibilityChange
+}: {
+  onVisibilityChange?: (visible: boolean) => void;
+}) => {
   const pathname = usePathname();
   const [hasLoadedOnboarding, setHasLoadedOnboarding] = useState(false);
   const [isOnboardingVisible, setIsOnboardingVisible] = useState(false);
@@ -112,6 +116,15 @@ export const FirstRunOnboardingGate = () => {
   const { width } = useWindowDimensions();
   const frame = onboardingFrames[frameIndex] ?? onboardingFrames[0];
   const isLastFrame = frameIndex === onboardingFrames.length - 1;
+  const hasPresented = useRef(false);
+
+  useEffect(() => {
+    if (!hasLoadedOnboarding) return;
+    if (isOnboardingVisible || !hasPresented.current || Platform.OS !== "ios") {
+      onVisibilityChange?.(isOnboardingVisible);
+    }
+    if (isOnboardingVisible) hasPresented.current = true;
+  }, [hasLoadedOnboarding, isOnboardingVisible, onVisibilityChange]);
 
   useEffect(() => {
     let isMounted = true;
@@ -155,12 +168,18 @@ export const FirstRunOnboardingGate = () => {
     }
   };
 
-  if (!hasLoadedOnboarding || !isOnboardingVisible) {
+  if (!hasLoadedOnboarding) {
     return null;
   }
 
   return (
-    <Modal animationType="fade" onRequestClose={completeOnboarding} transparent visible>
+    <Modal
+      animationType="fade"
+      onRequestClose={completeOnboarding}
+      onDismiss={() => onVisibilityChange?.(false)}
+      transparent
+      visible={isOnboardingVisible}
+    >
       <View style={styles.overlay}>
         <Pressable
           accessibilityLabel="Skip onboarding"

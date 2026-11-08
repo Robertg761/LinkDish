@@ -39,6 +39,7 @@ vi.mock("expo-router", () => ({
 }));
 
 vi.mock("react-native", () => ({
+  Platform: { OS: "ios" },
   Modal: ({ children, visible }: { children?: React.ReactNode; visible?: boolean }) =>
     visible ? React.createElement("Modal", null, children) : null,
   Pressable: ({ children, ...props }: { children?: React.ReactNode }) =>
@@ -101,8 +102,7 @@ describe("FirstRunOnboardingGate", () => {
     });
 
     const skipProps = renderer!.root.findAllByProps({ label: "Skip" }).at(0)?.props as
-      | { onPress?: () => void }
-      | undefined;
+      { onPress?: () => void } | undefined;
 
     await act(async () => {
       skipProps?.onPress?.();

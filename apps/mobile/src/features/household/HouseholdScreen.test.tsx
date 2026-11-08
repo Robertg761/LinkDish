@@ -99,6 +99,7 @@ vi.mock("expo-router", () => ({
 }));
 
 vi.mock("react-native", () => ({
+  Platform: { OS: "android" },
   Alert: {
     alert: vi.fn()
   },

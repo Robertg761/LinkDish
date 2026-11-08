@@ -8,9 +8,9 @@ import { AppLegalLinks } from "../src/components/AppLegalLinks";
 import { mobileEnv } from "../src/config/env";
 import { useAccount } from "../src/features/account/AccountContext";
 import { useBilling } from "../src/features/billing/BillingContext";
+import { getLaunchPaidTiers, isLaunchProductAvailable } from "../src/features/billing/launch-offering";
 import {
   billingPlans,
-  paidBillingTiers,
   type PaidBillingTier
 } from "../src/features/billing/plans";
 import {
@@ -18,6 +18,7 @@ import {
   paidPlanFeatures,
   pricingNotes
 } from "../src/features/billing/plans-content";
+import { RestorePurchasesFeedback } from "../src/features/billing/RestorePurchasesFeedback";
 import {
   getRevenueCatPackageBillingTier,
   getRevenueCatPackagePeriodLabel,
@@ -66,7 +67,7 @@ const getPlanPriceSummary = ({
   purchaseOptions: PurchasesPackage[];
   revenueCatConfigured: boolean;
 }): string => {
-  if (!revenueCatConfigured) {
+  if (!revenueCatConfigured && Platform.OS !== "ios") {
     return `${plan.monthlyPrice}/month or ${plan.yearlyPrice}/year`;
   }
 
@@ -108,7 +109,9 @@ export default function UpgradeScreen() {
     revenueCatConfigured,
     tier
   } = useBilling();
-  const availablePackages = offering?.availablePackages ?? [];
+  const availablePackages = (offering?.availablePackages ?? []).filter((option) =>
+    isLaunchProductAvailable(Platform.OS, option.product.identifier)
+  );
   const foundingPackage = availablePackages.find(isFoundingLifetimePackage);
   const purchaseOptionsByTier = buildPurchaseOptionsByTier(
     availablePackages.filter((option) => !isFoundingLifetimePackage(option))
@@ -149,7 +152,7 @@ export default function UpgradeScreen() {
         <PlanSummaryCard eyebrow="Start free" features={freePlanFeatures} title="Free start" />
       </View>
 
-      {paidBillingTiers.map((planId) => (
+      {getLaunchPaidTiers(Platform.OS).map((planId) => (
         <PaidPlanCard
           activatePlanPreview={activatePlanPreview}
           canUseLocalPlanPreview={canUseLocalPlanPreview}
@@ -205,7 +208,7 @@ export default function UpgradeScreen() {
       <AppSurface style={styles.notesCard}>
         <AppText variant="title">How Pricing Works</AppText>
         <View style={styles.noteList}>
-          {pricingNotes.map((note) => (
+          {pricingNotes.filter((note) => Platform.OS !== "ios" || note.title !== "Family plan").map((note) => (
             <View key={note.title} style={styles.noteRow}>
               <AppText style={styles.noteTitle}>{note.title}</AppText>
               <AppText muted style={styles.noteBody}>
@@ -244,11 +247,12 @@ export default function UpgradeScreen() {
         <AppText muted>
           Subscriptions are charged to your Apple Account and renew automatically unless canceled at
           least 24 hours before the current period ends. Manage or cancel subscriptions in your App
-          Store account settings. One-time lifetime purchases do not renew.
+          Store account settings.
         </AppText>
       ) : null}
       <AppLegalLinks />
 
+      <RestorePurchasesFeedback />
       <View style={styles.footerActions}>
         <AppButton label="Back to recipes" onPress={() => router.back()} variant="secondary" />
         {revenueCatConfigured ? (

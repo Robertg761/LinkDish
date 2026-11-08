@@ -954,3 +954,87 @@ describe("AccountContext", () => {
     expect(latestAccount?.sessionToken).toBeNull();
   });
 });
+
+describe("account billing refresh", () => {
+  it("loads the latest plan without marking the whole account busy for background checks", async () => {
+    const getSession = vi.fn().mockResolvedValue({
+      authenticated: true,
+      user: {
+        id: "user_123",
+        email: "user@example.com",
+        billingPlan: "free"
+      }
+    });
+    mocks.getItemAsync.mockResolvedValue("stored-token");
+    mocks.createExtractorApiClient.mockReturnValue(createMockClient({ getSession }));
+    let renderer!: ReturnType<typeof create>;
+    await act(async () => {
+      renderer = create(
+        <AccountProvider>
+          <Probe />
+        </AccountProvider>
+      );
+      await flushAsyncWork();
+    });
+    getSession.mockResolvedValue({
+      authenticated: true,
+      user: {
+        id: "user_123",
+        email: "user@example.com",
+        billingPlan: "family"
+      }
+    });
+    await act(async () => {
+      const updated = await latestAccount!.refreshAccount({ silent: true });
+      expect(updated?.billingPlan).toBe("family");
+    });
+    expect(latestAccount!.user?.billingPlan).toBe("family");
+    expect(latestAccount!.isAccountBusy).toBe(false);
+    act(() => renderer.unmount());
+  });
+
+  it("does not apply an old billing response after logout", async () => {
+    const getSession = vi.fn().mockResolvedValue({
+      authenticated: true,
+      user: {
+        id: "user_123",
+        email: "user@example.com",
+        billingPlan: "free"
+      }
+    });
+    mocks.getItemAsync.mockResolvedValue("stored-token");
+    mocks.createExtractorApiClient.mockReturnValue(createMockClient({ getSession }));
+    let renderer!: ReturnType<typeof create>;
+    await act(async () => {
+      renderer = create(
+        <AccountProvider>
+          <Probe />
+        </AccountProvider>
+      );
+      await flushAsyncWork();
+    });
+    let finish!: (value: unknown) => void;
+    getSession.mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve;
+      })
+    );
+    let refreshed!: Promise<unknown>;
+    await act(async () => {
+      refreshed = latestAccount!.refreshAccount({ silent: true });
+      await flushAsyncWork();
+    });
+    await act(async () => {
+      await latestAccount!.logout();
+    });
+    await act(async () => {
+      finish({
+        authenticated: true,
+        user: { id: "user_123", email: "user@example.com", billingPlan: "family" }
+      });
+      await expect(refreshed).rejects.toThrow();
+    });
+    expect(latestAccount!.user).toBeNull();
+    act(() => renderer.unmount());
+  });
+});

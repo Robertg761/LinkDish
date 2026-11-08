@@ -2,11 +2,22 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   getRevenueCatPackageBillingTier,
+  getNextRevenueCatExpiration,
+  refreshRevenueCatCustomerInfo,
   getRevenueCatPackagePeriodLabel,
   isFoundingLifetimePackage
 } from "./revenuecat";
 
-import type { PurchasesPackage } from "react-native-purchases";
+import type { CustomerInfo, PurchasesPackage } from "react-native-purchases";
+
+const sdk = vi.hoisted(() => ({ invalidateCustomerInfoCache: vi.fn(), getCustomerInfo: vi.fn() }));
+vi.mock("react-native-purchases", () => ({ default: sdk }));
+vi.mock("../../config/env", () => ({
+  mobileEnv: {
+    revenueCatEntitlementIds: { family: "Family", plus: "Plus" },
+    revenueCatProductIds: { family: ["linkdish_family"], plus: ["linkdish_plus"] }
+  }
+}));
 
 vi.mock("react-native", () => ({
   Platform: {
@@ -157,5 +168,49 @@ describe("getRevenueCatPackagePeriodLabel", () => {
         })
       )
     ).toBe("Yearly");
+  });
+});
+
+describe("fresh entitlement checks", () => {
+  it("forces a fresh SDK read only when requested", async () => {
+    sdk.getCustomerInfo.mockResolvedValue({});
+    await refreshRevenueCatCustomerInfo(true);
+    expect(sdk.invalidateCustomerInfoCache).toHaveBeenCalledOnce();
+    expect(sdk.getCustomerInfo).toHaveBeenCalledOnce();
+    expect(sdk.invalidateCustomerInfoCache.mock.invocationCallOrder[0]).toBeLessThan(
+      sdk.getCustomerInfo.mock.invocationCallOrder[0]!
+    );
+    await refreshRevenueCatCustomerInfo();
+    expect(sdk.invalidateCustomerInfoCache).toHaveBeenCalledOnce();
+    expect(sdk.getCustomerInfo).toHaveBeenCalledTimes(2);
+  });
+
+  it("schedules the nearest paid expiration, ignoring lifetime, expired, and unrelated entitlements", () => {
+    const expiration = Date.now() + 30_000;
+    const info = {
+      entitlements: {
+        active: {
+          Plus: { identifier: "Plus", expirationDate: new Date(expiration).toISOString() },
+          Family: { identifier: "Family", expirationDate: null },
+          Other: { identifier: "Other", expirationDate: new Date(expiration - 1000).toISOString() }
+        }
+      }
+    } as unknown as CustomerInfo;
+    expect(getNextRevenueCatExpiration(info)).toBe(expiration);
+    const expired = {
+      ...info,
+      entitlements: {
+        ...info.entitlements,
+        active: {
+          ...info.entitlements.active,
+          Plus: {
+            ...info.entitlements.active.Plus!,
+            expirationDate: new Date(Date.now() - 1000).toISOString()
+          }
+        }
+      }
+    };
+    expect(getNextRevenueCatExpiration(expired)).toBeNull();
+    expect(getNextRevenueCatExpiration(null)).toBeNull();
   });
 });

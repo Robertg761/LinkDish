@@ -137,7 +137,7 @@ const withAndroidAsyncStorageSize: ConfigPlugin = (config) =>
   });
 
 const appVersion = getEnvValue("LINKDISH_APP_VERSION") ?? "2.2.2";
-const iosBuildNumber = getEnvValue("LINKDISH_IOS_BUILD_NUMBER") ?? "35";
+const iosBuildNumber = getEnvValue("LINKDISH_IOS_BUILD_NUMBER") ?? "37";
 const androidVersionCode = Number.parseInt(
   getEnvValue("LINKDISH_ANDROID_VERSION_CODE") ?? "35",
   10

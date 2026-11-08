@@ -4,7 +4,7 @@ import { AppFontProvider } from "@linkdish/ui";
 import { useFonts } from "expo-font";
 import { SplashScreen, Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { installMobileErrorTracking, trackMobileAppOpened } from "../src/analytics/client";
@@ -16,6 +16,7 @@ import { BillingProvider } from "../src/features/billing/BillingContext";
 import { UpgradeMomentProvider } from "../src/features/billing/UpgradeMomentContext";
 import { MealPlanProvider } from "../src/features/meal-plan/MealPlanContext";
 import { FirstRunOnboardingGate } from "../src/features/onboarding/FirstRunOnboardingGate";
+import { AiConsentGate } from "../src/features/privacy/AiConsentGate";
 import { SavedRecipesProvider } from "../src/features/saved-recipes/SavedRecipesContext";
 import { ShoppingListProvider } from "../src/features/shopping/ShoppingListContext";
 import { appColors } from "../src/theme/tokens";
@@ -39,6 +40,7 @@ const OptionalClerkProvider = ({ children }: { children: ReactNode }) =>
   );
 
 export default function RootLayout() {
+  const [onboardingVisible, setOnboardingVisible] = useState(true);
   const [fontsLoaded, fontLoadError] = useFonts({
     // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-unsafe-assignment
     "Fraunces-Bold": require("../assets/fonts/Fraunces-Bold.ttf"),
@@ -80,6 +82,7 @@ export default function RootLayout() {
                 <MealPlanProvider>
                   <ShoppingListProvider>
                     <SafeAreaProvider>
+                      <AiConsentGate blocked={onboardingVisible} />
                       <StatusBar style="dark" />
                       <Stack
                         screenOptions={{
@@ -129,7 +132,7 @@ export default function RootLayout() {
                           }}
                         />
                       </Stack>
-                      <FirstRunOnboardingGate />
+                      <FirstRunOnboardingGate onVisibilityChange={setOnboardingVisible} />
                     </SafeAreaProvider>
                   </ShoppingListProvider>
                 </MealPlanProvider>

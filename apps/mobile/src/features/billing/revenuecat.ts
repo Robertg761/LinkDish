@@ -259,6 +259,23 @@ export const restoreRevenueCatPurchases = async (): Promise<CustomerInfo> => {
   return Purchases.restorePurchases();
 };
 
+/** Force a store entitlement check when returning to the app or crossing an expiry. */
+export const refreshRevenueCatCustomerInfo = async (force = false): Promise<CustomerInfo> => {
+  const { default: Purchases } = await loadPurchasesModule();
+  if (force) await Purchases.invalidateCustomerInfoCache();
+  return Purchases.getCustomerInfo();
+};
+
+export const getNextRevenueCatExpiration = (customerInfo: CustomerInfo | null): number | null => {
+  const expirations = Object.values(customerInfo?.entitlements.active ?? {})
+    .filter((entitlement) =>
+      Object.values(mobileEnv.revenueCatEntitlementIds).includes(entitlement.identifier)
+    )
+    .map((entitlement) => Date.parse(entitlement.expirationDate ?? ""))
+    .filter((expiration) => Number.isFinite(expiration) && expiration > Date.now());
+  return expirations.length ? Math.min(...expirations) : null;
+};
+
 export const isRevenueCatPurchaseCancelled = (error: unknown): boolean =>
   typeof error === "object" &&
   error !== null &&

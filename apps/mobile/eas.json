@@ -82,6 +82,12 @@
         "applicationId": "com.linkdish.app",
         "track": "production"
       }
+    },
+    "testflight": {
+      "ios": {
+        "ascAppId": "6826987838",
+        "appleTeamId": "73UT6LC439"
+      }
     }
   }
 }

@@ -45,7 +45,7 @@ interface AccountContextValue {
   isEmailCodeSignInEnabled: boolean;
   isSignedIn: boolean;
   logout: () => Promise<void>;
-  refreshAccount: () => Promise<void>;
+  refreshAccount: (options?: { silent?: boolean }) => Promise<AccountUser | null>;
   requestCode: (email: string) => Promise<void>;
   sessionToken: string | null;
   signInWithDebugHousehold: () => Promise<void>;
@@ -313,6 +313,56 @@ export const AccountProvider = ({ children }: PropsWithChildren) => {
     });
   }, [clerkSessionId, loadAccountSession, switchingAccount]);
 
+  const refreshRequestRef = useRef(0);
+  const refreshAccount = useCallback(
+    async (options: { silent?: boolean } = {}) => {
+      const refreshingFor = accountUserRef.current?.id;
+      if (!refreshingFor) {
+        if (options.silent) return null;
+        setAccountError(null);
+        setIsAccountBusy(true);
+        try {
+          await loadAccountSession();
+          return null;
+        } catch (error) {
+          setAccountError(getAccountErrorMessage(error));
+          throw error;
+        } finally {
+          setIsAccountBusy(false);
+        }
+      }
+      const refreshingSession = clerkSessionIdRef.current;
+      const requestId = ++refreshRequestRef.current;
+      const isCurrent = () =>
+        accountUserRef.current?.id === refreshingFor &&
+        clerkSessionIdRef.current === refreshingSession &&
+        requestId === refreshRequestRef.current;
+
+      if (!options.silent) {
+        setAccountError(null);
+        setIsAccountBusy(true);
+      }
+      try {
+        const session = await createClientWithHeaders(
+          getAuthHeadersFor(refreshingFor)
+        ).getSession();
+        if (!isCurrent()) throw new AccountChangedError();
+        if (session.authenticated && session.user.id !== refreshingFor) {
+          throw new AccountChangedError();
+        }
+        const nextUser = session.authenticated ? session.user : null;
+        setUser(nextUser);
+        return nextUser;
+      } catch (error) {
+        if (!options.silent && isCurrent()) setAccountError(getAccountErrorMessage(error));
+        throw error;
+      } finally {
+        if (!options.silent) setIsAccountBusy(false);
+      }
+    },
+    [getAuthHeadersFor, loadAccountSession]
+  );
+
   const value = useMemo<AccountContextValue>(
     () => ({
       accountError,
@@ -393,19 +443,7 @@ export const AccountProvider = ({ children }: PropsWithChildren) => {
           setIsAccountBusy(false);
         }
       },
-      refreshAccount: async () => {
-        setAccountError(null);
-        setIsAccountBusy(true);
-
-        try {
-          await loadAccountSession();
-        } catch (error) {
-          setAccountError(getAccountErrorMessage(error));
-          throw error;
-        } finally {
-          setIsAccountBusy(false);
-        }
-      },
+      refreshAccount,
       requestCode: async (email) => {
         setAccountError(null);
         setIsAccountBusy(true);
@@ -578,7 +616,7 @@ export const AccountProvider = ({ children }: PropsWithChildren) => {
       accountUser,
       hasLoadedAccount,
       isAccountBusy,
-      loadAccountSession,
+      refreshAccount,
       sessionToken,
       switchingAccount
     ]
