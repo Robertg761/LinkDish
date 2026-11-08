@@ -5,6 +5,11 @@ import { Text } from "react-native";
 import { act, create } from "react-test-renderer";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+vi.mock("../../privacy/ai-consent", async (importOriginal) => ({
+  ...(await importOriginal<typeof AiConsentModule>()),
+  requireAiConsent: vi.fn().mockResolvedValue(undefined)
+}));
+
 vi.mock("react-native", () => ({
   Platform: {
     OS: "ios"
@@ -56,11 +61,13 @@ import { trackMobileEvent } from "../../../analytics/client";
 import { extractRecipe } from "../../../services/extractor-api";
 import { BillingProvider } from "../../billing/BillingContext";
 import { getBillingPeriodKey } from "../../billing/store";
+import { AiConsentDeclinedError, requireAiConsent } from "../../privacy/ai-consent";
 import { createSavedRecipeRecord, type SavedRecipeRecord } from "../../saved-recipes/store";
 
 import { shouldShowLastFreeImportPrompt, useRecipeExtraction } from "./useRecipeExtraction";
 
 import type { MobileExtractionRequest as ExtractRecipeRequest } from "../../../services/extraction-request";
+import type * as AiConsentModule from "../../privacy/ai-consent";
 
 const mockedExtractRecipe = vi.mocked(extractRecipe);
 const mockedAsyncStorage = vi.mocked(AsyncStorage);
@@ -102,6 +109,8 @@ const flushAsyncWork = async () => {
 
 describe("useRecipeExtraction", () => {
   beforeEach(() => {
+    vi.mocked(requireAiConsent).mockReset();
+    vi.mocked(requireAiConsent).mockResolvedValue(undefined);
     mockAccountState.getAuthToken.mockReset();
     mockAccountState.getAuthToken.mockResolvedValue(null);
     mockAccountState.hasLoadedAccount = true;
@@ -114,6 +123,43 @@ describe("useRecipeExtraction", () => {
     mockedAsyncStorage.setItem.mockReset();
     mockedAsyncStorage.getItem.mockResolvedValue(null);
     mockedAsyncStorage.setItem.mockResolvedValue(undefined);
+  });
+
+  it("does not time out or submit while waiting for consent, and explains a decline", async () => {
+    vi.useFakeTimers();
+    let decline!: (error: Error) => void;
+    vi.mocked(requireAiConsent).mockImplementationOnce(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          decline = reject;
+        })
+    );
+    let renderer!: ReturnType<typeof create>;
+    try {
+      await act(async () => {
+        renderer = create(<HookProbe url="https://example.com/recipe" />);
+        await flushAsyncWork();
+      });
+      await act(async () => {
+        await flushAsyncWork();
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(160_000);
+      });
+      expect(mockedExtractRecipe).not.toHaveBeenCalled();
+      expect(renderer.root.findByType(Text).props.children).not.toContain("taking longer");
+      await act(async () => {
+        decline(new AiConsentDeclinedError());
+        await flushAsyncWork();
+      });
+      expect(renderer.root.findByType(Text).props.children).toContain("Nothing was sent");
+      expect(mockedExtractRecipe).not.toHaveBeenCalled();
+    } finally {
+      await act(() => {
+        renderer.unmount();
+      });
+      vi.useRealTimers();
+    }
   });
 
   it("automatically tries fallback when the primary extraction asks for more help", async () => {

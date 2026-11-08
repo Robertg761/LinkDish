@@ -2,7 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const clientMocks = vi.hoisted(() => ({
   extractRecipe: vi.fn(),
-  extractRecipeFromText: vi.fn()
+  extractRecipeFromText: vi.fn(),
+  completeRecipe: vi.fn()
 }));
 
 vi.mock("../analytics/client", () => ({
@@ -19,15 +20,45 @@ vi.mock("@linkdish/api-client", async (importOriginal) => ({
   createExtractorApiClient: () => clientMocks
 }));
 
-import { extractRecipe } from "./extractor-api";
+import { registerAiConsentHandler } from "../features/privacy/ai-consent";
+
+import { completeRecipe, extractRecipe } from "./extractor-api";
 
 import type * as ApiClientModule from "@linkdish/api-client";
 
 describe("extractRecipe with pasted text", () => {
   beforeEach(() => {
+    registerAiConsentHandler(() => Promise.resolve(true));
     clientMocks.extractRecipe.mockReset();
     clientMocks.extractRecipeFromText.mockReset();
+    clientMocks.completeRecipe.mockReset();
     clientMocks.extractRecipeFromText.mockResolvedValue({ status: "failure" });
+  });
+
+  it("blocks links, pasted text, photos, and completion when permission is declined", async () => {
+    registerAiConsentHandler(() => Promise.resolve(false));
+    await expect(extractRecipe("https://example.com/recipe")).rejects.toThrow("Nothing was sent");
+    await expect(
+      extractRecipe({
+        attempt: "primary",
+        routeUrl: "https://linkdish.app/text-imports/1",
+        text: "Recipe text"
+      })
+    ).rejects.toThrow("Nothing was sent");
+    await expect(
+      extractRecipe({
+        attempt: "fallback",
+        sourceUrl: "https://linkdish.app/image-imports/1",
+        images: [{ mimeType: "image/jpeg", dataUrl: "data:image/jpeg;base64,aGVsbG8=" }]
+      })
+    ).rejects.toThrow("Nothing was sent");
+    // A payload is deliberately unnecessary: permission must be checked before it can be used.
+    await expect(completeRecipe({} as Parameters<typeof completeRecipe>[0])).rejects.toThrow(
+      "Nothing was sent"
+    );
+    expect(clientMocks.extractRecipe).not.toHaveBeenCalled();
+    expect(clientMocks.extractRecipeFromText).not.toHaveBeenCalled();
+    expect(clientMocks.completeRecipe).not.toHaveBeenCalled();
   });
 
   it("sends the text (and a caption's link) but never the route key", async () => {
