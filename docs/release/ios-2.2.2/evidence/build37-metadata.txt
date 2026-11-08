@@ -1,0 +1,3 @@
+Browser tab: 1894049050, Title: "App Store Connect", URL: "https://appstoreconnect.apple.com/teams/0d5f21fe-e3c4-4a09-9c67-f3c52c83d785/apps/6826987838/testflight/ios/46052c67-4edf-4b49-9726-9aedc9ac8ebc/metadata".
+There has been no change in the accessibility tree.
+The focused UI element is 0 AXWebArea App Store Connect, URL: appstoreconnect.apple.com/teams/0d5f21fe-e3c4-4a09-9c67-f3c52c83d785/apps/6826987838/testflight/ios/46052c67-4edf-4b49-9726-9aedc9ac8ebc/metadata

@@ -2,7 +2,15 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { getRecipeCompletionChanges, recipeSourceLabel } from "@linkdish/recipe-domain";
 import { AppButton, AppSurface, AppText } from "@linkdish/ui";
 import { Stack, router, useLocalSearchParams } from "expo-router";
-import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentProps,
+  type ReactNode
+} from "react";
 import {
   ActivityIndicator,
   Animated,
@@ -28,6 +36,10 @@ import { useAccount } from "../src/features/account/AccountContext";
 import { useOptionalUpgradeMoment } from "../src/features/billing/UpgradeMomentContext";
 import { RecipeOrganizeSection } from "../src/features/collections/RecipeOrganizeSection";
 import { ExtractionAnimation } from "../src/features/recipe-intake/components/ExtractionAnimation";
+import {
+  ImportRecovery,
+  shouldOfferImportAlternative
+} from "../src/features/recipe-intake/components/ImportRecovery";
 import { requestRecipeUrlReset } from "../src/features/recipe-intake/intakeResetEvents";
 import {
   usePendingImageImport,
@@ -890,6 +902,14 @@ export default function RecipeScreen() {
         {extraction.state.state === "retryable" ? (
           <StatusCard
             body={extraction.state.message}
+            recovery={
+              shouldOfferImportAlternative(extraction.state.reason) ? (
+                <ImportRecovery
+                  key={imageImportId ?? textImportId ?? url}
+                  source={imageImportId ? "image" : textImportId ? "text" : "url"}
+                />
+              ) : undefined
+            }
             primaryAction={
               extraction.state.allowFallback
                 ? {
@@ -916,6 +936,14 @@ export default function RecipeScreen() {
 
         {extraction.state.state === "failure" ? (
           <StatusCard
+            recovery={
+              shouldOfferImportAlternative(extraction.state.reason) ? (
+                <ImportRecovery
+                  key={imageImportId ?? textImportId ?? url}
+                  source={imageImportId ? "image" : textImportId ? "text" : "url"}
+                />
+              ) : undefined
+            }
             body={
               extraction.state.inspiredAvailable
                 ? `${extraction.state.message} Would you like a recipe based on the video?`
@@ -1389,10 +1417,12 @@ const StatusCard = ({
   title,
   body,
   primaryAction,
-  secondaryAction
+  secondaryAction,
+  recovery
 }: {
   title: string;
   body: string;
+  recovery?: ReactNode;
   primaryAction?:
     | {
         label: string;
@@ -1412,6 +1442,7 @@ const StatusCard = ({
       <AppText muted>{body}</AppText>
     </View>
 
+    {recovery}
     <View style={styles.actions}>
       {primaryAction ? (
         <AppButton label={primaryAction.label} onPress={primaryAction.onPress} />

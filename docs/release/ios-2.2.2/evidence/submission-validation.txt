@@ -1,0 +1,239 @@
+- banner "App Store Connect":
+  - heading "App Store Connect" [level=1]:
+    - link "App Store Connect":
+      - /url: /
+  - navigation "Global":
+    - list:
+      - link "Apps":
+        - /url: /apps
+      - link "Xcode Cloud":
+        - /url: /teams/0d5f21fe-e3c4-4a09-9c67-f3c52c83d785/xcode-cloud
+      - link "Trends":
+        - /url: /trends
+      - link "Reports":
+        - /url: /itc/payments_and_financial_reports
+      - link "Business":
+        - /url: /business
+      - link "Users and Access":
+        - /url: /access/users
+  - button "flavio herrera flavio herrera Account name menu":
+- 'button "Apps menu, LinkDish: Recipe Saver, selected"':
+  - 'generic "LinkDish: Recipe Saver"':
+    - 'img "LinkDish: Recipe Saver"'
+  - generic: "LinkDish: Recipe Saver"
+- navigation "Apps":
+  - generic: Distribution
+  - list:
+    - link "Distribution":
+      - /url: /apps/6826987838/distribution
+    - link "Analytics":
+      - /url: /apps/6826987838/analytics
+    - link "TestFlight":
+      - /url: /teams/0d5f21fe-e3c4-4a09-9c67-f3c52c83d785/apps/6826987838/testflight
+- main:
+  - heading "iOS App Version 2.2.2" [level=2]:
+    - button "iOS App Version 2.2.2":
+      - text: iOS App Version 2.2.2
+  - paragraph:
+    - text: Prepare for Submission
+  - button "Save" [disabled]
+  - button "Add for Review"
+  - separator
+  - paragraph: Unable to Add for Review
+  - paragraph: "The items below are required to start the review process:"
+  - list:
+    - listitem: You must provide copyright information for the app you are adding.
+    - listitem: 1 or more screenshots must finish processing.
+    - text: Before you can submit this app for review, an Admin must provide information about the app’s privacy practices in the App Privacy section.
+    - link "Learn More":
+      - /url: https://developer.apple.com/help/app-store-connect/manage-app-information/manage-app-privacy
+    - text: You must set up Content Rights Information in
+    - link "App Information":
+      - /url: ../../info
+    - text: .
+  - list:
+    - listitem: You have one or more errors on this page.
+    - listitem: User name - This field is required
+    - listitem: Password - This field is required
+    - listitem: First name - This field is required
+    - listitem: Last name - This field is required
+    - listitem: Email - This field is required
+    - listitem: Phone number - This field is required
+    - listitem: Phone number - This field is invalid. Please ensure your phone number is formatted correctly, including a "+" in front of the country code.
+    - listitem: Copyright - This field is required
+  - paragraph:
+    - button "Hide Details" [active]
+  - heading "Product Page Information" [level=3]
+  - button "English (U.S.)":
+    - text: English (U.S.)
+  - button "?"
+  - paragraph:
+    - text: The assets and metadata below help customers discover your app and engage with it on your product page and in search results.
+    - link "Learn more...":
+      - /url: https://developer.apple.com/app-store/asset-best-practices/
+  - paragraph: New Ways to Market Apps
+  - paragraph: Elevate your app's product page with a custom header and refine how your app appears in App Store search results. You can now also upload app previews and screenshots for iPhone Duo, adding support for the latest device.
+  - button:
+  - tablist:
+    - text: App Previews and Screenshots
+  - paragraph:
+    - link "View All Sizes in Media Manager":
+      - /url: /apps/6826987838/distribution/ios/version/inflight/media-manager/iphone
+  - tabpanel:
+    - paragraph:
+      - text: Use app previews and screenshots to visually communicate your app's user experience. Screenshots will automatically scale down to smaller device sizes unless you add specific app previews and screenshots for other device sizes and localizations. Screenshots must show your app in use or primarily depict your app's user experience.
+      - link "Learn more...":
+        - /url: https://developer.apple.com/app-store/asset-best-practices/#screenshots
+    - button "DropZone"
+    - tablist:
+      - tab "iPhone with Dynamic Island (medium display)" [selected]:
+        - generic: iPhone with Dynamic Island
+        - generic: (medium display)
+      - tab "iPhone Duo":
+        - generic: iPhone Duo
+      - tab "iPad 13\" display":
+        - generic: iPad
+        - generic: 13" display
+      - tab "Apple Watch Ultra 4, Series 12, 9, 6, 3":
+        - generic: Apple Watch
+        - generic: Ultra 4, Series 12, 9, 6, 3
+    - button "Preview":
+      - generic: Preview
+    - region:
+      - tabpanel "iPhone with Dynamic Island (medium display)":
+        - list:
+          - button "Screenshot 01-cookbook.png":
+            - img "Screenshot 01-cookbook.png":
+              - button "Remove":
+          - button "Screenshot 02-cooking.png":
+            - button "Screenshot 02-cooking.png":
+              - button "Remove":
+          - button "Screenshot 03-shopping.png":
+            - button "Screenshot 03-shopping.png":
+              - button "Remove":
+      - paragraph: 0 of 3 App Previews
+      - paragraph: 3 of 10 App Screenshots
+      - button "Browse Assets"
+      - button "Upload"
+      - button "Remove All"
+      - paragraph: Drag and drop to add assets or choose from your Asset Library for iPhone 6.1" or 6.3" displays. Supported sizes for app previews include 1920 × 886px and 886 × 1920px. For app screenshots, supported sizes include 2556 × 1179px, 1179 × 2556px, 2622 × 1206px and 1206 × 2622px.
+  - generic: Promotional Text
+  - button "More information": "?"
+  - textbox "Promotional Text": Turn recipe links, text, and photos into a cookbook you can actually cook from. Adjust servings, follow clear steps, and build your shopping list.
+  - status "Characters remaining": "24"
+  - separator
+  - generic: Description
+  - button "More information": "?"
+  - textbox "Description": "Keep the recipe. Lose the clutter. LinkDish brings the recipes you want to cook into one organized cookbook. Import a public recipe link, paste recipe text, or choose a recipe photo. With your permission, Google Gemini helps turn submitted content into structured ingredients and cooking steps. Always check imported details before cooking. YOUR COOKBOOK, READY WHEN YOU ARE Save and edit recipes, keep your own notes, and find a favorite when it is time to cook. COOK WITH CLEAR STEPS Follow focused cooking instructions, check off ingredients, and use timers when a recipe includes them. MAKE THE RIGHT AMOUNT Adjust servings and add ingredients to a shopping list so you can plan the next meal. TRY LINKDISH FREE Start with 3 recipe imports total and save up to 15 personal recipes. LinkDish Plus Monthly includes 100 recipe imports each month and unlimited personal recipe saves. Sign in to subscribe or restore purchases. Some websites require a login or block imports. When a link cannot be imported, try recipe text or a photo instead. Import results depend on the content provided. Plus Monthly is an auto-renewing subscription. The current price and billing period are shown in the app before purchase. Payment is charged to your Apple Account. Manage or cancel your subscription in App Store account settings. Privacy Policy: https://linkdish.ca/privacy/ Terms of Use: https://www.apple.com/legal/internet-services/itunes/dev/stdeula/"
+  - status "Characters remaining": 2,548
+  - generic: Keywords
+  - button "More information": "?"
+  - textbox "Keywords": cookbook,cooking,meal,ingredients,shopping,grocery,servings,organizer,import,food,kitchen
+  - status "Characters remaining": "11"
+  - generic: Support URL
+  - button "More information": "?"
+  - textbox "Support URL": https://linkdish.ca/support/
+  - generic: Marketing URL
+  - button "More information": "?"
+  - textbox "Marketing URL": https://linkdish.ca/
+  - generic: Version
+  - button "More information": "?"
+  - textbox "Version": 2.2.2
+  - generic: Copyright
+  - button "More information": "?"
+  - textbox "Copyright"
+  - status "Characters remaining": "200"
+  - generic: Routing App Coverage File
+  - button "More information": "?"
+  - button "Choose File"
+  - generic: Choose File
+  - separator
+  - button "App Clip":
+    - text: App Clip
+  - heading "iMessage App" [level=3]:
+    - button "iMessage App":
+      - text: iMessage App
+  - button "More information": "?"
+  - heading "Build" [level=3]
+  - table:
+    - rowgroup:
+      - row "Build Version Has App Clip":
+        - columnheader "Build":
+          - generic: Build
+        - columnheader "Version":
+          - generic: Version
+        - columnheader "Has App Clip":
+          - generic: Has App Clip
+        - columnheader
+    - rowgroup:
+      - row "App Icon 37 2.2.2 No Delete":
+        - cell "App Icon 37":
+          - link "App Icon":
+            - /url: /apps/6826987838/testflight/ios/46052c67-4edf-4b49-9726-9aedc9ac8ebc/metadata
+            - generic "App Icon":
+              - img "App Icon"
+          - link "37":
+            - /url: /apps/6826987838/testflight/ios/46052c67-4edf-4b49-9726-9aedc9ac8ebc/metadata
+        - cell "2.2.2":
+          - generic: 2.2.2
+        - cell "No":
+          - paragraph: "No"
+        - cell "Delete":
+          - button "Delete":
+  - paragraph: Included Assets
+  - button "App Icon":
+    - generic "App Icon":
+      - img "App Icon"
+  - paragraph: App Icon
+  - checkbox "Game Center"
+  - text: Game Center
+  - separator
+  - heading "App Review Information" [level=3]
+  - generic: Sign-In Information
+  - button "More information": "?"
+  - paragraph: Provide a user name and password so we can sign in to your app. We’ll need this to complete your app review.
+  - checkbox "Sign-in required" [checked]
+  - generic: Sign-in required
+  - textbox "User name"
+  - textbox "Password"
+  - generic: Contact Information
+  - button "More information": "?"
+  - textbox "First name"
+  - textbox "Last name"
+  - textbox "Phone number"
+  - textbox "Email"
+  - generic: Notes
+  - button "More information": "?"
+  - textbox "Notes": "LinkDish organizes recipes into a personal cookbook. Build 37 uses the production API at api.linkdish.ca and production Clerk authentication. Basic review: open Add, acknowledge the Google Gemini disclosure, and paste recipe text or a publicly accessible recipe link. Save the imported recipe, open it from Cookbook, adjust servings, use Cook mode, and add ingredients to Shopping. Photo imports are available from Add. Imported content is user-provided and should be checked for accuracy. Subscription review: sign in, then open Account > View plans. This iOS release offers only LinkDish Plus Monthly (linkdish_plus_monthly): 100 recipe imports/month and unlimited personal recipe saves. The free plan includes 3 recipe imports total and up to 15 personal recipes. Restore purchases and Manage subscription are available in the app. Existing Family entitlements remain recognized, but Family and yearly plans are not offered for new purchase on iOS. Account deletion is available from Account. The app does not require a local development server."
+  - status "Characters remaining": 2,949
+  - generic: Attachment
+  - button "More information": "?"
+  - button "Choose File (Optional)"
+  - generic: Choose File (Optional)
+  - separator
+  - heading "App Store Version Release" [level=3]
+  - paragraph: To make your app available on the App Store, you can automatically release it after it’s been approved by App Review. You can also manually release it on the App Store at a later date.
+  - radio "Manually release this version" [checked]
+  - generic: Manually release this version
+  - radio "Automatically release this version"
+  - generic: Automatically release this version
+  - radio "Automatically release this version after App Review, no earlier than"
+  - generic: Automatically release this version after App Review, no earlier than
+  - paragraph: Your local date and time.
+  - textbox "Automatically release this version after App Review, no earlier than" [disabled]: Nov 8, 2026 12:00 AM
+  - text: PST
+- contentinfo:
+  - list:
+    - link "App Store Connect":
+      - /url: /apps
+  - list:
+    - listitem: Copyright © 2026 Apple Inc. All rights reserved. |
+    - link "Terms of Service":
+      - /url: /WebObjects/iTunesConnect.woa/wa/termsOfService
+    - text: "|"
+    - link "Privacy Policy":
+      - /url: https://www.apple.com/legal/privacy
+    - text: "|"
+    - link "Contact Us":
+      - /url: /contact-us
+- log

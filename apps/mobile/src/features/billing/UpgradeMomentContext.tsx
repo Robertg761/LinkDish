@@ -8,14 +8,15 @@ import React, {
   useState,
   type PropsWithChildren
 } from "react";
-import { Modal, Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from "react-native";
+import { Platform, Modal, Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from "react-native";
 
 import { trackMobileEvent } from "../../analytics/client";
 import { appColors, appSpacing } from "../../theme/tokens";
 import { useAccount } from "../account/AccountContext";
 
 import { useBilling } from "./BillingContext";
-import { billingPlans, paidBillingTiers, type PaidBillingTier } from "./plans";
+import { getLaunchPaidTiers } from "./launch-offering";
+import { billingPlans, type PaidBillingTier } from "./plans";
 import { paidPlanFeatures } from "./plans-content";
 import {
   createUpgradeMomentSessionGate,
@@ -31,7 +32,7 @@ interface UpgradeMomentContextValue {
 const triggerCopy: Record<UpgradeMomentTrigger, { body: string; eyebrow: string; title: string }> =
   {
     fourth_import_monthly: {
-      body: "You have one free import left. Plus and Family keep the recipe pipeline open when the week gets busy.",
+      body: "You have one free import left. LinkDish Plus includes 100 recipe imports each month.",
       eyebrow: "One import left",
       title: "Keep saving the recipes worth cooking"
     },
@@ -41,8 +42,8 @@ const triggerCopy: Record<UpgradeMomentTrigger, { body: string; eyebrow: string;
       title: "Save unlimited recipes"
     },
     share_sheet_quota_exceeded: {
-      body: "That shared recipe is waiting, but this month's free imports are used. Upgrade to keep importing from the share sheet.",
-      eyebrow: "Monthly imports used",
+      body: "That shared recipe is waiting, but your free imports are used. Upgrade to keep importing from the share sheet.",
+      eyebrow: "Free imports used",
       title: "Bring this one into LinkDish"
     },
     share_to_family_no_plan: {
@@ -120,7 +121,12 @@ const UpgradeMomentSheet = ({
     return null;
   }
 
-  const copy = triggerCopy[activeTrigger];
+  const isUnavailableFamilyOffer = Platform.OS === "ios" && activeTrigger === "share_to_family_no_plan";
+  const copy = isUnavailableFamilyOffer ? {
+    eyebrow: "Household access",
+    title: "An existing Family plan is required",
+    body: "Family subscriptions are not available to purchase on iOS at launch. Plus covers personal imports and saves; it does not include household sharing."
+  } : triggerCopy[activeTrigger];
 
   const openPlans = () => {
     onClose();
@@ -157,7 +163,7 @@ const UpgradeMomentSheet = ({
             showsVerticalScrollIndicator={false}
             style={styles.planScroller}
           >
-            {paidBillingTiers.map((planId) => (
+            {!isUnavailableFamilyOffer && getLaunchPaidTiers(Platform.OS).map((planId) => (
               <SheetPlanCard
                 isActive={tier === planId}
                 key={planId}
@@ -167,7 +173,7 @@ const UpgradeMomentSheet = ({
           </ScrollView>
 
           <View style={styles.actions}>
-            {hasLoadedAccount && !user ? (
+            {isUnavailableFamilyOffer ? null : hasLoadedAccount && !user ? (
               <AppButton label="Sign in to upgrade" onPress={openAccount} />
             ) : (
               <AppButton label="View plans" onPress={openPlans} />
@@ -195,7 +201,7 @@ const SheetPlanCard = ({
         <View style={styles.planName}>
           <AppText variant="title">{plan.displayName}</AppText>
           <AppText muted>
-            {plan.monthlyPrice}/month or {plan.yearlyPrice}/year
+            {Platform.OS === "ios" ? "Monthly subscription · view plans for your local price" : `${plan.monthlyPrice}/month or ${plan.yearlyPrice}/year`}
           </AppText>
         </View>
         <AppChip label={planId === "family" ? "Family" : "Recommended"} tone="accent" />

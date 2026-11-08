@@ -1,3 +1,5 @@
+> Latest release handoff: [iOS 2.2.2 (37), November 7–8, 2026](release/ios-2.2.2/README.md). This supersedes older build numbers and staging observations below.
+
 # iOS release readiness
 
 ## SDK 58 merge reconciliation — 2026-11-03

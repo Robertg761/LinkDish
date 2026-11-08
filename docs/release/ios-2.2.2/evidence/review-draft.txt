@@ -1,0 +1,207 @@
+- banner "App Store Connect":
+  - heading "App Store Connect" [level=1]:
+    - link "App Store Connect":
+      - /url: /
+  - navigation "Global":
+    - list:
+      - link "Apps":
+        - /url: /apps
+      - link "Xcode Cloud":
+        - /url: /teams/0d5f21fe-e3c4-4a09-9c67-f3c52c83d785/xcode-cloud
+      - link "Trends":
+        - /url: /trends
+      - link "Reports":
+        - /url: /itc/payments_and_financial_reports
+      - link "Business":
+        - /url: /business
+      - link "Users and Access":
+        - /url: /access/users
+  - button "flavio herrera flavio herrera Account name menu":
+- 'button "Apps menu, LinkDish: Recipe Saver, selected"':
+  - 'generic "LinkDish: Recipe Saver"':
+    - 'img "LinkDish: Recipe Saver"'
+  - generic: "LinkDish: Recipe Saver"
+- navigation "Apps":
+  - generic: Distribution
+  - list:
+    - link "Distribution":
+      - /url: /apps/6826987838/distribution
+    - link "Analytics":
+      - /url: /apps/6826987838/analytics
+    - link "TestFlight":
+      - /url: /teams/0d5f21fe-e3c4-4a09-9c67-f3c52c83d785/apps/6826987838/testflight
+- main:
+  - link "Subscriptions":
+    - /url: /apps/6826987838/distribution/subscriptions
+    - text: Subscriptions
+  - heading "LinkDish Subscriptions Ready for Review" [level=2]:
+    - heading "LinkDish Subscriptions" [level=2]
+    - paragraph:
+      - text: Ready for Review
+  - button "Add for Review" [disabled]:
+    - text: Add for Review
+  - paragraph:
+    - text: You can create a subscription after you create a subscription group. All subscriptions must be a part of a group. Users can only subscribe to one subscription in a group at a time, but can change to another subscription in the same group. If they do, you'll still receive 85% of the proceeds in the second year (after tax, if applicable).
+    - link "Learn More":
+      - /url: https://developer.apple.com/help/app-store-connect/manage-subscriptions/offer-auto-renewable-subscriptions
+  - paragraph:
+    - text: This item has been
+    - link "added for review":
+      - /url: viewItem
+    - text: ", but you can still"
+    - link "remove the item":
+      - /url: removeItem
+    - text: .
+  - heading "Subscriptions" [level=3]
+  - button "Create Subscription":
+  - button "Edit"
+  - paragraph:
+    - text: Arrange your subscriptions in descending order, starting with the option that offers the highest level of service. You can add more than one subscription to each level. This order will determine your subscription's upgrade and downgrade options.
+    - link "Learn more about subscription upgrades and downgrades.":
+      - /url: https://developer.apple.com/go/?id=subscriptions-overview
+  - grid:
+    - rowgroup:
+      - row "Level Reference Name Product ID Duration Status":
+        - columnheader "Level":
+          - generic: Level
+        - columnheader "Reference Name":
+          - generic: Reference Name
+        - columnheader "Product ID":
+          - generic: Product ID
+        - columnheader "Duration":
+          - generic: Duration
+        - columnheader "Status":
+          - generic: Status
+    - rowgroup:
+      - row "1":
+        - rowheader "1":
+          - generic: "1"
+        - gridcell "LinkDish Family Monthly":
+          - link "LinkDish Family Monthly":
+            - /url: /apps/6826987838/distribution/subscriptions/6830322468
+        - gridcell "linkdish_family_monthly":
+          - generic: linkdish_family_monthly
+        - gridcell "1 month":
+          - generic: 1 month
+        - gridcell "Prepare for Submission":
+          - paragraph:
+            - text: Prepare for Submission
+      - row "1":
+        - rowheader "1":
+          - generic: "1"
+        - gridcell "LinkDish Family Yearly":
+          - link "LinkDish Family Yearly":
+            - /url: /apps/6826987838/distribution/subscriptions/6830322653
+        - gridcell "linkdish_family_yearly":
+          - generic: linkdish_family_yearly
+        - gridcell "1 year":
+          - generic: 1 year
+        - gridcell "Prepare for Submission":
+          - paragraph:
+            - text: Prepare for Submission
+      - row "2":
+        - rowheader "2":
+          - generic: "2"
+        - gridcell "LinkDish Plus Monthly":
+          - link "LinkDish Plus Monthly":
+            - /url: /apps/6826987838/distribution/subscriptions/6828737057
+        - gridcell "linkdish_plus_monthly":
+          - generic: linkdish_plus_monthly
+        - gridcell "1 month":
+          - generic: 1 month
+        - gridcell "Ready for Review":
+          - paragraph:
+            - text: Ready for Review
+      - row "2":
+        - rowheader "2":
+          - generic: "2"
+        - gridcell "LinkDish Plus Yearly":
+          - link "LinkDish Plus Yearly":
+            - /url: /apps/6826987838/distribution/subscriptions/6830321400
+        - gridcell "linkdish_plus_yearly":
+          - generic: linkdish_plus_yearly
+        - gridcell "1 year":
+          - generic: 1 year
+        - gridcell "Prepare for Submission":
+          - paragraph:
+            - text: Prepare for Submission
+  - heading "Display Name and Description" [level=3]
+  - paragraph:
+    - text: You can use different subscription group display names and app name display options for each localization. Users will see these names when they manage subscriptions on their devices.
+    - link "Learn More":
+      - /url: https://developer.apple.com/help/app-store-connect/manage-subscriptions/offer-auto-renewable-subscriptions
+  - grid "Display Name and Description":
+    - rowgroup:
+      - row "Localizations Subscription Group Display Name App Name Actions":
+        - columnheader "Localizations":
+          - generic: Localizations
+        - columnheader "Subscription Group Display Name":
+          - generic: Subscription Group Display Name
+        - columnheader "App Name":
+          - generic: App Name
+        - columnheader "Actions"
+    - rowgroup:
+      - row "English (U.S.)":
+        - rowheader "English (U.S.)":
+          - button "English (U.S.)"
+        - gridcell "LinkDish":
+          - generic: LinkDish
+        - 'gridcell "LinkDish: Recipe Saver"':
+          - generic: "LinkDish: Recipe Saver"
+        - gridcell
+  - heading "Subscription Group ID" [level=6]
+  - paragraph: "22527884"
+  - paragraph:
+    - button "Edit Subscription Group"
+  - region "Draft Submissions":
+    - button "Draft Submissions (1)":
+      - text: Draft Submissions (1)
+- dialog "Draft Submission Started by flavio herrera Today at 11:37 PM" [active]:
+  - document:
+    - heading "Draft Submission Started by flavio herrera Today at 11:37 PM" [level=2]:
+      - paragraph: Draft Submission
+      - paragraph: Started by flavio herrera Today at 11:37 PM
+    - button "Close":
+    - generic: Items added below will be reviewed together with your latest version of the selected platform.
+    - combobox "Select submission platform":
+      - option "iOS" [selected]
+      - option "macOS"
+      - option "tvOS"
+      - option "visionOS"
+    - paragraph: Unable to Submit for Review
+    - list:
+      - listitem: To submit your items for review, add an app version for the selected platform.
+    - heading "Items Ready to Submit (2)" [level=5]
+    - list "Items Ready to Submit (2)":
+      - listitem "LinkDish Plus Monthly":
+        - generic "App Icon":
+          - img "App Icon"
+        - paragraph:
+          - link "LinkDish Plus Monthly":
+            - /url: /apps/6826987838/distribution/subscriptions/6828737057
+        - paragraph: Subscription
+        - button "Delete":
+      - listitem "LinkDish Subscriptions":
+        - generic "App Icon":
+          - img "App Icon"
+        - paragraph:
+          - link "LinkDish Subscriptions":
+            - /url: /apps/6826987838/distribution/subscription-groups/22527884
+        - paragraph: Subscription Group
+        - button "Delete":
+    - generic: Last updated by flavio herrera Today at 11:38 PM
+    - button "Submit for Review" [disabled]
+- contentinfo:
+  - list:
+    - link "App Store Connect":
+      - /url: /apps
+  - list:
+    - listitem: Copyright © 2026 Apple Inc. All rights reserved. |
+    - link "Terms of Service":
+      - /url: /WebObjects/iTunesConnect.woa/wa/termsOfService
+    - text: "|"
+    - link "Privacy Policy":
+      - /url: https://www.apple.com/legal/privacy
+    - text: "|"
+    - link "Contact Us":
+      - /url: /contact-us

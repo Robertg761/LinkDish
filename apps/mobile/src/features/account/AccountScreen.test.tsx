@@ -34,6 +34,7 @@ const accountState = vi.hoisted(() => ({
 
 const billingState = vi.hoisted(() => ({
   purchaseStatus: "idle",
+  restoreMessage: null as string | null,
   restorePurchases: vi.fn()
 }));
 
@@ -264,6 +265,7 @@ describe("AccountScreen household actions", () => {
     };
     accountState.verifyCode.mockReset();
     billingState.purchaseStatus = "idle";
+    billingState.restoreMessage = null;
     billingState.restorePurchases.mockReset();
     routerMocks.push.mockReset();
     routerMocks.replace.mockReset();
@@ -337,4 +339,19 @@ describe("AccountScreen household actions", () => {
     expect(output).not.toContain("Keep a personal grocery list");
     expect(output).toContain("Manage Household");
   });
+});
+
+it("shows restore progress and the result next to the account restore action", async () => {
+  billingState.purchaseStatus = "restoring";
+  let renderer!: ReturnType<typeof create>;
+  await act(async () => {
+    renderer = create(<AccountScreen />);
+    await Promise.resolve();
+  });
+  expect(JSON.stringify(renderer.toJSON())).toContain("Checking your store purchases");
+  billingState.purchaseStatus = "idle";
+  billingState.restoreMessage = "Purchases restored. Your paid access is ready.";
+  act(() => renderer.update(<AccountScreen />));
+  expect(JSON.stringify(renderer.toJSON())).toContain(billingState.restoreMessage);
+  act(() => renderer.unmount());
 });

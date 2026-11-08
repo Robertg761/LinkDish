@@ -25,6 +25,7 @@ import { useClerkSession } from "../../src/features/account/ClerkSessionContext"
 import { activateClerkSignIn } from "../../src/features/account/completeClerkSignIn";
 import { BackupCard } from "../../src/features/backup/BackupCard";
 import { useBilling } from "../../src/features/billing/BillingContext";
+import { RestorePurchasesFeedback } from "../../src/features/billing/RestorePurchasesFeedback";
 import { useTabBarScroll } from "../../src/features/navigation/TabBarVisibility";
 import { CookbookSyncCard } from "../../src/features/saved-recipes/CookbookSyncCard";
 import { useSavedRecipes } from "../../src/features/saved-recipes/SavedRecipesContext";
@@ -838,6 +839,7 @@ export default function AccountScreen() {
                     variant="outline"
                   />
                 </View>
+                <RestorePurchasesFeedback />
                 <View style={styles.accountSecondaryActions}>
                   <AppButton
                     disabled={isBusy}
