@@ -1244,6 +1244,11 @@ const RecipeScreen: React.FC<RecipeScreenProps> = (props) => {
           notes={record.notes}
           onClose={() => setEditorOpen(false)}
           onSave={handleSaveEdits}
+          onUploadPhoto={
+            isAuthenticated
+              ? (dataUrl) => asAccount(account, () => apiClient.uploadRecipePhoto({ dataUrl }))
+              : undefined
+          }
           open={editorOpen}
           recipe={recipe}
           sourceUrl={isSaved && source.kind === "web" ? record.sourceUrl : null}

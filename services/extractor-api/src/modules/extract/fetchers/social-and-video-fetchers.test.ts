@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /* The transcript library does its own networking; these tests stay offline. */
 vi.mock("youtube-transcript", () => ({
@@ -208,6 +208,102 @@ describe("fetchTikTokDocument", () => {
     });
 
     expect(document).toMatchObject({ text: "", authorName: "Cook Creator" });
+  });
+
+  describe("when the embed page refuses", () => {
+    const embedHtml = `<script id="__FRONTITY_CONNECT_STATE__">${JSON.stringify({
+      source: {
+        data: {
+          "/embed/v2/7234567890123456789": {
+            videoData: { itemInfos: { text: "Chili  1 lb beef" } }
+          }
+        }
+      }
+    })}</script>`;
+
+    /** A TikTok whose oEmbed has no caption and whose embed page answers `statuses` in turn. */
+    const fetchWithEmbedStatuses = (statuses: number[]) => {
+      let embedRequests = 0;
+      const fetchMock = vi.fn<FetchSignature>((input) => {
+        if (!requestedUrl(input).startsWith(TIKTOK_EMBED_PAGE_ENDPOINT)) {
+          return Promise.resolve(
+            json({ author_name: "Cook Creator", embed_product_id: "7234567890123456789" })
+          );
+        }
+
+        const status = statuses[Math.min(embedRequests, statuses.length - 1)] ?? 503;
+        embedRequests += 1;
+
+        return Promise.resolve(new Response(status === 200 ? embedHtml : "", { status }));
+      });
+
+      return { embedRequestCount: () => embedRequests, fetchMock };
+    };
+
+    const readDocument = async (fetchMock: typeof fetch, timeoutMs = 10_000) => {
+      const reading = fetchTikTokDocument(videoUrl, fetchMock, { timeoutMs, validateUrl: safe });
+      const outcome = reading.then(
+        (document) => ({ document, error: null }),
+        (error: unknown) => ({ document: null, error })
+      );
+
+      await vi.advanceTimersByTimeAsync(20_000);
+      return outcome;
+    };
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it.each([503, 429, 500])("asks again after a %i and reads the caption", async (status) => {
+      const { embedRequestCount, fetchMock } = fetchWithEmbedStatuses([status, status, 200]);
+
+      const { document } = await readDocument(fetchMock);
+
+      expect(document?.text).toBe("Chili\n1 lb beef");
+      expect(embedRequestCount()).toBe(3);
+    });
+
+    it("gives up after five tries, keeping the oEmbed answer", async () => {
+      const { embedRequestCount, fetchMock } = fetchWithEmbedStatuses([503]);
+
+      const { document } = await readDocument(fetchMock);
+
+      expect(document).toMatchObject({ authorName: "Cook Creator", text: "" });
+      expect(embedRequestCount()).toBe(5);
+    });
+
+    it("doesn't ask again when the page says the video isn't there", async () => {
+      const { embedRequestCount, fetchMock } = fetchWithEmbedStatuses([404, 200]);
+
+      const { document } = await readDocument(fetchMock);
+
+      expect(document?.text).toBe("");
+      expect(embedRequestCount()).toBe(1);
+    });
+
+    it("stays within the time it was given", async () => {
+      const { embedRequestCount, fetchMock } = fetchWithEmbedStatuses([503]);
+      fetchMock.mockImplementation((input, init) =>
+        init?.signal?.aborted
+          ? Promise.reject(Object.assign(new Error("aborted"), { name: "AbortError" }))
+          : Promise.resolve(
+              requestedUrl(input).startsWith(TIKTOK_EMBED_PAGE_ENDPOINT)
+                ? new Response("", { status: 503 })
+                : json({ embed_product_id: "7234567890123456789" })
+            )
+      );
+
+      const { error } = await readDocument(fetchMock, 400);
+
+      expect(error).toBeInstanceOf(SocialFetchError);
+      expect(error).toMatchObject({ reason: "timeout" });
+      expect(embedRequestCount()).toBe(0);
+    });
   });
 
   it("resolves short links one validated hop at a time", async () => {

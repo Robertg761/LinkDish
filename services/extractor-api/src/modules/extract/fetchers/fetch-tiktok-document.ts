@@ -28,6 +28,13 @@ export const TIKTOK_OEMBED_ENDPOINT = "https://www.tiktok.com/oembed";
  */
 export const TIKTOK_EMBED_PAGE_ENDPOINT = "https://www.tiktok.com/embed/v2";
 
+/*
+ * The embed page often turns a request down with a 503 or 429 and answers the same request moments
+ * later, and it is the only source of a caption, so a refusal gets a few more tries. These waits
+ * add up to about 3 seconds, inside the 10-second fetch budget.
+ */
+const embedPageRetryDelaysMs = [250, 500, 1_000, 1_500];
+
 const oEmbedMaxBytes = 256 * 1024;
 const embedPageMaxBytes = 2 * 1024 * 1024;
 const maxShortLinkRedirects = 5;
@@ -168,6 +175,44 @@ export const readTikTokEmbedMedia = (
   };
 };
 
+const isRefusal = (status: number): boolean => status === 429 || status >= 500;
+
+/* Ends early when `signal` aborts, and the next request then fails with the abort. */
+const waitUnlessAborted = (delayMs: number, signal: AbortSignal): Promise<void> =>
+  new Promise((resolve) => {
+    const finish = () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", finish);
+      resolve();
+    };
+    const timer = setTimeout(finish, delayMs);
+
+    signal.addEventListener("abort", finish, { once: true });
+  });
+
+/** The embed page, asked again while it refuses. Answers with the last response either way. */
+const fetchEmbedPage = async (
+  embedUrl: string,
+  fetchImplementation: typeof fetch,
+  signal: AbortSignal
+): Promise<Response> => {
+  const request = () =>
+    fetchImplementation(embedUrl, { headers: browserLikeHeaders, redirect: "manual", signal });
+  let response = await request();
+
+  for (const delayMs of embedPageRetryDelaysMs) {
+    if (!isRefusal(response.status)) {
+      break;
+    }
+
+    discardBody(response);
+    await waitUnlessAborted(delayMs, signal);
+    response = await request();
+  }
+
+  return response;
+};
+
 /**
  * The video's record in the embed page's state (caption, author, covers and a playable MP4
  * link), or null when the page is missing, too large or carries no state.
@@ -182,11 +227,7 @@ export const fetchTikTokEmbedVideoData = async (
 
   await assertSafe(embedUrl, validateUrl);
 
-  const response = await fetchImplementation(embedUrl, {
-    headers: browserLikeHeaders,
-    redirect: "manual",
-    signal
-  });
+  const response = await fetchEmbedPage(embedUrl, fetchImplementation, signal);
 
   if (!response.ok) {
     discardBody(response);

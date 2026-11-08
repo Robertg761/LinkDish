@@ -78,5 +78,13 @@ export default tseslint.config(
         }
       ]
     }
+  },
+  {
+    // Release asset scripts are standalone CommonJS, outside the TypeScript projects.
+    files: ["docs/release/**/*.cjs"],
+    extends: [tseslint.configs.disableTypeChecked],
+    rules: {
+      "@typescript-eslint/no-require-imports": "off"
+    }
   }
 );

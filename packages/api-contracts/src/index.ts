@@ -643,6 +643,26 @@ export const deleteShoppingItemsResponseSchema = z.object({
 });
 
 /*
+ * A person's own picture for a recipe. The API re-encodes it and answers with where it lives; the
+ * recipe then holds that URL like any other picture (see recipe-photos.ts in the API).
+ */
+export const MAX_RECIPE_PHOTOS_PER_ACCOUNT = 100;
+export const RECIPE_PHOTO_PATH_PREFIX = "/image/photos/";
+
+export const uploadRecipePhotoRequestSchema = z.object({
+  dataUrl: imageDataUrlSchema
+});
+
+export const uploadRecipePhotoResponseSchema = z.object({
+  height: z.number().int().positive(),
+  path: z.string().startsWith(RECIPE_PHOTO_PATH_PREFIX),
+  width: z.number().int().positive()
+});
+
+export type UploadRecipePhotoRequest = z.infer<typeof uploadRecipePhotoRequestSchema>;
+export type UploadRecipePhotoResponse = z.infer<typeof uploadRecipePhotoResponseSchema>;
+
+/*
  * Personal library sync: a signed-in account's own cookbook (recipes with their personal metadata,
  * and collections), kept in the account and exchanged as changes. Each recipe or collection is one
  * item; the copy with the newest `updatedAt` wins, and a deletion travels as a tombstone.
@@ -692,8 +712,17 @@ export const libraryRecipeSchema = z.object({
   cookLog: z.array(libraryCookLogEntrySchema).max(MAX_LIBRARY_COOK_LOG_ENTRIES).optional(),
   timesCooked: z.number().int().nonnegative().optional(),
   lastCookedAt: z.string().datetime().optional(),
-  preferredServings: z.number().positive().max(10_000).optional()
+  preferredServings: z.number().positive().max(10_000).optional(),
+  /**
+   * Set only on a recipe the server copied into this cookbook from a Family household's shared
+   * book when the household owner deleted their account and the new owner has no Family plan
+   * (HOUSEHOLD_DELETION_COPY_ORIGIN). Such a copy is not an import and does not count toward the
+   * Free saved-recipe cap; it also lets the shared book and the copy be told apart later.
+   */
+  origin: z.literal("household-deletion-copy").optional()
 });
+
+export const HOUSEHOLD_DELETION_COPY_ORIGIN = "household-deletion-copy" as const;
 
 export const libraryCollectionSchema = z.object({
   name: z.string().trim().min(1).max(MAX_LIBRARY_COLLECTION_NAME_LENGTH),

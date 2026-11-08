@@ -27,7 +27,8 @@ import {
   recordSharedLinkOwners,
   markSavedRecipeShared,
   markSavedRecipeUnshared,
-  withOwnSharedLink
+  withOwnSharedLink,
+  hideHouseholdCopiesShownAsShared
 } from "./store";
 
 import type { SuccessfulExtractionState } from "../recipe-results/types";
@@ -256,6 +257,68 @@ describe("saved recipe store helpers", () => {
     expect(getQuotaSavedRecipeCount([starter, savedRecipe])).toBe(1);
     expect(clone.isStarter).toBeUndefined();
     expect(getQuotaSavedRecipeCount([starter, clone])).toBe(1);
+  });
+
+  it("leaves household-deletion copies out of the free quota count", () => {
+    const personal = Array.from({ length: 15 }, (_, index) => ({
+      ...createSavedRecipeRecord(buildSuccessState(), "2026-04-19T12:00:00.000Z"),
+      id: `personal-${index}`
+    }));
+    const copies = [0, 1].map((index) => ({
+      ...createSavedRecipeRecord(buildSuccessState(), "2026-04-19T12:00:00.000Z"),
+      id: `household-copy-${index}`,
+      origin: "household-deletion-copy" as const
+    }));
+
+    expect(getQuotaSavedRecipeCount([...personal, ...copies])).toBe(15);
+  });
+
+  it("does not pass the household-copy exemption on to a duplicate", () => {
+    const copy = {
+      ...createSavedRecipeRecord(buildSuccessState(), "2026-04-19T12:00:00.000Z"),
+      id: "household-copy-a",
+      origin: "household-deletion-copy" as const
+    };
+
+    const duplicate = cloneSavedRecipeRecord([copy], copy, "2026-04-19T12:15:00.000Z");
+
+    expect(duplicate.origin).toBeUndefined();
+    expect(getQuotaSavedRecipeCount([copy, duplicate])).toBe(1);
+  });
+
+  it("keeps a household-deletion copy the member edited visible beside the shared original", () => {
+    const own = createSavedRecipeRecord(buildSuccessState(), "2026-04-19T12:00:00.000Z");
+    const copy = { ...own, id: "household-copy-a", origin: "household-deletion-copy" as const };
+    const editedRecipe = {
+      ...copy,
+      id: "household-copy-b",
+      recipe: { ...copy.recipe, title: "Mine" }
+    };
+    const editedNotes = { ...copy, id: "household-copy-c", notes: "Less salt" };
+    const family = [{ recipe: { ...own.recipe } }] as Pick<SharedRecipe, "recipe">[];
+
+    expect(hideHouseholdCopiesShownAsShared([copy, editedRecipe, editedNotes], family)).toEqual([
+      editedRecipe,
+      editedNotes
+    ]);
+  });
+
+  it("hides household-deletion copies only while the shared original is visible", () => {
+    const own = createSavedRecipeRecord(buildSuccessState(), "2026-04-19T12:00:00.000Z");
+    const copy = { ...own, id: "household-copy-a", origin: "household-deletion-copy" as const };
+    const otherCopy = {
+      ...copy,
+      id: "household-copy-b",
+      recipe: { ...copy.recipe, sourceUrl: "https://example.com/other" }
+    };
+    const records = [own, copy, otherCopy];
+    const family = [{ recipe: { ...own.recipe } }] as Pick<SharedRecipe, "recipe">[];
+
+    // Household active: the copy matching a shared recipe is hidden; shared stays visible.
+    expect(hideHouseholdCopiesShownAsShared(records, family)).toEqual([own, otherCopy]);
+    // Household inactive: copies are visible again.
+    expect(hideHouseholdCopiesShownAsShared(records, null)).toEqual(records);
+    expect(hideHouseholdCopiesShownAsShared(records, [])).toEqual(records);
   });
 
   it("increments repeated clone titles", () => {

@@ -143,6 +143,7 @@ const API_METHODS = [
   "sendAnalyticsEvents",
   "updateAccountProfile",
   "updateSharedRecipe",
+  "uploadRecipePhoto",
   "upsertShoppingItems",
   "verifyLoginCode"
 ] as const satisfies ReadonlyArray<keyof ExtractorApiClient>;

@@ -322,6 +322,20 @@
   color: var(--ink);
 }
 
+/* The terms page has 18 contents entries, taller than a laptop viewport. Keep the sticky
+   behaviour but let the list scroll so every link stays reachable. */
+.legal-toc-long {
+  max-height: calc(100vh - var(--header-height) - 56px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+
+.legal-toc-long a {
+  padding: 5px 0;
+  font-size: 0.875rem;
+}
+
 .legal-content {
   min-width: 0;
   max-width: 780px;
@@ -535,6 +549,11 @@
 
   .legal-toc {
     position: static;
+  }
+
+  .legal-toc-long {
+    max-height: none;
+    overflow: visible;
   }
 }
 

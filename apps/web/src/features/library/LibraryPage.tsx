@@ -100,6 +100,7 @@ import {
   restoreSavedRecipe,
   SavedRecipeLimitError,
   syncRecipeToHousehold,
+  hideHouseholdCopiesShownAsShared,
   withOwnSharedLink
 } from "./saved-recipe-store";
 
@@ -245,7 +246,10 @@ export const LibraryPage: React.FC = () => {
   // sharers were recorded until this account's Family list shows the copy is its own.
   const family = shared.status === "ready" ? shared.recipes : null;
   const recipes = useMemo(
-    () => library.recipes.map((recipe) => withOwnSharedLink(recipe, account, family)),
+    () =>
+      hideHouseholdCopiesShownAsShared(library.recipes, family).map((recipe) =>
+        withOwnSharedLink(recipe, account, family)
+      ),
     [account, family, library.recipes]
   );
 

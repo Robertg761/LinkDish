@@ -55,6 +55,10 @@ size` checks the budgets after a build (entry ≤ 115 KB gzip, landing JS ≤
   hanging. Reactive stores in `src/data` (`useSavedRecipes`, collections, meal
   plan, import queue, cook sessions) use `useSyncExternalStore`, optimistic
   writes with rollback, and a BroadcastChannel change feed across tabs.
+  A shopping check-off is also noted synchronously in localStorage until its
+  IndexedDB transaction is over: a reload aborts that transaction, so the next
+  load applies whatever is still noted (`shopping-check-journal.ts`). Each item
+  has its own key, because tabs share localStorage.
   Personal metadata (favorites, tags, collections, ratings, cook log) stays on
   the device and is never part of the household sync payload.
 - **Features.** Cookbook (ranked search, filters, collections, tags, shelves),
@@ -68,6 +72,23 @@ size` checks the budgets after a build (entry ≤ 115 KB gzip, landing JS ≤
   page hide). Event names are the closed enum in `packages/api-contracts`;
   the API drops unknown events individually, so deploy the API before clients
   that send new names.
+
+## Recipe Pictures
+
+A recipe's `image` is always an http(s) URL, read through the `/image` proxy. A
+person's own picture keeps it that way, so syncing, sharing and installed clients
+need nothing new: `POST /image/photos` (signed in; rate limited; 100 per account)
+re-encodes the upload with sharp to a WebP of at most 1200px without its metadata,
+stores it in Upstash, and the recipe keeps the URL `GET /image/photos/<id>.webp`
+answers. Those URLs are public but unguessable, because household members and the
+proxy read them unsigned. Both editors upload on save, so backing out stores
+nothing. A picture and its place in the account's index are written in one
+transaction, whose count backs the limit against concurrent uploads. An upload that
+outlasts its account takes itself back, and deletion clears pictures again after
+marking the account. Pictures are removed with the account, stay out of the nightly snapshot
+(a recipe that loses one shows its designed cover), and aren't removed when a
+recipe stops using them, so replaced pictures count toward the 100. They run in
+the `image` function: the Hobby plan's 12 functions are all taken.
 
 ## Mobile
 
@@ -641,7 +662,10 @@ If production `/extract` skips the browser fetch, it is a deployment regression 
 - The live canary manifest is intentionally separate from PR-blocking CI so real-world regressions can be measured without making the pipeline flaky.
 - API deploys (`deploy-api.yml`) are gated on it instead: the workflow deploys with
   `--prod --skip-domain`, runs the health check and the live canary against that deployment's
-  own `*.vercel.app` URL, and only then runs `vercel promote`. After promoting it confirms through
+  own `*.vercel.app` URL, and only then runs `vercel promote`. A case that misses its expected outcome
+  gets one more try, so one bad answer from a third-party site doesn't stop a deploy while a real
+  regression, which misses twice, still does. The artifact records the miss as
+  `primaryRetriedAfter`. After promoting it confirms through
   the Vercel API that api.linkdish.ca points at the new deployment before the final health check.
   A failing check leaves api.linkdish.ca on the previous deployment, and the run summary names the
   staged URL so it can be promoted by hand when the failure is a third-party site rather than the

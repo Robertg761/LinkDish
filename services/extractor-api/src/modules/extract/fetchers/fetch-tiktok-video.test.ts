@@ -35,6 +35,26 @@ const mp4 = (bytes = new Uint8Array([0, 0, 0, 24, 102, 116, 121, 112])) =>
 const options = { timeoutMs: 1_000, maxBytes: 1_024, maxSeconds: 240, validateUrl: safe };
 
 describe("fetchTikTokVideo", () => {
+  it("asks the embed page again when it refuses", async () => {
+    let embedRequests = 0;
+    const fetchMock = vi.fn<FetchSignature>((input) => {
+      if (!requestedUrl(input).startsWith(TIKTOK_EMBED_PAGE_ENDPOINT)) {
+        return Promise.resolve(mp4());
+      }
+
+      embedRequests += 1;
+
+      return Promise.resolve(
+        embedRequests === 1
+          ? new Response("", { status: 503 })
+          : embedPage({ urls: [mediaUrl], videoMeta: { duration: 42 } })
+      );
+    });
+
+    await expect(fetchTikTokVideo(videoUrl, fetchMock, options)).resolves.toBeDefined();
+    expect(embedRequests).toBe(2);
+  });
+
   it("downloads the MP4 the embed page links, with its length", async () => {
     const fetchMock = vi.fn<FetchSignature>((input) =>
       Promise.resolve(

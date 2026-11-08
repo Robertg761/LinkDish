@@ -142,7 +142,8 @@ describe("command palette", () => {
     expect(dialog).toHaveAttribute("aria-modal", "true");
     expect(input).toHaveAttribute("aria-expanded", "true");
     expect(input).toHaveAttribute("aria-controls", listbox.id);
-    expect(input).toHaveFocus();
+    // Focus lands just after the dialog mounts, so a slow runner can get here first.
+    await waitFor(() => expect(input).toHaveFocus());
     expect(within(listbox).getByRole("group", { name: "Recent recipes" })).toBeInTheDocument();
     expect(within(listbox).getByRole("group", { name: "Go to" })).toBeInTheDocument();
     expect(within(listbox).getByRole("group", { name: "Actions" })).toBeInTheDocument();

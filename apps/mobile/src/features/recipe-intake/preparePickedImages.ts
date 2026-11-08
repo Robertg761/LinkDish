@@ -71,3 +71,27 @@ export const preparePickedImages = async (assets: PickedImage[]): Promise<Extrac
   }
   return images;
 };
+
+/* The API stores a recipe picture at this size at most, so sending more only costs time. */
+const RECIPE_PICTURE_EDGE = 1200;
+
+/** A person's own picture for a recipe, as the data URL the API takes. */
+export const prepareRecipePicture = async (asset: PickedImage): Promise<string> => {
+  const rendered = await manipulateAsync(asset.uri, resizeActions(asset, RECIPE_PICTURE_EDGE), {
+    base64: true,
+    compress: 0.8,
+    format: SaveFormat.JPEG
+  });
+
+  try {
+    const base64 = rendered.base64?.trim();
+
+    if (!base64) {
+      throw new Error("The picture could not be read.");
+    }
+
+    return `data:image/jpeg;base64,${base64}`;
+  } finally {
+    if (rendered.uri !== asset.uri) removeRenderedImage(rendered.uri);
+  }
+};

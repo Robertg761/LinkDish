@@ -349,6 +349,7 @@ const createMockClient = (): ExtractorApiClient => ({
   updateAccountProfile: vi.fn(),
   upsertShoppingItems: vi.fn(),
   updateSharedRecipe: apiMocks.updateSharedRecipe,
+  uploadRecipePhoto: vi.fn(),
   verifyLoginCode: vi.fn()
 });
 

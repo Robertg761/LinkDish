@@ -1,5 +1,5 @@
 import { ExtractorApiError, createExtractorApiClient } from "@linkdish/api-client";
-import { createStarterRecipeSeedRecords } from "@linkdish/recipe-domain";
+import { createStarterRecipeSeedRecords, type RecipeImage } from "@linkdish/recipe-domain";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, {
   createContext,
@@ -64,6 +64,7 @@ import {
   getOwnSharedRecipeId,
   recordSharedLinkOwners,
   markSavedRecipeUnshared,
+  hideHouseholdCopiesShownAsShared,
   withOwnSharedLink,
   removeSavedRecipeRecord,
   savedRecipeRecordToSharedRecipeRequest,
@@ -148,6 +149,8 @@ export interface SavedRecipesActions {
   updateCollection: (id: string, patch: CollectionPatch) => void;
   updateRecipe: (id: string, update: SavedRecipeUpdate) => boolean;
   updateSharedRecipe: (id: string, update: SavedRecipeUpdate) => Promise<boolean>;
+  /** Stores a person's own picture with their account, for a recipe to use. Rejects on failure. */
+  uploadRecipePhoto: (dataUrl: string) => Promise<RecipeImage>;
 }
 
 export interface BackupRestoreCookbook {
@@ -1695,6 +1698,11 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
     [commitSavedRecipes, ownSharedRecipeId, removeSharedRecipeFromState]
   );
 
+  const uploadRecipePhoto = useCallback(
+    (dataUrl: string) => client.uploadRecipePhoto({ dataUrl }),
+    [client]
+  );
+
   const updateRecipe = useCallback(
     (id: string, update: SavedRecipeUpdate): boolean => {
       const sourceRecord = getSavedRecipeRecordById(savedRecipesRef.current, id);
@@ -1767,13 +1775,22 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
   );
   // The cookbook as the signed-in account sees it: another account's Family link on a recipe
   // reads as not shared (it can't update or unshare that account's copy).
-  const visibleSavedRecipes = useMemo(() => {
+  const linkedSavedRecipes = useMemo(() => {
     const family = hasLoadedSharedRecipes ? sharedRecipes : null;
     return savedRecipes.map((record) => withOwnSharedLink(record, user?.id, family));
   }, [hasLoadedSharedRecipes, savedRecipes, sharedRecipes, user?.id]);
+  const visibleSavedRecipes = useMemo(
+    () =>
+      hideHouseholdCopiesShownAsShared(
+        linkedSavedRecipes,
+        hasLoadedSharedRecipes ? sharedRecipes : null
+      ),
+    [hasLoadedSharedRecipes, linkedSavedRecipes, sharedRecipes]
+  );
+  // By id it reads every record, hidden copies too: a meal plan entry can point at one.
   const getSavedRecipeById = useCallback(
-    (id: string) => getSavedRecipeRecordById(visibleSavedRecipes, id),
-    [visibleSavedRecipes]
+    (id: string) => getSavedRecipeRecordById(linkedSavedRecipes, id),
+    [linkedSavedRecipes]
   );
   const getSavedRecipeBySourceUrl = useCallback(
     (sourceUrl: string) => getSavedRecipeRecordBySourceUrl(visibleSavedRecipes, sourceUrl),
@@ -1839,7 +1856,8 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
       unshareRecipe,
       updateCollection,
       updateRecipe,
-      updateSharedRecipe
+      updateSharedRecipe,
+      uploadRecipePhoto
     }),
     [
       cloneRecipe,
@@ -1862,7 +1880,8 @@ export const SavedRecipesProvider = ({ children }: PropsWithChildren) => {
       unshareRecipe,
       updateCollection,
       updateRecipe,
-      updateSharedRecipe
+      updateSharedRecipe,
+      uploadRecipePhoto
     ]
   );
 

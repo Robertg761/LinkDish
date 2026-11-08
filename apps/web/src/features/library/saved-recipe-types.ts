@@ -43,6 +43,12 @@ export interface WebSavedRecipe {
   timesCooked?: number | undefined;
   /** The recipe this one is a copy of (set by Duplicate, here or in the Android app). */
   clonedFromId?: string | undefined;
+  /**
+   * "household-deletion-copy": copied in by the server when a Family owner deleted their account
+   * and the new owner has no Family plan. Not counted toward the Free cap, and hidden from the
+   * cookbook while the household's shared original is visible again.
+   */
+  origin?: "household-deletion-copy" | undefined;
   sync?: {
     status: "local_only" | "synced" | "dirty" | "sync_failed";
     sharedRecipeId?: string;

@@ -5,7 +5,14 @@ import { describe, expect, it, vi } from "vitest";
 import { RecipeEditorSheet } from "./RecipeEditorSheet";
 
 import type { RecipeEditorValues } from "./RecipeEditorSheet";
-import type { Recipe } from "@linkdish/recipe-domain";
+import type { Recipe, RecipeImage } from "@linkdish/recipe-domain";
+
+const photoMocks = vi.hoisted(() => ({ prepareRecipePhoto: vi.fn() }));
+
+vi.mock("../extract/image-downscale", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  prepareRecipePhoto: photoMocks.prepareRecipePhoto
+}));
 
 const recipe: Recipe = {
   confidence: {
@@ -217,5 +224,208 @@ describe("RecipeEditorSheet", () => {
 
     expect(await screen.findByRole("alert")).toBeInTheDocument();
     expect(props.onClose).not.toHaveBeenCalled();
+  });
+
+  describe("the picture", () => {
+    const facebookThumbnail: RecipeImage = {
+      source: "og",
+      url: "https://cdn.example.com/thumbnail.jpg"
+    };
+    const uploaded: RecipeImage = {
+      height: 900,
+      source: "content",
+      url: "https://api.example.com/image/photos/abc.webp",
+      width: 1200
+    };
+    const withPicture = { ...recipe, image: facebookThumbnail };
+    const savedValues = (props: ReturnType<typeof renderEditor>) =>
+      vi.mocked(props.onSave).mock.calls[0]?.[0] as RecipeEditorValues;
+
+    const choosePhoto = async () => {
+      photoMocks.prepareRecipePhoto.mockResolvedValue({
+        dataUrl: "data:image/jpeg;base64,abc",
+        height: 900,
+        mimeType: "image/jpeg",
+        width: 1200
+      });
+      fireEvent.change(screen.getByLabelText("Choose a picture"), {
+        target: { files: [new File(["photo"], "dinner.jpg", { type: "image/jpeg" })] }
+      });
+      await screen.findByAltText("Your new recipe picture");
+    };
+
+    const choosePhotoSlowly = () => {
+      let finish = (): void => undefined;
+
+      photoMocks.prepareRecipePhoto.mockReturnValue(
+        new Promise((resolve) => {
+          finish = () =>
+            resolve({
+              dataUrl: "data:image/jpeg;base64,late",
+              height: 9,
+              mimeType: "image/jpeg",
+              width: 9
+            });
+        })
+      );
+      fireEvent.change(screen.getByLabelText("Choose a picture"), {
+        target: { files: [new File(["photo"], "dinner.jpg", { type: "image/jpeg" })] }
+      });
+
+      return () => finish();
+    };
+
+    it("won't save while a chosen picture is still being prepared", async () => {
+      const onUploadPhoto = vi.fn().mockResolvedValue(uploaded);
+      const props = renderEditor({ onUploadPhoto, recipe: withPicture });
+
+      const finish = choosePhotoSlowly();
+
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled()
+      );
+      fireEvent.submit(document.querySelector(".recipe-editor-form") as HTMLFormElement);
+      expect(props.onSave).not.toHaveBeenCalled();
+
+      finish();
+      await screen.findByAltText("Your new recipe picture");
+      fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+      await waitFor(() => expect(props.onSave).toHaveBeenCalled());
+      expect(onUploadPhoto).toHaveBeenCalledWith("data:image/jpeg;base64,late");
+    });
+
+    it("drops a picture still being prepared when the cook removes it instead", async () => {
+      renderEditor({ onUploadPhoto: vi.fn(), recipe: withPicture });
+
+      const finish = choosePhotoSlowly();
+      fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+      finish();
+
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Save changes" })).toBeEnabled()
+      );
+      expect(screen.queryByAltText("Your new recipe picture")).not.toBeInTheDocument();
+    });
+
+    it("doesn't let a late picture into an editor opened again", async () => {
+      const props = { onClose: vi.fn(), onSave: vi.fn(), onUploadPhoto: vi.fn(), notes: "" };
+      const editor = (open: boolean) => (
+        <RecipeEditorSheet {...props} open={open} recipe={withPicture} />
+      );
+      const { rerender } = render(editor(true));
+
+      const finish = choosePhotoSlowly();
+      rerender(editor(false));
+      rerender(editor(true));
+      finish();
+
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Save changes" })).toBeEnabled()
+      );
+      expect(screen.queryByAltText("Your new recipe picture")).not.toBeInTheDocument();
+    });
+
+    it("leaves the picture out of a save that didn't touch it", async () => {
+      const props = renderEditor({ onUploadPhoto: vi.fn(), recipe: withPicture });
+
+      fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Grandma's Soup" } });
+      fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+      await waitFor(() => expect(props.onSave).toHaveBeenCalled());
+      expect(savedValues(props).changes.recipe).toEqual({ title: "Grandma's Soup" });
+    });
+
+    it("uploads a chosen picture on save, not before", async () => {
+      const onUploadPhoto = vi.fn().mockResolvedValue(uploaded);
+      const props = renderEditor({ onUploadPhoto, recipe: withPicture });
+
+      await choosePhoto();
+      expect(onUploadPhoto).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+      await waitFor(() => expect(props.onSave).toHaveBeenCalled());
+      expect(onUploadPhoto).toHaveBeenCalledWith("data:image/jpeg;base64,abc");
+      expect(savedValues(props).changes.recipe).toEqual({ image: uploaded });
+      expect(savedValues(props).recipe.image).toEqual(uploaded);
+    });
+
+    it("sends nothing when a chosen picture is abandoned", async () => {
+      const onUploadPhoto = vi.fn();
+      const props = renderEditor({ onUploadPhoto, recipe: withPicture });
+
+      await choosePhoto();
+      fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+      fireEvent.click(
+        within(screen.getByRole("dialog", { name: "Discard changes?" })).getByRole("button", {
+          name: "Discard"
+        })
+      );
+
+      expect(props.onClose).toHaveBeenCalled();
+      expect(onUploadPhoto).not.toHaveBeenCalled();
+    });
+
+    it("removes the picture without uploading anything", async () => {
+      const onUploadPhoto = vi.fn();
+      const props = renderEditor({ onUploadPhoto, recipe: withPicture });
+
+      fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+      expect(screen.getByRole("button", { name: "Add picture" })).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+      await waitFor(() => expect(props.onSave).toHaveBeenCalled());
+      expect(savedValues(props).changes.recipe).toEqual({ image: null });
+      expect(onUploadPhoto).not.toHaveBeenCalled();
+    });
+
+    it("explains why there's no picture button when signed out, and still allows removing", () => {
+      renderEditor({ recipe: withPicture });
+
+      expect(screen.getByText("Sign in to use your own picture.")).toBeInTheDocument();
+      expect(screen.queryByLabelText("Choose a picture")).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Remove" })).toBeInTheDocument();
+    });
+
+    it("stays open with the reason when a photo can't be read", async () => {
+      const { PhotoPrepError } = await import("../extract/image-downscale");
+      photoMocks.prepareRecipePhoto.mockRejectedValue(
+        new PhotoPrepError("not_image", "Not a photo.")
+      );
+      renderEditor({ onUploadPhoto: vi.fn(), recipe: withPicture });
+
+      fireEvent.change(screen.getByLabelText("Choose a picture"), {
+        target: { files: [new File(["x"], "notes.txt", { type: "text/plain" })] }
+      });
+
+      expect(await screen.findByRole("alert")).toHaveTextContent("Not a photo.");
+    });
+
+    it("keeps the editor open when the upload fails, and saves nothing", async () => {
+      const onUploadPhoto = vi.fn().mockRejectedValue(new Error("offline"));
+      const props = renderEditor({ onUploadPhoto, recipe: withPicture });
+
+      await choosePhoto();
+      fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+      expect(await screen.findByRole("alert")).toBeInTheDocument();
+      expect(props.onSave).not.toHaveBeenCalled();
+      expect(props.onClose).not.toHaveBeenCalled();
+    });
+
+    it("doesn't upload the picture again when retrying a save that failed after it", async () => {
+      const onUploadPhoto = vi.fn().mockResolvedValue(uploaded);
+      const onSave = vi.fn().mockRejectedValueOnce(new Error("nope")).mockResolvedValue(undefined);
+      renderEditor({ onSave, onUploadPhoto, recipe: withPicture });
+
+      await choosePhoto();
+      fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+      await screen.findByRole("alert");
+      fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+      await waitFor(() => expect(onSave).toHaveBeenCalledTimes(2));
+      expect(onUploadPhoto).toHaveBeenCalledTimes(1);
+    });
   });
 });

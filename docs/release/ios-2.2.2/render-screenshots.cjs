@@ -2,6 +2,7 @@
 // Composes genuine, unchanged iOS captures in editable SVG layouts.
 const fs = require('node:fs');
 const path = require('node:path');
+
 const sharp = require('sharp');
 const root = __dirname;
 const shots = [
