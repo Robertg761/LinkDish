@@ -17,9 +17,14 @@ import { logAuthWarning } from "../../lib/authLogging";
 import { unlinkMobileLibrary } from "../saved-recipes/librarySync";
 
 import { AccountChangedError } from "./account-changed-error";
+import {
+  confirmAccountDeletionWithApple,
+  needsAppleDeletionConfirmation
+} from "./appleDeletionConfirmation";
 import { useClerkSession } from "./ClerkSessionContext";
 
 import type {
+  AccountDeletionProviders,
   AccountUser,
   AuthConfigResponse,
   UpdateAccountProfileRequest
@@ -29,7 +34,13 @@ interface AccountContextValue {
   accountError: string | null;
   authMode: AuthConfigResponse["authMode"];
   clearAccountError: () => void;
-  deleteAccount: (confirmEmail: string) => Promise<void>;
+  /**
+   * Deletes the signed-in account and signs it out. On iOS, an Apple-linked account is first
+   * confirmed with Apple so the server can revoke Sign in with Apple. Resolves with what happened at
+   * each outside provider, or null when nothing was deleted (no account, or the person cancelled
+   * Apple's prompt).
+   */
+  deleteAccount: (confirmEmail: string) => Promise<AccountDeletionProviders | null>;
   getAuthHeaders: () => Promise<Record<string, string>>;
   /**
    * Headers for requests made for account `userId` only: once the token is in hand, they are
@@ -370,7 +381,7 @@ export const AccountProvider = ({ children }: PropsWithChildren) => {
       clearAccountError: () => setAccountError(null),
       deleteAccount: async (confirmEmail) => {
         if (!accountUser) {
-          return;
+          return null;
         }
 
         setAccountError(null);
@@ -381,8 +392,29 @@ export const AccountProvider = ({ children }: PropsWithChildren) => {
         const deletingSession = userClerkSessionIdRef.current;
 
         try {
-          await createClientWithHeaders(getAuthHeadersFor(deletingFor)).deleteAccount({
-            confirmEmail
+          let appleAuthorizationCode: string | undefined;
+
+          // Only for the Clerk account being deleted: a legacy session has no Apple sign-in.
+          if (
+            deletingSession !== null &&
+            needsAppleDeletionConfirmation(clerkSession.hasAppleAccount)
+          ) {
+            const confirmation = await confirmAccountDeletionWithApple();
+
+            if (confirmation.status === "cancelled") {
+              return null;
+            }
+
+            // Unavailable: the deletion carries on, and the server reports Apple as not revoked.
+            appleAuthorizationCode =
+              confirmation.status === "confirmed" ? confirmation.authorizationCode : undefined;
+          }
+
+          const { providers } = await createClientWithHeaders(
+            getAuthHeadersFor(deletingFor)
+          ).deleteAccount({
+            confirmEmail,
+            ...(appleAuthorizationCode ? { appleAuthorizationCode } : {})
           });
           // Its cloud cookbook went with it: this device's cookbook stops syncing with it (and
           // stays here).
@@ -393,7 +425,7 @@ export const AccountProvider = ({ children }: PropsWithChildren) => {
           // Another account signed in meanwhile: it stays signed in (the deleted account's
           // session is gone with it).
           if (accountUserRef.current?.id !== deletingFor) {
-            return;
+            return providers;
           }
 
           // Only the deleted account's session ends: Clerk may already be on another account's
@@ -404,6 +436,7 @@ export const AccountProvider = ({ children }: PropsWithChildren) => {
           preferLegacySessionRef.current = false;
           await applySessionToken(null);
           setUser(null);
+          return providers;
         } catch (error) {
           if (accountUserRef.current?.id === deletingFor) {
             setAccountError(getAccountErrorMessage(error));

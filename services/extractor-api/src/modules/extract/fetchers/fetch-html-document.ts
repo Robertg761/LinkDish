@@ -3,8 +3,8 @@ import { isAbortError } from "../deadline.js";
 import { isSourceUrlRejection, validatePublicSourceUrl } from "../source-url-safety.js";
 
 import { HtmlFetchError } from "./errors.js";
+import { isRobotsDisallowedError, ROBOTS_DISALLOWED_SIGNAL } from "./robots-txt.js";
 import {
-  browserLikeHeaders,
   classifyFetchStatusCode,
   createTimeoutSignal,
   detectBlockedSignals,
@@ -49,75 +49,21 @@ const loadDocumentBuilder = () => {
 
 class ConnectionFailure extends Error {}
 
-type FetchHeaders = typeof browserLikeHeaders | typeof identifyingFetchHeaders;
-
-const isBotChallengeError = (error: unknown): boolean =>
-  error instanceof HtmlFetchError &&
-  error.statusCode !== undefined &&
-  error.statusCode >= 400 &&
-  (error.reason === "blocked" || (error.statusCode === 503 && error.blockedSignals.length > 0));
+type FetchHeaders = typeof identifyingFetchHeaders;
 
 /*
- * Cloudflare-protected sites challenge a spoofed Chrome user-agent (the TLS
- * fingerprint does not match) but serve an honest, identifying bot user-agent.
- * When the browser-like attempt is challenged, the whole fetch (redirects and
- * URL safety checks included) is retried once with the identifying headers.
+ * One honest request: the identifying LinkDishBot user-agent from the start. Until 2026-11-08 the
+ * first request posed as desktop Chrome and only a challenged one was retried honestly; LinkDish
+ * no longer poses as a browser (see shared.ts). The caller passes a robots.txt-aware fetch
+ * (robots-txt.ts), so a page or redirect hop robots.txt disallows fails here as "blocked" with
+ * the robots_txt_disallowed signal, and is never retried in the headless browser.
  */
 export const fetchHtmlDocument = async (
   url: string,
   fetchImplementation: typeof fetch,
   options: FetchHtmlDocumentOptions
-): Promise<FetchResult> => {
-  let original: FetchResult | HtmlFetchError;
-
-  try {
-    original = await fetchHtmlDocumentWithHeaders(
-      url,
-      fetchImplementation,
-      options,
-      browserLikeHeaders
-    );
-  } catch (error) {
-    if (!isBotChallengeError(error)) {
-      throw error;
-    }
-
-    original = error as HtmlFetchError;
-  }
-
-  if (!(original instanceof HtmlFetchError) && original.blockedSignals.length === 0) {
-    return original;
-  }
-
-  if (options.signal?.aborted) {
-    if (original instanceof HtmlFetchError) {
-      throw original;
-    }
-
-    return original;
-  }
-
-  try {
-    const retried = await fetchHtmlDocumentWithHeaders(
-      url,
-      fetchImplementation,
-      options,
-      identifyingFetchHeaders
-    );
-
-    if (retried.blockedSignals.length === 0) {
-      return retried;
-    }
-  } catch {
-    /* Surface the original outcome below. */
-  }
-
-  if (original instanceof HtmlFetchError) {
-    throw original;
-  }
-
-  return original;
-};
+): Promise<FetchResult> =>
+  fetchHtmlDocumentWithHeaders(url, fetchImplementation, options, identifyingFetchHeaders);
 
 const fetchHtmlDocumentWithHeaders = async (
   url: string,
@@ -157,6 +103,16 @@ const fetchHtmlDocumentWithHeaders = async (
             signal: timeout.signal
           });
         } catch (error) {
+          if (isRobotsDisallowedError(error)) {
+            throw new HtmlFetchError(
+              "robots.txt does not allow LinkDish to fetch that page.",
+              "blocked",
+              [ROBOTS_DISALLOWED_SIGNAL],
+              undefined,
+              requestUrl
+            );
+          }
+
           throw timeout.signal.aborted || isAbortError(error)
             ? error
             : new ConnectionFailure(

@@ -8,8 +8,6 @@ on:
       - "docs/*.md"
       - "**.md"
       - "*.png"
-      - public/privacy.html
-      - public/support.html
   # No paths filter on pull_request: a filtered-out PR produces no run at all, so a required
   # "CI / validate" check would stay pending forever on docs-only pull requests.
   pull_request:

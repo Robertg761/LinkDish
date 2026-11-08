@@ -145,6 +145,29 @@ describe("extraction result cache in the extract pipeline", () => {
     });
   });
 
+  it("does not serve a cache hit once the site's robots.txt disallows the page", async () => {
+    const { runtime, fetchHtmlDocument } = createTestRuntime();
+    let robotsAllows = true;
+    runtime.isAllowedByRobots = vi.fn(() => Promise.resolve(robotsAllows));
+
+    await extractRecipe(
+      { attempt: "primary", url: "https://fixtures.linkdish.test/recipe-jsonld" },
+      runtime
+    );
+    robotsAllows = false;
+    const second = await extractRecipe(
+      { attempt: "primary", url: "https://fixtures.linkdish.test/recipe-jsonld" },
+      runtime
+    );
+
+    // Not served from the cache: the request goes to the (robots-aware) fetch instead.
+    expect(second.logContext.cacheStatus).not.toBe("hit");
+    expect(fetchHtmlDocument).toHaveBeenCalledTimes(2);
+    expect(runtime.isAllowedByRobots).toHaveBeenCalledWith(
+      "https://fixtures.linkdish.test/recipe-jsonld"
+    );
+  });
+
   it("does not cache failures", async () => {
     const { runtime, fetchHtmlDocument } = createTestRuntime();
 

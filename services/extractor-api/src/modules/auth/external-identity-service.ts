@@ -12,6 +12,7 @@ import {
 
 import {
   AuthError,
+  deletedAccountRecordTtlSeconds,
   getUserByEmail,
   getUserById,
   updateUserEmailById,
@@ -87,7 +88,9 @@ const readMappedUser = async (
     return toAccountUser(user);
   }
 
-  await setStoreString(externalIdentityKeys.deletedIdentity(provider, subject), userId);
+  await setStoreString(externalIdentityKeys.deletedIdentity(provider, subject), userId, {
+    ttlSeconds: deletedAccountRecordTtlSeconds
+  });
   await deleteStoreKeys(externalIdentityKeys.identity(provider, subject));
   throw new AuthError(
     "This LinkDish account has been deleted. Contact support to recover it.",
@@ -201,6 +204,16 @@ export const resolveMappedExternalIdentity = async (
   return null;
 };
 
+/** The outside sign-in identities (today Clerk users) linked to LinkDish account `userId`. */
+export const listExternalIdentitiesForUser = async (
+  userId: string
+): Promise<Array<Pick<ExternalIdentity, "provider" | "subject">>> =>
+  (await getStoreSetMembers(externalIdentityKeys.userIdentities(userId)))
+    .map(parseIdentityMember)
+    .filter((member): member is NonNullable<ReturnType<typeof parseIdentityMember>> =>
+      Boolean(member)
+    );
+
 export const tombstoneExternalIdentitiesForUser = async (userId: string): Promise<void> => {
   const members = await getStoreSetMembers(externalIdentityKeys.userIdentities(userId));
   const parsedMembers = members
@@ -213,7 +226,8 @@ export const tombstoneExternalIdentitiesForUser = async (userId: string): Promis
     parsedMembers.map(async (identity) => {
       await setStoreString(
         externalIdentityKeys.deletedIdentity(identity.provider, identity.subject),
-        userId
+        userId,
+        { ttlSeconds: deletedAccountRecordTtlSeconds }
       );
       await deleteStoreKeys(externalIdentityKeys.identity(identity.provider, identity.subject));
     })
@@ -232,7 +246,9 @@ export const tombstoneExternalIdentity = async (
   const userId = await getStoreString(identityKey);
   const tombstoneUserId = userId ?? "unknown";
 
-  await setStoreString(externalIdentityKeys.deletedIdentity(provider, subject), tombstoneUserId);
+  await setStoreString(externalIdentityKeys.deletedIdentity(provider, subject), tombstoneUserId, {
+    ttlSeconds: deletedAccountRecordTtlSeconds
+  });
   await deleteStoreKeys(identityKey);
 
   if (userId) {

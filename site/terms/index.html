@@ -142,7 +142,7 @@
           The agreement between you and LinkDish: what the app does, what it costs, what you own,
           and how we handle problems.
         </p>
-        <p class="page-meta">Last updated · November 3, 2026</p>
+        <p class="page-meta">Last updated · November 9, 2026</p>
       </section>
 
       <div class="legal-layout">
@@ -212,6 +212,8 @@
             These terms are the agreement between you and us. They cover the LinkDish Android app,
             the web app at app.linkdish.ca, the site at linkdish.ca, and the LinkDish API at
             api.linkdish.ca. Together, "LinkDish", "we", "us" and "our" in this document.
+            LinkDish is available in Canada, the United States, the European Economic Area, the
+            United Kingdom and elsewhere.
           </p>
 
           <p>
@@ -223,8 +225,7 @@
           </p>
 
           <p>
-            You need to be at least the age of majority where you live, or using LinkDish with a
-            parent or guardian's consent and supervision. You also need to be able to enter into a
+            You need to be at least the age of majority where you live, and able to enter into a
             contract on your own behalf.
           </p>
 
@@ -237,8 +238,30 @@
 
           <p>
             LinkDish saves recipes from links and turns them into a portable recipe library. You can
-            save from recipe websites, YouTube videos and Shorts, Pinterest pins, TikTok captions,
-            pasted text, and photos of cookbook pages, recipe cards or screenshots.
+            save from recipe websites, pasted text, and photos of cookbook pages, recipe cards or
+            screenshots. LinkDish can also read the recipe in some social and video links: TikTok
+            captions, YouTube videos and Shorts, Instagram posts and reels, public Facebook posts
+            and reels, and the recipe page a Pinterest pin links to. Which of these work can change,
+            and some may be switched off.
+          </p>
+
+          <p>
+            <strong>How LinkDish reads a link.</strong> When you give LinkDish a link, our server
+            fetches that page for you. It identifies itself as <strong>LinkDishBot</strong>, follows
+            the site's robots.txt, and doesn't try to get around a site that blocks it or asks for a
+            login. A site that doesn't want LinkDish to read it can say so in its robots.txt, or
+            email us.
+          </p>
+
+          <p>
+            <strong>How AI is used.</strong> Ordinary recipe links and pasted text are read by
+            LinkDish's own rules, not by AI. Google's Gemini API is used for photo scans, for
+            reading a recipe from a video when its caption or description doesn't have one (where
+            that is switched on), for an "inspired" recipe you ask for from a video, and for
+            <strong>Fill in with AI</strong>. The LinkDish apps ask before they first send anything
+            for an import or Fill in with AI; the website doesn't ask first, so using import or
+            Fill in with AI there sends the content straight away. AI results can be wrong, like any extraction. The
+            Privacy Policy explains what is sent.
           </p>
 
           <p>
@@ -253,9 +276,23 @@
 
           <ul>
             <li>
-              <strong>We don't host, publish, own or claim the recipes you save.</strong> They
-              belong to whoever wrote them. We store a copy for you and keep the original source one
-              tap away. We don't sell recipes, and we don't license them to anyone.
+              <strong>We don't publish, own or claim the recipes you save.</strong> They belong to
+              whoever wrote them. We keep your copy for you (on your device and, when you're signed
+              in, with your account) with the original source one tap away. We don't sell recipes,
+              we don't license them to anyone, and we don't show your saved recipes to anyone outside
+              your Family household.
+            </li>
+            <li>
+              <strong>Two short-lived working copies.</strong> When LinkDish reads a public recipe
+              page, it keeps what it read for up to 7 days, under the page's address, so the next
+              person who imports that same link gets it faster and the site is asked less often.
+              Recipe photos load through our image service, which keeps short-lived copies following
+              the photo site's own caching rules. Both still link back to the original, and both are
+              covered by the takedown process in section 9.
+            </li>
+            <li>
+              <strong>The sample recipes LinkDish shows are its own.</strong> We don't publish other
+              people's recipes as LinkDish samples.
             </li>
             <li>
               <strong>Extraction is best effort.</strong> LinkDish reads a page, video, pin, caption
@@ -459,6 +496,12 @@
             your copy, your notes and your edits, not a claim of ownership over the original.
           </p>
 
+          <p>
+            <strong>Keep it for your own kitchen.</strong> Saving a recipe asks LinkDish to keep a
+            copy for your own cooking and your household's. Please don't use LinkDish to republish
+            or sell someone else's recipe or photos.
+          </p>
+
           <h2 id="acceptable-use">8. Acceptable use</h2>
 
           <p>Please don't:</p>
@@ -491,10 +534,11 @@
           <p>
             LinkDish relies on other companies to work: <strong>Google Play</strong> for mobile
             purchases, <strong>RevenueCat</strong> for billing and entitlements,
-            <strong>Clerk</strong> for Google sign-in,
+            <strong>Clerk</strong> for Google sign-in, <strong>Google's Gemini API</strong> for
+            photo scans, video reading, inspired recipes and Fill in with AI,
             <strong>Sentry</strong> for crash and error reports in the Android app, and
-            <strong>Plausible</strong> for website analytics. It also depends on the sites, videos
-            and pins you save from.
+            <strong>Plausible</strong> for website analytics. It also depends on the sites, videos,
+            posts and pins you save from.
           </p>
 
           <p>
@@ -507,25 +551,59 @@
             <strong>Copyright and takedowns.</strong> We respect copyright, and we expect LinkDish
             to be used in a way that respects it too. If you believe something in LinkDish infringes
             your rights, email
-            <strong><a href="mailto:support@linkdish.ca">support@linkdish.ca</a></strong> with:
+            <strong><a href="mailto:support@linkdish.ca">support@linkdish.ca</a></strong> with the
+            subject "Copyright notice" and:
           </p>
 
           <ul>
-            <li>the work you own, and what it is;</li>
+            <li>the work you own, and what it is (a link to the original helps);</li>
             <li>
-              where the material sits in LinkDish (a link, a recipe title, or the household it's
-              in);
+              where the material sits in LinkDish (a link, a recipe title, the household it's in, or
+              the address of the page or photo LinkDish read);
             </li>
-            <li>your name and contact details; and</li>
+            <li>your name and contact details, and who you act for if it isn't you;</li>
             <li>
               a short statement, in good faith, that the use isn't authorized by you, your agent or
-              the law.
+              the law, and that what you've sent is accurate; and
+            </li>
+            <li>your name typed at the end, as your signature.</li>
+          </ul>
+
+          <p><strong>What happens next:</strong></p>
+
+          <ul>
+            <li>
+              We'll confirm we've received it within <strong>3 business days</strong>, and tell you
+              if anything is missing.
+            </li>
+            <li>
+              Within <strong>10 business days</strong> of a complete notice, we'll decide and act.
+              Where removal is appropriate, we remove or disable the material on our servers: a
+              recipe in a Family cookbook or a synced cookbook, the 7-day working copy of the page,
+              and our image service's copies of the photo. We can also stop LinkDish reading your
+              site at all.
+            </li>
+            <li>
+              We'll tell you what we did. We may also let the person who added the material know,
+              and forward your notice to them.
+            </li>
+            <li>
+              Copies kept only on someone's own device are outside our reach; removing it from our
+              servers stops it syncing or being shared.
+            </li>
+            <li>
+              If you added something that was removed and you think we got it wrong, reply to our
+              email and tell us why, and we'll look at it again.
+            </li>
+            <li>
+              We may end the access of anyone who repeatedly uses LinkDish to infringe.
             </li>
           </ul>
 
           <p>
-            We'll review it and remove the material where that's appropriate. We may ask for more
-            detail, and we may let the person who added it know.
+            If you run a site and simply don't want LinkDish to read it, you can block
+            <strong>LinkDishBot</strong> in your robots.txt (we check it at least every hour), or
+            email us and we'll stop.
           </p>
 
           <h2 id="intellectual-property">10. Our intellectual property</h2>

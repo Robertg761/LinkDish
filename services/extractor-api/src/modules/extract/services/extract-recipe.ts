@@ -1005,6 +1005,11 @@ const readRecipeFromVideo = async (request: VideoReadRequest): Promise<VideoRead
   if (request.platform === "youtube") {
     source = { kind: "youtube", url: request.watchUrl };
   } else {
+    /* TikTok and Facebook video files are only downloaded when that is switched on (5.2.3). */
+    if (runtime.platformAccess && !runtime.platformAccess.socialVideoDownload) {
+      return null;
+    }
+
     try {
       const video =
         request.platform === "facebook"
@@ -1600,6 +1605,106 @@ const rejectUnsupportedSource = (
   };
 };
 
+type GatedPlatform = "tiktok" | "youtube" | "instagram" | "facebook" | "pinterest";
+
+/*
+ * Shown when a platform's path is switched off (ExtractorRuntime.platformAccess, from env flags
+ * such as YOUTUBE_IMPORT_ENABLED). Each platform's terms were checked on 2026-11-08; Robert decided
+ * the same day to turn every path back on by default, accepting the risk, so these show only when
+ * a path is switched off on its own. Every message points at a way in that involves no automated
+ * reading of the platform.
+ */
+const platformOffMessages: Record<GatedPlatform, string> = {
+  facebook:
+    "LinkDish doesn't read Facebook posts. Paste the recipe text or import a screenshot of the post instead.",
+  instagram:
+    "LinkDish doesn't read Instagram posts. Paste the recipe text or import a screenshot of the post instead.",
+  pinterest:
+    "LinkDish doesn't read Pinterest pins. Open the pin and paste the link to the recipe's own web page instead.",
+  tiktok:
+    "LinkDish doesn't read TikTok videos. Paste the recipe text or import a screenshot of the caption instead.",
+  youtube:
+    "LinkDish doesn't read YouTube videos. If the description links to the recipe's web page, paste that link instead, or paste the recipe text."
+};
+
+const gatedPlatformFor = (
+  url: string,
+  hostname: string,
+  detection: DetectionResult
+): GatedPlatform | null => {
+  if (detection.sourceType === "youtube") {
+    return "youtube";
+  }
+
+  if (detection.adapterKey === TIKTOK_ADAPTER_KEY) {
+    return "tiktok";
+  }
+
+  if (detection.adapterKey === INSTAGRAM_ADAPTER_KEY) {
+    return "instagram";
+  }
+
+  if (detection.adapterKey === FACEBOOK_ADAPTER_KEY) {
+    return "facebook";
+  }
+
+  if (isPinterestPinUrl(url) || hostname.toLowerCase() === "pin.it") {
+    return "pinterest";
+  }
+
+  return null;
+};
+
+/**
+ * Fails a link to a platform whose path is switched off, before the cache lookup and before
+ * anything is fetched. Returns null when the platform is allowed, or for ordinary web pages.
+ */
+const rejectPlatformTurnedOff = (
+  request: ExtractRecipeUrlRequest,
+  context: ExtractionContext,
+  hostname: string,
+  detection: DetectionResult
+): ExtractionResult | null => {
+  const access = context.runtime.platformAccess;
+  const platform = access ? gatedPlatformFor(request.url, hostname, detection) : null;
+
+  if (!access || !platform || access[platform]) {
+    return null;
+  }
+
+  const response = extractRecipeResponseSchema.parse({
+    status: "failure",
+    reason: "unsupported_source",
+    userMessage: platformOffMessages[platform],
+    recovery: {
+      retryable: false,
+      allowFallback: false,
+      suggestedAction: "try_another_url"
+    }
+  });
+
+  return {
+    response,
+    logContext: makeLogContext({
+      hostname,
+      detection: {
+        ...detection,
+        reasons: [...detection.reasons, `Platform path switched off: ${platform}`]
+      },
+      attempt: request.attempt,
+      response,
+      strategy: "none",
+      fetchMode: "none",
+      fallbackProvider: context.runtime.fallbackExtractor.providerName,
+      browserAttempted: false
+    })
+  };
+};
+
+/* A robots.txt that cannot be read counts as "disallowed" (RFC 9309), so the hit is not served. */
+const isCacheHitAllowedByRobots = async (runtime: ExtractorRuntime, url: string) =>
+  runtime.isAllowedByRobots ? runtime.isAllowedByRobots(url).catch(() => false) : true;
+
 /* Linked recipe pages are only tried while this much of the request budget is left. */
 const minimumLinkedPageBudgetMs = 4_000;
 
@@ -1832,6 +1937,13 @@ const extractFromUrl = async (
   const { runtime } = context;
   const initialDetection = detectSourceTypeFromUrl(request.url);
   const hostname = new URL(request.url).hostname;
+  /* A platform that is switched off is never fetched, and never served from the shared cache. */
+  const platformTurnedOff = rejectPlatformTurnedOff(request, context, hostname, initialDetection);
+
+  if (platformTurnedOff) {
+    return platformTurnedOff;
+  }
+
   const cacheLookupEnabled = !request.inspired && isCacheLookupEnabled(context, initialDetection);
 
   /* URL safety (DNS) and the cache lookup are independent. */
@@ -1844,7 +1956,8 @@ const extractFromUrl = async (
 
   const cached = await cacheLookup;
 
-  if (cached) {
+  /* A hit is only served while the site's robots.txt still allows the page (fetched otherwise). */
+  if (cached && (await isCacheHitAllowedByRobots(runtime, request.url))) {
     return buildCacheHitResult(request, cached, runtime, hostname);
   }
 
@@ -1978,6 +2091,17 @@ const extractFromUrl = async (
       return rejectInspired(outboundDetection);
     }
 
+    const outboundTurnedOff = rejectPlatformTurnedOff(
+      outboundRequest,
+      context,
+      new URL(pinOutboundUrl).hostname,
+      outboundDetection
+    );
+
+    if (outboundTurnedOff) {
+      return outboundTurnedOff;
+    }
+
     if (isSupportedSocialSource(outboundDetection, runtime)) {
       return extractFromSocialCaption(outboundRequest, context, hostname, outboundDetection);
     }
@@ -1994,9 +2118,13 @@ const extractFromUrl = async (
     }
 
     /* The pin's recipe page may already be cached from a direct import. */
-    const cached =
+    const cachedOutbound =
       !request.inspired && isCacheLookupEnabled(context, outboundDetection)
         ? await readCachedExtraction(context, pinOutboundUrl)
+        : null;
+    const cached =
+      cachedOutbound && (await isCacheHitAllowedByRobots(runtime, pinOutboundUrl))
+        ? cachedOutbound
         : null;
 
     if (cached) {

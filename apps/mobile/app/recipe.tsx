@@ -14,9 +14,11 @@ import {
 } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Animated,
   Image,
   KeyboardAvoidingView,
+  Linking,
   Modal,
   Platform,
   Pressable,
@@ -61,6 +63,7 @@ import {
 } from "../src/features/recipe-results/draftSteps";
 import { useRecipeCompletion } from "../src/features/recipe-results/hooks/useRecipeCompletion";
 import { useRecipeExtraction } from "../src/features/recipe-results/hooks/useRecipeExtraction";
+import { getRecipeSourceLink } from "../src/features/recipe-results/recipeSourceLink";
 import { useSavedRecipes } from "../src/features/saved-recipes/SavedRecipesContext";
 import {
   getSharedRecipeOwnerLabel,
@@ -310,6 +313,10 @@ export default function RecipeScreen() {
       : { allowed: true };
   const sourceUrl = currentRecipeSourceUrl ?? url;
   const sourceLabel = getSourceLabel(sourceUrl);
+  const sourceLink = getRecipeSourceLink(sourceUrl, {
+    author: displayedRecipe?.author,
+    siteName: displayedRecipe?.siteName
+  });
   const sourceImages =
     editableRecipe?.sourceImages ??
     (extraction.state.state === "success" ? extraction.state.sourceImages : undefined);
@@ -803,21 +810,55 @@ export default function RecipeScreen() {
       <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
         <View style={styles.sourceTile}>
           <Pressable
-            accessibilityLabel={hasSourceImages ? "View scanned recipe images" : undefined}
-            accessibilityRole={hasSourceImages ? "button" : undefined}
-            disabled={!hasSourceImages}
-            onPress={() => setIsSourceImageViewerVisible(true)}
+            accessibilityHint={
+              !hasSourceImages && sourceLink.href ? "Opens the original page" : undefined
+            }
+            accessibilityLabel={
+              hasSourceImages
+                ? "View scanned recipe images"
+                : sourceLink.href
+                  ? `Open the original recipe on ${sourceLink.label}`
+                  : undefined
+            }
+            accessibilityRole={hasSourceImages ? "button" : sourceLink.href ? "link" : undefined}
+            disabled={!hasSourceImages && !sourceLink.href}
+            onPress={() => {
+              if (hasSourceImages) {
+                setIsSourceImageViewerVisible(true);
+                return;
+              }
+
+              if (sourceLink.href) {
+                const href = sourceLink.href;
+                void Linking.openURL(href).catch(() => {
+                  Alert.alert(
+                    "Unable to open the original recipe",
+                    `Open this address in your browser: ${href}`
+                  );
+                });
+              }
+            }}
             style={({ pressed }) => [styles.sourceTileContent, pressed && styles.pressed]}
           >
             <View style={styles.sourceCopy}>
               <AppText muted numberOfLines={1} style={styles.sourceTitle}>
-                From {sourceLabel}
+                From {hasSourceImages ? sourceLabel : sourceLink.label}
               </AppText>
+              {!hasSourceImages && sourceLink.byline ? (
+                <AppText muted numberOfLines={1} style={styles.sourceByline}>
+                  {sourceLink.byline}
+                </AppText>
+              ) : null}
             </View>
             {hasSourceImages ? (
               <View style={styles.sourceViewAction}>
                 <AppText style={styles.sourceViewActionText}>View scan</AppText>
                 <MaterialCommunityIcons color={appColors.accent} name="chevron-right" size={18} />
+              </View>
+            ) : sourceLink.href ? (
+              <View style={styles.sourceViewAction}>
+                <AppText style={styles.sourceViewActionText}>Open original</AppText>
+                <MaterialCommunityIcons color={appColors.accent} name="open-in-new" size={16} />
               </View>
             ) : null}
           </Pressable>
@@ -2170,6 +2211,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     flexDirection: "row",
     gap: 10
+  },
+  sourceByline: {
+    fontSize: 13,
+    lineHeight: 18
   },
   sourceThumbnail: {
     backgroundColor: appColors.surface,

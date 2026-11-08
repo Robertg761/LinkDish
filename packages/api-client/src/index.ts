@@ -293,6 +293,12 @@ export const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 /** Extraction can legitimately take a while (browser fallback, LLM passes), so it gets longer. */
 export const DEFAULT_EXTRACT_TIMEOUT_MS = 120_000;
 
+/**
+ * Account deletion also waits on Clerk, Apple and RevenueCat on the server (whose function may run
+ * for up to 60 s), so it gets a little longer than that.
+ */
+export const DEFAULT_ACCOUNT_DELETION_TIMEOUT_MS = 65_000;
+
 export interface CreateExtractorApiClientOptions {
   baseUrl: string;
   fetchImplementation?: FetchLike;
@@ -452,6 +458,8 @@ export const createExtractorApiClient = (
   // An explicit `timeoutMs` also bounds extraction unless a dedicated value is supplied.
   const extractTimeoutMs =
     options.extractTimeoutMs ?? options.timeoutMs ?? DEFAULT_EXTRACT_TIMEOUT_MS;
+  // An explicit `timeoutMs` bounds account deletion too.
+  const accountDeletionTimeoutMs = options.timeoutMs ?? DEFAULT_ACCOUNT_DELETION_TIMEOUT_MS;
 
   let normalizedBaseUrl = baseUrl;
 
@@ -625,7 +633,8 @@ export const createExtractorApiClient = (
         body: validateInput(deleteAccountRequestSchema, input),
         method: "DELETE",
         responseSchema: deleteAccountResponseSchema,
-        signal: callOptions?.signal
+        signal: callOptions?.signal,
+        timeoutMs: accountDeletionTimeoutMs
       });
     },
     async deleteShoppingItems(input, callOptions) {

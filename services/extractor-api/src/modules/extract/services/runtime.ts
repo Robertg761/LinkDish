@@ -24,6 +24,7 @@ import type * as TikTokFetcher from "../fetchers/fetch-tiktok-document.js";
 import type * as TikTokVideoFetcher from "../fetchers/fetch-tiktok-video.js";
 import type * as YouTubeFetcher from "../fetchers/fetch-youtube-document.js";
 import type * as PublicFetch from "../fetchers/public-fetch.js";
+import type * as RobotsTxt from "../fetchers/robots-txt.js";
 import type * as CreatorSiteSearch from "../fetchers/search-creator-site.js";
 import type {
   BrowserFetcher,
@@ -54,6 +55,12 @@ let instagramFetcherModule: Promise<typeof InstagramFetcher> | null = null;
 let facebookFetcherModule: Promise<typeof FacebookFetcher> | null = null;
 let facebookVideoFetcherModule: Promise<typeof FacebookVideoFetcher> | null = null;
 let creatorSiteSearchModule: Promise<typeof CreatorSiteSearch> | null = null;
+let robotsTxtModule: Promise<typeof RobotsTxt> | null = null;
+
+const loadRobotsTxt = () => {
+  robotsTxtModule ??= import("../fetchers/robots-txt.js");
+  return robotsTxtModule;
+};
 
 const loadHtmlFetcher = () => {
   htmlFetcherModule ??= import("../fetchers/fetch-html-document.js");
@@ -139,6 +146,41 @@ const createRecipeTextCleaner = (): RecipeTextCleaner =>
 export const createDefaultExtractorRuntime = (): ExtractorRuntime => {
   const browserEnabled = extractorApiEnv.BROWSER_FETCH_ENABLED;
   let browserFetcherPromise: Promise<BrowserFetcher> | null = null;
+  let robotsPolicyPromise: Promise<RobotsTxt.RobotsTxtPolicy> | null = null;
+
+  /* One robots.txt cache per runtime; robots.txt files are fetched with the SSRF-safe fetch. */
+  const getRobotsPolicy = () => {
+    robotsPolicyPromise ??= Promise.all([loadRobotsTxt(), loadPublicFetch()]).then(
+      ([{ createRobotsTxtPolicy }, { publicOnlyFetch }]) =>
+        createRobotsTxtPolicy({
+          enabled: extractorApiEnv.ROBOTS_TXT_ENFORCED,
+          fetchImplementation: publicOnlyFetch
+        })
+    );
+
+    return robotsPolicyPromise;
+  };
+
+  /*
+   * Every request to a site people import from (pages, redirect hops, oEmbed, embed pages,
+   * creator-site searches, video files) checks that site's robots.txt first. API calls (Gemini,
+   * OpenAI) use the plain fetchImplementation and are not checked.
+   */
+  const robotsAware =
+    (base: typeof fetch): typeof fetch =>
+    async (input, init) => {
+      const [{ createRobotsAwareFetch }, policy] = await Promise.all([
+        loadRobotsTxt(),
+        getRobotsPolicy()
+      ]);
+
+      return createRobotsAwareFetch(base, policy)(input, init);
+    };
+  const siteFetch = robotsAware(fetchImplementation);
+  const publicSiteFetch: typeof fetch = async (input, init) => {
+    const { publicOnlyFetch } = await loadPublicFetch();
+    return robotsAware(publicOnlyFetch)(input, init);
+  };
 
   const getBrowserFetcher = () => {
     browserFetcherPromise ??= import("../fetchers/fetch-browser-document.js").then(
@@ -146,7 +188,8 @@ export const createDefaultExtractorRuntime = (): ExtractorRuntime => {
         createBrowserFetcher({
           enabled: browserEnabled,
           timeoutMs: extractorApiEnv.BROWSER_FETCH_TIMEOUT_MS,
-          concurrency: extractorApiEnv.BROWSER_FETCH_CONCURRENCY
+          concurrency: extractorApiEnv.BROWSER_FETCH_CONCURRENCY,
+          isAllowedByRobots: async (url) => (await getRobotsPolicy()).isAllowed(url)
         })
     );
 
@@ -194,11 +237,8 @@ export const createDefaultExtractorRuntime = (): ExtractorRuntime => {
       const blockSignalPatterns = getBlockSignalPatterns(url);
 
       try {
-        const [{ fetchHtmlDocument }, { publicOnlyFetch }] = await Promise.all([
-          loadHtmlFetcher(),
-          loadPublicFetch()
-        ]);
-        const httpResult = await fetchHtmlDocument(url, publicOnlyFetch, {
+        const { fetchHtmlDocument } = await loadHtmlFetcher();
+        const httpResult = await fetchHtmlDocument(url, publicSiteFetch, {
           timeoutMs: deadline
             ? deadline.budgetMs(extractorApiEnv.FETCH_HTTP_TIMEOUT_MS)
             : extractorApiEnv.FETCH_HTTP_TIMEOUT_MS,
@@ -222,13 +262,15 @@ export const createDefaultExtractorRuntime = (): ExtractorRuntime => {
 
         return httpResult;
       } catch (error) {
+        /*
+         * A timeout or connection failure may be retried in the browser. A block (403/429, a
+         * challenge, or robots.txt) never is: that is the site refusing automated access.
+         */
         if (
           browserEnabled &&
           !deadline?.signal.aborted &&
           error instanceof HtmlFetchError &&
-          (error.reason === "blocked" ||
-            error.reason === "timeout" ||
-            error.reason === "unreachable")
+          (error.reason === "timeout" || error.reason === "unreachable")
         ) {
           return fetchWithBrowser(url, options, blockSignalPatterns);
         }
@@ -258,7 +300,7 @@ export const createDefaultExtractorRuntime = (): ExtractorRuntime => {
       return fetchYouTubeDocument(
         url,
         videoId,
-        fetchImplementation,
+        siteFetch,
         deadline
           ? deadline.budgetMs(extractorApiEnv.FETCH_HTTP_TIMEOUT_MS)
           : extractorApiEnv.FETCH_HTTP_TIMEOUT_MS,
@@ -281,7 +323,7 @@ export const createDefaultExtractorRuntime = (): ExtractorRuntime => {
       if (isFacebookUrl(url)) {
         const { fetchFacebookDocument } = await loadFacebookFetcher();
 
-        return fetchFacebookDocument(url, fetchImplementation, {
+        return fetchFacebookDocument(url, siteFetch, {
           timeoutMs: deadline
             ? deadline.budgetMs(extractorApiEnv.FETCH_HTTP_TIMEOUT_MS)
             : extractorApiEnv.FETCH_HTTP_TIMEOUT_MS,
@@ -292,7 +334,7 @@ export const createDefaultExtractorRuntime = (): ExtractorRuntime => {
 
       const { fetchTikTokDocument } = await loadTikTokFetcher();
 
-      return fetchTikTokDocument(url, fetchImplementation, {
+      return fetchTikTokDocument(url, siteFetch, {
         timeoutMs: deadline
           ? deadline.budgetMs(extractorApiEnv.FETCH_HTTP_TIMEOUT_MS)
           : extractorApiEnv.FETCH_HTTP_TIMEOUT_MS,
@@ -300,49 +342,54 @@ export const createDefaultExtractorRuntime = (): ExtractorRuntime => {
         validateUrl: validatePublicSourceUrl
       });
     },
-    fetchSocialVideo: async (
-      videoUrl: string,
-      options?: SourceFetchOptions & { locator?: TikTokVideoLocator | undefined }
-    ) => {
-      const deadline = options?.deadline;
-      const { fetchTikTokVideo } = await loadTikTokVideoFetcher();
+    /*
+     * Video files are only downloaded when SOCIAL_VIDEO_DOWNLOAD_ENABLED is on (TikTok's terms and
+     * Apple guideline 5.2.3); without these the video reader skips TikTok and Facebook videos.
+     */
+    ...(extractorApiEnv.SOCIAL_VIDEO_DOWNLOAD_ENABLED
+      ? {
+          fetchSocialVideo: async (
+            videoUrl: string,
+            options?: SourceFetchOptions & { locator?: TikTokVideoLocator | undefined }
+          ) => {
+            const deadline = options?.deadline;
+            const { fetchTikTokVideo } = await loadTikTokVideoFetcher();
 
-      return fetchTikTokVideo(videoUrl, fetchImplementation, {
-        timeoutMs: deadline
-          ? deadline.budgetMs(tikTokVideoDownloadMaxMs)
-          : tikTokVideoDownloadMaxMs,
-        maxBytes: tikTokVideoMaxBytes,
-        maxSeconds: extractorApiEnv.VIDEO_RECIPE_MAX_SECONDS,
-        ...(deadline ? { signal: deadline.signal } : {}),
-        validateUrl: validatePublicSourceUrl,
-        locator: options?.locator
-      });
-    },
-    fetchFacebookVideo: async (locator: FacebookVideoLocator, options?: SourceFetchOptions) => {
-      const deadline = options?.deadline;
-      const [{ fetchFacebookVideo }, { publicOnlyFetch }] = await Promise.all([
-        loadFacebookVideoFetcher(),
-        loadPublicFetch()
-      ]);
+            return fetchTikTokVideo(videoUrl, siteFetch, {
+              timeoutMs: deadline
+                ? deadline.budgetMs(tikTokVideoDownloadMaxMs)
+                : tikTokVideoDownloadMaxMs,
+              maxBytes: tikTokVideoMaxBytes,
+              maxSeconds: extractorApiEnv.VIDEO_RECIPE_MAX_SECONDS,
+              ...(deadline ? { signal: deadline.signal } : {}),
+              validateUrl: validatePublicSourceUrl,
+              locator: options?.locator
+            });
+          },
+          fetchFacebookVideo: async (
+            locator: FacebookVideoLocator,
+            options?: SourceFetchOptions
+          ) => {
+            const deadline = options?.deadline;
+            const { fetchFacebookVideo } = await loadFacebookVideoFetcher();
 
-      return fetchFacebookVideo(locator, publicOnlyFetch, {
-        timeoutMs: deadline
-          ? deadline.budgetMs(tikTokVideoDownloadMaxMs)
-          : tikTokVideoDownloadMaxMs,
-        maxBytes: tikTokVideoMaxBytes,
-        maxSeconds: extractorApiEnv.VIDEO_RECIPE_MAX_SECONDS,
-        ...(deadline ? { signal: deadline.signal } : {}),
-        validateUrl: validatePublicSourceUrl
-      });
-    },
+            return fetchFacebookVideo(locator, publicSiteFetch, {
+              timeoutMs: deadline
+                ? deadline.budgetMs(tikTokVideoDownloadMaxMs)
+                : tikTokVideoDownloadMaxMs,
+              maxBytes: tikTokVideoMaxBytes,
+              maxSeconds: extractorApiEnv.VIDEO_RECIPE_MAX_SECONDS,
+              ...(deadline ? { signal: deadline.signal } : {}),
+              validateUrl: validatePublicSourceUrl
+            });
+          }
+        }
+      : {}),
     searchCreatorSite: async (domain: string, query: string, options?: SourceFetchOptions) => {
       const deadline = options?.deadline;
-      const [{ searchCreatorSite }, { publicOnlyFetch }] = await Promise.all([
-        loadCreatorSiteSearch(),
-        loadPublicFetch()
-      ]);
+      const { searchCreatorSite } = await loadCreatorSiteSearch();
 
-      return searchCreatorSite(domain, query, publicOnlyFetch, {
+      return searchCreatorSite(domain, query, publicSiteFetch, {
         timeoutMs: deadline ? deadline.budgetMs(creatorSiteSearchMaxMs) : creatorSiteSearchMaxMs,
         ...(deadline ? { signal: deadline.signal } : {}),
         validateUrl: validatePublicSourceUrl
@@ -373,6 +420,15 @@ export const createDefaultExtractorRuntime = (): ExtractorRuntime => {
         }
       : {}),
     validateSourceUrl: validatePublicSourceUrl,
+    isAllowedByRobots: async (url: string) => (await getRobotsPolicy()).isAllowed(url),
+    platformAccess: {
+      tiktok: extractorApiEnv.TIKTOK_IMPORT_ENABLED,
+      youtube: extractorApiEnv.YOUTUBE_IMPORT_ENABLED,
+      instagram: extractorApiEnv.INSTAGRAM_IMPORT_ENABLED,
+      facebook: extractorApiEnv.FACEBOOK_IMPORT_ENABLED,
+      pinterest: extractorApiEnv.PINTEREST_IMPORT_ENABLED,
+      socialVideoDownload: extractorApiEnv.SOCIAL_VIDEO_DOWNLOAD_ENABLED
+    },
     dispose: async () => {
       const browserFetcher = await browserFetcherPromise?.catch(() => null);
       await browserFetcher?.dispose();

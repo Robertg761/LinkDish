@@ -28,6 +28,11 @@ import { describeFreeQuota } from "../library/components/free-quota";
 import { countCookbook } from "../library/components/library-model";
 import { isPaidPlan, planContent } from "../pricing/plans-content";
 
+import {
+  getAccountDeletionFollowUps,
+  type AccountDeletionFollowUp
+} from "./account-deletion-follow-ups";
+
 import type { IconName } from "../../components/Icon";
 import type { AccountUser } from "@linkdish/api-contracts";
 
@@ -332,7 +337,8 @@ const SignInView: React.FC<{ destination: string | null }> = ({ destination }) =
 
           <p className="account-signin-fineprint">
             New here? The same steps create your free account.{" "}
-            <Link to="/privacy">How we handle your data</Link>
+            <Link to="/privacy">How we handle your data</Link> ·{" "}
+            <a href="https://linkdish.ca/terms/">Terms of Service</a>
           </p>
         </Card>
 
@@ -669,7 +675,41 @@ const PlanCardSection: React.FC<{ tier: WebBillingTier }> = ({ tier }) => {
   );
 };
 
-const DeleteAccount: React.FC<{ user: AccountUser }> = ({ user }) => {
+interface DeletedAccount {
+  followUps: AccountDeletionFollowUp[];
+}
+
+/** Shown once the account is gone (and signed out): what the person still has to do. */
+const AccountDeletedNotice: React.FC<{ deleted: DeletedAccount; onDismiss: () => void }> = ({
+  deleted,
+  onDismiss
+}) => (
+  <section aria-labelledby="account-deleted-title" className="account-deleted" role="status">
+    <h2 id="account-deleted-title">Your account has been deleted</h2>
+    {deleted.followUps.length > 0 ? (
+      <>
+        <p>There&apos;s still something only you can do:</p>
+        <ul className="account-deleted-steps">
+          {deleted.followUps.map((followUp) => (
+            <li key={followUp.id}>
+              <strong>{followUp.title}.</strong> {followUp.body}
+            </li>
+          ))}
+        </ul>
+      </>
+    ) : (
+      <p>Your LinkDish account and its data have been deleted.</p>
+    )}
+    <Button onClick={onDismiss} size="sm" variant="secondary">
+      Done
+    </Button>
+  </section>
+);
+
+const DeleteAccount: React.FC<{
+  onDeleted: (deleted: DeletedAccount) => void;
+  user: AccountUser;
+}> = ({ onDeleted, user }) => {
   const { deleteAccount } = useAuth();
   const [open, setOpen] = useState(false);
   const [confirmEmail, setConfirmEmail] = useState("");
@@ -689,7 +729,10 @@ const DeleteAccount: React.FC<{ user: AccountUser }> = ({ user }) => {
     setDeleting(true);
 
     try {
-      await deleteAccount(confirmEmail.trim());
+      const billingPlan = user.billingPlan;
+      await deleteAccount(confirmEmail.trim(), (providers) =>
+        onDeleted({ followUps: getAccountDeletionFollowUps(providers, billingPlan) })
+      );
     } catch (failure) {
       setError(getFriendlyErrorMessage(failure, "generic"));
       setDeleting(false);
@@ -713,18 +756,30 @@ const DeleteAccount: React.FC<{ user: AccountUser }> = ({ user }) => {
         <h2 id="account-delete-title">Delete your account?</h2>
       </div>
       <ul className="account-danger-consequences">
-        <li>Your LinkDish account and sign-in are removed for good.</li>
         <li>
-          You leave your household, and recipes you shared there are removed. If you own the
-          household, it closes for everyone.
+          Your LinkDish account is removed for good, along with your sign-in at Clerk, our sign-in
+          provider.
         </li>
         <li>
-          Your cookbook is deleted from LinkDish&apos;s servers. The recipes saved in this browser
-          stay on this device.
+          You leave your household, and the recipes and shopping list items you shared there are
+          removed. If you own the household, it doesn&apos;t close: it passes to the member who has
+          been in it longest, and if they don&apos;t have a Family plan, each member gets a copy of
+          the shared recipes in their own cookbook while it has room. If you&apos;re the last
+          member, it closes.
         </li>
         <li>
-          Deleting your account doesn&apos;t cancel a subscription. Cancel it first from{" "}
+          Your cookbook and recipe pictures are deleted from LinkDish&apos;s servers, along with the
+          analytics linked to your account. The recipes saved in this browser stay on this device.
+        </li>
+        <li>
+          Your purchase record at RevenueCat, our billing provider, is deleted. Deleting your
+          account doesn&apos;t cancel a subscription. Cancel it first from{" "}
           <Link to="/pricing">Plans</Link> or the store you subscribed through.
+        </li>
+        <li>
+          If you use Sign in with Apple, LinkDish can&apos;t turn it off from the web. Afterwards,
+          stop using Sign in with Apple for LinkDish in your Apple Account settings, or delete your
+          account from the iPhone app, which does it for you.
         </li>
       </ul>
       <form className="account-danger-form" noValidate onSubmit={submit}>
@@ -775,6 +830,7 @@ export const AccountPage: React.FC = () => {
   /** The account the profile editor was opened for: it stays closed for any other. */
   const [profileOpenFor, setProfileOpenFor] = useState<string | null>(null);
   const [signingOut, setSigningOut] = useState(false);
+  const [deletedAccount, setDeletedAccount] = useState<DeletedAccount | null>(null);
   const destination = getPostSignInDestination(searchParams);
   useDocumentTitle(isAuthenticated ? "You" : "Sign in");
 
@@ -796,9 +852,14 @@ export const AccountPage: React.FC = () => {
     );
   }
 
+  const deletedNotice = deletedAccount ? (
+    <AccountDeletedNotice deleted={deletedAccount} onDismiss={() => setDeletedAccount(null)} />
+  ) : null;
+
   if (!isAuthenticated || !user) {
     return (
       <div className="account-page container page-enter">
+        {deletedNotice}
         <SignInView destination={destination} />
       </div>
     );
@@ -858,7 +919,7 @@ export const AccountPage: React.FC = () => {
       </div>
 
       {/* Keyed by account: a draft or confirmation typed for one never carries to the next. */}
-      <DeleteAccount key={`delete:${user.id}`} user={user} />
+      <DeleteAccount key={`delete:${user.id}`} onDeleted={setDeletedAccount} user={user} />
 
       <ProfileSheet
         isCurrentAccount={isCurrentAccount}

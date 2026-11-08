@@ -25,12 +25,29 @@ describe("shouldUseBrowserFallback", () => {
     ).toBe(false);
   });
 
-  it("uses the browser for a genuine challenge page without usable recipe data", () => {
+  it("never uses the browser to get past a challenge or block page", () => {
     expect(
       shouldUseBrowserFallback({
         available: true,
         blockedSignals: ["captcha", "cloudflare", "challenge-title"],
         html: "<html><title>Just a moment...</title><body>Verify you are human.</body></html>"
+      })
+    ).toBe(false);
+    expect(
+      shouldUseBrowserFallback({
+        available: true,
+        blockedSignals: ["status:403"],
+        html: "<html><body></body></html>"
+      })
+    ).toBe(false);
+  });
+
+  it("still renders a JavaScript shell that the site served normally", () => {
+    expect(
+      shouldUseBrowserFallback({
+        available: true,
+        blockedSignals: [],
+        html: '<html><head><title>Recipe</title></head><body><div id="root"></div><script src="/app.js"></script></body></html>'
       })
     ).toBe(true);
   });

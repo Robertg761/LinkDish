@@ -146,7 +146,7 @@ describe("FirstRunOnboardingSheet", () => {
 
     await waitFor(() => {
       expect(screen.getByTestId("current-path")).toHaveTextContent(
-        "/featured/classic-chocolate-chip-cookies"
+        "/featured/brown-butter-berry-oat-bars"
       );
     });
     expect(localStorage.getItem(ONBOARDING_STORAGE_KEY)).toBe("true");

@@ -16,7 +16,8 @@ import "./FirstRunOnboardingSheet.css";
  * FirstRunOnboardingSheet, so returning cooks never download it.
  */
 
-export const SAMPLE_RECIPE_SLUG = "classic-chocolate-chip-cookies";
+/** A LinkDish kitchen recipe (featured recipes are LinkDish's own; see featured-recipes.ts). */
+export const SAMPLE_RECIPE_SLUG = "brown-butter-berry-oat-bars";
 
 const FRAMES = [
   {
@@ -30,7 +31,7 @@ const FRAMES = [
     title: "Cook calmly, shop smarter"
   },
   {
-    body: "Paste a link to a recipe you love, or open one we’ve already tidied up.",
+    body: "Paste a link to a recipe you love, or open one from the LinkDish kitchen.",
     id: "start",
     title: "Start with one recipe"
   }
@@ -44,7 +45,7 @@ const SaveArt: React.FC = () => (
   <div aria-hidden="true" className="first-run-stage is-save">
     <div className="first-run-paste-mock">
       <Icon name="link" size={16} />
-      <span className="first-run-paste-mock-url">kingarthurbaking.com/recipes/chocolate-chip…</span>
+      <span className="first-run-paste-mock-url">yourfavouritesite.com/recipes/oat-bars…</span>
       <span className="first-run-paste-mock-go">Get it</span>
     </div>
     <div className="first-run-mini-card">
@@ -53,15 +54,15 @@ const SaveArt: React.FC = () => (
         image={sample?.recipe.image}
         priority
         sizes="280px"
-        title={sample?.recipe.title ?? "Cookies"}
+        title={sample?.recipe.title ?? "Oat bars"}
         widths={[480]}
       />
       <div className="first-run-mini-card-body">
         <span className="first-run-mini-card-title">
-          {sample?.recipe.title ?? "Classic Chocolate Chip Cookies"}
+          {sample?.recipe.title ?? "Brown Butter Berry Oat Bars"}
         </span>
         <span className="first-run-mini-card-meta">
-          <Icon name="clock" size={13} /> 24 min <Icon name="users" size={13} /> 36 cookies
+          <Icon name="clock" size={13} /> 53 min <Icon name="users" size={13} /> 9 bars
         </span>
       </div>
     </div>
@@ -202,7 +203,7 @@ const StartFrame: React.FC<StartFrameProps> = ({ onImport, onSample }) => {
         <span className="first-run-sample-copy">
           <span className="first-run-sample-title">Try a sample recipe</span>
           <span className="first-run-sample-meta">
-            {sample?.recipe.title ?? "Classic Chocolate Chip Cookies"}
+            {sample?.recipe.title ?? "Brown Butter Berry Oat Bars"}
           </span>
         </span>
         <Icon className="first-run-sample-chevron" name="chevron-right" size={20} />

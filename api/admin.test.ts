@@ -417,11 +417,12 @@ describe("Vercel admin dashboard adapter", () => {
       const audit = await import("../services/extractor-api/src/modules/admin/admin-audit.js");
       await audit.recordAdminAuditEvent(
         { action: "llm.reset", actor: "robert", ip: "203.0.113.1", outcome: "success" },
-        new Date(Date.now() - 181 * 86_400_000)
+        new Date(Date.now() - 91 * 86_400_000)
       );
       expect(sortedSets.get("linkdish:admin:audit:v1")?.size).toBe(1);
       expect(await audit.listAdminAuditEvents()).toHaveLength(0);
-      expect([...keyTtls.values()]).toContain(180 * 86_400);
+      // 90 days by default: the privacy policy keeps server logs for up to 90 days.
+      expect([...keyTtls.values()]).toContain(90 * 86_400);
     });
 
     it("holds a concurrent burst of bad tokens to the limit", async () => {

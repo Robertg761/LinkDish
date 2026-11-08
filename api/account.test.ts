@@ -141,6 +141,53 @@ describe("Vercel account adapter", () => {
     });
   });
 
+  it("deletes the account and reports what happened at each provider", async () => {
+    const { setClerkAuthVerifierForTesting } =
+      await import("../services/extractor-api/src/modules/auth/clerk-auth-service.js");
+    const { setClerkAccountAdminForTesting } =
+      await import("../services/extractor-api/src/modules/account/account-deletion-providers.js");
+    setClerkAuthVerifierForTesting({
+      getExternalIdentity(subject) {
+        return Promise.resolve({
+          email: "delete-clerk@example.com",
+          emailVerified: true,
+          subject
+        });
+      },
+      verifySessionToken() {
+        return Promise.resolve({
+          expiresAt: "2026-06-01T00:00:00.000Z",
+          subject: "clerk_delete_vercel_account"
+        });
+      }
+    });
+    const deleteUser = vi.fn().mockResolvedValue("deleted");
+    setClerkAccountAdminForTesting({
+      deleteUser,
+      getUser: (subject) => Promise.resolve({ appleUserIds: ["apple-user-1"], subject })
+    });
+
+    const response = await accountApi.DELETE(
+      new Request("https://api.linkdish.ca/api/account", {
+        body: JSON.stringify({ confirmEmail: "delete-clerk@example.com" }),
+        headers: {
+          authorization: "Bearer header.payload.signature",
+          "content-type": "application/json"
+        },
+        method: "DELETE"
+      })
+    );
+
+    expect(response.status).toBe(200);
+    // Apple is linked but no code came with the request (as from the web), and this server has
+    // no RevenueCat key outside production.
+    await expect(response.json()).resolves.toEqual({
+      providers: { apple: "not_revoked", clerk: "deleted", revenueCat: "not_configured" },
+      status: "deleted"
+    });
+    expect(deleteUser).toHaveBeenCalledWith("clerk_delete_vercel_account");
+  });
+
   it("returns Clerk identity linking errors as JSON instead of throwing", async () => {
     const response = await accountApi.DELETE(
       new Request("https://api.linkdish.ca/api/account", {

@@ -26,10 +26,9 @@ describe("LibraryWelcome", () => {
     });
     expect(within(shelf).queryAllByRole("link")).toHaveLength(0);
 
-    expect(await within(shelf).findByRole("link", { name: "Pizza Crust" })).toHaveAttribute(
-      "href",
-      "/featured/pizza-crust"
-    );
+    expect(
+      await within(shelf).findByRole("link", { name: "Ginger-Sesame Chicken Rice Skillet" })
+    ).toHaveAttribute("href", "/featured/ginger-sesame-chicken-rice-skillet");
     expect(container.querySelector(".library-welcome-sample-placeholder")).toBeNull();
   });
 
@@ -42,7 +41,9 @@ describe("LibraryWelcome", () => {
     );
 
     const shelf = screen.getByRole("region", { name: "Try a sample" });
-    expect(within(shelf).getByRole("link", { name: "Pizza Crust" })).toBeInTheDocument();
+    expect(
+      within(shelf).getByRole("link", { name: "Ginger-Sesame Chicken Rice Skillet" })
+    ).toBeInTheDocument();
     expect(screen.getByText("Your cookbook is ready")).toBeInTheDocument();
   });
 });

@@ -2,6 +2,8 @@ import React, { createContext, useContext, type PropsWithChildren } from "react"
 
 interface ClerkSessionContextValue {
   getToken: () => Promise<string | null>;
+  /** The signed-in Clerk user has Sign in with Apple linked. */
+  hasAppleAccount: boolean;
   isLoaded: boolean;
   isSignedIn: boolean;
   /**
@@ -15,6 +17,7 @@ interface ClerkSessionContextValue {
 
 const noopContext: ClerkSessionContextValue = {
   getToken: () => Promise.resolve(null),
+  hasAppleAccount: false,
   isLoaded: true,
   isSignedIn: false,
   sessionId: null,

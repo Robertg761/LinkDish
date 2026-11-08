@@ -3,7 +3,12 @@ import { buildHtmlSourceDocument } from "../html/parsed-html-document.js";
 import { isSourceUrlRejection, validatePublicSourceUrl } from "../source-url-safety.js";
 
 import { BrowserFetchError } from "./errors.js";
-import { browserLikeHeaders, classifyFetchStatusCode, detectBlockedSignals } from "./shared.js";
+import { ROBOTS_DISALLOWED_SIGNAL } from "./robots-txt.js";
+import {
+  identifyingFetchHeaders,
+  classifyFetchStatusCode,
+  detectBlockedSignals
+} from "./shared.js";
 
 import type { SourceUrlSafetyResult, ValidateSourceUrl } from "../source-url-safety.js";
 import type { BrowserFetcher, BrowserFetchOptions, FetchResult } from "../types.js";
@@ -230,6 +235,24 @@ const launchBrowser = async (): Promise<BrowserHandle> => {
   return chromium.launch({ headless: true }) as unknown as Promise<BrowserHandle>;
 };
 
+/** Whether robots.txt lets LinkDish load a page. Absent: no robots.txt check (tests only). */
+export type BrowserRobotsCheck = (url: string) => Promise<boolean>;
+
+const assertRobotsAllowsBrowserUrl = async (
+  url: string,
+  isAllowedByRobots: BrowserRobotsCheck | undefined
+): Promise<void> => {
+  if (isAllowedByRobots && !(await isAllowedByRobots(url))) {
+    throw new BrowserFetchError(
+      "robots.txt does not allow LinkDish to load that page.",
+      "blocked",
+      [ROBOTS_DISALLOWED_SIGNAL],
+      undefined,
+      url
+    );
+  }
+};
+
 class AvailableBrowserFetcher implements BrowserFetcher {
   public readonly available = true;
   private browserPromise: Promise<BrowserHandle> | null = null;
@@ -238,7 +261,8 @@ class AvailableBrowserFetcher implements BrowserFetcher {
     private readonly timeoutMs: number,
     private readonly concurrency: number,
     private readonly validateUrl: ValidateSourceUrl,
-    private readonly maxBytes: number
+    private readonly maxBytes: number,
+    private readonly isAllowedByRobots?: BrowserRobotsCheck
   ) {}
 
   private async getBrowser(): Promise<BrowserHandle> {
@@ -279,10 +303,12 @@ class AvailableBrowserFetcher implements BrowserFetcher {
 
     try {
       await assertSafeBrowserUrl(url, this.validateUrl);
+      // Checked before Chromium starts: a page robots.txt disallows is never loaded.
+      await assertRobotsAllowsBrowserUrl(url, this.isAllowedByRobots);
 
       browser = await this.getBrowser();
       context = await browser.newContext({
-        userAgent: browserLikeHeaders["user-agent"],
+        userAgent: identifyingFetchHeaders["user-agent"],
         locale: "en-US",
         serviceWorkers: "block"
       });
@@ -306,13 +332,23 @@ class AvailableBrowserFetcher implements BrowserFetcher {
           return;
         }
 
+        // Pages (the first one, its redirects and frames) obey robots.txt like plain fetches do.
+        if (
+          request.resourceType() === "document" &&
+          this.isAllowedByRobots &&
+          !(await this.isAllowedByRobots(requestUrl).catch(() => false))
+        ) {
+          await route.abort();
+          return;
+        }
+
         await route.continue();
       });
       page = await context.newPage();
       const activePage = page;
 
       await activePage.setExtraHTTPHeaders({
-        "accept-language": browserLikeHeaders["accept-language"],
+        "accept-language": identifyingFetchHeaders["accept-language"],
         "cache-control": "no-cache",
         pragma: "no-cache"
       });
@@ -460,12 +496,14 @@ export const createBrowserFetcher = (options: {
   concurrency: number;
   maxBytes?: number;
   validateUrl?: ValidateSourceUrl;
+  isAllowedByRobots?: BrowserRobotsCheck;
 }): BrowserFetcher =>
   options.enabled
     ? new AvailableBrowserFetcher(
         options.timeoutMs,
         options.concurrency,
         options.validateUrl ?? validatePublicSourceUrl,
-        options.maxBytes ?? extractorApiEnv.FETCH_MAX_RESPONSE_BYTES
+        options.maxBytes ?? extractorApiEnv.FETCH_MAX_RESPONSE_BYTES,
+        options.isAllowedByRobots
       )
     : new UnavailableBrowserFetcher();

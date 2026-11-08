@@ -3,6 +3,9 @@ import { Alert, Linking, Platform, View } from "react-native";
 
 import { reviewAiConsent } from "../features/privacy/ai-consent";
 
+const OPEN_SOURCE_LICENCES_URL =
+  "https://github.com/Robertg761/LinkDish/blob/main/THIRD_PARTY_NOTICES.md";
+
 const openLink = (url: string) => {
   void Linking.openURL(url).catch(() => {
     Alert.alert(
@@ -27,6 +30,7 @@ export const AppLegalLinks = () => (
       onPress={() => openLink("https://linkdish.ca/privacy/")}
       variant="ghost"
     />
+    {/* The LinkDish Terms do not cover iOS yet, so iOS keeps Apple's Standard EULA for now. */}
     {Platform.OS === "ios" ? (
       <AppButton
         label="Terms of Use (Apple Standard EULA)"
@@ -35,10 +39,21 @@ export const AppLegalLinks = () => (
         }
         variant="ghost"
       />
-    ) : null}
+    ) : (
+      <AppButton
+        label="Terms of Service"
+        onPress={() => openLink("https://linkdish.ca/terms/")}
+        variant="ghost"
+      />
+    )}
     <AppButton
       label="Help and support"
       onPress={() => openLink("https://linkdish.ca/support/")}
+      variant="ghost"
+    />
+    <AppButton
+      label="Open source licences"
+      onPress={() => openLink(OPEN_SOURCE_LICENCES_URL)}
       variant="ghost"
     />
   </View>

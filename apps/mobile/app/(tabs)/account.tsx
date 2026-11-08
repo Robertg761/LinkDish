@@ -21,6 +21,10 @@ import { AppDialog } from "../../src/components/AppDialog";
 import { AppLegalLinks } from "../../src/components/AppLegalLinks";
 import { mobileEnv } from "../../src/config/env";
 import { useAccount } from "../../src/features/account/AccountContext";
+import {
+  getAccountDeletedMessage,
+  getAccountDeletionFollowUps
+} from "../../src/features/account/accountDeletionFollowUps";
 import { useClerkSession } from "../../src/features/account/ClerkSessionContext";
 import { activateClerkSignIn } from "../../src/features/account/completeClerkSignIn";
 import { BackupCard } from "../../src/features/backup/BackupCard";
@@ -591,6 +595,9 @@ export default function AccountScreen() {
   } = useAccount();
   const { restorePurchases, purchaseStatus } = useBilling();
   const { refreshSharedRecipes } = useSavedRecipes();
+  const { hasAppleAccount } = useClerkSession();
+  /** Shown once the account is deleted: what the person still has to do (null: no dialog). */
+  const [accountDeletedMessage, setAccountDeletedMessage] = useState<string | null>(null);
   const [code, setCode] = useState("");
   const [confirmEmail, setConfirmEmail] = useState("");
   const [email, setEmail] = useState("");
@@ -864,11 +871,19 @@ export default function AccountScreen() {
                 Delete Account
               </AppText>
               <AppText muted style={styles.centeredText}>
-                Deleting your account removes server-side account, synced cookbook, household, and
-                shared Family recipe records that belong to the account. Recipes saved on this
-                device stay on this device. Deleting your account does not cancel a store
-                subscription. Manage or cancel it separately in your App Store or Google Play
-                account settings.
+                Deleting your account removes your LinkDish account and your sign-in, your synced
+                cookbook and recipe pictures, the analytics linked to your account, and your
+                purchase record at RevenueCat, our billing provider. You leave your household, and
+                the recipes and shopping list items you shared there are removed. If you own the
+                household, it passes to the member who has been in it longest; if you are the last
+                member, it closes. Recipes saved on this device stay on this device.
+              </AppText>
+              <AppText muted style={styles.centeredText}>
+                Deleting your account does not cancel a store subscription. Cancel it first in your
+                App Store or Google Play account settings, or you'll keep being charged.
+                {Platform.OS === "ios" && hasAppleAccount
+                  ? " Because you use Sign in with Apple, Apple will ask you to confirm, so LinkDish can stop using your Apple ID. Cancelling that prompt cancels the deletion."
+                  : ""}
               </AppText>
               <TextInput
                 autoCapitalize="none"
@@ -1061,14 +1076,24 @@ export default function AccountScreen() {
             label: isAccountBusy ? "Deleting" : "Delete",
             onPress: () => {
               setIsDeleteAccountDialogVisible(false);
+              // Read before the deletion signs the account out.
+              const billingPlan = user?.billingPlan;
               void deleteAccount(confirmEmail)
-                .then(() => router.replace("/"))
+                .then((providers) => {
+                  // Null: nothing was deleted (Apple's confirmation was cancelled).
+                  if (providers) {
+                    setConfirmEmail("");
+                    setAccountDeletedMessage(
+                      getAccountDeletedMessage(getAccountDeletionFollowUps(providers, billingPlan))
+                    );
+                  }
+                })
                 .catch(() => undefined);
             },
             variant: "danger"
           }
         ]}
-        message="This removes your LinkDish account, household membership, and shared Family recipes you added. Store subscriptions are still managed by Apple or Google."
+        message="This permanently deletes your LinkDish account, synced cookbook, household membership, the Family recipes you shared, and our billing provider's record of your purchases. It doesn't cancel an App Store or Google Play subscription."
         onRequestClose={() => {
           if (!isAccountBusy) {
             setIsDeleteAccountDialogVisible(false);
@@ -1076,6 +1101,24 @@ export default function AccountScreen() {
         }}
         title="Delete account"
         visible={isDeleteAccountDialogVisible}
+      />
+      <AppDialog
+        actions={[
+          {
+            label: "OK",
+            onPress: () => {
+              setAccountDeletedMessage(null);
+              router.replace("/");
+            }
+          }
+        ]}
+        message={accountDeletedMessage ?? ""}
+        onRequestClose={() => {
+          setAccountDeletedMessage(null);
+          router.replace("/");
+        }}
+        title="Account deleted"
+        visible={accountDeletedMessage !== null}
       />
     </>
   );

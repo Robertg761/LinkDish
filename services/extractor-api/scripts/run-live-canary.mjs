@@ -9,15 +9,41 @@ const outcomeRank = {
   needs_retry: 1,
   success: 2
 };
-const browserLikeHeaders = {
+/*
+ * The preflight identifies itself as LinkDish, like the extractor does (never as a desktop
+ * browser). A site that blocks it is not drift (blockedStatusCodes below).
+ */
+const preflightHeaders = {
   accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
   "accept-language": "en-US,en;q=0.9",
-  "cache-control": "no-cache",
-  pragma: "no-cache",
-  "upgrade-insecure-requests": "1",
-  "user-agent":
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36"
+  "user-agent": "Mozilla/5.0 (compatible; LinkDishBot/1.0; +https://linkdish.ca)"
 };
+
+/*
+ * Platform cases run only for platform paths switched on in production (YOUTUBE_IMPORT_ENABLED,
+ * FACEBOOK_IMPORT_ENABLED, ...; their terms were checked on 2026-11-08). List the ones that are on
+ * in LINKDISH_CANARY_PLATFORMS ("tiktok,youtube"). Robert turned every platform path back on by
+ * default on 2026-11-08, but the default here stays TikTok only: Facebook's, Instagram's and
+ * Pinterest's robots.txt refuse LinkDishBot, so their cases (the Facebook reel expects success)
+ * would fail and block deploys, and the YouTube cases have not been re-checked without the
+ * robots.txt-disallowed comments endpoint. A skipped case is neither preflighted nor sent to
+ * the API.
+ */
+const gatedCanaryKinds = new Set(["facebook", "instagram", "pinterest", "tiktok", "youtube"]);
+const defaultCanaryPlatforms = ["tiktok"];
+
+export const resolveCanaryPlatforms = (rawPlatforms = process.env.LINKDISH_CANARY_PLATFORMS) =>
+  new Set(
+    rawPlatforms == null || rawPlatforms.trim() === ""
+      ? defaultCanaryPlatforms
+      : rawPlatforms
+          .split(",")
+          .map((platform) => platform.trim().toLowerCase())
+          .filter(Boolean)
+  );
+
+export const isCanaryEntryEnabled = (entry, platforms) =>
+  !gatedCanaryKinds.has(entry.kind) || platforms.has(entry.kind);
 
 const extractTitle = (html) => {
   const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
@@ -212,7 +238,7 @@ export const preflightEntry = async ({
     const response = await withTimeout(
       (signal) =>
         fetchImplementation(entry.url, {
-          headers: browserLikeHeaders,
+          headers: preflightHeaders,
           redirect: "follow",
           signal
         }),
@@ -302,9 +328,14 @@ export const runLiveCanary = async ({
   billingProvider = process.env.LINKDISH_CANARY_BILLING_PROVIDER ?? "revenuecat",
   headers = {},
   timeoutMs = resolveCanaryTimeoutMs(),
-  fetchImplementation = fetch
+  fetchImplementation = fetch,
+  platforms = resolveCanaryPlatforms()
 }) => {
-  const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
+  const fullManifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
+  const manifest = fullManifest.filter((entry) => isCanaryEntryEnabled(entry, platforms));
+  const platformSkipped = fullManifest
+    .filter((entry) => !isCanaryEntryEnabled(entry, platforms))
+    .map((entry) => entry.id);
   const outputDir = path.resolve(".artifacts/live-canary");
 
   await fs.mkdir(outputDir, { recursive: true });
@@ -456,6 +487,7 @@ export const runLiveCanary = async ({
 
   summary.abortReason = abortReason;
   summary.skipped = manifest.length - results.length;
+  summary.platformSkipped = platformSkipped;
 
   const payload = {
     ranAt: new Date().toISOString(),

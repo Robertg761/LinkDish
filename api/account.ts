@@ -15,8 +15,9 @@ import { deleteAccountAndHouseholdAccess } from "../services/extractor-api/src/m
 
 import type { AccountUser } from "../packages/api-contracts/src/index.js";
 
+/* Account deletion calls Clerk, Apple and RevenueCat (5 s timeout each) besides the store. */
 export const config = {
-  maxDuration: 30
+  maxDuration: 60
 };
 
 const jsonError = (request: Request, message: string, status: number): Response =>
@@ -139,9 +140,12 @@ export async function DELETE(request: Request) {
     }
 
     const payload = deleteAccountRequestSchema.parse(await readJsonBody(request));
-    await deleteAccountAndHouseholdAccess(session.user, payload.confirmEmail);
+    const providers = await deleteAccountAndHouseholdAccess(session.user, payload.confirmEmail, {
+      appleAuthorizationCode: payload.appleAuthorizationCode
+    });
 
     return corsJson(request, {
+      providers,
       status: "deleted"
     });
   } catch (error) {

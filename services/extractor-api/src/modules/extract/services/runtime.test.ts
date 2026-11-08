@@ -54,10 +54,11 @@ const originalBrowserEnabled = extractorApiEnv.BROWSER_FETCH_ENABLED;
 
 beforeEach(() => {
   extractorApiEnv.BROWSER_FETCH_ENABLED = true;
-  /* The site answers with a bot challenge, which escalates to a browser render. */
-  mocks.httpFetch.mockRejectedValue(
-    new HtmlFetchError("Blocked", "blocked", ["status_403"], 403, url)
-  );
+  /*
+   * The plain request times out, which may be retried as a browser render. (A block never is;
+   * see "never uses the browser to get past a block" below.)
+   */
+  mocks.httpFetch.mockRejectedValue(new HtmlFetchError("Timed out", "timeout"));
   mocks.browserFetch.mockResolvedValue(renderedPage);
   mocks.createBrowserFetcher.mockReturnValue({
     available: true,
@@ -72,6 +73,38 @@ afterEach(() => {
 });
 
 describe("default runtime browser escalation", () => {
+  it.each([
+    ["a 403 bot challenge", new HtmlFetchError("Blocked", "blocked", ["status:403"], 403, url)],
+    [
+      "a robots.txt refusal",
+      new HtmlFetchError("robots.txt", "blocked", ["robots_txt_disallowed"], undefined, url)
+    ]
+  ])("never uses the browser to get past %s", async (_label, error) => {
+    mocks.httpFetch.mockRejectedValue(error);
+    const runtime = createDefaultExtractorRuntime();
+    const deadline = createRequestDeadline(30_000);
+
+    await expect(runtime.fetchHtmlDocument(url, { deadline })).rejects.toMatchObject({
+      reason: "blocked"
+    });
+    expect(mocks.createBrowserFetcher).not.toHaveBeenCalled();
+    expect(mocks.browserFetch).not.toHaveBeenCalled();
+    deadline.dispose();
+  });
+
+  it("hands the browser a robots.txt check and the honest fetch a robots-aware fetch", async () => {
+    const runtime = createDefaultExtractorRuntime();
+    const deadline = createRequestDeadline(30_000);
+
+    await expect(runtime.fetchHtmlDocument(url, { deadline })).resolves.toMatchObject({
+      mode: "browser"
+    });
+    expect(mocks.createBrowserFetcher).toHaveBeenCalledWith(
+      expect.objectContaining({ isAllowedByRobots: expect.any(Function) as unknown })
+    );
+    deadline.dispose();
+  });
+
   it("waits for billing before starting a browser render", async () => {
     const runtime = createDefaultExtractorRuntime();
     const deadline = createRequestDeadline(30_000);

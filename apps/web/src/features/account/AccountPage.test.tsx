@@ -391,8 +391,64 @@ describe("AccountPage account deletion", () => {
     const section = screen.getByRole("region", { name: "Delete your account?" });
     expect(section).toHaveTextContent("The recipes saved in this browser stay on this device.");
     expect(section).toHaveTextContent("doesn't cancel a subscription");
+    expect(section).toHaveTextContent("Your purchase record at RevenueCat");
+    expect(section).toHaveTextContent("along with your sign-in at Clerk");
+    // The household is handed on, not closed for everyone.
+    expect(section).toHaveTextContent(
+      "If you own the household, it doesn't close: it passes to the member who has been in it longest"
+    );
+    expect(section).not.toHaveTextContent("closes for everyone");
+    expect(section).toHaveTextContent("If you use Sign in with Apple");
     expect(screen.getByRole("button", { name: /delete account/i })).toBeDisabled();
     expect(authMocks.deleteAccount).not.toHaveBeenCalled();
+  });
+
+  const deleteWith = (providers: Record<string, string>) => {
+    authMocks.deleteAccount.mockImplementation(
+      (_email: string, onDeleted?: (result: Record<string, string>) => void) => {
+        onDeleted?.(providers);
+        // The deletion signs the account out.
+        authMocks.user = null;
+        return Promise.resolve(providers);
+      }
+    );
+    openDeleteForm();
+    fireEvent.change(screen.getByRole("textbox", { name: /confirm your email/i }), {
+      target: { value: "cook@example.com" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: /delete account/i }));
+  };
+
+  it("shows the steps still to take once the account is deleted, instead of plain success", async () => {
+    authMocks.user = { ...authMocks.user!, billingPlan: "plus" };
+    deleteWith({ apple: "not_revoked", clerk: "deleted", revenueCat: "deleted" });
+
+    const notice = await screen.findByRole("status", { name: "Your account has been deleted" });
+    expect(notice).toHaveTextContent("Turn off Sign in with Apple.");
+    expect(notice).toHaveTextContent("account.apple.com");
+    expect(notice).toHaveTextContent("Cancel any subscription.");
+    expect(notice).toHaveTextContent("doesn't cancel a subscription");
+
+    fireEvent.click(within(notice).getByRole("button", { name: "Done" }));
+    expect(
+      screen.queryByRole("status", { name: "Your account has been deleted" })
+    ).not.toBeInTheDocument();
+  });
+
+  it("confirms the deletion with nothing left to do when no provider step remains", async () => {
+    deleteWith({ apple: "not_linked", clerk: "deleted", revenueCat: "no_record" });
+
+    const notice = await screen.findByRole("status", { name: "Your account has been deleted" });
+    expect(notice).toHaveTextContent("Your LinkDish account and its data have been deleted.");
+    expect(notice).not.toHaveTextContent("Sign in with Apple");
+    expect(notice).not.toHaveTextContent("Cancel any subscription");
+  });
+
+  it("asks nothing about Apple once the server revoked Sign in with Apple", async () => {
+    deleteWith({ apple: "revoked", clerk: "deleted", revenueCat: "deleted" });
+
+    const notice = await screen.findByRole("status", { name: "Your account has been deleted" });
+    expect(notice).not.toHaveTextContent("Turn off Sign in with Apple");
   });
 
   it("accepts the confirmation email in any casing", async () => {
@@ -407,7 +463,10 @@ describe("AccountPage account deletion", () => {
     fireEvent.click(submitButton);
 
     await waitFor(() => {
-      expect(authMocks.deleteAccount).toHaveBeenCalledWith("cook@example.com");
+      expect(authMocks.deleteAccount).toHaveBeenCalledWith(
+        "cook@example.com",
+        expect.any(Function)
+      );
     });
     expect(
       screen.queryByText("Email address does not match your current account email.")

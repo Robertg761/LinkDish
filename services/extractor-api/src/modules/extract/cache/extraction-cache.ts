@@ -39,8 +39,18 @@ import type { DetectionResult } from "../types.js";
  * used to be rejected as unsupported.
  * 2026-10-29.1: view, reaction and like counts no longer become ingredients; an older entry
  * for a Facebook video may list "1.2M views · 20K reactions" as one.
+ * 2026-11-08.1: pages are fetched with the honest LinkDishBot user-agent only, robots.txt is
+ * obeyed, a blocked page is never re-rendered in the browser, and platform paths whose terms do
+ * not permit automated reading are off. An older entry may hold a page fetched under the old
+ * rules (a spoofed user-agent, a page robots.txt disallows, or a page read past a bot wall), so
+ * none is served. A hit is also re-checked against the site's current robots.txt before it is
+ * served (extract-recipe.ts).
+ *
+ * Takedowns: an entry for one URL is removed by deleting getExtractionCacheKey(url) from the
+ * store (Upstash); bumping this version drops every entry at once. Entries expire on their own
+ * after EXTRACT_CACHE_TTL_SECONDS (7 days by default).
  */
-export const EXTRACTOR_CACHE_VERSION = "2026-10-29.1";
+export const EXTRACTOR_CACHE_VERSION = "2026-11-08.1";
 
 const cacheKeyPrefix = "linkdish:extract-cache:v1";
 

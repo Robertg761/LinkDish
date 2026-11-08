@@ -6,24 +6,20 @@ import {
 
 import type { InternalFetchFailureKind } from "../types.js";
 
-export const browserLikeHeaders = {
+/*
+ * Every request LinkDish makes to a site someone imports from identifies LinkDish honestly. It
+ * never poses as a desktop browser, a search engine or a platform's own crawler. (Until
+ * 2026-11-08 the first request used a spoofed Chrome user-agent and only a challenged request was
+ * retried with this one; see outputs/CONTENT-RIGHTS-REVIEW.md.) Sites can address LinkDish in
+ * robots.txt by LINKDISH_BOT_TOKEN, and robots-txt.ts obeys what they say.
+ */
+export const LINKDISH_BOT_TOKEN = "LinkDishBot";
+export const LINKDISH_BOT_USER_AGENT = `Mozilla/5.0 (compatible; ${LINKDISH_BOT_TOKEN}/1.0; +https://linkdish.ca)`;
+
+export const identifyingFetchHeaders = {
   accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
   "accept-language": "en-US,en;q=0.9",
-  "cache-control": "no-cache",
-  pragma: "no-cache",
-  "upgrade-insecure-requests": "1",
-  "user-agent":
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36"
-} as const;
-
-/*
- * Cloudflare-protected sites challenge the spoofed Chrome user-agent above (the
- * TLS fingerprint does not match) but serve an honest, non-browser user-agent.
- */
-export const identifyingFetchHeaders = {
-  accept: browserLikeHeaders.accept,
-  "accept-language": browserLikeHeaders["accept-language"],
-  "user-agent": "Mozilla/5.0 (compatible; LinkDishBot/1.0; +https://linkdish.ca)"
+  "user-agent": LINKDISH_BOT_USER_AGENT
 } as const;
 
 const defaultBlockedPatterns = [

@@ -14,8 +14,9 @@ be reviewed and shipped together.
   pages. Each has a canonical URL, Open Graph/Twitter tags, SoftwareApplication,
   BreadcrumbList and FAQPage JSON-LD, and a sitemap entry.
 - `support/index.html`: support page and support ticket form.
-- `privacy/index.html`: privacy policy (keep in step with
-  `../public/privacy.html`).
+- `privacy/index.html`: privacy policy. This is the only copy: the API host
+  redirects `/privacy` and `/support` here, and `pnpm check:site` fails if
+  `public/privacy.html` or `public/support.html` comes back.
 - `invite/index.html`: household invite handoff (web join link for everyone,
   Android app link on Android only; there is no iPhone app yet).
 - `base.css`: tokens (light and `prefers-color-scheme: dark`), header, footer,

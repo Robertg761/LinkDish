@@ -142,7 +142,7 @@ const DiscoverShelf: React.FC = () => {
     <LibraryShelf
       className="library-welcome-discover"
       icon="book-open"
-      subtitle="Real recipes, already cleaned up. Open one to see how LinkDish reads."
+      subtitle="Original LinkDish kitchen recipes. Open one to see how a recipe looks in LinkDish."
       title="Try a sample"
     >
       {recipes

@@ -272,7 +272,29 @@ export interface ExtractorRuntime {
   /** URL-keyed store of validated success responses. Test runtimes omit it unless they opt in. */
   extractionCache?: ExtractionResultCache;
   validateSourceUrl: ValidateSourceUrl;
+  /**
+   * Which platform paths may run, from each platform's terms (env flags such as
+   * YOUTUBE_IMPORT_ENABLED). A link to a platform that is off fails as source_blocked before
+   * anything is fetched. Runtimes without it allow every path (tests).
+   */
+  platformAccess?: PlatformAccess;
+  /**
+   * Whether the site's current robots.txt lets LinkDish fetch `url` (fetchers/robots-txt.ts).
+   * Checked before a shared-cache hit is served, so a page the site has since disallowed is not
+   * served from the cache either. Runtimes without it skip the check (tests).
+   */
+  isAllowedByRobots?: (url: string) => Promise<boolean>;
   dispose(): Promise<void>;
+}
+
+export interface PlatformAccess {
+  tiktok: boolean;
+  youtube: boolean;
+  instagram: boolean;
+  facebook: boolean;
+  pinterest: boolean;
+  /** TikTok and Facebook video file downloads for the video reader. */
+  socialVideoDownload: boolean;
 }
 
 export type VideoReadOutcome =
