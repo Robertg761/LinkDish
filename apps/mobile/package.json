@@ -37,7 +37,7 @@
     "test:ios:release-env": "node --test scripts/test-testflight-env.mjs"
   },
   "dependencies": {
-    "@clerk/expo": "^4.14.5",
+    "@clerk/expo": "^4.15.1",
     "@clerk/expo-google-signin": "^1.1.0",
     "@expo/dom-webview": "~58.0.2",
     "@expo/vector-icons": "^15.0.2",
