@@ -119,6 +119,28 @@ describe("Vercel extract adapter request identity", () => {
     vi.clearAllMocks();
   });
 
+  it.each(["https://api.linkdish.ca/api/extract?path=ios", "https://api.linkdish.ca/extract/ios"])(
+    "enforces the fixed iPhone route despite a spoofed platform header: %s",
+    async (endpoint) => {
+      const { POST } = await import("./extract.js");
+      const response = await POST(
+        new Request(endpoint, {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-linkdish-platform": "web" },
+          body: JSON.stringify({ url: "https://outside.example/recipe/", attempt: "primary" })
+        })
+      );
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        status: "failure",
+        reason: "unsupported_source"
+      });
+      expect(response.headers.get("x-linkdish-source-policy")).toBe("ios_public_domain_v1");
+      expect(mocks.authorizeExtractionRequest).not.toHaveBeenCalled();
+      expect(mocks.extractRecipe).not.toHaveBeenCalled();
+    }
+  );
+
   it("passes Vercel's trusted IP helper result to rate limiting and billing", async () => {
     mocks.ipAddress.mockReturnValue("198.51.100.3 ");
     const extractApi = await import("./extract.js");

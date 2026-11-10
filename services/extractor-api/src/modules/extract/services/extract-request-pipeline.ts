@@ -1,3 +1,7 @@
+import {
+  isSupportedIosRecipeUrl,
+  IOS_RECIPE_SOURCE_MESSAGE
+} from "../../../../../../packages/recipe-domain/src/index.js";
 import { recordAdminExtractionEvent } from "../../admin/metrics.js";
 import { recordDurableExtractionAnalyticsEvent } from "../../analytics/extraction-analytics.js";
 import { authorizeExtractionRequest } from "../../billing/enforce-billing.js";
@@ -20,6 +24,8 @@ export interface ExtractPipelineLogger {
 
 export interface ExtractRequestPipelineInput {
   payload: ExtractRecipeAnyRequest;
+  /** Selected by the fixed /extract/ios route, never by a claimed platform header. */
+  sourcePolicy?: "ios_public_domain_v1";
   headers: RequestHeaders;
   identity: RequestIdentity;
   startedAt: number;
@@ -104,11 +110,31 @@ export const runExtractRequestPipeline = async (
   input: ExtractRequestPipelineInput
 ): Promise<ExtractRequestPipelineResult> => {
   const { payload, headers } = input;
+  const restrictedUrl = input.sourcePolicy === "ios_public_domain_v1" && "url" in payload;
+  const policyFailure: ExtractRecipeResponse = {
+    status: "failure",
+    reason: "unsupported_source",
+    userMessage: IOS_RECIPE_SOURCE_MESSAGE
+  };
+  if (restrictedUrl && !isSupportedIosRecipeUrl(payload.url)) {
+    return {
+      response: policyFailure,
+      headers: { "x-linkdish-source-policy": "ios_public_domain_v1" }
+    };
+  }
+  let runtime = input.runtime;
+  if (restrictedUrl) {
+    const [{ createIosSourceRuntime }, { getSharedExtractorRuntime }] = await Promise.all([
+      import("./ios-source-runtime.js"),
+      import("./runtime.js")
+    ]);
+    runtime = createIosSourceRuntime(runtime ?? getSharedExtractorRuntime());
+  }
   const correlationId = payload.correlationId;
   const cancellation = new AbortController();
   const billingAttempt = getBillingAttempt(payload);
   const billingAuthorization = authorizeExtractionRequest(headers, billingAttempt, input.identity);
-  const extraction = extractRecipe(payload, input.runtime, {
+  const extraction = extractRecipe(payload, runtime, {
     signal: cancellation.signal,
     authorization: billingAuthorization.then(
       (authorization) => authorization.allowed,
@@ -119,7 +145,11 @@ export const runExtractRequestPipeline = async (
      * Only the token-verified canary may read around the shared cache and refresh it. The bare
      * x-linkdish-canary marker is caller-controlled and changes nothing here.
      */
-    cacheMode: isAuthorizedCanaryRequest(headers) ? "refresh" : "default",
+    cacheMode: restrictedUrl
+      ? "bypass"
+      : isAuthorizedCanaryRequest(headers)
+        ? "refresh"
+        : "default",
     schedule: input.schedule
   });
 
@@ -176,7 +206,19 @@ export const runExtractRequestPipeline = async (
     throw error;
   }
 
-  const { response: extractionResponse, logContext } = extracted;
+  let { response: extractionResponse, logContext } = extracted;
+  if (restrictedUrl && extractionResponse.status === "success") {
+    if (!isSupportedIosRecipeUrl(extractionResponse.recipe.sourceUrl)) {
+      extractionResponse = policyFailure;
+      logContext = { ...logContext, outcomeStatus: "failure", failureReason: "unsupported_source" };
+    } else if (extractionResponse.recipe.image) {
+      // URL imports initially omit remote artwork. The general image proxy does not yet
+      // enforce this source policy on redirects; photos supplied by users are unchanged.
+      const recipe = { ...extractionResponse.recipe };
+      delete recipe.image;
+      extractionResponse = { ...extractionResponse, recipe };
+    }
+  }
   const committed = billing.commitUsageWithQuota
     ? await billing.commitUsageWithQuota(extractionResponse)
     : { logContext: await billing.commitUsage(extractionResponse), quota: null };
@@ -203,6 +245,9 @@ export const runExtractRequestPipeline = async (
 
   return {
     response,
-    headers: logContext.cacheStatus ? { "x-linkdish-cache": logContext.cacheStatus } : {}
+    headers: {
+      ...(logContext.cacheStatus ? { "x-linkdish-cache": logContext.cacheStatus } : {}),
+      ...(input.sourcePolicy ? { "x-linkdish-source-policy": input.sourcePolicy } : {})
+    }
   };
 };

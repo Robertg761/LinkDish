@@ -108,6 +108,10 @@ export async function POST(request: Request) {
      */
     const { response, headers } = await runExtractRequestPipeline({
       payload,
+      ...(new URL(request.url).searchParams.get("path") === "ios" ||
+      new URL(request.url).pathname === "/extract/ios"
+        ? { sourcePolicy: "ios_public_domain_v1" as const }
+        : {}),
       headers: request.headers,
       identity: requestIdentity,
       startedAt,

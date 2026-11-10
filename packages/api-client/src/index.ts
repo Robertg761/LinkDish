@@ -295,6 +295,8 @@ export const DEFAULT_EXTRACT_TIMEOUT_MS = 120_000;
 
 export interface CreateExtractorApiClientOptions {
   baseUrl: string;
+  /** Fixed server policy endpoint used by the iPhone release. No fallback to /extract. */
+  extractPath?: "/extract" | "/extract/ios";
   fetchImplementation?: FetchLike;
   getHeaders?: () => Promise<Record<string, string>> | Record<string, string>;
   /**
@@ -653,7 +655,7 @@ export const createExtractorApiClient = (
       });
     },
     async extractRecipe(input, callOptions) {
-      return requestJson("/extract", {
+      return requestJson(options.extractPath ?? "/extract", {
         body: validateInput(extractRecipeRequestSchema, input),
         method: "POST",
         responseSchema: extractRecipeResponseSchema,
@@ -662,7 +664,7 @@ export const createExtractorApiClient = (
       });
     },
     async extractRecipeFromText(input, callOptions) {
-      return requestJson("/extract", {
+      return requestJson(options.extractPath ?? "/extract", {
         body: validateInput(extractRecipeTextRequestSchema, input),
         method: "POST",
         responseSchema: extractRecipeResponseSchema,

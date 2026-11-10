@@ -28,6 +28,8 @@ export interface FetchHtmlDocumentOptions {
   blockSignalPatterns?: RegExp[];
   maxBytes?: number;
   maxRedirects?: number;
+  /** Restricted sources use an honest bot identity without browser impersonation retries. */
+  identifyingOnly?: boolean;
   validateUrl?: ValidateSourceUrl;
   /** The request deadline or a cancellation; aborts the fetch and suppresses retries. */
   signal?: AbortSignal;
@@ -68,6 +70,10 @@ export const fetchHtmlDocument = async (
   fetchImplementation: typeof fetch,
   options: FetchHtmlDocumentOptions
 ): Promise<FetchResult> => {
+  if (options.identifyingOnly) {
+    return fetchHtmlDocumentWithHeaders(url, fetchImplementation, options, identifyingFetchHeaders);
+  }
+
   let original: FetchResult | HtmlFetchError;
 
   try {

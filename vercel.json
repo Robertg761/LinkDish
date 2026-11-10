@@ -175,6 +175,10 @@
       "destination": "/api/image?photo=:file"
     },
     {
+      "source": "/extract/ios",
+      "destination": "/api/extract?path=ios"
+    },
+    {
       "source": "/extract",
       "destination": "/api/extract"
     },
