@@ -1,6 +1,8 @@
 import { ExtractorApiError } from "@linkdish/api-client";
 import { describe, expect, it, vi } from "vitest";
 
+vi.mock("react-native", () => ({ Platform: { OS: "android" } }));
+
 vi.mock("../analytics/client", () => ({
   getMobileAnalyticsHeaders: () =>
     Promise.resolve({

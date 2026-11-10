@@ -64,8 +64,9 @@ export const AiConsentGate = ({ blocked = false }: { blocked?: boolean }) => {
               missing details.
             </AppText>
             <AppText muted>
-              Only submit content you want processed. AI can make mistakes; check ingredients,
-              quantities, and cooking instructions before using the result.
+              Only submit content you created or have permission to process with LinkDish and Google
+              Gemini. AI can make mistakes; check ingredients, quantities, and cooking instructions
+              before using the result.
             </AppText>
             <AppText muted>
               Your choice is remembered on this device. Change it anytime under AI data sharing in

@@ -1,8 +1,10 @@
 import { ExtractorApiError, createExtractorApiClient } from "@linkdish/api-client";
+import { Platform } from "react-native";
 
 import { getMobileAnalyticsHeaders, trackMobileEvent } from "../analytics/client";
 import { mobileEnv } from "../config/env";
 import { requireAiConsent } from "../features/privacy/ai-consent";
+import { getRecipeSourceRestriction } from "../features/recipe-intake/iosRecipeSources";
 import { buildMockCompletionResponse, buildMockExtractionResponse } from "../mocks/extraction";
 
 import { isTextExtractionRequest, type MobileExtractionRequest } from "./extraction-request";
@@ -14,6 +16,7 @@ export type { MobileExtractionRequest, TextExtractionRequest } from "./extractio
 
 const apiClient = createExtractorApiClient({
   baseUrl: mobileEnv.apiBaseUrl,
+  extractPath: Platform.OS === "ios" ? "/extract/ios" : "/extract",
   getHeaders: getMobileAnalyticsHeaders
 });
 
@@ -70,6 +73,7 @@ const getBillingClient = (options: ExtractRecipeOptions | undefined) =>
   options?.billingClientId || options?.authToken
     ? createExtractorApiClient({
         baseUrl: mobileEnv.apiBaseUrl,
+        extractPath: Platform.OS === "ios" ? "/extract/ios" : "/extract",
         getHeaders: async () => {
           const analyticsHeaders = await getMobileAnalyticsHeaders();
 
@@ -123,6 +127,14 @@ export async function extractRecipe(
   const options =
     typeof requestOrUrl === "string" ? maybeOptions : (attemptOrOptions as ExtractRecipeOptions);
 
+  // Covers pasted URLs, share/deep links and retries before any extraction request or quota use.
+  if ("url" in request) {
+    const restriction = getRecipeSourceRestriction(request.url, Platform.OS);
+    if (restriction) {
+      return { status: "failure", reason: "unsupported_source", userMessage: restriction };
+    }
+  }
+
   if (mobileEnv.useMockApi) {
     return buildMockExtractionResponse(request);
   }
@@ -145,15 +157,25 @@ export async function extractRecipe(
     }
   });
 
-  const operation = () =>
-    isTextExtractionRequest(request)
+  const operation = async (): Promise<ExtractRecipeResponse> => {
+    const result = await (isTextExtractionRequest(request)
       ? client.extractRecipeFromText({
           attempt: request.attempt,
           text: request.text,
           ...(request.correlationId ? { correlationId: request.correlationId } : {}),
           ...(request.sourceUrl ? { sourceUrl: request.sourceUrl } : {})
         })
-      : client.extractRecipe(request);
+      : client.extractRecipe(request));
+    // Also refuse to display/save a URL extraction redirected outside the source list.
+    // The server must separately enforce the policy before fetching redirect destinations.
+    if ("url" in request && result.status === "success") {
+      const restriction = getRecipeSourceRestriction(result.recipe.sourceUrl, Platform.OS);
+      if (restriction) {
+        return { status: "failure", reason: "unsupported_source", userMessage: restriction };
+      }
+    }
+    return result;
+  };
   const response = await runExtractorRequestWithRetry(operation);
 
   if (shouldRetryRetryableExtractionFailure(response)) {

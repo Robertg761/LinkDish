@@ -1,12 +1,13 @@
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { AppButton, AppText, AppTextField } from "@linkdish/ui";
 import { useEffect, useRef, useState } from "react";
-import { Animated, Pressable, StyleSheet, View } from "react-native";
+import { Animated, Linking, Platform, Pressable, StyleSheet, View } from "react-native";
 
 import { useReduceMotion } from "../../../hooks/useReduceMotion";
 import { easeInOutCubic, easeOutCubic } from "../../../theme/easing";
 import { pressedOpacity } from "../../../theme/interactions";
 import { appColors } from "../../../theme/tokens";
+import { getRecipeSourceRestriction, IOS_RECIPE_SOURCES } from "../iosRecipeSources";
 import { INVALID_RECIPE_URL_MESSAGE, resolveRecipeUrlInput } from "../urlValidation";
 
 import type { TextInputInstance } from "react-native";
@@ -81,6 +82,12 @@ export const UrlForm = ({
     const recipeUrl = resolveRecipeUrlInput(url);
 
     if (recipeUrl) {
+      const restriction = getRecipeSourceRestriction(recipeUrl, Platform.OS);
+      if (restriction) {
+        setError(restriction);
+        nudgeInput();
+        return;
+      }
       setError(null);
       onSubmit(recipeUrl);
       return;
@@ -107,7 +114,11 @@ export const UrlForm = ({
         <AppTextField
           onChangeText={setUrl}
           onSubmitEditing={handleSubmit}
-          placeholder="https://example.com/my-recipe"
+          placeholder={
+            Platform.OS === "ios"
+              ? "https://publicdomainrecipes.com/basic-waffles/"
+              : "https://example.com/my-recipe"
+          }
           ref={inputRef}
           rightElement={
             onCameraPress ? (
@@ -133,6 +144,28 @@ export const UrlForm = ({
           {error ?? helperText}
         </AppText>
       ) : null}
+      {Platform.OS === "ios" ? (
+        <View style={styles.sources}>
+          <AppText muted>Supported recipe sources on iPhone:</AppText>
+          {IOS_RECIPE_SOURCES.map(({ name, host }) => (
+            <Pressable
+              key={host}
+              accessibilityRole="link"
+              accessibilityLabel={`Browse ${name}`}
+              onPress={() =>
+                void Linking.openURL(`https://${host}/`).catch(() =>
+                  setError(`Open https://${host}/ in your browser to choose a recipe.`)
+                )
+              }
+            >
+              <AppText tone="accent">{name} ↗</AppText>
+            </Pressable>
+          ))}
+          <AppText muted>
+            For text and photos, use material you own or have permission to use.
+          </AppText>
+        </View>
+      ) : null}
       <AppButton
         disabled={disabled}
         label={submitLabel}
@@ -144,6 +177,7 @@ export const UrlForm = ({
 };
 
 const styles = StyleSheet.create({
+  sources: { gap: 8 },
   container: {
     gap: 14
   },
