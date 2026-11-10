@@ -142,7 +142,7 @@
           How to ask for your LinkDish account and its data to be deleted. You do not need the app
           installed, and you do not need to sign in here.
         </p>
-        <p class="page-meta">Last updated · November 3, 2026</p>
+        <p class="page-meta">Last updated · November 9, 2026</p>
       </section>
 
       <div class="legal-layout">
@@ -158,9 +158,9 @@
 
         <article class="legal-content">
           <p>
-            LinkDish is an Android recipe app made by Robert Gordon. This page is where you can ask
-            for your LinkDish account and its data to be deleted. You do not need the app installed,
-            and you do not need to sign in here.
+            LinkDish is a recipe app for iPhone, Android and the web, made by Robert Gordon. This
+            page is where you can ask for your LinkDish account and its data to be deleted. You do
+            not need the app installed, and you do not need to sign in here.
           </p>
 
           <h2 id="in-the-app">Delete it in the app (fastest)</h2>
@@ -168,6 +168,12 @@
           <p>
             Open LinkDish, go to <strong>Account</strong>, and choose
             <strong>Delete account</strong>. Deletion starts right away.
+          </p>
+
+          <p>
+            Account deletion does not currently revoke Sign in with Apple automatically. If you used
+            it, remove LinkDish from Sign in with Apple in your Apple Account settings. Contact
+            support if deletion fails or you need help removing provider records.
           </p>
 
           <h2 id="by-email">Delete it by email</h2>
@@ -184,7 +190,10 @@
           <h2 id="what-gets-deleted">What gets deleted</h2>
 
           <ul>
-            <li>Your LinkDish account and sign-in records.</li>
+            <li>
+              Your LinkDish account and its active server sessions. Provider records at Clerk and
+              RevenueCat may remain; contact support for help with those records.
+            </li>
             <li>
               Your synced cookbook and the recipes, notes, favourites, tags, ratings, collections
               and cook log stored with it.
@@ -194,18 +203,22 @@
               shared Family cookbook.
             </li>
             <li>
-              <strong>If you own a Family household, deleting your account doesn't close it for the
-              others.</strong> It passes to the member who has been in it longest. Your own shared
-              recipes and shopping list items go, and everything the others added stays. If the new
-              owner doesn't have a Family plan, each remaining member gets a copy of the shared
-              recipes in their own cookbook, as long as their cookbook has room. A copy made that
-              way stays with the person who received it, even if you delete your account later. If
-              you were the last member, the household closes. Either way, save anything you want to
-              keep before you delete.
+              <strong
+                >If you own a Family household, deleting your account doesn't close it for the
+                others.</strong
+              >
+              It passes to the member who has been in it longest. Your own shared recipes and
+              shopping list items go, and everything the others added stays. If the new owner
+              doesn't have a Family plan, each remaining member gets a copy of the shared recipes in
+              their own cookbook, as long as their cookbook has room. A copy made that way stays
+              with the person who received it, even if you delete your account later. If you were
+              the last member, the household closes. Either way, save anything you want to keep
+              before you delete.
             </li>
             <li>Analytics records linked to your account.</li>
             <li>
-              Crash reports can't be traced back to you, so there is nothing to look up there.
+              First-party error reports linked to your account are covered by analytics deletion.
+              Android Sentry reports are not associated with your account and expire within 90 days.
             </li>
           </ul>
 
@@ -214,8 +227,8 @@
           <ul>
             <li>
               <strong>Backups.</strong> Deleted data can stay in our ordinary backups for up to 90
-              days until backups are rotated, and then it's gone. We don't restore deleted
-              accounts from backups.
+              days until backups are rotated, and then it's gone. We don't restore deleted accounts
+              from backups.
             </li>
             <li>
               <strong>Abuse and security records.</strong> Basic server logs may be kept for a
@@ -229,7 +242,9 @@
             <li>
               <strong>A record that the account was deleted.</strong> We keep a stripped record with
               no email address, name or avatar, marked as deleted, so we can show the deletion was
-              carried out.
+              carried out. The current backend does not automatically expire this record or the
+              sign-in identifiers retained to prevent reuse. Contact support to request review of
+              retained personal data.
             </li>
           </ul>
 
@@ -237,9 +252,10 @@
 
           <ul>
             <li>
-              <strong>It does not cancel a subscription.</strong> Subscriptions are billed by Google
-              Play, or by our web checkout. Cancel in Google Play, or through the billing portal
-              opened from LinkDish, or you'll keep being charged.
+              <strong>It does not cancel a subscription.</strong> Subscriptions are billed by Apple
+              App Store, Google Play, or by our web checkout. Cancel in your Apple Account
+              subscription settings, Google Play, or through the billing portal opened from
+              LinkDish, or you'll keep being charged.
             </li>
             <li>
               <strong>It does not delete recipes saved on a device you still have.</strong> Those
