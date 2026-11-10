@@ -10,6 +10,12 @@ export const getAccountDeletionFollowUps = (
 ): string[] => {
   const followUps: string[] = [];
 
+  if (Object.values(providers).includes("unknown")) {
+    followUps.push(
+      "Provider cleanup was not confirmed by this server. Contact support@linkdish.ca to confirm deletion at Clerk and RevenueCat. If you used Sign in with Apple, remove LinkDish in your Apple Account settings."
+    );
+  }
+
   if (providers.apple === "not_revoked") {
     followUps.push(
       "Turn off Sign in with Apple: LinkDish couldn't do it for you. Open Settings, tap your name, then Sign-In & Security, then Sign in with Apple, choose LinkDish, and stop using Sign in with Apple. You can also do this at account.apple.com."

@@ -435,6 +435,14 @@ describe("AccountPage account deletion", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("reports unconfirmed provider cleanup from an older server", async () => {
+    deleteWith({ apple: "unknown", clerk: "unknown", revenueCat: "unknown" });
+    const notice = await screen.findByRole("status", { name: "Your account has been deleted" });
+    expect(notice).toHaveTextContent("Provider cleanup was not confirmed");
+    expect(notice).toHaveTextContent("support@linkdish.ca");
+    expect(notice).not.toHaveTextContent("Your LinkDish account and its data have been deleted.");
+  });
+
   it("confirms the deletion with nothing left to do when no provider step remains", async () => {
     deleteWith({ apple: "not_linked", clerk: "deleted", revenueCat: "no_record" });
 

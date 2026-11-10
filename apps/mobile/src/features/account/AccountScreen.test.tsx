@@ -443,6 +443,20 @@ describe("AccountScreen account deletion", () => {
     expect(JSON.stringify(renderer.toJSON())).not.toContain("Account deleted");
   });
 
+  it("does not claim provider cleanup when an older server only confirms account deletion", async () => {
+    accountState.deleteAccount.mockResolvedValue({
+      apple: "unknown",
+      clerk: "unknown",
+      revenueCat: "unknown"
+    });
+    const renderer = await renderAndDelete("free");
+    const output = JSON.stringify(renderer.toJSON());
+    expect(output).toContain("Account deleted");
+    expect(output).toContain("Provider cleanup was not confirmed");
+    expect(output).toContain("support@linkdish.ca");
+    expect(output).not.toContain("Your LinkDish account and its data have been deleted.");
+  });
+
   it("confirms the deletion plainly when nothing is left to do", async () => {
     accountState.deleteAccount.mockResolvedValue({
       apple: "revoked",

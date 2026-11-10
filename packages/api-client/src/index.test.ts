@@ -146,16 +146,17 @@ describe("account deletion", () => {
     });
   });
 
-  it("treats a deletion answer without provider results as a contract mismatch", async () => {
+  it("accepts an older server deletion answer without claiming provider cleanup", async () => {
     const fetchImplementation = createFetchMock(() => jsonResponse({ status: "deleted" }));
     const client = createExtractorApiClient({
       baseUrl: "https://api.test",
       fetchImplementation
     });
 
-    await expect(client.deleteAccount({ confirmEmail: "cook@example.com" })).rejects.toThrow(
-      "did not match the contract"
-    );
+    await expect(client.deleteAccount({ confirmEmail: "cook@example.com" })).resolves.toEqual({
+      status: "deleted",
+      providers: { apple: "unknown", clerk: "unknown", revenueCat: "unknown" }
+    });
   });
 
   it("waits longer than an ordinary request for the server's provider calls", async () => {

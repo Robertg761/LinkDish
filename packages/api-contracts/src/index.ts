@@ -445,6 +445,7 @@ export const deleteAccountRequestSchema = z.object({
 
 /*
  * What happened at each outside provider during an account deletion.
+ * "unknown" means an older server did not report provider cleanup; it never implies success.
  * - apple: "revoked" (LinkDish's Sign in with Apple access was revoked), "not_linked" (no Apple ID
  *   was linked), or "not_revoked" (linked, but not revoked: the person has to turn it off in their
  *   Apple Account settings).
@@ -453,14 +454,20 @@ export const deleteAccountRequestSchema = z.object({
  * - clerk: "deleted" (the sign-in user was deleted) or "not_linked" (the account had none).
  */
 export const accountDeletionProvidersSchema = z.object({
-  apple: z.enum(["revoked", "not_linked", "not_revoked"]),
-  clerk: z.enum(["deleted", "not_linked"]),
-  revenueCat: z.enum(["deleted", "no_record", "not_configured"])
+  apple: z.enum(["revoked", "not_linked", "not_revoked", "unknown"]),
+  clerk: z.enum(["deleted", "not_linked", "unknown"]),
+  revenueCat: z.enum(["deleted", "no_record", "not_configured", "unknown"])
 });
 
 export const deleteAccountResponseSchema = z.object({
   status: z.literal("deleted"),
-  providers: accountDeletionProvidersSchema
+  // Older servers return only status. Do not turn a completed deletion into a client error
+  // during independent client/API deployments, or imply that provider cleanup was verified.
+  providers: accountDeletionProvidersSchema.default({
+    apple: "unknown",
+    clerk: "unknown",
+    revenueCat: "unknown"
+  })
 });
 
 export const householdMemberSchema = z.object({

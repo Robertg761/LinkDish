@@ -1,7 +1,7 @@
 import type { AccountDeletionProviders, AccountUser } from "@linkdish/api-contracts";
 
 export interface AccountDeletionFollowUp {
-  id: "apple" | "subscription";
+  id: "apple" | "subscription" | "provider-cleanup";
   title: string;
   body: string;
 }
@@ -15,6 +15,14 @@ export const getAccountDeletionFollowUps = (
   billingPlan: AccountUser["billingPlan"]
 ): AccountDeletionFollowUp[] => {
   const followUps: AccountDeletionFollowUp[] = [];
+
+  if (Object.values(providers).includes("unknown")) {
+    followUps.push({
+      id: "provider-cleanup",
+      title: "Confirm provider cleanup",
+      body: "Provider cleanup was not confirmed by this server. Contact support@linkdish.ca to confirm deletion at Clerk and RevenueCat. If you used Sign in with Apple, remove LinkDish in your Apple Account settings."
+    });
+  }
 
   if (providers.apple === "not_revoked") {
     followUps.push({
