@@ -434,11 +434,40 @@ export const logoutResponseSchema = z.object({
 });
 
 export const deleteAccountRequestSchema = z.object({
-  confirmEmail: z.string().trim().email()
+  confirmEmail: z.string().trim().email(),
+  /*
+   * iOS only, and only when the account has Sign in with Apple linked: a fresh authorization code
+   * from Apple, which the server exchanges and revokes so LinkDish no longer has access to the
+   * Apple ID. The web and Android apps cannot get one.
+   */
+  appleAuthorizationCode: z.string().trim().min(1).max(4_096).optional()
+});
+
+/*
+ * What happened at each outside provider during an account deletion.
+ * "unknown" means an older server did not report provider cleanup; it never implies success.
+ * - apple: "revoked" (LinkDish's Sign in with Apple access was revoked), "not_linked" (no Apple ID
+ *   was linked), or "not_revoked" (linked, but not revoked: the person has to turn it off in their
+ *   Apple Account settings).
+ * - revenueCat: "deleted" (the customer record was deleted), "no_record" (there was none), or
+ *   "not_configured" (billing is not set up on this server, outside production only).
+ * - clerk: "deleted" (the sign-in user was deleted) or "not_linked" (the account had none).
+ */
+export const accountDeletionProvidersSchema = z.object({
+  apple: z.enum(["revoked", "not_linked", "not_revoked", "unknown"]),
+  clerk: z.enum(["deleted", "not_linked", "unknown"]),
+  revenueCat: z.enum(["deleted", "no_record", "not_configured", "unknown"])
 });
 
 export const deleteAccountResponseSchema = z.object({
-  status: z.literal("deleted")
+  status: z.literal("deleted"),
+  // Older servers return only status. Do not turn a completed deletion into a client error
+  // during independent client/API deployments, or imply that provider cleanup was verified.
+  providers: accountDeletionProvidersSchema.default({
+    apple: "unknown",
+    clerk: "unknown",
+    revenueCat: "unknown"
+  })
 });
 
 export const householdMemberSchema = z.object({
@@ -1076,6 +1105,7 @@ export type WebBillingRedirectResponse = z.infer<typeof webBillingRedirectRespon
 export type LogoutResponse = z.infer<typeof logoutResponseSchema>;
 export type DeleteAccountRequest = z.infer<typeof deleteAccountRequestSchema>;
 export type DeleteAccountResponse = z.infer<typeof deleteAccountResponseSchema>;
+export type AccountDeletionProviders = z.infer<typeof accountDeletionProvidersSchema>;
 export type HouseholdMember = z.infer<typeof householdMemberSchema>;
 export type HouseholdInviteCode = z.infer<typeof householdInviteCodeSchema>;
 export type HouseholdInviteSummary = z.infer<typeof householdInviteSummarySchema>;

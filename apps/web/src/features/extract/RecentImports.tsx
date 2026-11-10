@@ -70,7 +70,7 @@ const SampleRecipes: React.FC = () => {
         </h2>
       </div>
       <p className="import-recent-intro">
-        See what LinkDish does with a real recipe before you paste your own.
+        Open a LinkDish kitchen recipe to see how it looks before you paste your own.
       </p>
       <ul className="import-recent-list">
         {samples.map((sample) => (

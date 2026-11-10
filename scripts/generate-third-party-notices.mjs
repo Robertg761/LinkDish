@@ -1,0 +1,191 @@
+import { execFileSync } from "node:child_process";
+import { access, readFile, readdir, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+/*
+ * Writes THIRD_PARTY_NOTICES.md from what is installed: the production dependencies of the mobile
+ * and web apps, with the licence and notice files each package ships. Nothing is filled in by hand,
+ * so a package that ships no licence file says so. Run `pnpm notices` after changing dependencies.
+ */
+
+const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
+const licenceFilePattern = /^(?:(?:un)?licen[cs]e|copying|notice)(?:[-._].*)?$/iu;
+
+const bundledAssets = [
+  ["Fraunces fonts", "SIL Open Font License 1.1", "apps/web/public/fonts/OFL.txt"],
+  ["Lucide icons (vendored)", "ISC and MIT", "apps/web/src/components/icons/LICENSE"]
+];
+
+const listDependencies = () =>
+  JSON.parse(
+    execFileSync(
+      "pnpm",
+      [
+        "licenses",
+        "list",
+        "--prod",
+        "--json",
+        "--filter",
+        "@linkdish/mobile",
+        "--filter",
+        "@linkdish/web"
+      ],
+      { cwd: repositoryRoot, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 }
+    )
+  );
+
+const exists = async (filePath) => {
+  try {
+    await access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const addInstalledPackage = async (installed, packagePath) => {
+  try {
+    const { name, version } = JSON.parse(
+      await readFile(path.join(packagePath, "package.json"), "utf8")
+    );
+    installed.set(`${name}@${version}`, packagePath);
+  } catch {
+    // A folder with no readable package.json is not a package.
+  }
+};
+
+const collectInstalled = async (modulesPath, installed) => {
+  if (!(await exists(modulesPath))) {
+    return;
+  }
+
+  for (const entry of await readdir(modulesPath, { withFileTypes: true })) {
+    // Workspace packages are symlinks, and dot folders are pnpm's own state.
+    if (!entry.isDirectory() || entry.name.startsWith(".")) {
+      continue;
+    }
+
+    const entryPath = path.join(modulesPath, entry.name);
+    const packagePaths = entry.name.startsWith("@")
+      ? (await readdir(entryPath)).map((name) => path.join(entryPath, name))
+      : [entryPath];
+
+    for (const packagePath of packagePaths) {
+      await addInstalledPackage(installed, packagePath);
+      await collectInstalled(path.join(packagePath, "node_modules"), installed);
+    }
+  }
+};
+
+// pnpm reports node_modules/.pnpm paths, which do not exist under `nodeLinker: hoisted`.
+const findInstalledPackages = async () => {
+  const installed = new Map();
+  const roots = [repositoryRoot];
+
+  for (const parent of ["apps", "packages", "services"]) {
+    for (const name of await readdir(path.join(repositoryRoot, parent))) {
+      roots.push(path.join(repositoryRoot, parent, name));
+    }
+  }
+
+  for (const root of roots) {
+    await collectInstalled(path.join(root, "node_modules"), installed);
+  }
+
+  return installed;
+};
+
+const readLicenceText = async (packagePath) => {
+  const names = (await readdir(packagePath)).filter((name) => licenceFilePattern.test(name)).sort();
+  const texts = await Promise.all(
+    names.map((name) => readFile(path.join(packagePath, name), "utf8"))
+  );
+
+  return texts
+    .map((text) => text.trim())
+    .join("\n\n")
+    .replaceAll("\r\n", "\n");
+};
+
+const installed = await findInstalledPackages();
+const packages = [];
+const notFound = [];
+
+for (const [licence, entries] of Object.entries(listDependencies())) {
+  for (const entry of entries) {
+    if (entry.name.startsWith("@linkdish/")) {
+      continue;
+    }
+
+    for (const [index, version] of entry.versions.entries()) {
+      const label = `${entry.name}@${version}`;
+      const packagePath = installed.get(label) ?? entry.paths[index];
+
+      if (!(await exists(packagePath))) {
+        notFound.push(label);
+        continue;
+      }
+
+      packages.push({ licence, label, text: await readLicenceText(packagePath) });
+    }
+  }
+}
+
+// A missing folder must stop the run: it would otherwise read as "ships no licence file".
+if (notFound.length > 0) {
+  throw new Error(`Not installed, run pnpm install first: ${notFound.join(", ")}`);
+}
+
+packages.sort((left, right) => left.label.localeCompare(right.label));
+
+const byLicenceAndText = new Map();
+
+for (const item of packages) {
+  const key = `${item.licence}\0${item.text}`;
+  const group = byLicenceAndText.get(key) ?? { ...item, labels: [] };
+  group.labels.push(item.label);
+  byLicenceAndText.set(key, group);
+}
+
+const groups = [...byLicenceAndText.values()].sort(
+  (left, right) =>
+    left.licence.localeCompare(right.licence) || left.labels[0].localeCompare(right.labels[0])
+);
+const withoutFile = packages.filter((item) => !item.text);
+const fence = "`````";
+const lines = [
+  "# Third-party notices",
+  "",
+  "LinkDish's own code is proprietary (see `LICENSE`). The LinkDish apps include the open source",
+  "software below, under the licences shown. This file is generated by",
+  "`scripts/generate-third-party-notices.mjs` from the production dependencies of `apps/mobile`",
+  "and `apps/web`. Do not edit it by hand.",
+  "",
+  `Packages listed: ${packages.length}. Packages that ship no licence file: ${withoutFile.length}.`,
+  "",
+  "## Bundled assets",
+  ""
+];
+
+for (const [name, licence, file] of bundledAssets) {
+  lines.push(`### ${name}`, "", `Licence: ${licence}`, "", `${fence}text`);
+  lines.push((await readFile(path.join(repositoryRoot, file), "utf8")).trim(), fence, "");
+}
+
+lines.push("## Packages", "");
+
+for (const group of groups) {
+  lines.push(`### ${group.licence}`, "", group.labels.map((label) => `- ${label}`).join("\n"), "");
+  lines.push(
+    ...(group.text
+      ? [`${fence}text`, group.text, fence]
+      : ["No licence file ships in this package. The licence shown is its declared licence."]),
+    ""
+  );
+}
+
+await writeFile(path.join(repositoryRoot, "THIRD_PARTY_NOTICES.md"), lines.join("\n"));
+console.log(
+  `Wrote notices for ${packages.length} packages (${withoutFile.length} without a file).`
+);

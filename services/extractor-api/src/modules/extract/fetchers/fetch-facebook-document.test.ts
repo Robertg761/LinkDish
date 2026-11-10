@@ -9,7 +9,7 @@ import {
   readFacebookVideo,
   readFacebookVideoId
 } from "./fetch-facebook-document";
-import { browserLikeHeaders, identifyingFetchHeaders } from "./shared";
+import { identifyingFetchHeaders } from "./shared";
 
 const fixture = (name: string) =>
   readFileSync(new URL(`../__fixtures__/${name}`, import.meta.url), "utf8");
@@ -168,9 +168,7 @@ describe("fetchFacebookDocument", () => {
     expect(init.headers).toEqual(identifyingFetchHeaders);
     expect(JSON.stringify(init.headers)).toContain("LinkDishBot");
     expect(JSON.stringify(init.headers)).not.toMatch(/facebookexternalhit|Googlebot/iu);
-    expect((init.headers as Record<string, string>)["user-agent"]).not.toBe(
-      browserLikeHeaders["user-agent"]
-    );
+    expect((init.headers as Record<string, string>)["user-agent"]).not.toMatch(/Chrome\//u);
     expect(document).toMatchObject({
       kind: "text",
       origin: "facebook",

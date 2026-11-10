@@ -1,7 +1,11 @@
 import { isSourceUrlRejection } from "../source-url-safety.js";
 
 import { SocialFetchError } from "./errors.js";
-import { browserLikeHeaders, getContentTypeEssence, readLimitedResponseBytes } from "./shared.js";
+import {
+  identifyingFetchHeaders,
+  getContentTypeEssence,
+  readLimitedResponseBytes
+} from "./shared.js";
 
 import type { ValidateSourceUrl } from "../source-url-safety.js";
 
@@ -59,7 +63,7 @@ export const downloadSocialVideo = async (
     const response = await options.fetchImplementation(current, {
       headers: {
         accept: "video/mp4,video/*;q=0.9,*/*;q=0.5",
-        "user-agent": browserLikeHeaders["user-agent"],
+        "user-agent": identifyingFetchHeaders["user-agent"],
         referer: options.referer
       },
       redirect: "manual",

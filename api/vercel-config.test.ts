@@ -254,6 +254,35 @@ describe("vercel.json API functions", () => {
     expect(position("/image/photos/:file")).toBeLessThan(position("/(.*)"));
   });
 
+  it("redirects the old API-host policy pages to linkdish.ca, leaving the app hosts alone", () => {
+    const { redirects = [] } = JSON.parse(
+      readFileSync(new URL("../vercel.json", import.meta.url), "utf8")
+    ) as {
+      redirects?: Array<{
+        source: string;
+        destination: string;
+        permanent?: boolean;
+        missing?: Array<{ type: string; value: string }>;
+      }>;
+    };
+
+    for (const page of ["privacy", "support"]) {
+      const redirect = redirects.find((rule) => rule.source === `/${page}`);
+
+      expect(redirect).toMatchObject({
+        destination: `https://linkdish.ca/${page}/`,
+        permanent: true
+      });
+      expect(redirect?.missing?.[0]?.value).toContain("app\\.linkdish\\.ca");
+    }
+
+    expect(
+      apiConfig.rewrites
+        ?.map((rule) => rule.destination)
+        .filter((destination) => destination.endsWith(".html"))
+    ).toEqual(["/index.html"]);
+  });
+
   it("only rewrites to functions that exist", () => {
     for (const rule of apiConfig.rewrites ?? []) {
       const target = /^\/api\/([^/?]+)/u.exec(rule.destination)?.[1];

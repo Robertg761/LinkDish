@@ -144,7 +144,10 @@ the `image` function: the Hobby plan's 12 functions are all taken.
 - Shared zod schemas validate both requests and responses.
 - The extractor pipeline is split into source detection, layered fetching, extraction, normalization, and confidence scoring to make future source-specific logic easy to add.
 - Deterministic extraction is implemented separately for recipe webpages, articles, and YouTube.
-- HTML fetching now prefers browser-like HTTP requests and can optionally escalate to Playwright browser rendering when a site is blocked or JS-heavy.
+- HTML fetching is one honest HTTP request (the LinkDishBot user-agent) that obeys the site's
+  robots.txt, and can escalate to Playwright browser rendering only when the page is a
+  JavaScript shell or nearly empty, never when the site blocked or challenged LinkDish (see
+  "Fetching rules" below).
 - Source detection now uses fetched HTML hints in addition to URL heuristics.
 - Success responses include `fetchMode` and extraction provenance metadata.
 - Links, YouTube videos, TikTok captions and pasted text are read by rules only, whatever
@@ -168,6 +171,60 @@ the `image` function: the Hobby plan's 12 functions are all taken.
   changes. Accounts deleted since the backup (or while it was read) stay deleted: a restore leaves
   out their keys and what they shared with a household, checking under the lock account deletion
   takes. An email lookup comes back only while its account still has that address.
+
+### Fetching rules (2026-11-08)
+
+Decided after the content-rights review (`outputs/CONTENT-RIGHTS-REVIEW.md` in the legal work
+folder, outside the repo):
+
+- **Honest user-agent everywhere.** Every request to a site people import from (pages, redirect
+  hops, oEmbed, embed pages, creator-site searches, video files, the headless browser, the live
+  canary's preflight) sends `Mozilla/5.0 (compatible; LinkDishBot/1.0; +https://linkdish.ca)`
+  (`fetchers/shared.ts`). LinkDish never poses as a desktop browser, a search engine or a
+  platform's own crawler. (Until 2026-11-08 the first request posed as desktop Chrome.)
+- **robots.txt, per RFC 9309** (`fetchers/robots-txt.ts`, `ROBOTS_TXT_ENFORCED`, default on).
+  Checked before every request to an import site, redirect hops and browser page loads
+  included: the `LinkDishBot` group, else `*`; longest match wins, Allow wins a tie; 4xx means
+  allowed, 5xx or unreachable means disallowed; cached per origin for an hour (5 minutes when
+  unreachable). A disallowed page fails as `source_blocked` and is never tried another way. A
+  shared-cache hit is re-checked against the current robots.txt before it is served.
+- **No headless browser past a block** (`services/browser-escalation.ts`, runtime). A page that
+  answers 403/429 or a CAPTCHA/bot wall is the site refusing automated access, so it is never
+  re-rendered. The browser is kept for JavaScript shells and thin pages the site served
+  normally, and as the retry after a plain timeout or connection failure. It also identifies as
+  LinkDishBot and obeys robots.txt for every page it loads.
+- **Platform paths behind flags** (`ExtractorRuntime.platformAccess`). Each platform's terms
+  were read on 2026-11-08, and the paths whose terms bar automated reading were first turned off
+  by default. On 2026-11-08 Robert decided to turn them all back on by default, accepting that
+  risk (Apple guidelines 5.2.2 and 5.2.3; see `outputs/CONTENT-RIGHTS-REVIEW.md`). Each flag
+  still turns its own path off. A link to a platform that is off fails as `unsupported_source`
+  with a paste-text/screenshot message before anything is fetched or read from the cache:
+  - `TIKTOK_IMPORT_ENABLED` (default **on**): captions through TikTok's public oEmbed endpoint.
+    The `/embed/v2` page is disallowed by TikTok's robots.txt, so the embed-page fallback no
+    longer runs.
+  - `YOUTUBE_IMPORT_ENABLED` (default **on**): watch pages and `youtubei/v1/next` comments.
+    YouTube's terms bar automated access. `/watch` is allowed by robots.txt, but `/youtubei/` is
+    disallowed, so the comments fetch is refused and the import goes on without comments.
+  - `INSTAGRAM_IMPORT_ENABLED`, `FACEBOOK_IMPORT_ENABLED`, `PINTEREST_IMPORT_ENABLED` (default
+    **on**): their terms bar automated collection without permission. Their robots.txt (as of
+    2026-11-08) ends `User-agent: *` / `Disallow: /`, so while robots.txt is obeyed their pages
+    are refused as `source_blocked` even with the flag on.
+  - `SOCIAL_VIDEO_DOWNLOAD_ENABLED` (default **on**): TikTok and Facebook video file downloads
+    for the video reader (TikTok's terms; Apple guideline 5.2.3). When off, `fetchSocialVideo` and
+    `fetchFacebookVideo` are not wired and those videos are never read. Downloads happen only
+    while the video reader below is on as well. While robots.txt is obeyed they do not run in
+    practice: TikTok's MP4 link comes only from the `/embed/v2` page, and Facebook's only from
+    the post page, and both were disallowed by robots.txt on 2026-11-08.
+  The live canary runs platform cases only for platforms listed in `LINKDISH_CANARY_PLATFORMS`
+  (default `tiktok`: robots.txt refuses the Facebook, Instagram and Pinterest cases, and the
+  YouTube cases are not yet re-checked without comments).
+- **Image proxy caching follows the publisher** (`image/image-proxy.ts`,
+  `buildProxiedImageCacheHeaders`): `no-store` means no copy anywhere, `private`/`no-cache` means
+  no CDN copy, and no copy outlives the publisher's `max-age`. A silent publisher gets the old
+  policy (browser a year, CDN a day plus a week stale).
+- **Sample ("featured") recipes are LinkDish's own** (`apps/web/src/features/featured`): the
+  LinkDish kitchen starters only. Third-party recipes must not be published there without
+  written permission.
 
 ### Sources
 
@@ -287,7 +344,8 @@ platforms map onto them and are told apart internally by the detection `adapterK
   the next reels in the feed, so it is matched by video id), which goes to the video reader
   below. A cut caption is never sent to the video reader. When nothing works and the caption
   mentions the comments, the failure says so and points at paste-text or a screenshot.
-- **Video reader** (`extractors/video/`, behind `VIDEO_RECIPE_READER_ENABLED` and
+- **Video reader** (`extractors/video/`, behind `VIDEO_RECIPE_READER_ENABLED`, default **on**
+  since 2026-11-08 because the TikTok/Facebook video downloads only feed it, and
   `GEMINI_API_KEY`): when a TikTok or Facebook video's caption has no recipe or only the
   ingredients (and, for Facebook, the creator's site has none either), or a
   YouTube video's description, creator comments and linked pages have none, Gemini
@@ -607,8 +665,8 @@ protected by named tokens rather than a Clerk session. Both adapters go through
   runs) and model changes/resets are appended to the `linkdish:admin:audit:v1` sorted set
   (sign-in failures and lockouts to `linkdish:admin:audit:v1:auth`, so a flood of them
   cannot trim real actions out) with the admin's name, IP, outcome and details (never the
-  presented token). Each set is trimmed to `ADMIN_AUDIT_RETENTION_DAYS` (180) and 2,000
-  entries, each network adds at most the lockout limit of failure entries per window, and
+  presented token). Each set is trimmed to `ADMIN_AUDIT_RETENTION_DAYS` (90, the privacy
+  policy's server-log period) and 2,000 entries, each network adds at most the lockout limit of failure entries per window, and
   everything is mirrored to the function log
   as `[admin-audit]` lines. The dashboard shows the newest 50 under Admin Activity. Plan
   grants also keep their own `linkdish:admin:billing-grant:*` record, now with

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { fetchHtmlDocument } from "./fetch-html-document";
+import { RobotsDisallowedError, ROBOTS_DISALLOWED_SIGNAL } from "./robots-txt";
 import { detectBlockedSignals } from "./shared";
 
 import type { ValidateSourceUrl } from "../source-url-safety";
@@ -23,16 +24,8 @@ const userAgentOf = (call: unknown[]) =>
   ((call[1] as RequestInit).headers as Record<string, string>)["user-agent"];
 
 describe("fetchHtmlDocument", () => {
-  it("retries a 403 challenge with the identifying user-agent", async () => {
-    const fetchImplementation = vi
-      .fn()
-      .mockImplementation((_url: string, init: RequestInit) =>
-        Promise.resolve(
-          (init.headers as Record<string, string>)["user-agent"]?.includes("LinkDishBot")
-            ? createHtmlResponse(200, recipeHtml)
-            : createHtmlResponse(403, challengeHtml)
-        )
-      );
+  it("identifies itself as LinkDishBot from the first request, never as a browser", async () => {
+    const fetchImplementation = vi.fn().mockResolvedValue(createHtmlResponse(200, recipeHtml));
 
     const result = await fetchHtmlDocument("https://example.com/recipe", fetchImplementation, {
       validateUrl: allowUrl,
@@ -41,15 +34,14 @@ describe("fetchHtmlDocument", () => {
     });
 
     expect(result.blockedSignals).toEqual([]);
-    expect(fetchImplementation).toHaveBeenCalledTimes(2);
-    expect(userAgentOf(fetchImplementation.mock.calls[1] as unknown[])).toContain("LinkDishBot");
+    expect(fetchImplementation).toHaveBeenCalledTimes(1);
+    const userAgent = userAgentOf(fetchImplementation.mock.calls[0] as unknown[]);
+    expect(userAgent).toContain("LinkDishBot");
+    expect(userAgent).not.toMatch(/Chrome\/|Safari\/|Macintosh/u);
   });
 
-  it("retries a 200 challenge page with the identifying user-agent", async () => {
-    const fetchImplementation = vi
-      .fn()
-      .mockResolvedValueOnce(createHtmlResponse(200, challengeHtml))
-      .mockResolvedValueOnce(createHtmlResponse(200, recipeHtml));
+  it("returns a 200 challenge page as blocked without asking again another way", async () => {
+    const fetchImplementation = vi.fn().mockResolvedValue(createHtmlResponse(200, challengeHtml));
 
     const result = await fetchHtmlDocument("https://example.com/recipe", fetchImplementation, {
       validateUrl: allowUrl,
@@ -57,11 +49,11 @@ describe("fetchHtmlDocument", () => {
       retries: 0
     });
 
-    expect(result.blockedSignals).toEqual([]);
-    expect(fetchImplementation).toHaveBeenCalledTimes(2);
+    expect(result.blockedSignals.length).toBeGreaterThan(0);
+    expect(fetchImplementation).toHaveBeenCalledTimes(1);
   });
 
-  it("surfaces blocked when both attempts are challenged", async () => {
+  it("surfaces blocked after one challenged request", async () => {
     const fetchImplementation = vi
       .fn()
       .mockImplementation(() => Promise.resolve(createHtmlResponse(403, challengeHtml)));
@@ -77,7 +69,48 @@ describe("fetchHtmlDocument", () => {
         }
       )
     ).rejects.toMatchObject({ reason: "blocked", statusCode: 403 });
-    expect(fetchImplementation).toHaveBeenCalledTimes(2);
+    expect(fetchImplementation).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails as blocked, with the robots signal, when robots.txt disallows the page", async () => {
+    const fetchImplementation = vi
+      .fn()
+      .mockRejectedValue(new RobotsDisallowedError("https://example.com/recipe"));
+
+    await expect(
+      fetchHtmlDocument(
+        "https://example.com/recipe",
+        fetchImplementation as unknown as typeof fetch,
+        { validateUrl: allowUrl, timeoutMs: 1_000, retries: 1 }
+      )
+    ).rejects.toMatchObject({ reason: "blocked", blockedSignals: [ROBOTS_DISALLOWED_SIGNAL] });
+    // Not a connection error: never retried.
+    expect(fetchImplementation).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops at a redirect hop robots.txt disallows", async () => {
+    const fetchImplementation = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 301,
+        url: "https://example.com/recipe",
+        headers: new Headers({ location: "https://example.com/private/recipe" }),
+        text: () => Promise.resolve("")
+      })
+      .mockRejectedValueOnce(new RobotsDisallowedError("https://example.com/private/recipe"));
+
+    await expect(
+      fetchHtmlDocument(
+        "https://example.com/recipe",
+        fetchImplementation as unknown as typeof fetch,
+        { validateUrl: allowUrl, timeoutMs: 1_000, retries: 0 }
+      )
+    ).rejects.toMatchObject({
+      reason: "blocked",
+      blockedSignals: [ROBOTS_DISALLOWED_SIGNAL],
+      finalUrl: "https://example.com/private/recipe"
+    });
   });
 
   it("classifies 402 anti-bot pages as blocked", async () => {
@@ -122,7 +155,7 @@ describe("fetchHtmlDocument", () => {
     expect(fetchImplementation).toHaveBeenCalledTimes(1);
   });
 
-  it("does not retry with the identifying user-agent after a cancellation", async () => {
+  it("does not ask again after a cancellation", async () => {
     const controller = new AbortController();
     const fetchImplementation = vi.fn().mockImplementation(() => {
       controller.abort();

@@ -122,7 +122,7 @@
         <p class="page-lede">
           What LinkDish handles, why it is needed, where it goes, and the choices you have.
         </p>
-        <p class="page-meta">Last updated · November 3, 2026</p>
+        <p class="page-meta">Last updated · November 9, 2026</p>
       </section>
 
       <div class="legal-layout">
@@ -134,6 +134,8 @@
           <a href="#authentication">Authentication providers</a>
           <a href="#does-not">What LinkDish does not do</a>
           <a href="#storage">Data storage</a>
+          <a href="#retention">How long it is kept</a>
+          <a href="#processors">Service providers</a>
           <a href="#choices">Your choices</a>
           <a href="#questions">Questions</a>
         </nav>
@@ -141,7 +143,9 @@
         <article class="legal-content">
           <p class="legal-callout">
             LinkDish helps you turn recipe links into a clean, readable recipe format. This page
-            explains what information the app handles and how it is used.
+            explains what information the app handles and how it is used. LinkDish is available in
+            Canada, the United States, the European Economic Area (EEA), the United Kingdom and
+            elsewhere, and this policy applies wherever you use it.
           </p>
 
           <h2 id="information">Information LinkDish handles</h2>
@@ -172,9 +176,8 @@
               including the account email shown as the recipe owner.
             </li>
             <li>
-              Source page text, metadata, and video transcript details needed to extract recipe
-              information, including when LinkDish uses configured fallback processing for difficult
-              links.
+              Text and details from the page, post, caption or video you link to (such as the recipe
+              text, title, author, site name and picture address), needed to extract the recipe.
             </li>
             <li>
               An app-generated RevenueCat app user ID used to load purchase options, restore
@@ -197,6 +200,10 @@
             <li>
               If you join the iOS notification list, the email address you submit and basic request
               details needed to prevent abuse.
+            </li>
+            <li>
+              If you contact support, the email address and details you send us, such as the problem
+              type, any link, and your device or browser.
             </li>
             <li>
               First-party analytics events such as page or screen views, app opens, feature actions,
@@ -222,26 +229,58 @@
           <h2 id="use">How the information is used</h2>
           <ul>
             <li>
-              Submitted links are sent to LinkDish's backend service to fetch and extract recipe
-              details.
+              Submitted links are sent to LinkDish's backend service, which fetches the page for you
+              (identifying itself as LinkDishBot and following the site's robots.txt) and reads the
+              recipe with LinkDish's own rules. For social and video links that LinkDish reads
+              (TikTok, YouTube, Instagram, Facebook and Pinterest; which of these are available can
+              change), it reads the public caption, description or creator's comments, or, for a
+              Pinterest pin, the recipe page the pin links to.
             </li>
             <li>
-              Difficult links may be processed by LinkDish's configured extraction providers to
-              recover missing recipe details. This is used only to provide recipe extraction, not
-              for advertising.
+              Ordinary recipe links and pasted text, and captions and descriptions that already hold
+              a written recipe, are read by those rules only; their text is not sent to an AI
+              service. Google's Gemini API, LinkDish's extraction provider, is used only for: photo
+              scans (below), including tidying up garbled text in a recipe read from a scan; reading
+              the recipe from the video itself when a TikTok, Facebook or YouTube video's caption or
+              description has no written recipe, where video reading is switched on (the video's
+              title, creator name and caption go with it; a TikTok or Facebook video file is
+              downloaded, sent to Gemini and then deleted, and a YouTube video is passed to Gemini
+              by its link); an "inspired" recipe you ask for from a YouTube video; and
+              <strong>Fill in with AI</strong> (below). This is used only to provide recipe
+              extraction, not for advertising. LinkDish uses the paid tier of Google's Gemini API in
+              every country where LinkDish is available, including the EEA and the UK. Under
+              Google's paid-service terms, submitted content is not used to improve Google's
+              products. This does not mean Google retains no data; its service terms also describe
+              processing for safety, security and legal obligations.
             </li>
             <li>
-              Submitted recipe images may be processed by LinkDish's backend and configured
-              extraction providers to turn paper recipes, recipe cards, or cookbook pages into
-              structured recipe details.
+              In the LinkDish iPhone app, LinkDish asks whether you allow Gemini processing before
+              you first import a recipe or use <strong>Fill in with AI</strong>, and nothing is sent
+              for either until you allow it. Your answer is remembered on that device, and you can
+              change it at any time under <strong>AI data sharing</strong> in the app's Account
+              screen. This describes the iPhone app; consent controls in Android depend on the
+              installed version. On the LinkDish website (app.linkdish.ca) there is no prompt first:
+              using import or <strong>Fill in with AI</strong> on the website sends the content as
+              described on this page.
+            </li>
+            <li>
+              When you choose <strong>Fill in with AI</strong> on a recipe, its title, ingredients,
+              and steps are sent to Gemini to fill in what is missing, such as ingredient amounts,
+              and to make the steps easier to follow.
+            </li>
+            <li>
+              Recipe photos you scan are processed by LinkDish's backend and sent to Gemini to turn
+              paper recipes, recipe cards, or cookbook pages into structured recipe details. Gemini
+              is the only AI provider currently used in production. OpenAI is not currently used.
             </li>
             <li>
               Personal saved recipes are stored on your device so you can reopen them later inside
               the app. When you're signed in, your cookbook (saved recipes with your notes,
               favorites, tags, ratings, collections, and cook log) is also stored by LinkDish's
               backend with your account so it stays in sync on every device where you sign in.
-              Photos you scanned to import a recipe stay on the device. Free accounts can keep up to
-              15 personal recipes on a device; paid plans remove that save limit.
+              Photos you scan to import a recipe are sent for processing but aren't saved with your
+              cookbook. The copy stays on your device. Free accounts can keep up to 15 personal
+              recipes on a device; paid plans remove that save limit.
             </li>
             <li>
               Shared Family recipes are stored by LinkDish's backend so active household members can
@@ -258,8 +297,8 @@
             </li>
             <li>
               Analytics are used to understand whether LinkDish is working across the website, web
-              app, Android app, and backend, including extraction success rates, source hostnames,
-              performance problems, and errors.
+              app, iPhone app, Android app, and backend, including extraction success rates, source
+              hostnames, performance problems, and errors.
             </li>
             <li>
               Account and household records are used only to sign you in, manage Family household
@@ -288,7 +327,11 @@
             enabled, Clerk handles the authentication flow and provides LinkDish with a verified
             account identifier and email address so LinkDish can connect the sign-in to a LinkDish
             account. LinkDish keeps its own account ID for saved recipes, Family households, quotas,
-            and account deletion.
+            and account deletion. When you delete your LinkDish account, LinkDish also deletes your
+            user at Clerk. If you signed in with Apple and delete your account in the iPhone app,
+            supported versions ask you to confirm with Apple so LinkDish can revoke its access; if
+            that can't be done (for example when you delete from the web or Android), LinkDish tells
+            you how to turn it off in your Apple Account settings.
           </p>
 
           <h2 id="does-not">What LinkDish does not do</h2>
@@ -296,7 +339,11 @@
             <li>No account is required for the first 3 free recipe imports.</li>
             <li>Sign in is required to buy or restore a plan and for Family household sharing.</li>
             <li>LinkDish does not sell your personal information.</li>
-            <li>LinkDish does not include third-party advertising in the current app.</li>
+            <li>
+              LinkDish does not show third-party advertising and does not use your information for
+              targeted advertising.
+            </li>
+            <li>LinkDish does not track you across other companies' apps or websites.</li>
             <li>
               LinkDish analytics do not store full recipe URLs, recipe titles, ingredients,
               instructions, uploaded recipe images, raw page text, or LLM prompts.
@@ -306,19 +353,56 @@
           <h2 id="storage">Data storage</h2>
           <p>
             Personal recipes you save are stored locally on your device and, when you're signed in,
-            with your account on LinkDish's backend so they sync between your devices. Shared
-            Family recipes and
-            their notes are stored by LinkDish's backend for household access. Extracted recipe data
-            may also pass through LinkDish's backend service in order to produce results and keep
-            the service running reliably. The RevenueCat app user ID is stored on your device and
-            may be stored by LinkDish's backend for quota checks and by RevenueCat for purchase and
-            entitlement management. Mobile session tokens use operating-system-backed secure
-            storage; the web app uses browser storage needed to keep you signed in. Server-side
-            account, session, external sign-in identity, synced cookbook, invite, household, and
-            shared recipe records are stored by LinkDish's backend. iOS notification list records are stored by
-            LinkDish's backend. First-party analytics records are stored by LinkDish's backend using
-            anonymous or hashed identifiers. Android crash reports are processed and stored by Sentry. Website page-view statistics
-            are processed and stored in aggregate by Plausible Analytics.
+            with your account on LinkDish's backend so they sync between your devices. Shared Family
+            recipes and their notes are stored by LinkDish's backend for household access. Extracted
+            recipe data may also pass through LinkDish's backend service in order to produce results
+            and keep the service running reliably. When LinkDish reads a public recipe page, it may
+            keep the result for up to 7 days under the page's address, not linked to you, so the
+            next person who imports the same link gets it faster. Recipe pictures load through
+            LinkDish's image service, which keeps short-lived copies following the picture site's
+            own caching rules. The RevenueCat app user ID is stored on your device and may be stored
+            by LinkDish's backend for quota checks and by RevenueCat for purchase and entitlement
+            management. Mobile session tokens use operating-system-backed secure storage; the web
+            app uses browser storage needed to keep you signed in. Server-side account, session,
+            external sign-in identity, synced cookbook, invite, household, and shared recipe records
+            are stored by LinkDish's backend. iOS notification list records are stored by LinkDish's
+            backend. First-party analytics records are stored by LinkDish's backend using anonymous
+            or hashed identifiers. Android crash reports are processed and stored by Sentry. Website
+            page-view statistics are processed and stored in aggregate by Plausible Analytics.
+          </p>
+
+          <h2 id="retention">How long information is kept</h2>
+          <ul>
+            <li>Your cookbook and account records: until you delete them or your account.</li>
+            <li>Backups: deleted data can stay in encrypted backups for up to 90 days.</li>
+            <li>
+              A stripped record that an account was deleted: 90 days, after which it is deleted
+              automatically. See the
+              <a href="/delete-account/">account deletion page</a>.
+            </li>
+            <li>
+              Analytics, including anonymous analytics recorded before you signed in: 90 days, after
+              which they are deleted automatically.
+            </li>
+            <li>Crash reports at Sentry: up to 90 days, after which Sentry deletes them.</li>
+            <li>Server logs: up to 90 days.</li>
+          </ul>
+
+          <h2 id="processors">Who processes your information</h2>
+          <p>
+            LinkDish uses service providers to run the app: hosting and storage (Vercel, Upstash,
+            [TBD: analytics database host]), website hosting and encrypted backups (GitHub), sign-in
+            (Clerk), billing (RevenueCat and its payment processor, Apple App Store and Google
+            Play), email delivery (Resend and Cloudflare), photo scans, video reading, inspired
+            recipes and Fill in with AI (Google's Gemini API), crash reports (Sentry), and website
+            statistics (Plausible).
+          </p>
+          <p>
+            Apart from hosting, storage, backups, email delivery and the app stores, the outside
+            services that receive information about you are Clerk, RevenueCat, Google's Gemini API,
+            Sentry (in the Android app only) and Plausible (on the linkdish.ca website only).
+            LinkDish's analytics are its own first-party analytics. LinkDish does not use any other
+            analytics, advertising or tracking services.
           </p>
 
           <h2 id="choices">Your choices</h2>
@@ -336,12 +420,18 @@
           </p>
           <p>
             If you create a LinkDish account, you can delete it from Account in the app. Account
-            deletion removes server-side account, synced cookbook, household, and shared Family
-            recipe records that belong to the account, and the analytics records linked to the
-            account, but it does not cancel App Store, Google Play, or web subscriptions. Local saved
-            recipes remain on your device. The
-            <a href="/delete-account/">account deletion page</a> explains what is deleted and what is
-            kept.
+            deletion removes server-side account, synced cookbook, recipe picture, household, and
+            shared Family recipe records that belong to the account, and the analytics records
+            linked to the account. It also deletes your user at Clerk, our sign-in provider, and
+            your customer record at RevenueCat, our billing provider. Supported iPhone versions also
+            request revocation of Sign in with Apple; if it cannot be completed, remove LinkDish
+            from Sign in with Apple in your Apple Account settings. Some records are kept, including
+            a stripped record that the account was deleted and the purchase records that the App
+            Store, Google Play, or our payment processor keep themselves. Deletion does not cancel
+            App Store, Google Play, or web subscriptions. Local saved recipes remain on your device.
+            The
+            <a href="/delete-account/">account deletion page</a> explains what is deleted and what
+            is kept.
           </p>
           <p>
             If you joined the iOS notification list and want to be removed, or if you cannot access
@@ -351,8 +441,11 @@
 
           <h2 id="questions">Questions</h2>
           <p>
-            If you have questions about privacy or support, use the support contact listed on the
-            app's store listing or visit the <a href="/support/">LinkDish support page</a>.
+            LinkDish is operated by Robert Gordon, an individual, in Newfoundland and Labrador,
+            Canada, and published on Google Play as Robertg761. For privacy questions or to ask for
+            access to or correction of your information, email
+            <a href="mailto:support@linkdish.ca">support@linkdish.ca</a> or use the
+            <a href="/support/">LinkDish support page</a>.
           </p>
         </article>
       </div>

@@ -104,6 +104,92 @@ describe("recipe photos", () => {
   });
 });
 
+describe("account deletion", () => {
+  const deleted = {
+    providers: { apple: "not_revoked", clerk: "deleted", revenueCat: "no_record" },
+    status: "deleted"
+  };
+
+  it("sends the Apple authorization code and returns each provider's result", async () => {
+    const fetchImplementation = createFetchMock(() => jsonResponse(deleted));
+    const client = createExtractorApiClient({
+      baseUrl: "https://api.test",
+      fetchImplementation
+    });
+
+    const response = await client.deleteAccount({
+      appleAuthorizationCode: " apple-code ",
+      confirmEmail: "cook@example.com"
+    });
+    const { input, init } = firstCall(fetchImplementation);
+
+    expect(input).toBe("https://api.test/account");
+    expect(init?.method).toBe("DELETE");
+    expect(JSON.parse(init?.body as string)).toEqual({
+      appleAuthorizationCode: "apple-code",
+      confirmEmail: "cook@example.com"
+    });
+    expect(response).toEqual(deleted);
+  });
+
+  it("leaves the Apple code out when there is none", async () => {
+    const fetchImplementation = createFetchMock(() => jsonResponse(deleted));
+    const client = createExtractorApiClient({
+      baseUrl: "https://api.test",
+      fetchImplementation
+    });
+
+    await client.deleteAccount({ confirmEmail: "cook@example.com" });
+
+    expect(JSON.parse(firstCall(fetchImplementation).init?.body as string)).toEqual({
+      confirmEmail: "cook@example.com"
+    });
+  });
+
+  it("accepts an older server deletion answer without claiming provider cleanup", async () => {
+    const fetchImplementation = createFetchMock(() => jsonResponse({ status: "deleted" }));
+    const client = createExtractorApiClient({
+      baseUrl: "https://api.test",
+      fetchImplementation
+    });
+
+    await expect(client.deleteAccount({ confirmEmail: "cook@example.com" })).resolves.toEqual({
+      status: "deleted",
+      providers: { apple: "unknown", clerk: "unknown", revenueCat: "unknown" }
+    });
+  });
+
+  it("waits longer than an ordinary request for the server's provider calls", async () => {
+    vi.useFakeTimers();
+
+    try {
+      let aborted = false;
+      const fetchImplementation = vi.fn<FetchSignature>(
+        (_input, init) =>
+          new Promise<Response>((resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => {
+              aborted = true;
+              reject(new Error("The operation was aborted."));
+            });
+            setTimeout(() => resolve(jsonResponse(deleted)), 45_000);
+          })
+      );
+      const client = createExtractorApiClient({
+        baseUrl: "https://api.test",
+        fetchImplementation
+      });
+
+      const deleting = client.deleteAccount({ confirmEmail: "cook@example.com" });
+      await vi.advanceTimersByTimeAsync(45_000);
+
+      await expect(deleting).resolves.toEqual(deleted);
+      expect(aborted).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe("error responses", () => {
   it("does not treat a 403 whose body matches the schema as success", async () => {
     const fetchImplementation = createFetchMock(() =>

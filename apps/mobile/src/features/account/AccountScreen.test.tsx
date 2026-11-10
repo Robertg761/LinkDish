@@ -355,3 +355,129 @@ it("shows restore progress and the result next to the account restore action", a
   expect(JSON.stringify(renderer.toJSON())).toContain(billingState.restoreMessage);
   act(() => renderer.unmount());
 });
+
+describe("AccountScreen account deletion", () => {
+  beforeEach(() => {
+    accountState.accountError = null;
+    accountState.deleteAccount.mockReset();
+    accountState.getAuthHeadersFor.mockReset();
+    accountState.getAuthHeadersFor.mockImplementation(() => () => Promise.resolve({}));
+    accountState.hasLoadedAccount = true;
+    accountState.isAccountBusy = false;
+    accountState.user = {
+      avatarEmoji: null,
+      displayName: null,
+      email: "member@example.com",
+      id: "user_member"
+    };
+    routerMocks.replace.mockReset();
+    apiMocks.createExtractorApiClient.mockReset();
+    apiMocks.createExtractorApiClient.mockReturnValue({});
+  });
+
+  const renderAndDelete = async (billingPlan?: "free" | "plus") => {
+    if (billingPlan) {
+      (accountState.user as { billingPlan?: string }).billingPlan = billingPlan;
+    }
+
+    let renderer: ReturnType<typeof create>;
+    await act(async () => {
+      renderer = create(<AccountScreen />);
+      await flushAsyncWork();
+    });
+
+    act(() => {
+      (
+        renderer!.root.findByProps({ placeholder: "Confirm your email" }).props as {
+          onChangeText: (value: string) => void;
+        }
+      ).onChangeText("member@example.com");
+    });
+    act(() => {
+      (
+        renderer!.root.findByProps({ label: "Delete account" }).props as { onPress: () => void }
+      ).onPress();
+    });
+    await act(async () => {
+      (renderer!.root.findByProps({ label: "Delete" }).props as { onPress: () => void }).onPress();
+      await flushAsyncWork();
+    });
+
+    return renderer!;
+  };
+
+  it("explains what deletion does, including the store subscription and the household handover", async () => {
+    let renderer: ReturnType<typeof create>;
+    await act(async () => {
+      renderer = create(<AccountScreen />);
+      await flushAsyncWork();
+    });
+
+    const output = JSON.stringify(renderer!.toJSON());
+    expect(output).toContain("purchase record at RevenueCat");
+    expect(output).toContain("it passes to the member who has been in it longest");
+    expect(output).toContain("Deleting your account does not cancel a store subscription.");
+  });
+
+  it("shows the steps still to take once the account is deleted", async () => {
+    accountState.deleteAccount.mockResolvedValue({
+      apple: "not_revoked",
+      clerk: "deleted",
+      revenueCat: "deleted"
+    });
+
+    const renderer = await renderAndDelete("plus");
+
+    expect(accountState.deleteAccount).toHaveBeenCalledWith("member@example.com");
+    const output = JSON.stringify(renderer.toJSON());
+    expect(output).toContain("Account deleted");
+    expect(output).toContain("Turn off Sign in with Apple");
+    expect(output).toContain("Cancel any subscription");
+    // Nothing navigates away until the person has read it.
+    expect(routerMocks.replace).not.toHaveBeenCalled();
+
+    act(() => {
+      (renderer.root.findByProps({ label: "OK" }).props as { onPress: () => void }).onPress();
+    });
+    expect(routerMocks.replace).toHaveBeenCalledWith("/");
+    expect(JSON.stringify(renderer.toJSON())).not.toContain("Account deleted");
+  });
+
+  it("does not claim provider cleanup when an older server only confirms account deletion", async () => {
+    accountState.deleteAccount.mockResolvedValue({
+      apple: "unknown",
+      clerk: "unknown",
+      revenueCat: "unknown"
+    });
+    const renderer = await renderAndDelete("free");
+    const output = JSON.stringify(renderer.toJSON());
+    expect(output).toContain("Account deleted");
+    expect(output).toContain("Provider cleanup was not confirmed");
+    expect(output).toContain("support@linkdish.ca");
+    expect(output).not.toContain("Your LinkDish account and its data have been deleted.");
+  });
+
+  it("confirms the deletion plainly when nothing is left to do", async () => {
+    accountState.deleteAccount.mockResolvedValue({
+      apple: "revoked",
+      clerk: "deleted",
+      revenueCat: "deleted"
+    });
+
+    const renderer = await renderAndDelete("free");
+
+    const output = JSON.stringify(renderer.toJSON());
+    expect(output).toContain("Your LinkDish account and its data have been deleted.");
+    expect(output).not.toContain("Turn off Sign in with Apple");
+    expect(output).not.toContain("Cancel any subscription");
+  });
+
+  it("stays put when Apple's confirmation was cancelled and nothing was deleted", async () => {
+    accountState.deleteAccount.mockResolvedValue(null);
+
+    const renderer = await renderAndDelete();
+
+    expect(JSON.stringify(renderer.toJSON())).not.toContain("Account deleted");
+    expect(routerMocks.replace).not.toHaveBeenCalled();
+  });
+});

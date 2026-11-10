@@ -71,8 +71,13 @@ const FeaturedRecipeScreen: React.FC<{ featured: FeaturedRecipe }> = ({ featured
   const isSaved = saving.status === "saved";
 
   useDocumentTitle(recipe.title);
+  // Featured recipes are LinkDish's own (see featured-recipes.ts). The "saved from <site>" wording
+  // is kept only for a recipe that really came from another site, which needs permission first.
+  const isLinkDishOwn = source.kind === "starter";
   useMetaDescription(
-    `${recipe.title}, saved from ${source.label} with LinkDish: just the recipe, no ads. Scale it, switch units and cook it step by step.`
+    isLinkDishOwn
+      ? `${recipe.title}, an original LinkDish kitchen recipe: just the recipe, no ads. Scale it, switch units and cook it step by step.`
+      : `${recipe.title}, saved from ${source.label} with LinkDish: just the recipe, no ads. Scale it, switch units and cook it step by step.`
   );
 
   const openSaved = () => {
@@ -128,8 +133,16 @@ const FeaturedRecipeScreen: React.FC<{ featured: FeaturedRecipe }> = ({ featured
       </span>
       <div className="featured-banner-copy">
         <p className="featured-banner-title" id="featured-banner-title">
-          Saved from <strong>{source.label}</strong> with{" "}
-          <span className="accent-word">LinkDish</span>
+          {isLinkDishOwn ? (
+            <>
+              An original recipe from the <span className="accent-word">LinkDish</span> kitchen
+            </>
+          ) : (
+            <>
+              Saved from <strong>{source.label}</strong> with{" "}
+              <span className="accent-word">LinkDish</span>
+            </>
+          )}
         </p>
         <p className="featured-banner-text">
           Paste any recipe link and LinkDish keeps just the recipe: no ads, no life story. Then
@@ -153,12 +166,18 @@ const FeaturedRecipeScreen: React.FC<{ featured: FeaturedRecipe }> = ({ featured
           <>
             {promo}
             <p className="featured-footer print-hide">
-              Recipe and photo © {source.label}.{" "}
-              {source.href ? (
-                <a href={source.href} rel="noopener noreferrer" target="_blank">
-                  Read the original
-                </a>
-              ) : null}{" "}
+              {isLinkDishOwn ? (
+                <>A LinkDish kitchen recipe.</>
+              ) : (
+                <>
+                  Recipe and photo © {source.label}.{" "}
+                  {source.href ? (
+                    <a href={source.href} rel="noopener noreferrer" target="_blank">
+                      Read the original
+                    </a>
+                  ) : null}
+                </>
+              )}{" "}
               · <Link to="/import">Save your own recipes with LinkDish</Link>
             </p>
           </>

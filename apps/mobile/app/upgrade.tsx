@@ -420,7 +420,9 @@ const FoundingPlanCard = ({
     <View style={styles.planHeader}>
       <View style={styles.planName}>
         <AppText variant="title">Founding Plus</AppText>
-        <AppText muted>Everything in Plus, forever. One payment, no subscription.</AppText>
+        <AppText muted>
+          Everything in Plus for as long as we operate LinkDish. One payment, no subscription.
+        </AppText>
       </View>
       <AppChip label="Founding member" tone="accent" />
     </View>

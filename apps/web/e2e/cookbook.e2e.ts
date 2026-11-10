@@ -23,7 +23,9 @@ test.describe("first visit", () => {
     const main = page.getByRole("main");
     await expect(main.getByText("3 starter recipes")).toBeVisible();
     await expect(
-      main.getByRole("link", { name: /Ginger-Sesame Chicken Rice Skillet/u })
+      main
+        .getByRole("region", { name: "Recipes", exact: true })
+        .getByRole("link", { name: /Ginger-Sesame Chicken Rice Skillet/u })
     ).toBeVisible();
 
     await page.reload();
@@ -36,6 +38,7 @@ test("opens a starter recipe, deletes it and undoes the delete", async ({ page }
   await page.goto("/");
   const main = page.getByRole("main");
   await main
+    .getByRole("region", { name: "Recipes", exact: true })
     .getByRole("link", { name: /Crisp Cucumber Chickpea Pitas/u })
     .first()
     .click();
@@ -52,11 +55,18 @@ test("opens a starter recipe, deletes it and undoes the delete", async ({ page }
 
   await expect(page).toHaveURL("/");
   await expect(main.getByText("2 starter recipes")).toBeVisible();
-  await expect(main.getByRole("link", { name: /Crisp Cucumber Chickpea Pitas/u })).toHaveCount(0);
+  await expect(
+    main
+      .getByRole("region", { name: "Recipes", exact: true })
+      .getByRole("link", { name: /Crisp Cucumber Chickpea Pitas/u })
+  ).toHaveCount(0);
 
   await toasts(page).getByRole("button", { name: "Undo" }).click();
   await expect(main.getByText("3 starter recipes")).toBeVisible();
   await expect(
-    main.getByRole("link", { name: /Crisp Cucumber Chickpea Pitas/u }).first()
+    main
+      .getByRole("region", { name: "Recipes", exact: true })
+      .getByRole("link", { name: /Crisp Cucumber Chickpea Pitas/u })
+      .first()
   ).toBeVisible();
 });

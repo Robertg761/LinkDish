@@ -635,3 +635,54 @@ describe("runLiveCanary", () => {
     await rm(result.outputPath, { force: true });
   });
 });
+
+describe("platform cases and the preflight user-agent", () => {
+  const { isCanaryEntryEnabled, preflightEntry, resolveCanaryPlatforms } = canaryModule as {
+    isCanaryEntryEnabled: (entry: { kind: string }, platforms: Set<string>) => boolean;
+    preflightEntry: (input: {
+      entry: { id: string; kind: string; url: string; expectedMinimumOutcome: string };
+      timeoutMs?: number;
+      fetchImplementation?: typeof fetch;
+    }) => Promise<unknown>;
+    resolveCanaryPlatforms: (raw?: string) => Set<string>;
+  };
+
+  it("runs only TikTok among platform cases by default, whatever the platform flags say", () => {
+    const platforms = resolveCanaryPlatforms("");
+
+    expect(isCanaryEntryEnabled({ kind: "recipe-webpage" }, platforms)).toBe(true);
+    expect(isCanaryEntryEnabled({ kind: "article-blog" }, platforms)).toBe(true);
+    expect(isCanaryEntryEnabled({ kind: "tiktok" }, platforms)).toBe(true);
+    expect(isCanaryEntryEnabled({ kind: "youtube" }, platforms)).toBe(false);
+    expect(isCanaryEntryEnabled({ kind: "facebook" }, platforms)).toBe(false);
+  });
+
+  it("runs the platforms listed in LINKDISH_CANARY_PLATFORMS", () => {
+    const platforms = resolveCanaryPlatforms(" YouTube , facebook ");
+
+    expect(isCanaryEntryEnabled({ kind: "youtube" }, platforms)).toBe(true);
+    expect(isCanaryEntryEnabled({ kind: "facebook" }, platforms)).toBe(true);
+    expect(isCanaryEntryEnabled({ kind: "tiktok" }, platforms)).toBe(false);
+  });
+
+  it("preflights as LinkDishBot, never as a desktop browser", async () => {
+    let userAgent = "";
+    const fetchImplementation = ((_url: string, init: RequestInit) => {
+      userAgent = (init.headers as Record<string, string>)["user-agent"] ?? "";
+      return Promise.resolve(new Response("<title>Recipe</title>", { status: 200 }));
+    }) as unknown as typeof fetch;
+
+    await preflightEntry({
+      entry: {
+        id: "x",
+        kind: "recipe-webpage",
+        url: "https://example.com/recipe",
+        expectedMinimumOutcome: "success"
+      },
+      fetchImplementation
+    });
+
+    expect(userAgent).toContain("LinkDishBot");
+    expect(userAgent).not.toMatch(/Chrome\//u);
+  });
+});

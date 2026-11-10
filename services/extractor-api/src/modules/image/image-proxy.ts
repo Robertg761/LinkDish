@@ -243,7 +243,7 @@ const readImageBody = async (response: Response): Promise<Buffer> => {
 const fetchImageBytes = async (
   sourceUrl: URL,
   dependencies: Required<Pick<ImageProxyDependencies, "fetchImplementation" | "resolveHostname">>
-): Promise<Buffer> => {
+): Promise<{ body: Buffer; originCacheControl: string | null }> => {
   const startedAt = Date.now();
   let currentUrl = sourceUrl;
 
@@ -298,7 +298,7 @@ const fetchImageBytes = async (
       reject("invalid_image_bytes", "Image source returned invalid image bytes.", 415);
     }
 
-    return body;
+    return { body, originCacheControl: response.headers.get("cache-control") };
   }
 
   return reject("redirect_limit", "Image source redirected too many times.", 400);
@@ -329,31 +329,139 @@ export const resizeImageToWebp = async (
     .toBuffer();
 };
 
-export const getProxiedImage = async (
+export interface ProxiedImageCacheHeaders {
+  "cache-control": string;
+  "cdn-cache-control": string;
+}
+
+/* What LinkDish sends when the publisher says nothing about caching (the previous fixed policy). */
+const defaultBrowserMaxAgeSeconds = 31_536_000;
+const defaultCdnMaxAgeSeconds = 86_400;
+const defaultCdnStaleSeconds = 604_800;
+
+const readDirectiveSeconds = (directives: Map<string, string | true>, name: string) => {
+  const value = directives.get(name);
+
+  if (typeof value !== "string" || !/^\d+$/u.test(value)) {
+    return null;
+  }
+
+  return Number.parseInt(value, 10);
+};
+
+/**
+ * The proxy's cache headers, following the publisher's own caching directions for the image.
+ *
+ * The proxy keeps short-lived copies of publisher photos (in browsers and on the CDN). Canada's
+ * caching exception (Copyright Act s. 31.1(3)(b)) expects caching directions "specified in a
+ * manner consistent with industry practice" by whoever made the work available to be "read and
+ * executed", and US 17 U.S.C. s. 512(b)(2)(B) has a similar refresh condition. So (decided
+ * 2026-11-08, see outputs/CONTENT-RIGHTS-REVIEW.md):
+ *
+ * - no-store from the publisher: nothing keeps a copy (browser or CDN).
+ * - private or no-cache: the browser may keep it but must revalidate; the CDN keeps nothing.
+ * - max-age / s-maxage: neither copy outlives what the publisher allowed; the CDN copy is also
+ *   capped at a day, and serving stale needs the publisher's own stale-while-revalidate.
+ * - no Cache-Control at all: the previous policy (browser a year, CDN a day plus a week stale),
+ *   which HTTP's heuristic caching allows when the origin is silent.
+ */
+export const buildProxiedImageCacheHeaders = (
+  originCacheControl: string | null | undefined
+): ProxiedImageCacheHeaders => {
+  const directives = new Map<string, string | true>();
+
+  for (const part of (originCacheControl ?? "").split(",")) {
+    const [rawName, ...rawValue] = part.split("=");
+    const name = rawName?.trim().toLowerCase();
+
+    if (name) {
+      directives.set(
+        name,
+        rawValue.length > 0 ? rawValue.join("=").trim().replace(/^"|"$/gu, "") : true
+      );
+    }
+  }
+
+  if (directives.size === 0) {
+    return {
+      "cache-control": `public, max-age=${defaultBrowserMaxAgeSeconds}, immutable`,
+      "cdn-cache-control": `public, s-maxage=${defaultCdnMaxAgeSeconds}, stale-while-revalidate=${defaultCdnStaleSeconds}`
+    };
+  }
+
+  if (directives.has("no-store")) {
+    return { "cache-control": "no-store", "cdn-cache-control": "no-store" };
+  }
+
+  if (directives.has("private") || directives.has("no-cache")) {
+    return { "cache-control": "private, no-cache", "cdn-cache-control": "no-store" };
+  }
+
+  const maxAge = readDirectiveSeconds(directives, "max-age");
+  const sharedMaxAge = readDirectiveSeconds(directives, "s-maxage") ?? maxAge;
+  const stale = readDirectiveSeconds(directives, "stale-while-revalidate");
+  const browserMaxAge = Math.min(
+    maxAge ?? defaultBrowserMaxAgeSeconds,
+    defaultBrowserMaxAgeSeconds
+  );
+  const cdnMaxAge = Math.min(sharedMaxAge ?? defaultCdnMaxAgeSeconds, defaultCdnMaxAgeSeconds);
+  const immutable = directives.has("immutable") || maxAge === null;
+
+  return {
+    "cache-control": `public, max-age=${browserMaxAge}${immutable && browserMaxAge > 0 ? ", immutable" : ""}`,
+    "cdn-cache-control":
+      cdnMaxAge <= 0
+        ? "no-store"
+        : `public, s-maxage=${cdnMaxAge}${
+            stale !== null && stale > 0
+              ? `, stale-while-revalidate=${Math.min(stale, defaultCdnStaleSeconds)}`
+              : sharedMaxAge === null
+                ? `, stale-while-revalidate=${defaultCdnStaleSeconds}`
+                : ""
+          }`
+  };
+};
+
+/** The resized WebP image plus cache headers that follow the publisher's caching directions. */
+export const getProxiedImageWithCacheHeaders = async (
   sourceUrl: URL,
   width: number,
   dependencies?: ImageProxyDependencies
-): Promise<Buffer> => {
-  const imageBytes = await fetchImageBytes(sourceUrl, {
+): Promise<{ image: Buffer; headers: ProxiedImageCacheHeaders }> => {
+  const { body, originCacheControl } = await fetchImageBytes(sourceUrl, {
     fetchImplementation: dependencies?.fetchImplementation ?? publicOnlyFetch,
     resolveHostname: dependencies?.resolveHostname ?? lookup
   });
 
-  return resizeImageToWebp(imageBytes, width, dependencies?.loadSharp);
+  return {
+    image: await resizeImageToWebp(body, width, dependencies?.loadSharp),
+    headers: buildProxiedImageCacheHeaders(originCacheControl)
+  };
 };
+
+export const getProxiedImage = async (
+  sourceUrl: URL,
+  width: number,
+  dependencies?: ImageProxyDependencies
+): Promise<Buffer> => (await getProxiedImageWithCacheHeaders(sourceUrl, width, dependencies)).image;
 
 export const registerImageRoute = (app: FastifyInstance, dependencies?: ImageProxyDependencies) => {
   app.get("/image", async (request, reply) => {
     try {
       const { sourceUrl, width } = parseImageProxyQuery(request.query);
-      const image = await getProxiedImage(sourceUrl, width, dependencies);
+      const { image, headers } = await getProxiedImageWithCacheHeaders(
+        sourceUrl,
+        width,
+        dependencies
+      );
 
       return (
         reply
-          .header("cache-control", "public, max-age=31536000, immutable")
-          // The shared CDN copy is revalidated after a day: the cache key is only the source URL and
-          // width, and recipe sites do replace images at the same URL.
-          .header("cdn-cache-control", "public, s-maxage=86400, stale-while-revalidate=604800")
+          // Follows the publisher's caching directions (buildProxiedImageCacheHeaders). When the
+          // publisher is silent the CDN copy is revalidated after a day: the cache key is only the
+          // source URL and width, and recipe sites do replace images at the same URL.
+          .header("cache-control", headers["cache-control"])
+          .header("cdn-cache-control", headers["cdn-cache-control"])
           .type("image/webp")
           .send(image)
       );

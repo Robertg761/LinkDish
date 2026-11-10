@@ -612,6 +612,13 @@ export const deleteUserSessions = async (userId: string): Promise<void> => {
   await deleteStoreKeys(...sessionHashes.map(authKeys.session), authKeys.userSessions(userId));
 };
 
+/*
+ * How long the stripped record of a deleted account, and the tombstones that stop its sign-ins
+ * being reused, are kept before they expire. The privacy policy and the account deletion page
+ * promise 90 days (the same period as backups and analytics), so change them together.
+ */
+export const deletedAccountRecordTtlSeconds = 90 * 86_400;
+
 export const markUserDeleted = async (userId: string): Promise<UserRecord | null> => {
   const user = await getUserById(userId);
 
@@ -629,7 +636,9 @@ export const markUserDeleted = async (userId: string): Promise<UserRecord | null
   };
 
   await deleteStoreKeys(authKeys.emailLookup(user.emailHash));
-  await setStoreString(authKeys.user(user.id), JSON.stringify(deletedUser));
+  await setStoreString(authKeys.user(user.id), JSON.stringify(deletedUser), {
+    ttlSeconds: deletedAccountRecordTtlSeconds
+  });
   await deleteUserSessions(user.id);
   return deletedUser;
 };

@@ -4,62 +4,36 @@ import { PageHeader } from "./PageHeader";
 
 import "./PrivacyPage.css";
 
-// The policy text below is legal copy: restyle freely, but keep the words exactly as they are.
+// A summary only, with no date of its own: linkdish.ca/privacy is the one policy text.
 export const PrivacyPage: React.FC = () => {
   return (
     <div className="privacy-page container page-enter">
-      <PageHeader
-        className="privacy-header"
-        eyebrow="Privacy"
-        subtitle={<span className="privacy-updated">Last updated: October 26, 2026</span>}
-        title="Privacy Policy"
-      />
+      <PageHeader className="privacy-header" eyebrow="Privacy" title="Your privacy" />
 
       <article className="privacy-card">
         <div className="privacy-content">
           <p className="privacy-intro">
-            Welcome to LinkDish. We respect your privacy and are committed to protecting the
-            information you share with us.
+            LinkDish handles the recipes, links and images you give it, plus the account and plan
+            details it needs to run. The full policy explains what is handled and why.
           </p>
           <section className="privacy-section">
-            <h2>Information LinkDish handles</h2>
+            <h2>Read the details</h2>
             <p>
-              Recipe links and images you submit are sent to LinkDish's extraction service and its
-              configured processing providers to produce structured recipe details. This may include
-              source-page text, metadata, or video transcript details needed for the import.
+              <a href="https://linkdish.ca/privacy/">Privacy Policy</a>
+              {" · "}
+              <a href="https://linkdish.ca/terms/">Terms of Service</a>
+              {" · "}
+              <a href="https://linkdish.ca/delete-account/">Delete your account</a>
+              {" · "}
+              <a href="https://github.com/Robertg761/LinkDish/blob/main/THIRD_PARTY_NOTICES.md">
+                Open source licences
+              </a>
             </p>
           </section>
           <section className="privacy-section">
-            <h2>Saved recipes and households</h2>
+            <h2>Questions</h2>
             <p>
-              Personal saved recipes are stored locally in your browser. When you&apos;re signed in,
-              your cookbook (saved recipes with your notes, favorites, tags, ratings, collections,
-              and cook log) is also stored by LinkDish with your account, so it stays in sync on
-              every device where you sign in; photos you scanned to import a recipe stay on the
-              device. Free includes up to 15 personal saves on a device and paid plans include
-              unlimited saves. Clearing LinkDish site data deletes the recipes in this browser, and
-              deleting your account deletes the cookbook stored with it. Recipes shared with a
-              Family household are stored by LinkDish so active household members can access them.
-            </p>
-          </section>
-          <section className="privacy-section">
-            <h2>Accounts, purchases, and analytics</h2>
-            <p>
-              If you sign in, LinkDish handles your email, session or social-sign-in identity, plan
-              status, and any household records. RevenueCat supplies purchase, subscription, and
-              lifetime-access status. First-party analytics record product actions, import outcomes,
-              performance, and sanitized errors, but not full recipe URLs, recipe content, uploaded
-              images, raw page text, or prompts.
-            </p>
-          </section>
-          <section className="privacy-section">
-            <h2>Your choices</h2>
-            <p>
-              You can delete your LinkDish account from Account, remove local recipes, and stop
-              submitting links or images at any time. Account deletion does not cancel a store or
-              web subscription. See the full policy at{" "}
-              <a href="https://linkdish.ca/privacy/">linkdish.ca/privacy</a> or contact{" "}
-              <a href="mailto:support@linkdish.ca">support@linkdish.ca</a>.
+              Email <a href="mailto:support@linkdish.ca">support@linkdish.ca</a>.
             </p>
           </section>
         </div>

@@ -977,8 +977,8 @@ describe("LibraryPage", () => {
     // The samples load after the welcome (placeholder cards hold their place meanwhile).
     const samples = await screen.findByRole("region", { name: "Try a sample" });
     expect(
-      await within(samples).findByRole("link", { name: "Classic Sandwich Bread" })
-    ).toHaveAttribute("href", "/featured/classic-sandwich-bread");
+      await within(samples).findByRole("link", { name: "Brown Butter Berry Oat Bars" })
+    ).toHaveAttribute("href", "/featured/brown-butter-berry-oat-bars");
 
     fireEvent.change(input, { target: { value: "www.seriouseats.com/best-chili" } });
     fireEvent.click(screen.getByRole("button", { name: "Import" }));

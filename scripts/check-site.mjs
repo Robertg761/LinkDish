@@ -96,6 +96,20 @@ for (const relativePath of requiredFiles) {
   }
 }
 
+// site/ is the only source for these pages. A second copy under public/ went stale and was served
+// from the API host; root vercel.json now redirects those paths to linkdish.ca instead.
+for (const relativePath of ["public/privacy.html", "public/support.html"]) {
+  if (await exists(path.join(repositoryRoot, relativePath))) {
+    errors.push(`${relativePath} must not exist: site/ is the only source for this page`);
+  }
+}
+
+// Vercel's default build serves public/ when it exists, and otherwise nearly the whole repository
+// (the static builder falls back to everything outside api/ and node_modules/). Keep the folder.
+if (!(await exists(path.join(repositoryRoot, "public/.gitkeep")))) {
+  errors.push("public/.gitkeep is missing: without public/ Vercel would serve the repository root");
+}
+
 const cname = (await readFile(path.join(siteRoot, "CNAME"), "utf8")).trim();
 
 if (cname !== "linkdish.ca") {
@@ -408,6 +422,17 @@ for (const requiredSnippet of [
 ]) {
   if (!analytics.includes(requiredSnippet)) {
     errors.push(`Analytics hardening is missing: ${requiredSnippet}`);
+  }
+}
+
+// deploy-site.yml publishes site/ on every merge, so an unfilled legal placeholder would go live.
+for (const filePath of htmlFiles) {
+  const placeholders = (await readFile(filePath, "utf8")).match(/\[TBD[^\]]*\]/gu) ?? [];
+
+  for (const placeholder of placeholders) {
+    errors.push(
+      `${relativeSitePath(filePath)} has an unfilled ${placeholder.replace(/\s+/gu, " ")}`
+    );
   }
 }
 

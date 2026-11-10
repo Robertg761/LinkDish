@@ -1,7 +1,14 @@
 declare module "./run-live-canary.mjs" {
   export type LiveCanaryEntry = {
     id: string;
-    kind: "recipe-webpage" | "article-blog" | "youtube" | "tiktok";
+    kind:
+      | "recipe-webpage"
+      | "article-blog"
+      | "youtube"
+      | "tiktok"
+      | "facebook"
+      | "instagram"
+      | "pinterest";
     url: string;
     billingClientId?: string;
     billingProvider?: string;
@@ -43,6 +50,8 @@ declare module "./run-live-canary.mjs" {
     final: Record<string, number>;
     abortReason: "canary_not_billing_exempt" | null;
     skipped: number;
+    /** Platform cases left out because that platform's path is off (LINKDISH_CANARY_PLATFORMS). */
+    platformSkipped: string[];
   };
 
   export function validateManifestEntry(input: {
@@ -64,6 +73,10 @@ declare module "./run-live-canary.mjs" {
 
   export function resolveCanaryTimeoutMs(rawTimeoutMs?: string): number;
 
+  export function resolveCanaryPlatforms(rawPlatforms?: string): Set<string>;
+
+  export function isCanaryEntryEnabled(entry: LiveCanaryEntry, platforms: Set<string>): boolean;
+
   export function runLiveCanary(input: {
     manifestPath: string;
     baseUrl?: string;
@@ -72,6 +85,7 @@ declare module "./run-live-canary.mjs" {
     headers?: Record<string, string>;
     timeoutMs?: number;
     fetchImplementation?: typeof fetch;
+    platforms?: Set<string>;
   }): Promise<{
     outputPath: string;
     summary: LiveCanarySummary;

@@ -489,6 +489,37 @@
   text-decoration-color: currentColor;
 }
 
+.account-deleted {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 24px;
+  padding: 20px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  background: var(--color-surface);
+  color: var(--color-ink);
+}
+
+.account-deleted h2 {
+  margin: 0;
+  font-size: var(--text-title);
+}
+
+.account-deleted p {
+  margin: 0;
+}
+
+.account-deleted-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding-left: 20px;
+  font-size: var(--text-small);
+}
+
 .account-danger {
   display: flex;
   flex-direction: column;

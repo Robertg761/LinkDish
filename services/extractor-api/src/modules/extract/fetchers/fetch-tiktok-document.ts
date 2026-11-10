@@ -5,7 +5,7 @@ import { isSourceUrlRejection, validatePublicSourceUrl } from "../source-url-saf
 
 import { SocialFetchError } from "./errors.js";
 import {
-  browserLikeHeaders,
+  identifyingFetchHeaders,
   createTimeoutSignal,
   readLimitedResponseText,
   ResponseBodyTooLargeError
@@ -97,7 +97,7 @@ const resolveShortLink = async (
     await assertSafe(current, validateUrl);
 
     const response = await fetchImplementation(current, {
-      headers: browserLikeHeaders,
+      headers: identifyingFetchHeaders,
       redirect: "manual",
       signal
     });
@@ -197,7 +197,7 @@ const fetchEmbedPage = async (
   signal: AbortSignal
 ): Promise<Response> => {
   const request = () =>
-    fetchImplementation(embedUrl, { headers: browserLikeHeaders, redirect: "manual", signal });
+    fetchImplementation(embedUrl, { headers: identifyingFetchHeaders, redirect: "manual", signal });
   let response = await request();
 
   for (const delayMs of embedPageRetryDelaysMs) {
@@ -318,8 +318,8 @@ export const fetchTikTokDocument = async (
     const response = await fetchImplementation(oEmbedUrl, {
       headers: {
         accept: "application/json",
-        "accept-language": browserLikeHeaders["accept-language"],
-        "user-agent": browserLikeHeaders["user-agent"]
+        "accept-language": identifyingFetchHeaders["accept-language"],
+        "user-agent": identifyingFetchHeaders["user-agent"]
       },
       redirect: "manual",
       signal: timeout.signal

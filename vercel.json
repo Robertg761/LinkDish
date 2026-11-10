@@ -93,15 +93,31 @@
       ]
     }
   ],
-  "rewrites": [
+  "redirects": [
     {
       "source": "/privacy",
-      "destination": "/privacy.html"
+      "missing": [
+        {
+          "type": "host",
+          "value": "(?:app\\.linkdish\\.ca|app\\.linkdish\\.xyz|linkdish-web\\.vercel\\.app)"
+        }
+      ],
+      "destination": "https://linkdish.ca/privacy/",
+      "permanent": true
     },
     {
       "source": "/support",
-      "destination": "/support.html"
-    },
+      "missing": [
+        {
+          "type": "host",
+          "value": "(?:app\\.linkdish\\.ca|app\\.linkdish\\.xyz|linkdish-web\\.vercel\\.app)"
+        }
+      ],
+      "destination": "https://linkdish.ca/support/",
+      "permanent": true
+    }
+  ],
+  "rewrites": [
     {
       "source": "/admin",
       "destination": "/api/admin"

@@ -45,7 +45,12 @@ import {
 } from "./clerk-bridge";
 import { hasClerkSessionHint } from "./clerk-session-hint";
 
-import type { AccountUser, AuthConfigResponse, AuthMode } from "@linkdish/api-contracts";
+import type {
+  AccountDeletionProviders,
+  AccountUser,
+  AuthConfigResponse,
+  AuthMode
+} from "@linkdish/api-contracts";
 
 /** Auth config is tiny; a slow answer should not hold the app hostage. */
 export const AUTH_CONFIG_TIMEOUT_MS = 4_000;
@@ -82,7 +87,14 @@ interface AuthContextType {
   prepareGoogleSignIn: () => void;
   // Global actions
   logout: () => Promise<void>;
-  deleteAccount: (email: string) => Promise<void>;
+  /**
+   * Deletes the signed-in account, then signs out. `onDeleted` hears what happened at each outside
+   * provider just before the sign-out, so the steps the person still has to take can be shown.
+   */
+  deleteAccount: (
+    email: string,
+    onDeleted?: (providers: AccountDeletionProviders) => void
+  ) => Promise<AccountDeletionProviders>;
   refreshUser: () => Promise<void>;
 }
 
@@ -717,10 +729,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [setUser]);
 
   const deleteAccount = useCallback(
-    async (email: string) => {
+    async (email: string, onDeleted?: (providers: AccountDeletionProviders) => void) => {
       const deleting = userRef.current?.id;
-      // Sent only as the account being deleted, never as one Clerk switches to meanwhile.
-      await asAccount(deleting ?? null, () => apiClient.deleteAccount({ confirmEmail: email }));
+      // Sent only as the account being deleted, never as one Clerk switches to meanwhile. The web
+      // can't get a Sign in with Apple code, so an Apple-linked account comes back "not_revoked".
+      const { providers } = await asAccount(deleting ?? null, () =>
+        apiClient.deleteAccount({ confirmEmail: email })
+      );
+      onDeleted?.(providers);
 
       if (deleting) {
         // Its cloud cookbook went with it: this browser's cookbook stops syncing with it (and
@@ -738,10 +754,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Another account signed in (or out) while the deletion was on its way: signing out now
       // would sign out that account, not the deleted one.
       if (userRef.current?.id !== deleting) {
-        return;
+        return providers;
       }
 
       await logout();
+      return providers;
     },
     [logout]
   );

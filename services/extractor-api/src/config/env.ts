@@ -85,6 +85,75 @@ const parsedExtractorApiEnv = readEnv(
       .transform((value) => value === true || value === "true"),
     BROWSER_FETCH_TIMEOUT_MS: z.coerce.number().int().positive().default(15_000),
     BROWSER_FETCH_CONCURRENCY: z.coerce.number().int().positive().default(2),
+    /*
+     * Obey each site's robots.txt (RFC 9309) for the LinkDishBot user-agent before every request
+     * to a site people import from (fetchers/robots-txt.ts). On by default; turning it off needs a
+     * reason a lawyer has agreed with.
+     */
+    ROBOTS_TXT_ENFORCED: z
+      .union([trimmedBooleanString, z.boolean()])
+      .default("true")
+      .transform((value) => value === true || value === "true"),
+    /*
+     * Platform paths, each checked against that platform's own terms on 2026-11-08 (see
+     * outputs/CONTENT-RIGHTS-REVIEW.md). That review found the YouTube, Instagram, Facebook and
+     * Pinterest terms, and TikTok's terms on video downloads, do not permit LinkDish's automated
+     * reading without the platform's written permission, and these paths were turned off by
+     * default. On 2026-11-08 Robert decided to turn them back on by default, accepting that risk
+     * (including Apple guidelines 5.2.2 and 5.2.3). Each flag still turns its path off on its own:
+     * set it to "false".
+     *
+     * TikTok captions through TikTok's public, documented oEmbed endpoint: on by default (the
+     * endpoint is published for developers; whether its use for import is covered is still open).
+     */
+    TIKTOK_IMPORT_ENABLED: z
+      .union([trimmedBooleanString, z.boolean()])
+      .default("true")
+      .transform((value) => value === true || value === "true"),
+    /*
+     * YouTube watch pages and the youtubei comments endpoint. YouTube's terms bar automated access;
+     * on by default since Robert's 2026-11-08 decision to accept that risk.
+     */
+    YOUTUBE_IMPORT_ENABLED: z
+      .union([trimmedBooleanString, z.boolean()])
+      .default("true")
+      .transform((value) => value === true || value === "true"),
+    /*
+     * Instagram embed pages in the headless browser. Instagram's terms bar automated collection;
+     * on by default since Robert's 2026-11-08 decision to accept that risk.
+     */
+    INSTAGRAM_IMPORT_ENABLED: z
+      .union([trimmedBooleanString, z.boolean()])
+      .default("true")
+      .transform((value) => value === true || value === "true"),
+    /*
+     * Facebook public post pages. Facebook's terms bar automated collection without permission;
+     * on by default since Robert's 2026-11-08 decision to accept that risk.
+     */
+    FACEBOOK_IMPORT_ENABLED: z
+      .union([trimmedBooleanString, z.boolean()])
+      .default("true")
+      .transform((value) => value === true || value === "true"),
+    /*
+     * Pinterest pin pages (to follow the pin's link). Pinterest's terms bar automated access; on
+     * by default since Robert's 2026-11-08 decision to accept that risk.
+     */
+    PINTEREST_IMPORT_ENABLED: z
+      .union([trimmedBooleanString, z.boolean()])
+      .default("true")
+      .transform((value) => value === true || value === "true"),
+    /*
+     * Downloading TikTok and Facebook video files for the video reader. TikTok's terms bar
+     * downloads without consent, and Apple guideline 5.2.3 asks for explicit authorization to
+     * download media from third-party sources. On by default since Robert's 2026-11-08 decision
+     * to accept that risk. Downloads only happen while the video reader is on too
+     * (VIDEO_RECIPE_READER_ENABLED and GEMINI_API_KEY). YouTube is never downloaded (Gemini reads
+     * it by URL).
+     */
+    SOCIAL_VIDEO_DOWNLOAD_ENABLED: z
+      .union([trimmedBooleanString, z.boolean()])
+      .default("true")
+      .transform((value) => value === true || value === "true"),
     LLM_PROVIDER: trimmedString()
       .pipe(z.enum(["gemini", "openai", "none"]))
       .default("none"),
@@ -94,12 +163,17 @@ const parsedExtractorApiEnv = readEnv(
     OPENAI_MODEL: trimmedOptionalString(),
     LLM_FALLBACK_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
     /*
-     * Gemini watches a TikTok or YouTube video when its caption, description and linked pages
-     * hold no written recipe. Off by default; it needs GEMINI_API_KEY too.
+     * Gemini watches a TikTok, Facebook or YouTube video when its caption, description and linked
+     * pages hold no written recipe. It needs GEMINI_API_KEY too. On by default since 2026-11-08
+     * (off before): the TikTok and Facebook video downloads that SOCIAL_VIDEO_DOWNLOAD_ENABLED
+     * allows only feed this reader, so with the reader off, Robert's 2026-11-08 decision to turn
+     * those downloads back on would have no effect. Reads are capped by
+     * VIDEO_RECIPE_DAILY_READ_LIMIT. Set to "false" to turn the reader, and with it every video
+     * download, off.
      */
     VIDEO_RECIPE_READER_ENABLED: z
       .union([trimmedBooleanString, z.boolean()])
-      .default("false")
+      .default("true")
       .transform((value) => value === true || value === "true"),
     VIDEO_RECIPE_MODEL: trimmedString().default("gemini-3.8-flash"),
     /* Gemini model that fills a saved recipe's gaps when the person asks (POST /recipes/complete). */
@@ -185,6 +259,18 @@ const parsedExtractorApiEnv = readEnv(
     CLERK_AUTHORIZED_PARTIES: trimmedOptionalString(),
     CLERK_JWT_KEY: trimmedOptionalString(),
     CLERK_WEBHOOK_SECRET: trimmedOptionalString(),
+    /*
+     * Sign in with Apple token revocation on account deletion. All four are needed; until they
+     * are set, a deletion carries on and tells the person to turn off "Sign in with Apple" for
+     * LinkDish in their Apple Account settings themselves.
+     * APPLE_SIGN_IN_CLIENT_ID is the iOS app's bundle ID (the client the authorization code was
+     * issued to), and APPLE_SIGN_IN_PRIVATE_KEY the Sign in with Apple .p8 key's contents
+     * (newlines may be written as \n).
+     */
+    APPLE_SIGN_IN_TEAM_ID: trimmedOptionalString(),
+    APPLE_SIGN_IN_KEY_ID: trimmedOptionalString(),
+    APPLE_SIGN_IN_PRIVATE_KEY: trimmedOptionalString(),
+    APPLE_SIGN_IN_CLIENT_ID: trimmedOptionalString(),
     HOUSEHOLD_INVITE_TTL_SECONDS: z.coerce.number().int().positive().default(604_800),
     HOUSEHOLD_MEMBER_LIMIT: z.coerce.number().int().positive().default(6),
     HOUSEHOLD_REPLACEMENT_COOLDOWN_DAYS: z.coerce.number().int().nonnegative().default(30),
@@ -203,7 +289,8 @@ const parsedExtractorApiEnv = readEnv(
     ADMIN_DASHBOARD_TOKENS: trimmedOptionalString(),
     ADMIN_AUTH_FAILURE_LIMIT_MAX: z.coerce.number().int().positive().default(10),
     ADMIN_AUTH_FAILURE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(900_000),
-    ADMIN_AUDIT_RETENTION_DAYS: z.coerce.number().int().positive().default(180),
+    // The privacy policy keeps server logs for up to 90 days; this log is one of them.
+    ADMIN_AUDIT_RETENTION_DAYS: z.coerce.number().int().positive().default(90),
     ANALYTICS_ENABLED: z
       .union([trimmedBooleanString, z.boolean()])
       .default("false")

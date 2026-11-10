@@ -14,6 +14,7 @@ const imageMocks = vi.hoisted(() => {
 
   return {
     getProxiedImage: vi.fn(),
+    getProxiedImageWithCacheHeaders: vi.fn(),
     ImageProxyError: MockImageProxyError,
     parseImageProxyQuery: vi.fn()
   };
@@ -21,6 +22,7 @@ const imageMocks = vi.hoisted(() => {
 
 vi.mock("../services/extractor-api/src/modules/image/image-proxy.js", () => ({
   getProxiedImage: imageMocks.getProxiedImage,
+  getProxiedImageWithCacheHeaders: imageMocks.getProxiedImageWithCacheHeaders,
   ImageProxyError: imageMocks.ImageProxyError,
   parseImageProxyQuery: imageMocks.parseImageProxyQuery
 }));
@@ -67,7 +69,13 @@ describe("Vercel image adapter", () => {
       sourceUrl: new URL("https://img.test/food.jpg"),
       width: 480
     });
-    imageMocks.getProxiedImage.mockResolvedValue(Buffer.from("webp-bytes"));
+    imageMocks.getProxiedImageWithCacheHeaders.mockResolvedValue({
+      image: Buffer.from("webp-bytes"),
+      headers: {
+        "cache-control": "public, max-age=31536000, immutable",
+        "cdn-cache-control": "public, s-maxage=86400, stale-while-revalidate=604800"
+      }
+    });
     const imageApi = await import("./image.js");
 
     const response = await imageApi.GET(request());
@@ -80,10 +88,27 @@ describe("Vercel image adapter", () => {
     );
     expect(response.headers.get("access-control-allow-origin")).toBe("https://app.linkdish.ca");
     expect(Buffer.from(await response.arrayBuffer()).toString("utf8")).toBe("webp-bytes");
-    expect(imageMocks.getProxiedImage).toHaveBeenCalledWith(
+    expect(imageMocks.getProxiedImageWithCacheHeaders).toHaveBeenCalledWith(
       new URL("https://img.test/food.jpg"),
       480
     );
+  });
+
+  it("passes on cache headers that follow the publisher's directions", async () => {
+    imageMocks.parseImageProxyQuery.mockReturnValue({
+      sourceUrl: new URL("https://img.test/food.jpg"),
+      width: 480
+    });
+    imageMocks.getProxiedImageWithCacheHeaders.mockResolvedValue({
+      image: Buffer.from("webp-bytes"),
+      headers: { "cache-control": "no-store", "cdn-cache-control": "no-store" }
+    });
+    const imageApi = await import("./image.js");
+
+    const response = await imageApi.GET(request());
+
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("cdn-cache-control")).toBe("no-store");
   });
 
   it("maps shared ImageProxyError statuses and reasons", async () => {
@@ -91,7 +116,7 @@ describe("Vercel image adapter", () => {
       sourceUrl: new URL("https://img.test/food.jpg"),
       width: 480
     });
-    imageMocks.getProxiedImage.mockRejectedValue(
+    imageMocks.getProxiedImageWithCacheHeaders.mockRejectedValue(
       new imageMocks.ImageProxyError(
         "Image source returned an unsupported content type.",
         "invalid_content_type",

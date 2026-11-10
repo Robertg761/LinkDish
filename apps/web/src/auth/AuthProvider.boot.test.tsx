@@ -733,8 +733,9 @@ describe("AuthProvider boot", () => {
     expect(clerkMocks.auth.signOut).toHaveBeenCalled();
   });
 
-  it("signs out once the account is deleted", async () => {
-    apiClientMocks.deleteAccount.mockResolvedValue({ status: "deleted" });
+  it("signs out once the account is deleted, after reporting each provider's result", async () => {
+    const providers = { apple: "not_revoked", clerk: "deleted", revenueCat: "deleted" } as const;
+    apiClientMocks.deleteAccount.mockResolvedValue({ providers, status: "deleted" });
     cacheConfig(clerkConfig);
     cacheUser("clerk");
     clerkMocks.auth.isSignedIn = true;
@@ -744,10 +745,17 @@ describe("AuthProvider boot", () => {
     renderAuth();
     await waitFor(() => expect(apiClientMocks.getSession).toHaveBeenCalled());
 
+    const onDeleted = vi.fn(() => {
+      // Heard while the deleted account is still the one shown, before the sign-out.
+      expect(apiClientMocks.logout).not.toHaveBeenCalled();
+    });
+    let result: unknown;
     await act(async () => {
-      await seen.at(-1)?.deleteAccount("cook@example.com");
+      result = await seen.at(-1)?.deleteAccount("cook@example.com", onDeleted);
     });
 
+    expect(onDeleted).toHaveBeenCalledWith(providers);
+    expect(result).toEqual(providers);
     expect(apiClientMocks.logout).toHaveBeenCalled();
     expect(authText()).toBe("anonymous");
   });
@@ -770,7 +778,7 @@ describe("AuthProvider boot", () => {
     renderAuth();
     expect(authText()).toBe("user:cook@example.com");
 
-    let deleted: Promise<void> | undefined;
+    let deleted: Promise<unknown> | undefined;
     act(() => {
       deleted = seen.at(-1)?.deleteAccount("cook@example.com");
     });
@@ -787,7 +795,10 @@ describe("AuthProvider boot", () => {
     await waitFor(() => expect(authText()).toBe("user:next@example.com"));
 
     await act(async () => {
-      finishDelete({ status: "deleted" });
+      finishDelete({
+        providers: { apple: "not_linked", clerk: "deleted", revenueCat: "deleted" },
+        status: "deleted"
+      });
       await deleted;
     });
 

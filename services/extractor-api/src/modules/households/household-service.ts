@@ -3,6 +3,7 @@ import { createHmac, randomBytes } from "node:crypto";
 import { z } from "zod";
 
 import {
+  type AccountDeletionProviders,
   type AccountUser,
   type DeleteShoppingItemsRequest,
   type DeleteShoppingItemsResponse,
@@ -26,6 +27,12 @@ import {
   shoppingItemSchema
 } from "../../../../../packages/recipe-domain/src/index.js";
 import { extractorApiEnv } from "../../config/env.js";
+import {
+  deleteClerkUsersForAccount,
+  deleteRevenueCatCustomerForAccount,
+  lookUpClerkUsersForAccount,
+  revokeAppleSignInForAccount
+} from "../account/account-deletion-providers.js";
 import { deleteAnalyticsForAccount } from "../analytics/analytics-store.js";
 import {
   createSessionForUser,
@@ -1445,11 +1452,29 @@ export const transferHouseholdOwnershipAndRemoveUser = async (
   });
 };
 
+/*
+ * Deletes an account everywhere, in an order where every step is safe to repeat, so a request that
+ * stops part-way can simply be retried by the person (who can still sign in until the last steps):
+ *  1. The confirmation email must match.
+ *  2. Look up the account's Clerk users and the Apple IDs linked to them. Clerk unreachable: stop,
+ *     nothing deleted.
+ *  3. Sign in with Apple: with an authorization code from the iOS app, check it is for the linked
+ *     Apple ID (a different one stops the deletion, nothing deleted) and revoke it. No code, or a
+ *     failed revocation, carries on and reports Apple as not revoked.
+ *  4. Analytics linked to the account.
+ *  5. The RevenueCat customer ("not found" is fine; a failure stops the deletion).
+ *  6. Household, cloud cookbook and recipe pictures.
+ *  7. The Clerk users (one already gone counts as done; a failure stops the deletion before the
+ *     account is marked deleted, so the person can still sign in and retry). Last of the
+ *     providers because it ends the person's sign-in.
+ *  8. Mark the account deleted, tombstone its sign-in links, then the late cleanup.
+ */
 export const deleteAccountAndHouseholdAccess = async (
   user: AccountUser,
-  confirmEmail: string
-): Promise<void> => {
-  await withHouseholdLock(`user:${user.id}`, async () => {
+  confirmEmail: string,
+  options: { appleAuthorizationCode?: string | undefined } = {}
+): Promise<AccountDeletionProviders> => {
+  return withHouseholdLock(`user:${user.id}`, async () => {
     if (normalizeEmail(confirmEmail) !== normalizeEmail(user.email)) {
       throw new HouseholdError(
         "Confirm the account email address before deleting this account.",
@@ -1457,9 +1482,17 @@ export const deleteAccountAndHouseholdAccess = async (
       );
     }
 
-    // First, so an analytics database failure stops the deletion before anything else is gone
-    // and the person can retry; the delete is idempotent.
+    const clerkUsers = await lookUpClerkUsersForAccount(user.id);
+    const apple = await revokeAppleSignInForAccount(
+      clerkUsers.flatMap((clerkUser) => clerkUser.appleUserIds),
+      options.appleAuthorizationCode
+    );
+
+    // Before the account's own data, so an analytics database failure stops the deletion while
+    // the person can retry; the delete is idempotent.
     await deleteAnalyticsForAccount(user.id);
+
+    const revenueCat = await deleteRevenueCatCustomerForAccount(user.id);
 
     const householdId = await getHouseholdIdForUser(user.id);
     const household = householdId ? await getHouseholdById(householdId) : null;
@@ -1484,6 +1517,9 @@ export const deleteAccountAndHouseholdAccess = async (
 
     await deleteLibraryForUser(user.id);
     await deleteRecipePhotosForUser(user.id);
+
+    const clerk = await deleteClerkUsersForAccount(clerkUsers);
+
     await markUserDeleted(user.id);
     await tombstoneExternalIdentitiesForUser(user.id);
 
@@ -1498,6 +1534,8 @@ export const deleteAccountAndHouseholdAccess = async (
     await deleteRecipePhotosForUser(user.id).catch((error: unknown) => {
       console.error("Failed to delete late pictures for a deleted account.", error);
     });
+
+    return { apple, clerk, revenueCat };
   });
 };
 

@@ -248,7 +248,7 @@ export const FoundingOfferCard: React.FC<FoundingOfferCardProps> = ({ action, pr
         Founding Plus
       </h2>
       <p className="founding-offer-lede">
-        Everything in Plus, forever. One payment, no subscription.
+        Everything in Plus for as long as we operate LinkDish. One payment, no subscription.
       </p>
     </div>
     <div className="founding-offer-buy">

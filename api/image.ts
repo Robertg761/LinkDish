@@ -6,7 +6,7 @@ import {
 } from "../services/extractor-api/src/http/vercel-cors.js";
 import { getAuthenticatedUser } from "../services/extractor-api/src/modules/auth/auth-service.js";
 import {
-  getProxiedImage,
+  getProxiedImageWithCacheHeaders,
   ImageProxyError,
   parseImageProxyQuery
 } from "../services/extractor-api/src/modules/image/image-proxy.js";
@@ -144,23 +144,28 @@ export async function GET(request: Request) {
     const { sourceUrl, width } = parseImageProxyQuery(
       Object.fromEntries(new URL(request.url).searchParams)
     );
-    const image = await getProxiedImage(sourceUrl, width);
+    const { image, headers: cacheHeaders } = await getProxiedImageWithCacheHeaders(
+      sourceUrl,
+      width
+    );
     const body = Uint8Array.from(image);
 
     /*
      * Vercel's CDN only caches function responses that opt in with s-maxage or
      * CDN-Cache-Control, so without it every new device re-fetched the origin
      * image, re-encoded it with sharp and paid an Upstash rate-limit round
-     * trip. The shared copy is kept for a day and then revalidated in the
-     * background: the cache key is only the source URL and width, and recipe
-     * sites do replace images at the same URL.
+     * trip. The headers follow the publisher's own caching directions
+     * (buildProxiedImageCacheHeaders): no copy when it says no-store, never
+     * longer than its max-age. When it is silent the shared copy is kept for a
+     * day and then revalidated in the background: the cache key is only the
+     * source URL and width, and recipe sites do replace images at the same URL.
      */
     return withCors(
       request,
       new Response(body, {
         headers: {
-          "cache-control": "public, max-age=31536000, immutable",
-          "cdn-cache-control": "public, s-maxage=86400, stale-while-revalidate=604800",
+          "cache-control": cacheHeaders["cache-control"],
+          "cdn-cache-control": cacheHeaders["cdn-cache-control"],
           "content-type": "image/webp"
         },
         status: 200

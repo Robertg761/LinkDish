@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
 
 const clerkSessionState = vi.hoisted(() => ({
   getToken: vi.fn(),
+  hasAppleAccount: false,
   isLoaded: true,
   isSignedIn: false,
   sessionId: null as string | null,
@@ -58,6 +59,17 @@ vi.mock("./ClerkSessionContext", () => ({
   useClerkSession: () => clerkSessionState
 }));
 
+const appleMocks = vi.hoisted(() => ({
+  confirmAccountDeletionWithApple: vi.fn(),
+  isIos: true
+}));
+
+// Platform-gated like the real module: Apple's prompt exists only on iOS.
+vi.mock("./appleDeletionConfirmation", () => ({
+  confirmAccountDeletionWithApple: appleMocks.confirmAccountDeletionWithApple,
+  needsAppleDeletionConfirmation: (hasAppleAccount: boolean) => appleMocks.isIos && hasAppleAccount
+}));
+
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const createMockClient = (
@@ -71,7 +83,10 @@ const createMockClient = (
     createHouseholdInvite: vi.fn(),
     createWebBillingCheckout: vi.fn(),
     createWebBillingPortal: vi.fn(),
-    deleteAccount: vi.fn().mockResolvedValue({ status: "deleted" }),
+    deleteAccount: vi.fn().mockResolvedValue({
+      providers: { apple: "not_linked", clerk: "not_linked", revenueCat: "deleted" },
+      status: "deleted"
+    }),
     extractRecipe: vi.fn(),
     getAuthConfig: vi.fn().mockResolvedValue({
       authMode: "legacy_email_code",
@@ -126,6 +141,7 @@ beforeEach(() => {
   latestAccount = null;
   clerkSessionState.getToken.mockReset();
   clerkSessionState.getToken.mockResolvedValue(null);
+  clerkSessionState.hasAppleAccount = false;
   clerkSessionState.isLoaded = true;
   clerkSessionState.isSignedIn = false;
   clerkSessionState.sessionId = null;
@@ -140,6 +156,8 @@ beforeEach(() => {
   mocks.setItemAsync.mockResolvedValue(undefined);
   mobileEnvState.apiBaseUrl = "http://localhost:3000";
   mobileEnvState.debugHouseholdSimulatorEnabled = true;
+  appleMocks.confirmAccountDeletionWithApple.mockReset();
+  appleMocks.isIos = true;
 });
 
 afterEach(() => {
@@ -754,7 +772,10 @@ describe("AccountContext", () => {
   });
 
   it("deletes the stored session token when the account is deleted", async () => {
-    const deleteAccount = vi.fn().mockResolvedValue({ status: "deleted" });
+    const deleteAccount = vi.fn().mockResolvedValue({
+      providers: { apple: "not_linked", clerk: "not_linked", revenueCat: "deleted" },
+      status: "deleted"
+    });
     const client = createMockClient({
       deleteAccount,
       getSession: vi.fn().mockResolvedValue({
@@ -827,7 +848,7 @@ describe("AccountContext", () => {
       await flushAsyncWork();
     });
 
-    let deleting: Promise<void> | undefined;
+    let deleting: Promise<unknown> | undefined;
     await act(async () => {
       deleting = latestAccount?.deleteAccount("first@example.com");
       await flushAsyncWork();
@@ -851,7 +872,10 @@ describe("AccountContext", () => {
     });
 
     await act(async () => {
-      finishDelete({ status: "deleted" });
+      finishDelete({
+        providers: { apple: "not_linked", clerk: "deleted", revenueCat: "deleted" },
+        status: "deleted"
+      });
       await deleting;
       await flushAsyncWork();
     });
@@ -896,7 +920,7 @@ describe("AccountContext", () => {
       await flushAsyncWork();
     });
 
-    let deleting: Promise<void> | undefined;
+    let deleting: Promise<unknown> | undefined;
     await act(async () => {
       deleting = latestAccount?.deleteAccount("first@example.com");
       await flushAsyncWork();
@@ -906,12 +930,166 @@ describe("AccountContext", () => {
     // when the delete answers.
     clerkSessionState.sessionId = "sess_next";
     await act(async () => {
-      finishDelete({ status: "deleted" });
+      finishDelete({
+        providers: { apple: "not_linked", clerk: "deleted", revenueCat: "deleted" },
+        status: "deleted"
+      });
       await deleting;
     });
 
     expect(clerkSessionState.signOut).toHaveBeenCalledTimes(1);
     expect(clerkSessionState.signOut).toHaveBeenCalledWith("sess_first");
+  });
+
+  describe("Sign in with Apple confirmation", () => {
+    const deletedProviders = { apple: "revoked", clerk: "deleted", revenueCat: "deleted" } as const;
+
+    const renderClerkAccount = async (deleteAccount: ReturnType<typeof vi.fn>) => {
+      mocks.createExtractorApiClient.mockReturnValue(
+        createMockClient({
+          deleteAccount,
+          getAuthConfig: vi.fn().mockResolvedValue({
+            authMode: "clerk_beta",
+            clerkEnabled: true,
+            emailCodeEnabled: true
+          }),
+          getSession: vi.fn().mockResolvedValue({
+            authenticated: true,
+            expiresAt: "2026-08-09T10:00:00.000Z",
+            user: { email: "apple@example.com", id: "user_apple" }
+          })
+        })
+      );
+      clerkSessionState.getToken.mockResolvedValue("apple-token");
+      clerkSessionState.isSignedIn = true;
+      clerkSessionState.sessionId = "sess_apple";
+
+      await act(async () => {
+        create(
+          <AccountProvider>
+            <Probe />
+          </AccountProvider>
+        );
+        await flushAsyncWork();
+      });
+    };
+
+    const deleteNow = async () => {
+      let result: unknown;
+      await act(async () => {
+        result = await latestAccount?.deleteAccount("apple@example.com");
+        await flushAsyncWork();
+      });
+      return result;
+    };
+
+    it("asks Apple to confirm on iOS and sends the code with the deletion", async () => {
+      clerkSessionState.hasAppleAccount = true;
+      appleMocks.confirmAccountDeletionWithApple.mockResolvedValue({
+        authorizationCode: "apple-code",
+        status: "confirmed"
+      });
+      const deleteAccount = vi
+        .fn()
+        .mockResolvedValue({ providers: deletedProviders, status: "deleted" });
+      await renderClerkAccount(deleteAccount);
+
+      const result = await deleteNow();
+
+      expect(appleMocks.confirmAccountDeletionWithApple).toHaveBeenCalledTimes(1);
+      expect(deleteAccount).toHaveBeenCalledWith({
+        appleAuthorizationCode: "apple-code",
+        confirmEmail: "apple@example.com"
+      });
+      expect(result).toEqual(deletedProviders);
+      expect(clerkSessionState.signOut).toHaveBeenCalledWith("sess_apple");
+      expect(latestAccount?.user).toBeNull();
+    });
+
+    it("cancels the deletion when the person closes Apple's prompt", async () => {
+      clerkSessionState.hasAppleAccount = true;
+      appleMocks.confirmAccountDeletionWithApple.mockResolvedValue({ status: "cancelled" });
+      const deleteAccount = vi.fn();
+      await renderClerkAccount(deleteAccount);
+
+      const result = await deleteNow();
+
+      expect(result).toBeNull();
+      expect(deleteAccount).not.toHaveBeenCalled();
+      expect(clerkSessionState.signOut).not.toHaveBeenCalled();
+      expect(latestAccount?.user?.id).toBe("user_apple");
+      expect(latestAccount?.isAccountBusy).toBe(false);
+      expect(latestAccount?.accountError).toBeNull();
+    });
+
+    it("doesn't ask Apple when the account has no Apple sign-in linked", async () => {
+      clerkSessionState.hasAppleAccount = false;
+      const deleteAccount = vi.fn().mockResolvedValue({
+        providers: { apple: "not_linked", clerk: "deleted", revenueCat: "no_record" },
+        status: "deleted"
+      });
+      await renderClerkAccount(deleteAccount);
+
+      await deleteNow();
+
+      expect(appleMocks.confirmAccountDeletionWithApple).not.toHaveBeenCalled();
+      expect(deleteAccount).toHaveBeenCalledWith({ confirmEmail: "apple@example.com" });
+    });
+
+    it("doesn't ask Apple off iOS, where the server reports what is left to do", async () => {
+      appleMocks.isIos = false;
+      clerkSessionState.hasAppleAccount = true;
+      const providers = { apple: "not_revoked", clerk: "deleted", revenueCat: "deleted" };
+      const deleteAccount = vi.fn().mockResolvedValue({ providers, status: "deleted" });
+      await renderClerkAccount(deleteAccount);
+
+      const result = await deleteNow();
+
+      expect(appleMocks.confirmAccountDeletionWithApple).not.toHaveBeenCalled();
+      expect(deleteAccount).toHaveBeenCalledWith({ confirmEmail: "apple@example.com" });
+      expect(result).toEqual(providers);
+    });
+
+    it("still deletes, without a code, when Apple can't be asked", async () => {
+      clerkSessionState.hasAppleAccount = true;
+      appleMocks.confirmAccountDeletionWithApple.mockResolvedValue({ status: "unavailable" });
+      const deleteAccount = vi.fn().mockResolvedValue({
+        providers: { apple: "not_revoked", clerk: "deleted", revenueCat: "deleted" },
+        status: "deleted"
+      });
+      await renderClerkAccount(deleteAccount);
+
+      await deleteNow();
+
+      expect(deleteAccount).toHaveBeenCalledWith({ confirmEmail: "apple@example.com" });
+      expect(latestAccount?.user).toBeNull();
+    });
+
+    it("keeps the account signed in and shows the server's reason when the deletion fails", async () => {
+      clerkSessionState.hasAppleAccount = true;
+      appleMocks.confirmAccountDeletionWithApple.mockResolvedValue({
+        authorizationCode: "wrong-apple-id",
+        status: "confirmed"
+      });
+      const { ExtractorApiError } = await import("@linkdish/api-client");
+      const deleteAccount = vi.fn().mockRejectedValue(
+        new ExtractorApiError("Request failed", 409, {
+          message: "That Apple ID isn't the one linked to this LinkDish account."
+        })
+      );
+      await renderClerkAccount(deleteAccount);
+
+      await act(async () => {
+        await latestAccount?.deleteAccount("apple@example.com").catch(() => undefined);
+        await flushAsyncWork();
+      });
+
+      expect(latestAccount?.user?.id).toBe("user_apple");
+      expect(latestAccount?.accountError).toBe(
+        "That Apple ID isn't the one linked to this LinkDish account."
+      );
+      expect(clerkSessionState.signOut).not.toHaveBeenCalled();
+    });
   });
 
   it("clears the local session token even when server logout fails", async () => {

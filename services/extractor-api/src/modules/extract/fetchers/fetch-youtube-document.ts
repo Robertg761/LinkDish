@@ -7,7 +7,7 @@ import { isSourceUrlRejection, validatePublicSourceUrl } from "../source-url-saf
 
 import { YouTubeFetchError } from "./errors.js";
 import {
-  browserLikeHeaders,
+  identifyingFetchHeaders,
   createTimeoutSignal,
   isHtmlLikeContentType,
   readLimitedResponseText,
@@ -133,7 +133,7 @@ const fetchTranscriptFromCaptionTrack = async (
     try {
       const response = await fetchImplementation(captionUrl, {
         headers: {
-          "accept-language": browserLikeHeaders["accept-language"]
+          "accept-language": identifyingFetchHeaders["accept-language"]
         },
         signal: timeout.signal
       });
@@ -332,9 +332,9 @@ const fetchCreatorComments = async (
       {
         method: "POST",
         headers: {
-          "accept-language": browserLikeHeaders["accept-language"],
+          "accept-language": identifyingFetchHeaders["accept-language"],
           "content-type": "application/json",
-          "user-agent": browserLikeHeaders["user-agent"]
+          "user-agent": identifyingFetchHeaders["user-agent"]
         },
         body: JSON.stringify({
           context: {
@@ -415,12 +415,12 @@ export const fetchYouTubeDocument = async (
   /* The oEmbed metadata and the watch page are independent, so they load in parallel. */
   const oEmbedRequest = fetchImplementation(oEmbedUrl, {
     headers: {
-      "accept-language": browserLikeHeaders["accept-language"]
+      "accept-language": identifyingFetchHeaders["accept-language"]
     },
     signal: oEmbedTimeout.signal
   });
   const watchRequest = fetchImplementation(watchUrl, {
-    headers: browserLikeHeaders,
+    headers: identifyingFetchHeaders,
     signal: watchTimeout.signal
   });
 

@@ -66,60 +66,60 @@ describe("FeaturedRecipePage", () => {
     await flushCookSessionWrites();
   });
 
-  it("renders the featured recipe the LinkDish way, with a save CTA", () => {
-    renderFeaturedRoute("/featured/classic-sandwich-bread");
+  it("renders a LinkDish kitchen recipe the LinkDish way, with a save CTA", () => {
+    renderFeaturedRoute("/featured/brown-butter-berry-oat-bars");
 
     expect(
-      screen.getByRole("heading", { level: 1, name: "Classic Sandwich Bread" })
+      screen.getByRole("heading", { level: 1, name: "Brown Butter Berry Oat Bars" })
     ).toBeInTheDocument();
-    expect(screen.getByText(/Saved from/)).toHaveTextContent(
-      "Saved from kingarthurbaking.com with LinkDish"
+    expect(screen.getByText(/An original recipe from the/)).toHaveTextContent(
+      "An original recipe from the LinkDish kitchen"
     );
+    expect(screen.getByText(/A LinkDish kitchen recipe\./)).toBeInTheDocument();
+    // No third-party credit or link on LinkDish's own recipes.
+    expect(screen.queryByText(/Saved from/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Recipe and photo ©/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Read the original" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save to my cookbook" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Import your own recipe" })).toHaveAttribute(
       "href",
       "/import"
     );
     expect(screen.getByRole("heading", { name: "Method" })).toBeInTheDocument();
-    expect(screen.getByText("Nutrition")).toBeInTheDocument();
-    expect(document.title).toBe("Classic Sandwich Bread · LinkDish");
+    expect(document.title).toBe("Brown Butter Berry Oat Bars · LinkDish");
     expect(
       document.head.querySelector<HTMLMetaElement>('meta[name="description"]')?.content
-    ).toContain("Classic Sandwich Bread, saved from kingarthurbaking.com with LinkDish");
+    ).toContain("Brown Butter Berry Oat Bars, an original LinkDish kitchen recipe");
     expect(screen.queryByText(/warming up the oven/i)).not.toBeInTheDocument();
   });
 
-  it("shows fractions the domain way and converts units on request", () => {
-    renderFeaturedRoute("/featured/classic-sandwich-bread");
-
-    expect(screen.getByRole("checkbox", { name: /^½ cup \(113 g\) milk/ })).toBeInTheDocument();
+  it("converts units on request", () => {
+    renderFeaturedRoute("/featured/brown-butter-berry-oat-bars");
 
     fireEvent.click(screen.getByRole("radio", { name: "Metric" }));
-    expect(screen.getByRole("checkbox", { name: /^360 g King Arthur/ })).toBeInTheDocument();
-    expect(screen.getByText(/preheat your oven to 175°C/)).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "Metric" })).toHaveAttribute("aria-checked", "true");
   });
 
   it("scales by servings", () => {
-    renderFeaturedRoute("/featured/classic-sandwich-bread");
+    renderFeaturedRoute("/featured/ginger-sesame-chicken-rice-skillet");
 
     const stepper = screen.getByRole("group", { name: "Servings" });
-    expect(within(stepper).getByRole("spinbutton")).toHaveTextContent("Serves 16");
-    for (let index = 0; index < 16; index += 1) {
+    expect(within(stepper).getByRole("spinbutton")).toHaveTextContent("Serves 4");
+    for (let index = 0; index < 4; index += 1) {
       fireEvent.click(screen.getByRole("button", { name: "Increase servings" }));
     }
 
-    expect(within(stepper).getByRole("spinbutton")).toHaveTextContent("Serves 32");
-    expect(screen.getByRole("checkbox", { name: /^6 cups \(720 g\)/ })).toBeInTheDocument();
+    expect(within(stepper).getByRole("spinbutton")).toHaveTextContent("Serves 8");
   });
 
   it("saves the recipe to the cookbook", async () => {
-    renderFeaturedRoute("/featured/banana-bread");
+    renderFeaturedRoute("/featured/crisp-cucumber-chickpea-pitas");
 
     fireEvent.click(screen.getByRole("button", { name: "Save to my cookbook" }));
 
     expect(await screen.findByRole("button", { name: "In your cookbook" })).toBeInTheDocument();
     const records = fakeIdb.records<WebSavedRecipe>(SAVED_RECIPES_STORE_NAME);
-    expect(records.map((record) => record.recipe.title)).toEqual(["Banana Bread"]);
+    expect(records.map((record) => record.recipe.title)).toEqual(["Crisp Cucumber Chickpea Pitas"]);
     expect(analyticsMocks.trackWebV2AnalyticsEvent).toHaveBeenCalledWith({
       name: "recipe_saved",
       properties: { source_type: "url", surface: "import_result" },
@@ -132,9 +132,24 @@ describe("FeaturedRecipePage", () => {
 
   it("uses the unit preference by default", () => {
     setPreference("units", "metric");
-    renderFeaturedRoute("/featured/classic-sandwich-bread");
+    renderFeaturedRoute("/featured/brown-butter-berry-oat-bars");
 
     expect(screen.getByRole("radio", { name: "Metric" })).toHaveAttribute("aria-checked", "true");
+  });
+
+  it.each([
+    "classic-sandwich-bread",
+    "pizza-crust",
+    "classic-chocolate-chip-cookies",
+    "banana-bread",
+    "jo-mamas-spaghetti",
+    "pancakes",
+    "barbecue-ribs",
+    "oven-crisp-chicken-wings"
+  ])("no longer publishes the removed third-party recipe %s", (slug) => {
+    renderFeaturedRoute(`/featured/${slug}`);
+
+    expect(screen.getByText("Featured recipe not found")).toBeInTheDocument();
   });
 
   it("shows a not-found state for unknown featured slugs", () => {

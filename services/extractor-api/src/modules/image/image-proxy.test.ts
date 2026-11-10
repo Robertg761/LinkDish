@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   assertPublicImageUrl,
+  buildProxiedImageCacheHeaders,
   getProxiedImage,
   ImageProxyError,
   parseImageProxyQuery,
@@ -176,5 +177,88 @@ describe("registerImageRoute", () => {
       "public, s-maxage=86400, stale-while-revalidate=604800"
     );
     expect(response.body).toBe("webp-bytes");
+  });
+});
+
+describe("buildProxiedImageCacheHeaders (follows the publisher's caching directions)", () => {
+  it("keeps the previous policy when the publisher says nothing", () => {
+    expect(buildProxiedImageCacheHeaders(null)).toEqual({
+      "cache-control": "public, max-age=31536000, immutable",
+      "cdn-cache-control": "public, s-maxage=86400, stale-while-revalidate=604800"
+    });
+  });
+
+  it("keeps no copy anywhere when the publisher says no-store", () => {
+    expect(buildProxiedImageCacheHeaders("public, no-store")).toEqual({
+      "cache-control": "no-store",
+      "cdn-cache-control": "no-store"
+    });
+  });
+
+  it("keeps no shared CDN copy of a private or no-cache image", () => {
+    for (const value of ["private, max-age=600", "no-cache"]) {
+      expect(buildProxiedImageCacheHeaders(value)).toEqual({
+        "cache-control": "private, no-cache",
+        "cdn-cache-control": "no-store"
+      });
+    }
+  });
+
+  it("never keeps a copy longer than the publisher's max-age", () => {
+    expect(buildProxiedImageCacheHeaders("public, max-age=3600")).toEqual({
+      "cache-control": "public, max-age=3600",
+      "cdn-cache-control": "public, s-maxage=3600"
+    });
+    expect(buildProxiedImageCacheHeaders("max-age=0")).toEqual({
+      "cache-control": "public, max-age=0",
+      "cdn-cache-control": "no-store"
+    });
+  });
+
+  it("uses s-maxage for the CDN, capped at a day, and only the publisher's own stale window", () => {
+    expect(
+      buildProxiedImageCacheHeaders("max-age=31536000, s-maxage=604800, stale-while-revalidate=60")
+    ).toEqual({
+      "cache-control": "public, max-age=31536000",
+      "cdn-cache-control": "public, s-maxage=86400, stale-while-revalidate=60"
+    });
+    expect(buildProxiedImageCacheHeaders("public, max-age=31536000, immutable")).toEqual({
+      "cache-control": "public, max-age=31536000, immutable",
+      "cdn-cache-control": "public, s-maxage=86400"
+    });
+  });
+});
+
+describe("registerImageRoute with publisher cache directions", () => {
+  it("sends no-store on when the publisher's image says no-store", async () => {
+    const pngSignature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
+    const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(pngSignature, {
+        headers: { "cache-control": "no-store", "content-type": "image/png" },
+        status: 200
+      })
+    );
+    const pipeline = {
+      resize: () => pipeline,
+      rotate: () => pipeline,
+      toBuffer: () => Promise.resolve(Buffer.from("webp-bytes")),
+      webp: () => pipeline
+    };
+    const app = Fastify();
+    registerImageRoute(app, {
+      fetchImplementation,
+      loadSharp: () => Promise.resolve(() => pipeline),
+      resolveHostname: resolverFor({})
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/image?url=https%3A%2F%2Fimages.example.com%2Frecipe.png&w=480"
+    });
+    await app.close();
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["cache-control"]).toBe("no-store");
+    expect(response.headers["cdn-cache-control"]).toBe("no-store");
   });
 });

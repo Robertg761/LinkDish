@@ -96,9 +96,12 @@ export const registerAccountRoutes = (app: FastifyInstance) => {
       }
 
       const payload = deleteAccountRequestSchema.parse(request.body);
-      await deleteAccountAndHouseholdAccess(session.user, payload.confirmEmail);
+      const providers = await deleteAccountAndHouseholdAccess(session.user, payload.confirmEmail, {
+        appleAuthorizationCode: payload.appleAuthorizationCode
+      });
 
       return reply.status(200).send({
+        providers,
         status: "deleted"
       });
     } catch (error) {

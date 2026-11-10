@@ -8,6 +8,7 @@
   "scripts": {
     "dev:site": "node scripts/serve-site.mjs",
     "check:site": "node scripts/check-site.mjs",
+    "notices": "node scripts/generate-third-party-notices.mjs",
     "dev:web": "pnpm --filter @linkdish/web dev",
     "build:web": "pnpm --filter @linkdish/web build",
     "preview:web": "pnpm --filter @linkdish/web preview",
