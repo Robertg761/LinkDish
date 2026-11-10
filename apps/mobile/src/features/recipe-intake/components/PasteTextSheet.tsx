@@ -73,7 +73,8 @@ export const PasteTextSheet = ({
       visible={visible}
     >
       <AppText muted style={styles.hint}>
-        From a caption, a note or an email. Ingredients and steps are all we need.
+        Paste ingredients and steps you created or have permission to process with LinkDish and
+        Google Gemini.
       </AppText>
       <View style={[styles.box, showError && problem ? styles.boxError : null]}>
         <TextInput

@@ -16,6 +16,7 @@ export type { MobileExtractionRequest, TextExtractionRequest } from "./extractio
 
 const apiClient = createExtractorApiClient({
   baseUrl: mobileEnv.apiBaseUrl,
+  extractPath: Platform.OS === "ios" ? "/extract/ios" : "/extract",
   getHeaders: getMobileAnalyticsHeaders
 });
 
@@ -72,6 +73,7 @@ const getBillingClient = (options: ExtractRecipeOptions | undefined) =>
   options?.billingClientId || options?.authToken
     ? createExtractorApiClient({
         baseUrl: mobileEnv.apiBaseUrl,
+        extractPath: Platform.OS === "ios" ? "/extract/ios" : "/extract",
         getHeaders: async () => {
           const analyticsHeaders = await getMobileAnalyticsHeaders();
 

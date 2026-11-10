@@ -324,6 +324,10 @@ export default function HomeScreen() {
               <MaterialCommunityIcons color={appColors.accent} name="text-box-outline" size={20} />
               <AppText style={styles.pasteTextLabel}>Paste recipe text instead</AppText>
             </Pressable>
+            <AppText muted>
+              Import only content you created or have permission to process with LinkDish and Google
+              Gemini. Follow the source site's terms; public availability does not grant permission.
+            </AppText>
           </Animated.View>
 
           {imageScanError || (!useServerBillingGate && !importGate.allowed) ? (
