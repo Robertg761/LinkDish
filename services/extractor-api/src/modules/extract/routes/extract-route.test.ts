@@ -568,3 +568,19 @@ describe("POST /extract", () => {
     expect(response.json()).toEqual({ message: "Unexpected extractor error." });
   });
 });
+
+it("restricts the iPhone route independently of caller platform headers", async () => {
+  const runtime = createRuntime();
+  const fetchPage = vi.spyOn(runtime, "fetchHtmlDocument");
+  const app = buildApp({ runtime });
+  const response = await app.inject({
+    method: "POST",
+    url: "/extract/ios",
+    headers: { "x-linkdish-platform": "android_app" },
+    payload: { url: "https://outside.example/recipe/", attempt: "fallback" }
+  });
+  expect(response.statusCode).toBe(200);
+  expect(response.json()).toMatchObject({ status: "failure", reason: "unsupported_source" });
+  expect(fetchPage).not.toHaveBeenCalled();
+  await app.close();
+});

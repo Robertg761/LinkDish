@@ -406,3 +406,24 @@ describe("library sync", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
+
+describe("restricted extraction endpoint", () => {
+  it("uses the configured fixed endpoint and does not retry the unrestricted one on 404", async () => {
+    const fetchImplementation = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(new Response(JSON.stringify({ message: "Not found" }), { status: 404 }));
+    const client = createExtractorApiClient({
+      baseUrl: "https://api.example.com",
+      extractPath: "/extract/ios",
+      fetchImplementation
+    });
+    await expect(
+      client.extractRecipe({
+        url: "https://publicdomainrecipes.com/basic-waffles/",
+        attempt: "primary"
+      })
+    ).rejects.toThrow();
+    expect(fetchImplementation).toHaveBeenCalledTimes(1);
+    expect(firstCall(fetchImplementation).input).toBe("https://api.example.com/extract/ios");
+  });
+});
