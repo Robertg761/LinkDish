@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+vi.mock("react-native", () => ({ Platform: { OS: "android" } }));
+
 const clientMocks = vi.hoisted(() => ({
   extractRecipe: vi.fn(),
   extractRecipeFromText: vi.fn(),

@@ -1,4 +1,5 @@
 import React from "react";
+import { Platform } from "react-native";
 import { act, create } from "react-test-renderer";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -20,6 +21,7 @@ vi.mock("../../../theme/tokens", () => ({
   appColors: { accent: "green", accentSoft: "lightgreen" }
 }));
 vi.mock("react-native", () => ({
+  Platform: { OS: "android" },
   View: ({ children }: { children: React.ReactNode }) =>
     React.createElement("view", null, children),
   StyleSheet: { create: <T,>(styles: T) => styles }
@@ -47,6 +49,7 @@ const press = (renderer: ReturnType<typeof create>, label: string) => {
 
 describe("inline import recovery", () => {
   beforeEach(() => {
+    Platform.OS = "android";
     vi.resetAllMocks();
     mocks.permission.mockResolvedValue({ granted: true });
     mocks.library.mockResolvedValue({
@@ -57,6 +60,18 @@ describe("inline import recovery", () => {
     mocks.prepare.mockResolvedValue([
       { mimeType: "image/jpeg", dataUrl: "data:image/jpeg;base64,aGVsbG8=" }
     ]);
+  });
+
+  it("shows supported link entry alongside permission-aware photo recovery on iPhone", async () => {
+    Platform.OS = "ios";
+    let renderer!: ReturnType<typeof create>;
+    await act(() => {
+      renderer = create(<ImportRecovery source="url" />);
+    });
+    expect(renderer.root.findByType(UrlForm)).toBeTruthy();
+    expect(JSON.stringify(renderer.toJSON())).toContain("own or have permission to use");
+    expect(JSON.stringify(renderer.toJSON())).toContain("A screenshot does not remove");
+    await act(() => renderer.unmount());
   });
 
   it("opens the library directly and routes prepared photos through the normal import flow", async () => {

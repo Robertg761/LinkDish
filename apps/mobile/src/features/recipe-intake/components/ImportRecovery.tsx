@@ -3,7 +3,7 @@ import { AppButton, AppText } from "@linkdish/ui";
 import * as ImagePicker from "expo-image-picker";
 import { router } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
-import { StyleSheet, View } from "react-native";
+import { Platform, StyleSheet, View } from "react-native";
 
 import { appColors } from "../../../theme/tokens";
 import { createPendingImageImport } from "../pendingImageImports";
@@ -93,11 +93,13 @@ export const ImportRecovery = ({ source }: { source: "url" | "image" | "text" })
         {source === "url" ? "Try a recipe photo instead" : "Try the recipe link instead"}
       </AppText>
       <AppText>
-        {source === "url"
-          ? "Some sites block access or leave out recipe details. Upload a screenshot or photo showing the ingredients and steps, or take a photo now."
-          : source === "image"
-            ? "The photo may not show enough readable recipe details. Paste the original recipe link here to try another way."
-            : "If the pasted text is incomplete, try the original recipe link here."}
+        {Platform.OS === "ios"
+          ? "Try a link from the supported sources below, or a recipe photo you own or have permission to use. A screenshot does not remove a site's restrictions."
+          : source === "url"
+            ? "Some sites block access or leave out recipe details. Upload a screenshot or photo showing the ingredients and steps, or take a photo now."
+            : source === "image"
+              ? "The photo may not show enough readable recipe details. Paste the original recipe link here to try another way."
+              : "If the pasted text is incomplete, try the original recipe link here."}
       </AppText>
       {source === "url" ? (
         <View style={styles.actions}>
@@ -115,7 +117,7 @@ export const ImportRecovery = ({ source }: { source: "url" | "image" | "text" })
         </View>
       ) : null}
       {pickerError ? <AppText>{pickerError}</AppText> : null}
-      {source !== "url" || pickerError ? (
+      {Platform.OS === "ios" || source !== "url" || pickerError ? (
         <UrlForm
           disabled={busy}
           onSubmit={(url) => router.replace({ pathname: "/recipe", params: { url } })}
