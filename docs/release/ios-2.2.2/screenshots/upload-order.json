@@ -1,0 +1,52 @@
+[
+  {
+    "position": 1,
+    "file": "01-import.png",
+    "capture": "build39/01-import.png"
+  },
+  {
+    "position": 2,
+    "file": "02-cookbook.png",
+    "capture": "build38/02-cookbook.png"
+  },
+  {
+    "position": 3,
+    "file": "03-recipe.png",
+    "capture": "build38/03-recipe.png"
+  },
+  {
+    "position": 4,
+    "file": "04-ingredients.png",
+    "capture": "build38/04-ingredients.png"
+  },
+  {
+    "position": 5,
+    "file": "05-cooking.png",
+    "capture": "build38/05-cooking.png"
+  },
+  {
+    "position": 6,
+    "file": "06-add-shopping.png",
+    "capture": "build38/06-add-shopping.png"
+  },
+  {
+    "position": 7,
+    "file": "07-shopping.png",
+    "capture": "build38/07-shopping.png"
+  },
+  {
+    "position": 8,
+    "file": "08-plan.png",
+    "capture": "build38/08-plan.png"
+  },
+  {
+    "position": 9,
+    "file": "09-favorites.png",
+    "capture": "build38/09-favorites.png"
+  },
+  {
+    "position": 10,
+    "file": "10-servings.png",
+    "capture": "build38/10-servings.png"
+  }
+]
