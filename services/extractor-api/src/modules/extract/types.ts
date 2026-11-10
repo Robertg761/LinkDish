@@ -146,6 +146,8 @@ export interface DetectionResult {
 }
 
 export interface ExtractionSignals {
+  /** Exact title/ingredient/direction lists from a reviewed publisher template. */
+  explicitPublishedSections?: boolean;
   requiredFieldsInferred: boolean;
   titleConfidence: "strong" | "weak";
   timesFromStructuredMetadata: boolean;

@@ -1,5 +1,6 @@
 import {
   computeMissingRecipeFields,
+  isSupportedIosRecipeUrl,
   type MissingRecipeField,
   type Recipe
 } from "../../../../../../packages/recipe-domain/src/index.js";
@@ -43,6 +44,18 @@ export const isStrongStructuredCandidate = (candidate: ExtractionCandidate): boo
   (candidate.recipe.ingredients?.length ?? 0) >= minimumStrongIngredientCount &&
   (candidate.recipe.steps?.length ?? 0) >= 1;
 
+/** Explicit lists on the reviewed publisher are usable even without optional serving/time metadata. */
+export const isStrongPublishedCandidate = (candidate: ExtractionCandidate): boolean =>
+  isStrongStructuredCandidate(candidate) ||
+  (candidate.strategy === "recipe-adapter-dom" &&
+    candidate.signals.explicitPublishedSections === true &&
+    !candidate.signals.requiredFieldsInferred &&
+    candidate.signals.blockedSourceSignals === 0 &&
+    isSupportedIosRecipeUrl(candidate.recipe.sourceUrl ?? "") &&
+    Boolean(candidate.recipe.title?.trim()) &&
+    (candidate.recipe.ingredients?.length ?? 0) >= 2 &&
+    (candidate.recipe.steps?.length ?? 0) >= 1);
+
 /*
  * Optional fields that count against confidence. A published total time stands in for missing
  * prep and cook times (many sites only give "Total: 45 min").
@@ -68,7 +81,7 @@ export const scoreRecipe = (
   candidate: ExtractionCandidate
 ): ScoredExtraction => {
   const missingFields = computeMissingRecipeFields(recipe);
-  const missingFieldPenalty = isStrongStructuredCandidate({ ...candidate, recipe })
+  const missingFieldPenalty = isStrongPublishedCandidate({ ...candidate, recipe })
     ? structuredMissingFieldPenalty
     : heuristicMissingFieldPenalty;
   let score = strategyBaseScores[candidate.strategy];
