@@ -1,4 +1,7 @@
-import { parseDuration } from "../../../../../../../packages/recipe-domain/src/index.js";
+import {
+  isSupportedIosRecipeUrl,
+  parseDuration
+} from "../../../../../../../packages/recipe-domain/src/index.js";
 import { getParsedHtmlDocument, type ParsedHtmlDocument } from "../../html/parsed-html-document.js";
 import { getDomainAdapter } from "../../source-detection/domain-adapters.js";
 import { captureRecipeImage } from "../capture-recipe-image.js";
@@ -467,6 +470,17 @@ export const extractRecipeWebpage = (document: HtmlSourceDocument): ExtractionCa
           ...extractSectionContent($, /(instructions?|directions?|method|steps?)/i)
         ];
   const textSignals = parseTextRecipeSignals([...ingredientItems, ...stepItems]);
+  // Reviewed static publisher template: explicit lists, not text inferred from arbitrary pages.
+  const explicitPublishedSections =
+    isSupportedIosRecipeUrl(document.finalUrl) &&
+    $("main > header > h1").length === 1 &&
+    $("main > header > h1").text().trim().length > 0 &&
+    $("main > article > #ingredients").length === 1 &&
+    $("main > article > #directions").length === 1 &&
+    $("main > article > #ingredients + ul > li").length >= 2 &&
+    $("main > article > #directions + ol > li").length >= 1 &&
+    adapterIngredientItems.length === $("main > article > #ingredients + ul > li").length &&
+    adapterStepItems.length === $("main > article > #directions + ol > li").length;
 
   if (!textSignals.signals.recipeLike) {
     return null;
@@ -507,7 +521,11 @@ export const extractRecipeWebpage = (document: HtmlSourceDocument): ExtractionCa
         ? `Used adapter-aware selectors for ${adapter.key} after structured recipe metadata was unavailable.`
         : "Used section-based heuristics after structured recipe metadata was unavailable."
     ],
-    warnings: ["Recipe details were inferred from visible page sections."],
+    warnings: explicitPublishedSections
+      ? [
+          "Read the publisher's explicit ingredient and direction lists; optional details may be absent."
+        ]
+      : ["Recipe details were inferred from visible page sections."],
     provenance: ["visible-text"],
     fieldProvenance: buildFieldProvenance({
       title: "visible-text",
@@ -518,6 +536,16 @@ export const extractRecipeWebpage = (document: HtmlSourceDocument): ExtractionCa
       cookTimeMinutes: cookTimeMinutes == null ? null : "visible-text",
       nutrition: nutrition ? "visible-text" : null
     }),
-    signals: textSignals.signals
+    signals: {
+      ...textSignals.signals,
+      ...(explicitPublishedSections
+        ? {
+            explicitPublishedSections: true,
+            requiredFieldsInferred: false,
+            titleConfidence: "strong",
+            sectionCohesion: "strong"
+          }
+        : {})
+    }
   };
 };

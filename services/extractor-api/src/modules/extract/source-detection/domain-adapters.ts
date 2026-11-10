@@ -82,6 +82,14 @@ const buildAdapter = (
 });
 
 export const domainAdapters: DomainAdapter[] = [
+  buildAdapter("public-domain-recipes", ["publicdomainrecipes.com"], {
+    recipePathPatterns: [/^\/[a-z0-9]+(?:-[a-z0-9]+)*\/$/u],
+    selectors: {
+      ingredients: ["main > article > #ingredients + ul > li"],
+      steps: ["main > article > #directions + ol > li"],
+      recipeContainers: ["main > article"]
+    }
+  }),
   buildAdapter("allrecipes", ["allrecipes.com"], {
     recipePathPatterns: [/\/recipe\//i],
     articlePathPatterns: [/\/article\//i]

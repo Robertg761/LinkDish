@@ -15,7 +15,7 @@ import {
   type SourceType
 } from "../../../../../../packages/recipe-domain/src/index.js";
 import { extractorApiEnv } from "../../../config/env.js";
-import { isStrongStructuredCandidate } from "../confidence/score-recipe.js";
+import { isStrongPublishedCandidate } from "../confidence/score-recipe.js";
 import { successConfidenceThresholds } from "../confidence/thresholds.js";
 import {
   createRequestDeadline,
@@ -743,7 +743,7 @@ const decidePrimaryOutcome = (
   if (
     sourceType !== "youtube" &&
     normalized.confidenceScore < successConfidenceThresholds[sourceType] &&
-    !isStrongStructuredCandidate(candidate)
+    !isStrongPublishedCandidate(candidate)
   ) {
     return buildFailureDecision(
       "parse_failed",
