@@ -32,10 +32,13 @@ Both English (Canada) and English (U.S.) descriptions/promotional text and the r
 
 Ten 1206 × 2622 images were uploaded in both locales in `screenshots/upload-order.json` order. The first is a fresh capture of the build 39 import screen. The other nine are genuine build 38 captures of unchanged cookbook/cooking/shopping/planning UI. Raw captures and the renderer are included so the set can be reproduced. Apple preview confirms the revised first image. Header/search promotional artwork remains optional and empty.
 
-Policies are already live and the approved iOS App Privacy labels published. The version remains Prepare for Submission with manual release selected. No App Review submission was made.
+Policies are already live and the approved iOS App Privacy labels published. The user explicitly confirmed Apple’s Content Rights declaration on November 10, 2026 and authorized submission. The declaration was saved. Version 2.2.2 (39), LinkDish Plus Monthly and LinkDish Subscriptions were submitted together and are all Waiting for Review. Manual release remains selected.
 
-## Still needed
+## Submission and remaining work
 
-1. **Robert: Content Rights decision for the actual restricted release.** The public-domain publisher's grant is documented in `allowed-recipe-sources.md`, but Robert must confirm the declaration for all included content, including built-in, existing/synced/shared recipes and user uploads. No affirmative declaration has been entered on his behalf. Additional publishers require permission/licence evidence and parser/redirect tests before enabling.
-2. **Final physical iPhone smoke test of TestFlight 39:** supported/rejected link, text/photo import, saved-recipe reopening and the existing sign-in/purchase/restore flows. Simulator evidence and previous-build purchase tests do not replace testing the final archive.
-3. **Integration/submission authorization:** keep mobile PR #140 unmerged as requested; merge only when instructed. Add the version for review only after the outstanding rights declaration and final checks are complete.
+- [App Review submission](https://appstoreconnect.apple.com/apps/6826987838/distribution/reviewsubmissions/details/ab006edf-f1ff-4421-aef5-1a53c6f6f933): `ab006edf-f1ff-4421-aef5-1a53c6f6f933`, submitted November 10, 2026 at 12:51 AM Pacific by Flavio Herrera.
+- Apple confirmed **3 Items Submitted**. The app 2.2.2 (39), Plus Monthly subscription and subscription group each show **Waiting for Review**.
+- The user reported successful physical-device testing and explicitly confirmed the rights declaration for this restricted release. This records the user's declaration; it is not an independent legal guarantee or an Apple approval.
+- Await Apple's review and address any feedback. If approved, manual release is still required; this submission does not automatically publish the app.
+- Keep mobile PR #140 unmerged until the user authorizes integration. Backend PRs #141/#142 are separately merged/deployed. No additional app edits were made for submission.
+- Additional publishers remain disabled until permission/licence evidence and extraction/redirect tests support enabling them.
