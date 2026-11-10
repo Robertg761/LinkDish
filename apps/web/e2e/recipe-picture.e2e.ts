@@ -65,6 +65,7 @@ const openRecipe = async (page: Page, title: string) => {
   await page.goto("/");
   await page
     .getByRole("main")
+    .getByRole("region", { name: "Recipes", exact: true })
     .getByRole("link", { name: new RegExp(title, "u") })
     .first()
     .click();

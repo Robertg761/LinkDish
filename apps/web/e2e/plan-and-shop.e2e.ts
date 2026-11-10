@@ -8,6 +8,7 @@ test.beforeEach(async ({ page }) => {
   await page.goto("/");
   await page
     .getByRole("main")
+    .getByRole("region", { name: "Recipes", exact: true })
     .getByRole("link", { name: new RegExp(RECIPE, "u") })
     .first()
     .click();
