@@ -26,13 +26,13 @@ The permission basis is the publisher's express public-domain dedication, not ro
 ## Backend and release status
 
 - Backend PR #141 is merged and deployed independently. `/extract/ios` fixes `ios_public_domain_v1` on the server and checks every redirect and secondary HTML fetch, robots access and final source URL. It disables browser/social/video fetchers, bypasses the unrestricted cache, and omits remote artwork. A modified client can still call the older public endpoint: this is not device attestation.
-- Production testing found that the permitted publisher's explicit recipe sections failed the generic confidence threshold. Backend-only PR #142 adds deterministic parsing for that exact template, with a real public-domain fixture and negative tests. Missing optional details remain null/warnings; other sites' thresholds are unchanged.
+- Production testing found that the permitted publisher's explicit recipe sections failed the generic confidence threshold. Backend-only PR #142 adds deterministic parsing for that exact template, with a real public-domain fixture and negative tests. It is merged and deployed. Missing optional details remain null/warnings; other sites' thresholds are unchanged.
 - EAS produced signed version 2.2.2 build 39 from the mobile branch. Apple processed it and assigned it to LinkDish Internal Testers. It is selected for version 2.2.2 in App Store Connect. Mobile PR #140 remains unmerged.
 - Both English listing localizations and reviewer notes describe the narrower source support. The updated ten-image set includes a new import screen; the other nine genuine captures show unchanged features.
 
 ## Remaining release work
 
-1. Complete production verification after the parser follow-up deployment, then smoke-test the actual build 39 TestFlight archive on an iPhone. Simulator tests use the new JavaScript bundle on the unchanged native simulator shell, not the signed device archive. Test supported/rejected links, photo/text import and saved-recipe reopening.
+1. Smoke-test the actual build 39 TestFlight archive on an iPhone. Production simulator verification passed for permitted/rejected URLs, saving and reopening after restart. Simulator tests use the new JavaScript bundle on the unchanged native simulator shell, not the signed device archive. Test supported/rejected links, photo/text import and saved-recipe reopening.
 2. Content Rights remains unanswered. Robert needs to assess the declaration for the actual submitted app, including built-in, saved, uploaded and shared content. The publisher's public-domain grant is documented above; an allowlist does not itself authorize an affirmative declaration or guarantee approval.
 3. Keep the mobile branch unmerged until the user approves integration. Do not submit the version while required owner declarations remain pending.
 
@@ -41,4 +41,4 @@ The permission basis is the publisher's express public-domain dedication, not ro
 - Policy-only PR #139 is merged/deployed; public privacy/Terms pages are live and the approved iOS App Privacy labels are published.
 - Mobile: 527 tests, TypeScript, lint, production release preflight and Hermes export passed. EAS signing/build succeeded for bundle `com.linkdish.app`, Expo project `@linkdish/linkdish`.
 - Backend enforcement: full validation and all seven CI checks passed before deployment. Parser follow-up: 925 extractor tests, workspace types/lint, 109 Vercel handler tests and site validation passed locally. One unchanged web CommandPalette test timed out during the full run; all 16 tests in that file passed on rerun. CI is recorded on PR #142.
-- The simulator rejects unsupported URLs and displays Google Gemini consent for the permitted source. No reviewer-account imports were consumed. See the build 39 release report for final production verification and screenshot upload status.
+- The simulator rejects unsupported URLs and displays Google Gemini consent for the permitted source. No reviewer-account imports were consumed. The production permitted URL imported, saved and reopened after app restart; the negative API check rejected an unsupported URL with the correct source-policy header. Both English locales now show the new ten-image screenshot set. See `build39-release-report.md` for the evidence and remaining physical-device check.

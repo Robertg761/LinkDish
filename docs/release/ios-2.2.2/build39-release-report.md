@@ -15,7 +15,7 @@
 
 The existing `/extract` route remains for Android/web/older clients. This is not device attestation and does not prevent a modified client from calling another public route.
 
-[PR #142](https://github.com/Robertg761/LinkDish/pull/142) fixes the approved publisher's deterministic parser: explicit title, ingredient and direction sections are accepted without inventing optional fields or relaxing other sites' thresholds. All seven PR checks passed and it is merged. Production verification is recorded below after deployment.
+[PR #142](https://github.com/Robertg761/LinkDish/pull/142) fixes the approved publisher's deterministic parser: explicit title, ingredient and direction sections are accepted without inventing optional fields or relaxing other sites' thresholds. All seven PR checks passed; it is merged and deployed. Deploy API run 42783859445 passed staging verification, canary, promotion and production verification.
 
 ## Verification
 
@@ -23,7 +23,8 @@ The existing `/extract` route remains for Android/web/older clients. This is not
 - Backend enforcement: full repository validation and all seven PR checks passed; deployment passed staging, canary and production checks.
 - Parser follow-up: 925 extractor tests, workspace types/lint, 109 Vercel handler tests and site checks passed locally. The full workspace run had one timing failure in the unchanged web CommandPalette test; its 16 tests passed on rerun. All seven CI checks passed.
 - Simulator: unsupported URL rejection and Gemini consent verified using the new JavaScript bundle embedded in the unchanged native simulator shell. This is UI/flow evidence, not a test of the signed TestFlight archive. The simulator was signed out; reviewer account imports were not consumed.
-- Production approved-link test: pending completion of the parser deployment at the time of this draft.
+- Production approved-link test passed: the simulator imported `https://publicdomainrecipes.com/basic-waffles/` with six published ingredients and seven directions, saved it, restarted the app, and reopened the persisted recipe. Remote website artwork was absent. The publisher itself mentions eggs in the directions without listing an egg quantity; LinkDish preserved the published text rather than inventing one.
+- Production negative check passed after deployment: `/extract/ios` returned `unsupported_source` and `x-linkdish-source-policy: ios_public_domain_v1` for an unsupported URL, even with a spoofed Android platform header.
 
 ## Listing and screenshots
 
