@@ -38,19 +38,19 @@
     "@eslint/js": "^10.0.1",
     "@testing-library/jest-dom": "^7.0.1",
     "@types/node": "^22.14.1",
-    "@typescript-eslint/eslint-plugin": "^8.72.1",
-    "@typescript-eslint/parser": "^8.72.1",
-    "eslint": "^10.14.0",
+    "@typescript-eslint/eslint-plugin": "^8.73.0",
+    "@typescript-eslint/parser": "^8.73.0",
+    "eslint": "^10.15.0",
     "eslint-config-prettier": "^10.1.2",
-    "eslint-plugin-import-x": "^4.17.1",
-    "globals": "^17.13.0",
-    "prettier": "^3.9.10",
+    "eslint-plugin-import-x": "^4.18.1",
+    "globals": "^17.14.0",
+    "prettier": "^3.10.1",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-test-renderer": "19.2.3",
     "typescript": "^5.8.3",
-    "typescript-eslint": "^8.72.1",
-    "vitest": "^5.0.5"
+    "typescript-eslint": "^8.73.0",
+    "vitest": "^5.1.1"
   },
   "dependencies": {
     "@vercel/functions": "^3.10.5"
